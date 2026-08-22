@@ -25,6 +25,24 @@ The sections that follow are what each phase does, so either path can be used.
 - `~/.weather-tools-site.scrub` on the machine you publish from: the out-of-repo list of
   internal names the scrub refuses to publish. One substring per line.
 
+### If the AWS account is operated by someone else
+
+When the account is administered by another team and you have no console access, ask them for
+one of these, in order of preference:
+
+1. **An IAM role attached to an EC2 instance you can reach** (EC2 → instance → Actions →
+   Security → Modify IAM role), carrying the policy in `ops/aws/deployer-policy.json`. Then clone
+   the repository on that instance and run every `ops/aws/deploy.sh` phase there; no access
+   key exists anywhere. The instance needs `aws` (v2), Python 3.9+ and `python3 -m pip install
+   boto3` for the seed phase.
+2. **An IAM user with an access key**, carrying the same policy; you run the phases from your
+   machine after `aws configure`, and the key can be deactivated when the deployment is done.
+3. **They run the stack themselves**: `ops/aws/template.yaml` with the parameters in section 3,
+   then the code, seed and site phases need the bucket and function names from the outputs.
+
+The policy is scoped to resources named `weather-tools-site-*` wherever the service allows it;
+CloudFront, ACM and CloudFormation do not support name scoping and are granted on `*`.
+
 ## 1. Repository
 
     python3 scripts/scrub.py          # must print "scrub clean"

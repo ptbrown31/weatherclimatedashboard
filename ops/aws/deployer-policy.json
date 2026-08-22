@@ -1,0 +1,85 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateStack", "cloudformation:UpdateStack", "cloudformation:DeleteStack",
+        "cloudformation:DescribeStacks", "cloudformation:DescribeStackEvents", "cloudformation:DescribeStackResources",
+        "cloudformation:CreateChangeSet", "cloudformation:ExecuteChangeSet", "cloudformation:DescribeChangeSet",
+        "cloudformation:DeleteChangeSet", "cloudformation:GetTemplate", "cloudformation:GetTemplateSummary",
+        "cloudformation:ListStacks", "cloudformation:ValidateTemplate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Storage",
+      "Effect": "Allow",
+      "Action": ["s3:*"],
+      "Resource": ["arn:aws:s3:::weather-tools-site-*", "arn:aws:s3:::weather-tools-site-*/*"]
+    },
+    {
+      "Sid": "StorageList",
+      "Effect": "Allow",
+      "Action": ["s3:ListAllMyBuckets"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Cdn",
+      "Effect": "Allow",
+      "Action": ["cloudfront:*"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Certificate",
+      "Effect": "Allow",
+      "Action": ["acm:RequestCertificate", "acm:DescribeCertificate", "acm:ListCertificates", "acm:DeleteCertificate",
+                 "acm:AddTagsToCertificate"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Function",
+      "Effect": "Allow",
+      "Action": ["lambda:*"],
+      "Resource": ["arn:aws:lambda:*:*:function:weather-tools-site-*"]
+    },
+    {
+      "Sid": "FunctionRoles",
+      "Effect": "Allow",
+      "Action": ["iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:PassRole", "iam:UpdateRole",
+                 "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy",
+                 "iam:GetRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:TagRole",
+                 "iam:UpdateAssumeRolePolicy"],
+      "Resource": ["arn:aws:iam::*:role/weather-tools-site-*"]
+    },
+    {
+      "Sid": "Schedules",
+      "Effect": "Allow",
+      "Action": ["scheduler:*"],
+      "Resource": ["arn:aws:scheduler:*:*:schedule/default/weather-tools-site-*"]
+    },
+    {
+      "Sid": "Logs",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:PutRetentionPolicy", "logs:DescribeLogGroups",
+                 "logs:DescribeLogStreams", "logs:GetLogEvents", "logs:FilterLogEvents", "logs:TagResource",
+                 "logs:StartLiveTail", "logs:StopLiveTail"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Alarms",
+      "Effect": "Allow",
+      "Action": ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:DescribeAlarms",
+                 "sns:CreateTopic", "sns:DeleteTopic", "sns:GetTopicAttributes", "sns:SetTopicAttributes",
+                 "sns:Subscribe", "sns:Unsubscribe", "sns:ListSubscriptionsByTopic", "sns:TagResource"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "Identity",
+      "Effect": "Allow",
+      "Action": ["sts:GetCallerIdentity"],
+      "Resource": "*"
+    }
+  ]
+}
