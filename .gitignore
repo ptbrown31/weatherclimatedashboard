@@ -10,3 +10,5 @@ verify-out/
 
 # editor/agent local config
 .claude/
+# deploy settings for ops/aws/deploy.sh (no credentials, but per-account values)
+ops/aws/deploy.env

@@ -9,6 +9,10 @@ Local verification comes first and needs nothing below:
     python3 -m unittest discover -s tests
     python3 scripts/verify.py
 
+`ops/aws/deploy.sh` runs the AWS steps below as phases (`preflight`, `stack`, `code`, `seed`,
+`site`, `check`), reading its settings from `ops/aws/deploy.env` (copy `deploy.env.example`).
+The sections that follow are what each phase does, so either path can be used.
+
 ## 0. What you need
 
 - An AWS account on the pay-as-you-go plan. (A new account on the credit-based Free plan closes
