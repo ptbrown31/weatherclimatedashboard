@@ -1,22 +1,29 @@
 """
 scrub.py — refuse to publish anything that must not leave the machine.
 
-Scans every tracked text file (or any directory given) for strings that do
-not belong in a public repository: credentials, private keys, local paths,
-internal hostnames, employer identifiers. Exit status 1 on any hit, with
-file and line. Run before every push; DEPLOY.md and the tests call it.
+Scans every tracked file (or any directory given) for strings that do not
+belong in a public repository: credentials, private keys, local paths,
+internal names. Exit status 1 on any hit, with file and line. Run before
+every push; DEPLOY.md lists it as the last step before `git push`.
 
-Two needle sets. The built-in set below is generic and safe to publish.
-The second set is read from a file OUTSIDE the repo, ~/.weather-tools-site.scrub
-(one needle per line, '#' comments), because a list of internal hostnames is
-itself something that must not be committed.
+Two needle sets. The built-in set below is generic: key headers, credential
+field names, local home paths. The second set lives OUTSIDE the repo, in
+~/.weather-tools-site.scrub (one needle per line, '#' comments), and holds
+the specific internal names, because a list of them is itself something that
+must not be committed. The scrub refuses to pass when that file is missing,
+unless --no-external is given deliberately.
 
-    python3 scripts/scrub.py              # scan the git-tracked files
-    python3 scripts/scrub.py some/dir     # scan a directory tree (e.g. an archive seed)
+Every file is scanned regardless of extension; only files that look binary
+(a NUL byte in the first 8 KB) are skipped, and gzip members in directory
+mode are decompressed and scanned too. Skipped files are listed.
+
+    python3 scripts/scrub.py                 # scan the git-tracked and untracked files
+    python3 scripts/scrub.py some/dir        # scan a directory tree (e.g. an archive seed)
+    python3 scripts/scrub.py --no-external   # only when the external list is knowingly absent
 """
 from __future__ import annotations
+import gzip
 import os
-import re
 import subprocess
 import sys
 
@@ -24,28 +31,25 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXTERNAL = os.path.expanduser("~/.weather-tools-site.scrub")
 
 BUILTIN = [
-    "BEGIN PRIVATE KEY", "BEGIN RSA PRIVATE KEY", "BEGIN OPENSSH PRIVATE KEY",
+    "BEGIN PRIVATE KEY", "BEGIN RSA PRIVATE KEY", "BEGIN OPENSSH PRIVATE KEY", "BEGIN EC PRIVATE KEY",
     "AKIA",                      # AWS access key id prefix
-    "aws_secret_access_key",
+    "aws_secret_access_key", "AWS_SECRET_ACCESS_KEY",
     "/Users/",                   # local Mac paths
     "/home/ec2-user", "/home/ubuntu",
-    ".ts.net", "tailscale", "Tailscale",
-    "@interactivebrokers.com", "@ibkr.com",
-    "forecasttrader.interactivebrokers.com",   # the venue's endpoints stay out of this repo
 ]
-TEXT_EXT = {".md", ".py", ".html", ".js", ".css", ".json", ".yaml", ".yml", ".toml", ".txt",
-            ".service", ".timer", ".sh", ".env", ""}
-SKIP_DIRS = {".git", "__pycache__", "node_modules", "data", "archive", "dist", "verify-out"}
+SKIP_DIRS = {".git", "__pycache__", "node_modules", "data", "dist", "verify-out"}
 
 
-def needles() -> list:
-    out = list(BUILTIN)
+def needles(require_external: bool = True) -> tuple:
+    ext = []
     if os.path.isfile(EXTERNAL):
         for ln in open(EXTERNAL, encoding="utf-8"):
             ln = ln.strip()
             if ln and not ln.startswith("#"):
-                out.append(ln)
-    return out
+                ext.append(ln)
+    elif require_external:
+        raise FileNotFoundError(EXTERNAL)
+    return list(BUILTIN), ext
 
 
 def tracked_files() -> list:
@@ -65,34 +69,65 @@ def walk(base: str) -> list:
     return out
 
 
-def scan(paths: list, needles_: list) -> list:
-    hits = []
+def _text_of(path: str):
+    """The file's text, decompressing .gz; None for binary files."""
+    with open(path, "rb") as fh:
+        head = fh.read(8192)
+        if path.endswith(".gz"):
+            try:
+                data = gzip.decompress(head + fh.read())
+            except Exception:
+                return None
+            if b"\0" in data[:8192]:
+                return None
+            return data.decode("utf-8", "replace")
+        if b"\0" in head:
+            return None
+        return (head + fh.read()).decode("utf-8", "replace")
+
+
+def scan(paths: list, all_needles: list) -> tuple:
+    hits, skipped = [], []
     self_path = os.path.abspath(__file__)
     for path in paths:
         if os.path.abspath(path) == self_path:
-            continue                      # this file names the needles
-        if os.path.splitext(path)[1] not in TEXT_EXT:
-            continue
+            continue                      # this file names the built-in needles
         try:
-            text = open(path, encoding="utf-8", errors="strict").read()
-        except (UnicodeDecodeError, OSError):
+            text = _text_of(path)
+        except OSError:
+            skipped.append(path)
+            continue
+        if text is None:
+            skipped.append(path)
             continue
         for i, ln in enumerate(text.splitlines(), 1):
-            for n in needles_:
+            for n in all_needles:
                 if n in ln:
                     hits.append(f"{os.path.relpath(path, ROOT)}:{i}: {n!r} in: {ln.strip()[:100]}")
-    return hits
+    return hits, skipped
 
 
 def main(argv) -> int:
-    paths = walk(argv[0]) if argv else tracked_files()
-    hits = scan(paths, needles())
+    args = [a for a in argv if not a.startswith("--")]
+    require_external = "--no-external" not in argv
+    try:
+        builtin, ext = needles(require_external)
+    except FileNotFoundError:
+        print(f"SCRUB REFUSED: the external needle list {EXTERNAL} is missing. "
+              f"Create it (one internal name per line) or pass --no-external deliberately.", file=sys.stderr)
+        return 2
+    paths = walk(args[0]) if args else tracked_files()
+    hits, skipped = scan(paths, builtin + ext)
+    for s in skipped:
+        print(f"  skipped (binary): {os.path.relpath(s, ROOT)}")
     if hits:
         print("SCRUB FAILED - strings that must not be published:", file=sys.stderr)
         for h in hits[:60]:
             print(" ", h, file=sys.stderr)
         return 1
-    print(f"scrub clean: {len(paths)} files, {len(needles())} needles")
+    print(f"scrub clean: {len(paths)} files scanned, {len(skipped)} binary skipped, "
+          f"{len(builtin)} built-in + {len(ext)} external needles"
+          + ("" if ext or not require_external else " (external list empty)"))
     return 0
 
 

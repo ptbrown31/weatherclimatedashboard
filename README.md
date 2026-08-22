@@ -8,16 +8,23 @@ The site is static and reads only those snapshots. Two build targets come from o
 full `standalone` site and a single-chart `embed` for an iframe.
 
 Everything runs on a clean checkout with no cloud account. Deployment is a separate, documented
-step (`DEPLOY.md`).
+step (`DEPLOY.md`, added with the deployment templates).
 
 ## Run it locally
 
     python3 -m unittest discover -s tests          # no network
-    python3 -m pipeline.run --job archive          # one archive pass into ./data (hits the .gov feeds)
+    python3 scripts/build_assets.py                # project the map geometry once (outputs are committed)
+    python3 -m pipeline.run --job all              # archive, forecast, obs and hurricane passes into ./data
     python3 scripts/scrub.py                       # refuse to publish strings that must stay private
 
 Python 3.9 or later, standard library only. `boto3` is needed only when the `s3` storage backend
-is configured.
+is configured. The scrub reads a second needle list from `~/.weather-tools-site.scrub`, outside
+the repo, and refuses to pass without it unless told `--no-external`.
+
+Jobs and their cadence: `archive` (every 30 min, first), `forecast` (after it, from the archive),
+`obs` (every 10 min: the observation record, per-station observation snapshots, `summary.json`,
+`manifest.json`), `hurricane` (every 30 min). `half-hourly` runs archive, forecast and hurricane
+in one invocation; `all` runs everything once.
 
 ## What the archive job stores
 
@@ -33,7 +40,7 @@ station and one file per UTC day of observations:
 | `archive/{STATION}/lamp_{cycle}.txt.gz` | LAMP hourly block (NOMADS, the :30 run) | same-day trace, 25 h |
 | `archive/{STATION}/mav_{cycle}.txt.gz` | GFS MOS MAV block (NOMADS) | independent daily max and min (`N/X`) |
 | `archive/obs/{YYYYMMDD}.json.gz` | aviationweather.gov METAR rows, raw | observations keyed by `obsTime`; corrections kept |
-| `archive/_meta/grids.json`, `_done/`, `_runs/` | | grid cache, cycle markers, one record per pass |
+| `archive/_meta/grids.json`, `health.json`, `_done/`, `_runs/` | | grid cache, per-source failure streaks, cycle markers, one record per pass plus `latest.json` |
 
 Nothing is written twice. A pass that finds every cycle already stored does nothing, which also
 makes a retried scheduled run harmless. The observation day files are the one exception: they are
@@ -41,7 +48,24 @@ re-read and upserted each pass so that a corrected report (`COR`) replaces the o
 same `obsTime` while the file keeps what it superseded.
 
 Why the archive comes first: no public endpoint returns an earlier forecast, NOMADS keeps NBM text
-for about two days, and data from days when the job was not running cannot be recovered.
+for about two days, and data from days when the job was not running cannot be recovered. Bulletins
+are caught up, not sampled: every cycle in the lookback window without a completion marker is
+fetched, a few per pass, and a marker is written only when the bulletin covered the stations it
+should. One limit by design: the NWS forecast is served with an hour's CDN cache and the job
+honours it, so two issuances less than an hour apart can reach the archive as one.
+
+## Snapshots
+
+The browser reads only these (all JSON, short `Cache-Control`, each stamped `asof`):
+
+| Key | Cadence | Contents |
+| --- | --- | --- |
+| `snapshots/obs/{STATION}.json` | 10 min | last 72 h of reports, today's and yesterday's extremes, the latest raw report |
+| `snapshots/summary.json` | 10 min | every station: position, observed extremes so far, forecast levels, day markers |
+| `snapshots/manifest.json` | 10 min | as-of per data type, cadences, archive depth |
+| `snapshots/forecast/{STATION}.json` | 30 min | standing NWS (hourly + official day/night), NBM, LAMP, MAV; the as-issued pre-day cycle per source with its level for the day; yesterday's as-issued |
+| `snapshots/field.json` | 30 min | the map shading: inverse-distance interpolation of tomorrow's NWS highs and lows (derived) |
+| `snapshots/hurricane.json` | 30 min | active storms with points, track, cone, past track; outlook regions; season counts |
 
 ## Configuration
 

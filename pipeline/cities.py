@@ -1,5 +1,5 @@
 """
-City registry shared by build.py and archiver.py.
+Station registry shared by every job: the archive, the snapshots and the asset build.
 
 The full ForecastEx daily-temperature roster, 38 stations. Fields: ICAO
 settlement station, display name, latitude, longitude, IANA timezone, and

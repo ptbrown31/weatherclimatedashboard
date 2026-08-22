@@ -184,7 +184,7 @@ _T_GROUP = re.compile(r"(?:^|\s)T[01]\d{3}[01]\d{3}(?:\s|$)")
 
 
 def fetch_observations_raw(stations: list[str], hours: int = 36,
-                           on_truncated=None) -> list[dict]:
+                           on_truncated=None, end: Optional[dt.datetime] = None) -> list[dict]:
     """
     The raw decoded rows from aviationweather.gov, every field as served, plus
     one stamp per row: temp_source = "tgroup" if the remarks carry a T-group
@@ -196,12 +196,18 @@ def fetch_observations_raw(stations: list[str], hours: int = 36,
     400-row cap. `on_truncated(batch_ids)` is called for any batch that comes
     back with exactly 400 rows.
     """
-    per_batch = max(1, min(8, AWC_ROW_CAP // max(1, hours * 2)))
+    # three reports an hour of headroom (hourly METAR plus SPECI bursts), and
+    # strictly under the cap: at 6 h that is 8 stations, at 24 h five, at 72 h one
+    per_batch = max(1, min(8, (AWC_ROW_CAP - 1) // max(1, hours * 3)))
     rows: list = []
     for i in range(0, len(stations), per_batch):
         ids = stations[i:i + per_batch]
-        url = ("https://aviationweather.gov/api/data/metar?"
-               + urllib.parse.urlencode({"ids": ",".join(ids), "format": "json", "hours": hours}))
+        params = {"ids": ",".join(ids), "format": "json", "hours": hours}
+        if end is not None:
+            # `date` is the END of the window and `hours` counts back from it;
+            # anything older than 30 days is refused with HTTP 400.
+            params["date"] = end.astimezone(dt.timezone.utc).strftime("%Y%m%d_%H%M")
+        url = "https://aviationweather.gov/api/data/metar?" + urllib.parse.urlencode(params)
         batch = _get(url) or []
         if len(batch) >= AWC_ROW_CAP and on_truncated:
             on_truncated(ids)
@@ -265,15 +271,47 @@ def fetch_daily_forecast(grid: dict) -> list[dict]:
     periods = _get(grid["daily_url"])["properties"]["periods"]
     rows = []
     for p in periods:
-        t = float(p["temperature"] if not isinstance(p["temperature"], dict)
-                  else p["temperature"]["value"])
+        f = period_temp_f(p)
+        if f is None:
+            continue
         rows.append({
             "start": dt.datetime.fromisoformat(p["startTime"]),
             "end": dt.datetime.fromisoformat(p["endTime"]),
             "is_day": bool(p.get("isDaytime")),
-            "temp_f": round(t if p.get("temperatureUnit", "F") == "F" else c_to_f(t), 1),
+            "temp_f": f,
         })
     return rows
+
+
+def period_temp_f(p: dict) -> Optional[float]:
+    """
+    A forecast period's temperature in Fahrenheit, or None when the period
+    carries null (api.weather.gov does serve "temperature": null for some
+    periods; four archived day/night files from 2026-08-20 have one). Two
+    shapes: today a scalar with a sibling temperatureUnit; under the
+    forecast_temperature_qv feature flag, which NWS says will become the
+    default, an object {"unitCode": "wmoUnit:degC", "value": 25} with NO
+    temperatureUnit key, and the value is Celsius even when units=us.
+    """
+    t = p.get("temperature")
+    if t is None:
+        return None
+    if isinstance(t, dict):
+        v = t.get("value")
+        if v is None:
+            return None
+        code = str(t.get("unitCode", "")).lower()
+        if code.endswith("degc"):
+            return round(c_to_f(float(v)), 1)
+        if code.endswith("degf"):
+            return round(float(v), 1)
+        raise ValueError(f"unknown temperature unitCode {t.get('unitCode')!r}")
+    unit = p.get("temperatureUnit")
+    if unit == "F":
+        return round(float(t), 1)
+    if unit == "C":
+        return round(c_to_f(float(t)), 1)
+    raise ValueError(f"period has no temperatureUnit: {p!r}"[:200])
 
 
 def fetch_hourly_forecast(grid: dict) -> list[dict]:
@@ -296,15 +334,12 @@ def fetch_hourly_forecast(grid: dict) -> list[dict]:
         # the hour current at generation time, so a copy fetched late in the
         # hour can start with a period that has already ended. Readers that
         # want "now" must drop periods whose endTime has passed rather than
-        # trust period[0]. A schema change is also scheduled (feature flag
-        # forecast_temperature_qv): temperature becomes an object with a
-        # value, so both shapes are accepted here.
-        t = float(p["temperature"] if not isinstance(p["temperature"], dict)
-                  else p["temperature"]["value"])
-        rows.append({
-            "time": dt.datetime.fromisoformat(p["startTime"]),
-            "temp_f": round(t if p.get("temperatureUnit") == "F" else c_to_f(t), 1),
-        })
+        # trust period[0]. Both temperature shapes are handled by
+        # period_temp_f; a null temperature skips the period.
+        f = period_temp_f(p)
+        if f is None:
+            continue
+        rows.append({"time": dt.datetime.fromisoformat(p["startTime"]), "temp_f": f})
     return rows
 
 
@@ -412,13 +447,38 @@ BULLETIN_MARKER = {"nbh": " NBH GUIDANCE", "nbs": " NBS GUIDANCE",
                    "lamp": " LAMP GUIDANCE", "mav": " MOS GUIDANCE"}
 
 
+def bulletin_cycles(source: str, lookback_hours: int = 36, now: Optional[dt.datetime] = None) -> list:
+    """
+    Every cycle of one bulletin family that could exist in the lookback
+    window, newest first, as (cycle datetime, url). Nothing is requested
+    here; the archive job checks its own markers first and HEADs only the
+    cycles it does not hold, so a scheduler gap is caught up from the bucket
+    instead of silently skipped. NBM keeps about two days on NOMADS, LAMP and
+    MAV about ten, hence the default window.
+    """
+    now = (now or dt.datetime.now(dt.timezone.utc)).replace(minute=0, second=0, microsecond=0)
+    out = []
+    if source in ("nbh", "nbs"):
+        for k in range(lookback_hours + 1):
+            t = now - dt.timedelta(hours=k)
+            out.append((t, NBM_TEXT_URL.format(date=t.strftime("%Y%m%d"), hh=t.strftime("%H"), kind=source)))
+    elif source == "lamp":
+        for k in range(lookback_hours + 1):
+            t = now - dt.timedelta(hours=k)
+            out.append((t.replace(minute=30), LAMP_TEXT_URL.format(date=t.strftime("%Y%m%d"), hh=t.strftime("%H"))))
+    elif source == "mav":
+        t = now.replace(hour=(now.hour // 6) * 6)
+        for _ in range(lookback_hours // 6 + 1):
+            out.append((t, MAV_TEXT_URL.format(date=t.strftime("%Y%m%d"), hh=t.strftime("%H"))))
+            t -= dt.timedelta(hours=6)
+    else:
+        raise ValueError(f"unknown bulletin source {source!r}")
+    return out
+
+
 def latest_nbm_cycle(lookback_hours: int = 4, kind: str = "nbh") -> tuple[dt.datetime, str]:
-    """Most recent NBM cycle already on the bucket: walk back from the
-    current hour and take the first object that answers a HEAD request."""
-    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
-    for k in range(lookback_hours + 1):
-        t = now - dt.timedelta(hours=k)
-        url = NBM_TEXT_URL.format(date=t.strftime("%Y%m%d"), hh=t.strftime("%H"), kind=kind)
+    """Most recent NBM cycle already on the bucket (first HEAD that answers)."""
+    for t, url in bulletin_cycles(kind, lookback_hours):
         if _head(url):
             return t, url
     raise RuntimeError(f"no {kind.upper()} cycle on the bucket in the last {lookback_hours}h")
@@ -427,30 +487,80 @@ def latest_nbm_cycle(lookback_hours: int = 4, kind: str = "nbh") -> tuple[dt.dat
 def latest_lamp_cycle(lookback_hours: int = 4) -> tuple[dt.datetime, str]:
     """Most recent :30 LAMP run on NOMADS (the run with the temperature row).
     Files post at about HH:36, not on the exact quarter hour."""
-    now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
-    for k in range(lookback_hours + 1):
-        t = now - dt.timedelta(hours=k)
-        url = LAMP_TEXT_URL.format(date=t.strftime("%Y%m%d"), hh=t.strftime("%H"))
+    for t, url in bulletin_cycles("lamp", lookback_hours):
         if _head(url):
-            return t.replace(minute=30), url
+            return t, url
     raise RuntimeError(f"no LAMP :30 run on NOMADS in the last {lookback_hours}h")
 
 
 def latest_mav_cycle(lookback_cycles: int = 6) -> tuple[dt.datetime, str]:
     """Most recent GFS MOS MAV cycle (00/06/12/18Z) already posted."""
-    now = dt.datetime.now(dt.timezone.utc)
-    t = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
-    for _ in range(lookback_cycles + 1):
-        url = MAV_TEXT_URL.format(date=t.strftime("%Y%m%d"), hh=t.strftime("%H"))
+    for t, url in bulletin_cycles("mav", lookback_cycles * 6):
         if _head(url):
             return t, url
-        t -= dt.timedelta(hours=6)
     raise RuntimeError(f"no MAV cycle on NOMADS in the last {lookback_cycles} cycles")
 
 
 def fetch_bulletin_text(url: str) -> str:
-    """A whole bulletin as text (NBM files are about 28-30 MB)."""
+    """A whole bulletin as text (NBM files are about 28-30 MB). Prefer
+    fetch_bulletin_blocks, which streams and keeps memory near one chunk."""
     return _get_text(url, timeout=180)
+
+
+def fetch_bulletin_blocks(url: str, stations: list, marker: str, timeout: int = 180,
+                          tries: int = 2) -> tuple:
+    """
+    Stream a bulletin and keep only the wanted stations' blocks, verbatim.
+    A 28 MB NBM file read whole and split into lines peaks near 125 MB of
+    memory; streamed a megabyte at a time it stays near the chunk size,
+    which is what lets the job run in a small function. The urlopen timeout
+    is an idle timeout, so a stalled transfer fails within `timeout` seconds
+    rather than running on.
+        -> (blocks: {station: text}, bytes_read, total_block_count)
+    """
+    wanted = set(stations)
+    last_err: Optional[Exception] = None
+    for attempt in range(tries):
+        out: dict = {}
+        current, lines, nblocks, total = None, [], 0, 0
+        buf = b""
+
+        def take(line: str):
+            nonlocal current, lines, nblocks
+            if marker in line:
+                if current in wanted:
+                    out[current] = "\n".join(lines)
+                current, lines = line.split()[0], [line]
+                nblocks += 1
+            elif current is not None:
+                lines.append(line)
+
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    buf += chunk
+                    parts = buf.split(b"\n")
+                    buf = parts.pop()
+                    for raw in parts:
+                        take(raw.decode("ascii", "replace").rstrip("\r"))
+            if buf:
+                take(buf.decode("ascii", "replace").rstrip("\r"))
+            if current in wanted:
+                out[current] = "\n".join(lines)
+            return out, total, nblocks
+        except urllib.error.HTTPError as e:
+            if 400 <= e.code < 500 and e.code != 429:
+                raise
+            last_err = e
+        except Exception as e:
+            last_err = e
+        time.sleep(2.5 * (attempt + 1))
+    raise RuntimeError(f"bulletin fetch failed after {tries} tries: {last_err}")
 
 
 def station_blocks(text: str, stations: list[str], marker: str) -> dict[str, str]:
@@ -504,12 +614,13 @@ def parse_hourly_block(block: str) -> dict:
         # because a winter "-12" fills its cell and touches its neighbour.
         # Missing cells ("NG" or blank) become None IN PLACE: dropping them
         # per-row would misalign every hour after the gap when the two rows
-        # are zipped together.
+        # are zipped together. A block without the row is an error, not an
+        # empty forecast: the LAMP :00/:15/:45 files carry no TMP row.
         for line in block.splitlines():
-            if line.startswith(f" {label}"):
+            if line[:4].strip() == label:
                 cells = [line[5 + 3 * i: 8 + 3 * i].strip() for i in range(25)]
                 return [int(c) if c not in ("", "NG") else None for c in cells]
-        return []
+        raise ValueError(f"bulletin block has no {label} row")
 
     hours, temps = row("UTC"), row("TMP")
     rows, day, prev = [], cycle.date(), cycle.hour
@@ -529,6 +640,103 @@ def parse_hourly_block(block: str) -> dict:
 
 parse_nbh_block = parse_hourly_block
 parse_lamp_block = parse_hourly_block
+
+
+def bulletin_cycle(block: str) -> dt.datetime:
+    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{2})(\d{2}) UTC", block)
+    if not m:
+        raise ValueError("bulletin block has no cycle header")
+    mo, da, yr, hh, mi = map(int, m.groups())
+    return dt.datetime(yr, mo, da, hh, mi, tzinfo=dt.timezone.utc)
+
+
+def parse_columns(block: str, labels: tuple, ncols: int) -> dict:
+    """
+    The named rows of a bulletin block as lists of `ncols` integers (None for
+    blank or 'NG' cells). Every bulletin family (NBH, NBS, LAMP, MAV) lays its
+    rows out the same way: a label in the first four characters, then
+    right-aligned three-character cells from column 5. Slicing by position is
+    what keeps '-12-13' and '108107' apart.
+    """
+    out: dict = {}
+    for line in block.splitlines():
+        lab = line[:4].strip()
+        if lab in labels:
+            cells = [line[5 + 3 * i: 8 + 3 * i].strip() for i in range(ncols)]
+            out[lab] = [int(c) if c.lstrip("-").isdigit() else None for c in cells]
+    return out
+
+
+def column_times(cycle: dt.datetime, hours: list) -> list:
+    """UTC datetimes for a row of valid hours. The hour values advance a day
+    each time they wrap past midnight; None cells stay None in place."""
+    out, day, prev = [], cycle.date(), cycle.hour
+    for h in hours:
+        if h is None:
+            out.append(None)
+            continue
+        if h < prev:
+            day += dt.timedelta(days=1)
+        prev = h
+        out.append(dt.datetime(day.year, day.month, day.day, h, tzinfo=dt.timezone.utc))
+    return out
+
+
+def _hour_row_width(block: str, label: str) -> int:
+    for line in block.splitlines():
+        if line[:4].strip() == label:
+            return max(0, (len(line.rstrip()) - 5 + 2) // 3)
+    return 0
+
+
+def parse_daily_extremes(block: str, hour_label: str, value_label: str) -> dict:
+    """
+    The daily max/min row of an NBS (`TXN`) or MAV (`N/X`) block, plus the
+    3-hourly temperature row. Convention, checked against the 2026-08-21
+    bulletins by character alignment: the value under a 00Z column is the
+    MAXIMUM of the day that ends there (the daytime max of the previous local
+    day in every US zone), and the value under a 12Z column is the MINIMUM of
+    the night ending that morning. Converting each column time to the
+    station's local zone therefore lands each extreme on its own local day.
+
+        -> {"cycle", "rows": [{"time", "temp_f"}],
+            "extremes": [{"time", "kind": "max"|"min", "temp_f"}]}
+    """
+    cycle = bulletin_cycle(block)
+    n = _hour_row_width(block, hour_label)
+    if not n:
+        raise ValueError(f"bulletin block has no {hour_label} row")
+    # GFS MOS names the extremes row by which extreme comes first in the
+    # cycle's columns: 'N/X' when the 12Z minimum leads (12Z/18Z cycles),
+    # 'X/N' when the 00Z maximum leads (00Z/06Z cycles). Both are accepted.
+    labels = (value_label, "X/N", "N/X") if value_label in ("N/X", "X/N") else (value_label,)
+    cols = parse_columns(block, (hour_label, "TMP") + labels, n)
+    hours = cols.get(hour_label, [])
+    times = column_times(cycle, hours)
+    if "TMP" not in cols:
+        raise ValueError("bulletin block has no TMP row")
+    rows = [{"time": t, "temp_f": float(v)} for t, v in zip(times, cols.get("TMP", []))
+            if t is not None and v is not None]
+    values = next((cols[lab] for lab in labels if lab in cols), None)
+    if values is None:
+        raise ValueError(f"bulletin block has no {'/'.join(labels)} row")
+    extremes = []
+    for t, v in zip(times, values):
+        if t is None or v is None:
+            continue
+        if t.hour == 0:
+            extremes.append({"time": t, "kind": "max", "temp_f": float(v)})
+        elif t.hour == 12:
+            extremes.append({"time": t, "kind": "min", "temp_f": float(v)})
+    return {"cycle": cycle, "rows": rows, "extremes": extremes}
+
+
+def parse_nbs_block(block: str) -> dict:
+    return parse_daily_extremes(block, "UTC", "TXN")
+
+
+def parse_mav_block(block: str) -> dict:
+    return parse_daily_extremes(block, "HR", "N/X")
 
 
 def fetch_nbm_hourly(stations: list[str]) -> dict[str, dict]:

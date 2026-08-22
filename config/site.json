@@ -26,8 +26,9 @@
     "nbm": true,
     "lamp": true,
     "mav": true,
-    "obs_record": true
+    "obs_record": false
   },
+  "_sources_note": "obs_record is owned by the 10-minute obs job; set it true only when running the archive job alone",
 
   "market_overlay": {
     "standalone": "placeholder",

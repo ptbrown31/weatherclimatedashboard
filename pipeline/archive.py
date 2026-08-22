@@ -20,8 +20,9 @@ What one pass stores, through the storage adapter (local directory or bucket):
   archive/obs/{YYYYMMDD}.json.gz         every station's METAR and SPECI rows for one UTC day,
                                          raw as served, keyed by obsTime, corrections kept
   archive/_meta/grids.json               station -> NWS forecast URLs, re-resolved daily
-  archive/_done/{source}_{cycle}         markers for the bulk bulletins, one per cycle
-  archive/_runs/{pulled}.json            one record per pass: counts, errors, timings
+  archive/_meta/health.json              per-source failure streaks, for alarms
+  archive/_done/{source}_{cycle}         markers for the bulk bulletins, one per complete cycle
+  archive/_runs/{pulled}.json, latest.json   one record per pass, and the newest
 
 The stamp in a forecast filename is the forecast's own issuance time
 (`updateTime`), not the pull time. `generatedAt` is the render time and
@@ -31,6 +32,17 @@ scheduled run harmless. Observation day files are the one exception to
 write-once: they are re-read and upserted each pass, because a corrected
 report (COR) replaces the original under the same obsTime and the file must
 carry the correction while keeping what it superseded.
+
+Bulletins are caught up, not just sampled: every cycle in the lookback
+window that has no completion marker is fetched, newest first, a few per
+pass, so a scheduler gap is recovered from the bucket while it is still
+there. A marker is written only when the bulletin covered the stations it
+should, so a half-written file is retried on the next pass.
+
+Known limit, by design: the NWS forecast is served through a CDN with an
+hour's cache, and the job honours that cache. Two issuances less than an
+hour apart can therefore reach the archive as one. The archive records what
+was served, and the hour-old render is the one any reader would have seen.
 
 Observations are filed by UTC day on purpose. aviationweather.gov times are
 Zulu; local-day bucketing through the IANA zone happens when the data is
@@ -52,8 +64,14 @@ from .cities import CITIES
 from .storage import Storage
 
 GRIDS_KEY = "archive/_meta/grids.json"
+HEALTH_KEY = "archive/_meta/health.json"
 GRID_MAX_AGE_H = 24            # the docs ask that the points mapping be re-checked periodically
-OBS_WINDOW_H = 12              # each pass re-reads this much history so corrections land
+OBS_MIN_H, OBS_MAX_H = 6, 72   # fresh pull per pass, and the most a pass will reach back to heal a gap
+BULLETIN_LOOKBACK_H = {"nbh": 36, "nbs": 36, "lamp": 24, "mav": 36}
+BULLETIN_MAX_NEW = 4           # new cycles fetched per source per pass (a catch-up spreads over passes)
+FAIL_STREAK_ALARM = 6          # passes in a row before a source's failure is an alarm (3 h at 30 min)
+
+LAST_STATUS: dict = {}         # set by one_pass: per-source outcome of the latest pass
 
 
 def _gz(data: bytes) -> bytes:
@@ -77,18 +95,31 @@ def cycle_stamp(props: dict) -> Optional[str]:
     return _stamp(dt.datetime.fromisoformat(raw.replace("Z", "+00:00")))
 
 
+class Deadline:
+    """A wall-clock budget for one pass. Lambda stops a function at its
+    timeout, so the pass stops itself first and records what it skipped."""
+    def __init__(self, seconds: Optional[float]):
+        self.end = time.time() + seconds if seconds else None
+
+    def remaining(self) -> float:
+        return float("inf") if self.end is None else self.end - time.time()
+
+    def over(self, need: float = 0.0) -> bool:
+        return self.remaining() < need
+
+
 # ---------------------------------------------------------------- grids
 def load_grids(store: Storage, now: dt.datetime, log: Callable) -> dict:
     """Station -> forecast URLs, resolved through the points endpoint and
-    cached; re-resolved once a day because grid and office can change."""
+    cached; re-resolved once a day because grid and office can change. A
+    failed refresh is not stamped as a fresh one, so it is retried next pass."""
     raw = store.get(GRIDS_KEY)
     grids = json.loads(raw) if raw else {}
     resolved = grids.get("_resolved")
     stale = True
     if resolved:
-        age = now - dt.datetime.fromisoformat(resolved)
-        stale = age > dt.timedelta(hours=GRID_MAX_AGE_H)
-    changed = False
+        stale = (now - dt.datetime.fromisoformat(resolved)) > dt.timedelta(hours=GRID_MAX_AGE_H)
+    changed = ok = 0
     for sid, name, lat, lon, tzname, unit in CITIES:
         if unit != "F":                      # api.weather.gov covers US stations only
             continue
@@ -99,21 +130,29 @@ def load_grids(store: Storage, now: dt.datetime, log: Callable) -> dict:
         except Exception as e:               # keep the cached mapping on a bad day
             log(station=sid, kind="points", error=f"{type(e).__name__}: {e}")
             continue
-        grids[sid] = {"hourly": g["hourly_url"], "daily": g["daily_url"],
-                      "timezone": g["timezone"], "wfo": g["wfo"], "x": g["x"], "y": g["y"]}
-        changed = True
-    if changed or stale:
+        new = {"hourly": g["hourly_url"], "daily": g["daily_url"], "timezone": g["timezone"],
+               "wfo": g["wfo"], "x": g["x"], "y": g["y"]}
+        if grids.get(sid) != new:
+            if sid in grids:
+                log(station=sid, kind="points", note="grid mapping changed", old=grids[sid], new=new)
+            grids[sid] = new
+            changed += 1
+        ok += 1
+    if ok and (changed or stale):
         grids["_resolved"] = now.isoformat()
         store.put(GRIDS_KEY, json.dumps(grids, indent=1).encode(), "application/json")
     return {k: v for k, v in grids.items() if not k.startswith("_")}
 
 
 # ---------------------------------------------------------------- NWS
-def archive_nws(store: Storage, grids: dict, log: Callable) -> tuple[int, int]:
+def archive_nws(store: Storage, grids: dict, log: Callable, deadline: Deadline) -> tuple:
     """Both NWS forecast products per US station, stored raw, one object per
-    issuance. Returns (requests, errors)."""
-    requests = errors = 0
+    issuance. Returns (requests, errors, skipped)."""
+    requests = errors = skipped = 0
     for sid, g in grids.items():
+        if deadline.over(20):
+            skipped += 2
+            continue
         for kind in ("hourly", "daily"):
             requests += 1
             try:
@@ -125,54 +164,93 @@ def archive_nws(store: Storage, grids: dict, log: Callable) -> tuple[int, int]:
                 key = f"archive/{sid}/{fname}"
                 written = store.put_if_absent(key, _gz(json.dumps(body, separators=(",", ":")).encode()),
                                               "application/gzip")
-                log(station=sid, kind=kind, cycle=stamp, **({"file": key} if written else {"skipped": True}))
+                log(station=sid, kind=kind, cycle=stamp, grid=f"{g.get('wfo')}/{g.get('x')},{g.get('y')}",
+                    **({"file": key} if written else {"skipped": True}))
             except Exception as e:            # one station failing must not end the pass
                 errors += 1
                 log(station=sid, kind=kind, error=f"{type(e).__name__}: {e}")
-    return requests, errors
+    if skipped:
+        log(kind="nws", warning=f"deadline: {skipped} requests not attempted")
+    return requests, errors, skipped
 
 
 # ---------------------------------------------------------------- bulletins
-BULLETINS = {
-    # source: (latest-cycle function, stamp format)
-    "nbh":  (lambda: gw.latest_nbm_cycle(kind="nbh"), "%Y%m%dT%H00Z"),
-    "nbs":  (lambda: gw.latest_nbm_cycle(kind="nbs"), "%Y%m%dT%H00Z"),
-    "lamp": (gw.latest_lamp_cycle,                     "%Y%m%dT%H30Z"),
-    "mav":  (gw.latest_mav_cycle,                      "%Y%m%dT%H00Z"),
-}
+def expected_coverage(source: str) -> int:
+    """How many roster stations a bulletin should carry: NBM has the US and
+    Canadian stations, LAMP and MAV the US stations only."""
+    us = sum(1 for c in CITIES if c[5] == "F")
+    ca = sum(1 for c in CITIES if c[0].startswith("CY"))
+    return us + ca if source in ("nbh", "nbs") else us
 
 
-def archive_bulletin(store: Storage, source: str, stations: list, log: Callable) -> int:
-    """One bulk text bulletin: find the newest cycle, skip it if its marker
-    exists, otherwise download once, cut every roster station's block and
-    store each verbatim. Coverage varies by station (NBM has the Canadian
-    stations, LAMP and MAV do not), so the cycle is deduplicated by a marker
-    written after the whole bulletin was processed, not by counting files.
-    Returns 1 on error, 0 otherwise."""
-    latest, fmt = BULLETINS[source]
+def marker_body(stations: int, nbytes: int = 0) -> bytes:
+    return json.dumps({"marked": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                       "stations": stations, "bytes": nbytes}).encode()
+
+
+def _block_ok(source: str, block: str) -> bool:
     try:
-        cycle, url = latest()
+        if source in ("nbh", "lamp"):
+            return len(gw.parse_hourly_block(block)["rows"]) >= 20
+        if source == "nbs":
+            return bool(gw.parse_nbs_block(block)["extremes"])
+        if source == "mav":
+            return bool(gw.parse_mav_block(block)["extremes"])
+    except Exception:
+        return False
+    return True
+
+
+def archive_bulletins(store: Storage, source: str, stations: list, log: Callable, deadline: Deadline,
+                      now: Optional[dt.datetime] = None) -> dict:
+    """
+    Catch-up loop for one bulletin family. Every cycle in the lookback
+    window without a completion marker is a candidate; newest first, at most
+    BULLETIN_MAX_NEW fetched per pass. Each fetched bulletin is streamed,
+    every roster station's block stored verbatim, and the marker written
+    only when coverage is complete and the blocks parse, so a truncated file
+    is retried next pass. Returns {"new", "skipped", "missing", "errors"}.
+    """
+    fmt = "%Y%m%dT%H30Z" if source == "lamp" else "%Y%m%dT%H00Z"
+    want = expected_coverage(source)
+    out = {"new": 0, "skipped": 0, "missing": 0, "errors": 0, "incomplete": 0}
+    for cycle, url in gw.bulletin_cycles(source, BULLETIN_LOOKBACK_H[source], now):
         stamp = cycle.strftime(fmt)
         done = f"archive/_done/{source}_{stamp}"
         if store.exists(done):
-            log(kind=source, cycle=stamp, skipped=True)
-            return 0
-        t0 = time.time()
-        text = gw.fetch_bulletin_text(url)
-        blocks = gw.station_blocks(text, stations, gw.BULLETIN_MARKER[source])
-        for sid, block in blocks.items():
-            store.put_if_absent(f"archive/{sid}/{source}_{stamp}.txt.gz", _gz(block.encode("ascii", "replace")),
-                                "application/gzip")
-        store.put(done, b"", "text/plain")
-        log(kind=source, cycle=stamp, stations=len(blocks), bytes=len(text), seconds=round(time.time() - t0, 1))
-        return 0
-    except Exception as e:
-        log(kind=source, error=f"{type(e).__name__}: {e}")
-        return 1
+            out["skipped"] += 1
+            continue
+        if out["new"] >= BULLETIN_MAX_NEW or deadline.over(90):
+            break
+        try:
+            if not gw._head(url):
+                out["missing"] += 1          # not published yet, or already gone
+                continue
+            t0 = time.time()
+            timeout = 180 if deadline.end is None else min(180, max(30, int(deadline.remaining() - 30)))
+            blocks, nbytes, nblocks = gw.fetch_bulletin_blocks(url, stations, gw.BULLETIN_MARKER[source],
+                                                               timeout=timeout)
+            good = {sid: b for sid, b in blocks.items() if _block_ok(source, b)}
+            for sid, block in good.items():
+                store.put_if_absent(f"archive/{sid}/{source}_{stamp}.txt.gz", _gz(block.encode("ascii", "replace")),
+                                    "application/gzip")
+            complete = len(good) >= want
+            if complete:
+                # markers carry content: a zero-length object reads as absent
+                store.put(done, marker_body(len(good), nbytes), "application/json")
+            else:
+                out["incomplete"] += 1
+            out["new"] += 1
+            log(kind=source, cycle=stamp, stations=len(good), expected=want, complete=complete,
+                bytes=nbytes, blocks=nblocks, seconds=round(time.time() - t0, 1))
+        except Exception as e:
+            out["errors"] += 1
+            log(kind=source, cycle=stamp, error=f"{type(e).__name__}: {e}")
+    return out
 
 
 # ---------------------------------------------------------------- observations
-def merge_obs_rows(existing: dict, new_rows: list) -> tuple[dict, int, int]:
+def merge_obs_rows(existing: dict, new_rows: list) -> tuple:
     """
     Upsert raw aviationweather.gov rows into a day file keyed by
     "{icaoId}|{obsTime}". A row whose rawOb differs from the stored one is a
@@ -203,12 +281,51 @@ def merge_obs_rows(existing: dict, new_rows: list) -> tuple[dict, int, int]:
     return merged, added, updated
 
 
-def archive_observations(store: Storage, stations: list, now: dt.datetime, log: Callable) -> int:
-    """Re-read the last OBS_WINDOW_H hours for every station and upsert into
-    the UTC-day files. Returns 1 on error, 0 otherwise."""
+def _new_day_file(day: str) -> dict:
+    return {"utc_day": day,
+            "source": "aviationweather.gov /api/data/metar, format=json",
+            "decode": {"TEMP_SOURCE": gw.TEMP_SOURCE, "INCLUDE_SPECI": gw.INCLUDE_SPECI,
+                       "note": "temp is tenths C when temp_source=tgroup, whole degrees C when body"},
+            "rows": {}}
+
+
+def obs_watermark(store: Storage, now: dt.datetime) -> Optional[dt.datetime]:
+    """The newest observation time already on record, from the two most
+    recent day files. None when the record is empty."""
+    newest = None
+    for h in (0, 24):
+        raw = _ungz(store.get(f"archive/obs/{(now - dt.timedelta(hours=h)).strftime('%Y%m%d')}.json.gz"))
+        if not raw:
+            continue
+        for ob in json.loads(raw).get("rows", {}).values():
+            t = ob.get("obsTime")
+            if t is not None and (newest is None or t > newest):
+                newest = t
+        if newest is not None:
+            break
+    return dt.datetime.fromtimestamp(newest, dt.timezone.utc) if newest is not None else None
+
+
+def archive_observations(store: Storage, stations: list, now: dt.datetime, log: Callable,
+                         min_hours: int = OBS_MIN_H, max_hours: int = OBS_MAX_H) -> int:
+    """
+    Re-read the recent hours for every station and upsert into the UTC-day
+    files. The window reaches back to the newest observation already stored
+    (plus an hour), between min_hours and max_hours, so a gap heals itself
+    while the feed still holds the data; a gap longer than max_hours is for
+    scripts/backfill_obs.py. Returns 1 on error, 0 otherwise.
+    """
+    hours = min_hours
+    wm = obs_watermark(store, now)
+    if wm is not None:
+        hours = int(max(min_hours, min(max_hours, (now - wm).total_seconds() / 3600 + 1)))
+    else:
+        hours = max_hours
+    if hours > min_hours:
+        log(kind="obs", note=f"record ends {wm.isoformat() if wm else 'never'}; pulling {hours}h")
     truncated: list = []
     try:
-        rows = gw.fetch_observations_raw(stations, OBS_WINDOW_H, on_truncated=truncated.append)
+        rows = gw.fetch_observations_raw(stations, hours, on_truncated=truncated.append)
     except Exception as e:
         log(kind="obs", error=f"{type(e).__name__}: {e}")
         return 1
@@ -223,13 +340,7 @@ def archive_observations(store: Storage, stations: list, now: dt.datetime, log: 
     for day, day_rows in sorted(by_day.items()):
         key = f"archive/obs/{day}.json.gz"
         raw = _ungz(store.get(key))
-        existing = json.loads(raw) if raw else {
-            "utc_day": day,
-            "source": "aviationweather.gov /api/data/metar, format=json",
-            "decode": {"TEMP_SOURCE": gw.TEMP_SOURCE, "INCLUDE_SPECI": gw.INCLUDE_SPECI,
-                       "note": "temp is tenths C when temp_source=tgroup, whole degrees C when body"},
-            "rows": {},
-        }
+        existing = json.loads(raw) if raw else _new_day_file(day)
         merged, added, updated = merge_obs_rows(existing, day_rows)
         if added or updated:
             merged["updated"] = now.isoformat()
@@ -238,13 +349,40 @@ def archive_observations(store: Storage, stations: list, now: dt.datetime, log: 
     return 0
 
 
+# ---------------------------------------------------------------- health
+def update_health(store: Storage, results: dict, now: dt.datetime) -> dict:
+    """Per-source failure streaks, kept across passes so a source that fails
+    quietly every pass becomes an alarm (see handler.py)."""
+    raw = store.get(HEALTH_KEY)
+    health = json.loads(raw) if raw else {}
+    for source, r in results.items():
+        h = health.setdefault(source, {"fail_streak": 0, "last_ok": None, "last_error": None})
+        if r.get("ok"):
+            h["fail_streak"] = 0
+            h["last_ok"] = now.isoformat()
+            h["last_error"] = None
+        elif r.get("attempted", True):
+            h["fail_streak"] = h.get("fail_streak", 0) + 1
+            h["last_error"] = r.get("error")
+    health["_updated"] = now.isoformat()
+    store.put(HEALTH_KEY, json.dumps(health, indent=1).encode(), "application/json")
+    return health
+
+
 # ---------------------------------------------------------------- one pass
-def one_pass(cfg: dict, store: Storage, sources: Optional[dict] = None) -> int:
-    """Run everything once. Exit status is nonzero only when nothing at all
+def one_pass(cfg: dict, store: Storage, sources: Optional[dict] = None,
+             deadline_seconds: Optional[float] = None) -> int:
+    """
+    Run everything once. Exit status is nonzero only when nothing at all
     succeeded, so the scheduler flags a real outage but one flaky endpoint
-    does not mark the run failed."""
+    does not mark the run failed; per-source failure streaks are kept in
+    health.json for the alarm path. The run record is written even when the
+    pass stops early.
+    """
+    global LAST_STATUS
     gw.set_user_agent(cfg.get("user_agent", ""))
     sources = sources or cfg.get("sources", {})
+    deadline = Deadline(deadline_seconds or cfg.get("pass_budget_seconds"))
     now = dt.datetime.now(dt.timezone.utc)
     pulled = _stamp(now)
     entries: list = []
@@ -256,29 +394,50 @@ def one_pass(cfg: dict, store: Storage, sources: Optional[dict] = None) -> int:
         print(json.dumps(kw, default=str))
 
     stations = [c[0] for c in CITIES]
+    results: dict = {}
     requests = errors = 0
-
-    if sources.get("nws", True):
-        grids = load_grids(store, now, log)
-        r, e = archive_nws(store, grids, log)
-        requests += r
-        errors += e
-
-    for source in ("nbh", "nbs", "lamp", "mav"):
-        enabled = sources.get("nbm", True) if source in ("nbh", "nbs") else sources.get(source, True)
-        if enabled:
+    try:
+        if sources.get("nws", True):
+            grids = load_grids(store, now, log)
+            r, e, s = archive_nws(store, grids, log, deadline)
+            requests += r
+            errors += e
+            results["nws"] = {"ok": r > e and r > 0, "requests": r, "errors": e, "skipped": s,
+                              "error": None if r > e else "all NWS requests failed"}
+        for source in ("nbh", "nbs", "lamp", "mav"):
+            enabled = sources.get("nbm", True) if source in ("nbh", "nbs") else sources.get(source, True)
+            if not enabled:
+                continue
+            if deadline.over(90):
+                results[source] = {"ok": False, "attempted": False, "error": "deadline"}
+                log(kind=source, warning="deadline: not attempted")
+                continue
             requests += 1
-            errors += archive_bulletin(store, source, stations, log)
-
-    if sources.get("obs_record", True):
-        requests += 1
-        errors += archive_observations(store, stations, now, log)
-
-    summary = {"pulled": now.isoformat(), "requests": requests, "errors": errors,
-               "seconds": round(time.time() - t0, 1), "storage": store.describe(),
-               "entries": entries}
-    store.put(f"archive/_runs/{pulled}.json", json.dumps(summary, default=str).encode(), "application/json")
-    print(f"archive: {requests} requests, {errors} errors, {summary['seconds']}s -> {store.describe()}")
+            out = archive_bulletins(store, source, stations, log, deadline, now)
+            failed = out["errors"] and not out["new"]
+            errors += 1 if failed else 0
+            newest_done = store.exists(f"archive/_done/{source}_{gw.bulletin_cycles(source, 0, now)[0][0].strftime('%Y%m%dT%H30Z' if source == 'lamp' else '%Y%m%dT%H00Z')}")
+            results[source] = {"ok": not failed, **out, "newestCycleDone": newest_done,
+                               "error": "fetch failed" if failed else None}
+        if sources.get("obs_record", False):
+            requests += 1
+            e = archive_observations(store, stations, now, log)
+            errors += e
+            results["obs"] = {"ok": e == 0, "error": "fetch failed" if e else None}
+    finally:
+        health = update_health(store, results, now)
+        summary = {"pulled": now.isoformat(), "requests": requests, "errors": errors,
+                   "seconds": round(time.time() - t0, 1), "storage": store.kind(),
+                   "deadlineRemaining": None if deadline.end is None else round(deadline.remaining(), 1),
+                   "sources": results,
+                   "alarms": [s for s, h in health.items() if not s.startswith("_") and h.get("fail_streak", 0) >= FAIL_STREAK_ALARM],
+                   "entries": entries}
+        body = json.dumps(summary, default=str).encode()
+        store.put(f"archive/_runs/{pulled}.json", body, "application/json")
+        store.put("archive/_runs/latest.json", body, "application/json")
+        LAST_STATUS = summary
+    print(f"archive: {requests} requests, {errors} errors, {summary['seconds']}s, "
+          f"alarms {summary['alarms'] or 'none'} -> {store.describe()}")
     return 1 if (errors == requests and requests) else 0
 
 

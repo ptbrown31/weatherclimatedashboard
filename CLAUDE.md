@@ -10,8 +10,8 @@ codebase: `standalone` (the full site) and `embed` (one chart, no chrome). A Pyt
 US government feeds on a schedule, keeps an append-only forecast archive, and writes small JSON
 snapshots to object storage behind a CDN. The browser reads only those snapshots.
 
-It shares code with the earlier IBKR reference package (`~/ibkr-weather-displays`) but has a
-different job: this one has to stay up and stay fresh on its own.
+It shares code with an earlier reference package of the same displays, but has a different job:
+this one has to stay up and stay fresh on its own.
 
 ## Hard constraints, decided, do not relitigate
 
@@ -48,13 +48,14 @@ decision after compliance input. When off, the layout reserves no space for mark
 
 ## Decisions taken 2026-08-21
 
-Hosting: the owner's employer AWS account, as an isolated stack. Domain: placeholder until chosen.
-Decode: remarks tenths, SPECI counted. Overlay: on with placeholders (standalone). Disclosure text:
-in `config/site.json`, verbatim, pending compliance review. User-Agent contact: in config. Roster:
-the 38 contract stations. Scope: city chart, national map, scorecard, hurricanes, NCEI normals,
-climate series with placeholder markers. Archive seeded from the owner's existing archive. GitHub,
-public, MIT. Forecast series: chart NWS + NBM + LAMP; scorecard NWS + NBM + GFS MOS MAV; all
-archived. Embed parameters: `station`, `theme`, `market`.
+Hosting: AWS, as an isolated stack (S3, CloudFront, Lambda, EventBridge); the S3-API storage
+adapter keeps other targets a config change. Domain: placeholder until chosen. Decode: remarks
+tenths, SPECI counted. Overlay: on with placeholders (standalone). Disclosure text: in
+`config/site.json`, verbatim. User-Agent contact: in config. Roster: the 38 contract stations.
+Scope: city chart, national map, scorecard, hurricanes, NCEI normals, climate series with
+placeholder markers. Archive seeded from the owner's existing archive. GitHub, public, MIT.
+Forecast series: chart NWS + NBM + LAMP; scorecard NWS + NBM + GFS MOS MAV; all archived. Embed
+parameters: `station`, `theme`, `market`.
 
 ## Working style
 
