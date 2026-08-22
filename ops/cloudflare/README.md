@@ -22,10 +22,11 @@ directory without a git integration; static requests are free and unlimited.
         WX_STORAGE_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com
         WX_STORAGE_REGION=auto
         WX_STORAGE_PREFIX=data
-        AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY = the R2 token pair
 
-   On Lambda these go in the function's environment (the template's `Environment` block);
-   the secret pair belongs in Secrets Manager or the function configuration, never in the repo.
+   plus the R2 API token pair in the two standard AWS credential variables boto3 reads (the
+   access key id and the secret). On Lambda these go in the function's environment (the
+   template's `Environment` block); the secret belongs in Secrets Manager or the function
+   configuration, never in the repository.
 
 2. Connect the bucket to a custom hostname (for example `data.<domain>`) in the R2 dashboard.
    Add a Cache Rule for that hostname: path starts with `/data/snapshots/` → eligible for
