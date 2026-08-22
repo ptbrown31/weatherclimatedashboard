@@ -104,7 +104,8 @@ def run(no_build: bool) -> int:
                 errs = errors_of(page)
                 # ---- standalone pages
                 pages = [("index.html", "#map path", "map geometry"), ("city.html?station=KLAX", "#chart path", "city series"),
-                         ("hurricane.html", "#basin path", "basin geography"), ("about.html", "footer.site", "footer")]
+                         ("hurricane.html", "#basin path", "basin geography"), ("scorecard.html", "#overall table", "scorecard table"),
+                         ("climate.html", "#panels svg path", "climate series"), ("about.html", "footer.site", "footer")]
                 for path, sel, what in pages:
                     page.goto(f"{srv.url}/{path}")
                     page.wait_for_timeout(900)

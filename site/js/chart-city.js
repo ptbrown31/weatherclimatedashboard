@@ -74,8 +74,10 @@ window.WXCity = (() => {
     cur = sid; checked = new Set();
     if (push !== false) { const u = new URL(location.href); u.searchParams.set('station', sid); history.replaceState(null, '', u); }
     if (onSelect) onSelect(sid);
-    const r = await WXD.getAll([`forecast/${sid}.json`, `obs/${sid}.json`]);
-    snaps = { fc: r[`forecast/${sid}.json`], ob: r[`obs/${sid}.json`] };
+    const c0 = city();
+    const keys = [`forecast/${sid}.json`, `obs/${sid}.json`].concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`] : []);
+    const r = await WXD.getAll(keys);
+    snaps = { fc: r[`forecast/${sid}.json`], ob: r[`obs/${sid}.json`], nm: r[`normals/${sid}.json`] || null };
     const st = $('#chartStatus'); if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([snaps.ob, snaps.fc], 10)); }
     if (WXM.on()) {
       const c = city(), lv = levelsFor(c), lad = WXM.ladder(c, { high: lv.high, low: lv.low });
@@ -168,6 +170,10 @@ window.WXCity = (() => {
       else if (fc && fc[k] && (fc[k].highToday != null || fc[k].lowToday != null)) addLevel(k, fc[k].highToday, fc[k].lowToday, false);
     });
 
+    // NCEI daily normals for the day, drawn as quiet reference ticks in the gutter
+    const nm = snaps.nm && snaps.nm.data && snaps.nm.data.days ? snaps.nm.data.days[M.day.slice(5)] : null;
+    const normals = nm && nm.tmax != null ? [{ v: nm.tmax, nm: 'normal high' }, { v: nm.tmin, nm: 'normal low' }] : [];
+
     const lad = market ? WXM.ladder(c, levelsFor(c)) : null;
     const picked = market ? [...checked].map(k => { const [pfx, K] = k.split(':'); return { side: pfx, K: +K, col: skColor(pfx, +K, lad) }; }).sort((a, b) => b.K - a.K) : [];
 
@@ -175,7 +181,7 @@ window.WXCity = (() => {
     const x = t => S.L + (t - w0) / (d1 - w0) * (S.R - S.L);
     const step = unit === 'F' ? 5 : 2;
     const temps = [...O, ...F, ...N, ...LA, ...A, ...NA, ...LAI].map(p => p.v)
-      .concat(ySeries.flatMap(s => s.pts.map(p => p.v))).concat(levels.map(l => l.v))
+      .concat(ySeries.flatMap(s => s.pts.map(p => p.v))).concat(levels.map(l => l.v)).concat(normals.map(n => n.v))
       .concat(lad ? lad.high.map(l => l.strike).concat(lad.low.map(l => l.strike)) : []);
     if (!temps.length) temps.push(unit === 'F' ? 70 : 20);
     const lo = Math.floor(Math.min(...temps) / step) * step - step / 2, hi = Math.ceil(Math.max(...temps) / step) * step + step / 2;
@@ -227,6 +233,10 @@ window.WXCity = (() => {
       g.appendChild(txt(L.nm, { x: S.GN, y: labY[i] + 3.5, class: 'lvlnm', fill: L.col }));
     });
     if (levels.length) g.appendChild(el('line', { x1: S.R, x2: S.R, y1: S.T, y2: S.B, stroke: 'var(--rule)', 'stroke-width': .9 }));
+    normals.forEach(n => {
+      g.appendChild(el('line', { x1: S.L, x2: S.L + 14, y1: y(n.v), y2: y(n.v), stroke: 'var(--muted)', 'stroke-width': 1.4 }));
+      g.appendChild(txt(n.nm + ' ' + n.v.toFixed(0) + '°', { x: S.L + 17, y: y(n.v) + 3.5, class: 'mklab' }));
+    });
     if (unit === 'C') g.appendChild(txt(N.length ? 'Non-US station: no NWS forecast; NBM guidance covers Canada.' : 'Non-US station: US government feeds carry observations only.',
       { x: S.L + 8, y: S.T + 16, class: 'axl' }));
 

@@ -78,5 +78,48 @@ window.WXM = (() => {
     return pts;
   }
 
-  return { mode, on, implied, ladder, pricePath, LABEL };
+  // placeholder climate contracts for the climate page: a few thresholds at
+  // a few expirations per product, priced from a logistic around a simple
+  // extrapolation of the series, so the markers have a shape to show
+  function climateProducts(series, offsetC) {
+    if (!on()) return [];
+    const year = new Date().getUTCFullYear();
+    const last = s => (series[s] && series[s].length ? series[s][series[s].length - 1] : null);
+    const trend = (s, years) => {          // per-year slope over the last `years` points
+      const pts = (series[s] || []).slice(-years); if (pts.length < 3) return 0;
+      const n = pts.length, sx = pts.reduce((a, q) => a + q[0], 0), sy = pts.reduce((a, q) => a + q[1], 0);
+      const sxx = pts.reduce((a, q) => a + q[0] * q[0], 0), sxy = pts.reduce((a, q) => a + q[0] * q[1], 0);
+      return (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    };
+    const make = (symbol, title, seriesKey, unit, thresholds, years, sigma, monthly) => {
+      const L = last(seriesKey); if (!L) return null;
+      const slope = trend(seriesKey, monthly ? 120 : 15);
+      const contracts = [];
+      years.forEach(y => thresholds.forEach(th => {
+        const proj = L[1] + slope * (y - L[0]);
+        const p = 1 / (1 + Math.exp(-(proj - th) / sigma));
+        const seed = seedOf(symbol + th, String(y));
+        const yes = Math.max(0.01, Math.min(0.99, Math.round((p + ((seed % 7) - 3) * 0.01) * 100) / 100));
+        contracts.push({ year: y, threshold: th, label: (th >= 100 ? th.toFixed(0) : th.toFixed(2)) + ' ' + unit.split(' ')[0],
+          expiryLabel: (monthly ? 'any month of ' : '') + y, yes, label2: LABEL });
+      }));
+      return { symbol, title, seriesKey, unit, name: title, contracts, placeholder: true };
+    };
+    const ta = last('tempAnnual'), sl = last('seaLevel'), co = last('co2'), am = last('amoc');
+    const yrs = [year + 1, year + 2, year + 3, year + 4];
+    return [
+      ta && make('GTTA', 'Annual global temperature thresholds', 'tempAnnual', '°C above preindustrial',
+        [1.5, 1.6, 1.7, 1.8, 1.9, 2.0].map(t => t), yrs, 0.08, false),
+      ta && make('GTTM', 'Any-month global temperature thresholds', 'tempMonthly', '°C above preindustrial',
+        [1.6, 1.7, 1.8, 1.9, 2.0, 2.1], yrs, 0.12, true),
+      sl && make('GSL', 'Global sea level', 'seaLevel', 'mm (satellite altimetry)',
+        [10, 20, 30, 40].map(d => Math.round(sl[1] + d)), yrs, 6, false),
+      co && make('ACD', 'Atmospheric CO2', 'co2', 'ppm (Mauna Loa)',
+        [2, 5, 8, 11].map(d => Math.round(co[1] + d)), yrs, 1.2, false),
+      am && make('AMOCW', 'AMOC weakening', 'amoc', 'Sv, RAPID array annual mean',
+        [13, 14, 15, 16], yrs, 0.8, false),
+    ].filter(Boolean);
+  }
+
+  return { mode, on, implied, ladder, pricePath, climateProducts, LABEL };
 })();

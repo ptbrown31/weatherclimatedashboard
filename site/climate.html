@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Climate series</title>
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+<style>.panel{margin:0 0 26px}svg.ts{width:100%;height:auto;display:block}</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Climate series</h1>
+<p class="sub">The long series climate contracts settle on, as their publishers post them. Drag across any
+chart&rsquo;s history to fit a straight line and project it forward with the year it would cross each
+threshold; different windows give different projections. Double-click to clear.</p>
+<div class="bar"><span id="pageStatus"></span></div>
+<div id="panels"></div>
+<p class="cap" id="foot"></p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/market.js"></script>
+<script src="js/climate.js"></script>
+<script>WXC.chrome('climate.html'); WXClimate.init();</script>
+</body>
+</html>

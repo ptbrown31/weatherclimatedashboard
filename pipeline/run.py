@@ -26,11 +26,14 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane
+    from . import archive, snapshots, hurricane, scorecard, normals, climate
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
     JOBS["hurricane"] = hurricane.hurricane_pass
+    JOBS["scorecard"] = scorecard.scorecard_pass
+    JOBS["normals"] = normals.normals_pass
+    JOBS["climate"] = climate.climate_pass
 
     def chain(*names):
         def run(cfg, store):
@@ -41,7 +44,8 @@ def _register():
         return run
 
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane")
-    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane")
+    JOBS["daily"] = chain("scorecard", "normals", "climate")
+    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "scorecard", "normals", "climate")
 
 
 def main(argv=None) -> int:
