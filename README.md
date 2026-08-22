@@ -116,15 +116,39 @@ a longer gap (the days before the site went live, or an outage) is filled once w
 Run it soon after deploying: the 30-day window slides, and the scorecard can only score days that
 have observations. `manifest.json` lists stations with an unhealed gap under `obsUnhealed`.
 
+## The two build targets
+
+`scripts/build.py` writes `dist/standalone/` (the full site: map, city chart, scorecard,
+hurricanes, climate, about, with header, footer and the affiliation disclosure) and
+`dist/embed/` (one page: the city chart, no chrome, for an iframe). Both read the same snapshot
+files and the same JavaScript; only the generated `config.js` differs. The embed accepts
+`?station=KLAX`, `theme=light|dark` and `market=on|off`.
+
+The market layer lives in `site/js/market.js` behind one switch (`market_overlay` per target in
+`config/site.json`, overridable by `?market=`). The standalone site ships with `placeholder`: the
+reference package's labelled synthetic strike ladders and implied values, there to show layout.
+The embed ships `off`. When off, the pages reserve no space for market elements. No live market
+source exists in this repository.
+
+`scripts/serve_local.py` serves a built target (`--fail-fetch` makes every data request answer
+503, to see the degradation paths). `scripts/verify.py` drives Playwright's Chromium over both
+targets in light and dark and checks rendering, zero script errors, the overlay-off layout and
+both degradation paths; it needs `python3 -m pip install playwright`.
+
 ## Layout
 
-    config/        site.json, cities.json
-    pipeline/      gov_weather.py (every government call), archive.py, storage.py, config.py,
+    config/        site.json (the config surface), cities.json and field_grid.json (generated)
+    pipeline/      gov_weather.py (every government call), archive.py, snapshots.py, hurricane.py,
+                   scorecard.py, normals.py, climate.py, basemap.py, storage.py, config.py,
                    run.py (command line), handler.py (the only vendor-specific file: AWS Lambda)
-    scripts/       scrub.py, seed_archive.py
-    site/          the static frontend (later tasks)
-    samples/       snapshots for offline local mode (later tasks)
+    site/          the static frontend; site/assets/ holds the small projected geometry
+    geo/           vendored public-domain TopoJSON inputs; not published
+    samples/       snapshots for offline local mode (checked in)
+    scripts/       build.py, serve_local.py, verify.py, build_assets.py, scrub.py,
+                   seed_archive.py, backfill_obs.py, make_samples.py, package_lambda.py
+    ops/aws/       the CloudFormation stack; ops/cloudflare/ the serving alternative
     tests/         unittest, no network
+    DEPLOY.md      the runbook
 
 ## Data sources and licensing
 

@@ -1,0 +1,367 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Weather tools site: one private S3 bucket (site files at the root, snapshots and the
+  archive under data/), a CloudFront distribution with Origin Access Control, one Lambda
+  function that runs every pipeline job, three EventBridge schedules, and an error alarm.
+  Deployment-agnostic application code; this template is the only AWS-specific artefact
+  besides pipeline/handler.py. See DEPLOY.md for the steps around it.
+
+Parameters:
+  SiteName:
+    Type: String
+    Default: weather-tools-site
+    Description: Prefix for resource names (letters, digits, hyphens).
+  UserAgent:
+    Type: String
+    Description: The User-Agent the pipeline sends to every government endpoint, e.g. "weather-tools-site/0.1 (you@example.com)". api.weather.gov returns 403 without a contact.
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Optional custom domain (e.g. weather.example.com). Leave empty to use the CloudFront domain only.
+  CertificateArn:
+    Type: String
+    Default: ""
+    Description: >
+      ACM certificate ARN in us-east-1 for DomainName. Required when DomainName is set.
+      (cfn-lint reports W1030 for the empty default; it is only referenced when DomainName is set.)
+  AlarmEmail:
+    Type: String
+    Default: ""
+    Description: Optional address for the pipeline error alarm.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+
+Conditions:
+  HasDomain: !Not [!Equals [!Ref DomainName, ""]]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
+
+Resources:
+  # ------------------------------------------------------------------ storage
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${SiteName}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-run-records
+            Status: Enabled
+            Prefix: data/archive/_runs/
+            ExpirationInDays: 90
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 2
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${Bucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+          - Sid: DenyArchiveThroughCloudFront
+            Effect: Deny
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${Bucket.Arn}/data/archive/*"
+
+  # ------------------------------------------------------------------ CDN
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${SiteName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # snapshots: honour the origin's Cache-Control (max-age=60, stale-while-revalidate,
+  # stale-if-error), compress JSON, ignore query strings
+  SnapshotCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "${SiteName}-snapshots"
+        MinTTL: 0
+        DefaultTTL: 60
+        MaxTTL: 604800
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig:
+            CookieBehavior: none
+          HeadersConfig:
+            HeaderBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+
+  # directory URLs (/, /embed/) map to their index.html; CloudFront's default
+  # root object applies only at the distribution root
+  IndexRewrite:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "${SiteName}-index-rewrite"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: Append index.html to directory requests
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+          var req = event.request;
+          var uri = req.uri;
+          if (uri.endsWith('/')) { req.uri = uri + 'index.html'; }
+          else if (!uri.includes('.')) { req.uri = uri + '/index.html'; }
+          return req;
+        }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Ref SiteName
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Aliases: !If [HasDomain, [!Ref DomainName], !Ref "AWS::NoValue"]
+        ViewerCertificate: !If
+          - HasDomain
+          - AcmCertificateArn: !Ref CertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: site
+            DomainName: !GetAtt Bucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: site
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # managed CachingOptimized
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt IndexRewrite.FunctionMetadata.FunctionARN
+        CacheBehaviors:
+          - PathPattern: "data/snapshots/*"
+            TargetOriginId: site
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: !Ref SnapshotCachePolicy
+          - PathPattern: "config.js"
+            TargetOriginId: site
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: !Ref SnapshotCachePolicy
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 404
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 60
+
+  # ------------------------------------------------------------------ pipeline
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: data-bucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub "${Bucket.Arn}/data/*"
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: !GetAtt Bucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: ["data/*"]
+
+  PipelineLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${SiteName}-pipeline"
+      RetentionInDays: !Ref LogRetentionDays
+
+  Pipeline:
+    Type: AWS::Lambda::Function
+    DependsOn: PipelineLogs
+    Properties:
+      FunctionName: !Sub "${SiteName}-pipeline"
+      Description: Weather tools site pipeline (archive, snapshots, hurricane, daily jobs)
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: pipeline.handler.lambda_handler
+      Role: !GetAtt PipelineRole.Arn
+      MemorySize: 512
+      Timeout: 900
+      Environment:
+        Variables:
+          WX_STORAGE_BACKEND: s3
+          WX_STORAGE_BUCKET: !Ref Bucket
+          WX_STORAGE_PREFIX: data
+          WX_USER_AGENT: !Ref UserAgent
+          WX_DOMAIN: !Ref DomainName
+      # placeholder body; DEPLOY.md replaces it with dist/lambda.zip
+      Code:
+        ZipFile: |
+          def lambda_handler(event, context):
+              raise RuntimeError("placeholder: upload dist/lambda.zip (see DEPLOY.md)")
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-pipeline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt Pipeline.Arn
+
+  # observations every 10 minutes; archive + forecast + hurricane at :05 and :35
+  # (after the NWS hourly render and the NBM text land); the daily jobs at 09:30Z.
+  # Flexible time window OFF: invocations land within 60 s of the schedule.
+  ScheduleObs:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-obs"
+      ScheduleExpression: rate(10 minutes)
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "obs"}'
+        RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 300 }
+  ScheduleHalfHourly:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-half-hourly"
+      ScheduleExpression: cron(5,35 * * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "half-hourly"}'
+        RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 900 }
+  ScheduleDaily:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-daily"
+      ScheduleExpression: cron(30 9 * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "daily"}'
+        RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 }
+
+  # ------------------------------------------------------------------ alarms
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${SiteName}-alarms"
+  AlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+  PipelineErrors:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${SiteName}-pipeline-errors"
+      AlarmDescription: >
+        A pipeline invocation raised. The handler raises when every request in a pass failed
+        or when any source has failed for six passes in a row (archive/_meta/health.json).
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref Pipeline
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+  PipelineSilent:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${SiteName}-pipeline-silent"
+      AlarmDescription: No pipeline invocations in an hour; the schedules are not firing.
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref Pipeline
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref AlarmTopic]
+
+Outputs:
+  BucketName:
+    Value: !Ref Bucket
+  DistributionDomain:
+    Value: !GetAtt Distribution.DomainName
+  DistributionId:
+    Value: !Ref Distribution
+  FunctionName:
+    Value: !Ref Pipeline
+  SiteUrl:
+    Value: !If [HasDomain, !Sub "https://${DomainName}/", !Sub "https://${Distribution.DomainName}/"]
