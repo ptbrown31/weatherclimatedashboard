@@ -1,0 +1,116 @@
+/* Weather tools site. Tokens first; every colour on the page comes from them
+   so light and dark both resolve as a set. Light is the default on :root;
+   dark is the same tokens redefined under prefers-color-scheme and under an
+   explicit data-theme, so an explicit choice beats the system setting. */
+:root{
+  --ground:#F6F7F9; --panel:#FFFFFF; --ink:#1A2330; --muted:#5E6B7A; --line:#D8DEE6; --rule:#B8C1CC;
+  --navy:#0B2545; --accent:#1E5AA0; --accent-ink:#FFFFFF;
+  --obs:#111111; --nws:#2E7D32; --nbm:#B45309; --lamp:#6B4FBB; --mav:#5C6F8A;
+  --warm:#B2182B; --cool:#2166AC; --yes:#1E7A4F; --no:#B2182B;
+  --night:#EEF1F6; --shade:#F4F7FB; --map-land:#EEF1F5; --map-sea:#F6F9FC; --map-line:#FFFFFF;
+  --chip:#EEF2F7; --warn:#8A5A00; --warn-soft:#FFF4DC; --bad:#A6452B; --bad-soft:#F8E5DF; --ok:#2E6B3F; --ok-soft:#E3EFE6;
+  --tip-bg:#12161C; --tip-ink:#FFFFFF;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0F141A; --panel:#161C24; --ink:#E4E9F0; --muted:#98A4B3; --line:#2A3440; --rule:#3A4656;
+    --navy:#9DB8E3; --accent:#7FB0EA; --accent-ink:#0F141A;
+    --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC;
+    --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F;
+    --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
+    --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
+    --tip-bg:#E4E9F0; --tip-ink:#0F141A;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0F141A; --panel:#161C24; --ink:#E4E9F0; --muted:#98A4B3; --line:#2A3440; --rule:#3A4656;
+  --navy:#9DB8E3; --accent:#7FB0EA; --accent-ink:#0F141A;
+  --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC;
+  --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F;
+  --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
+  --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
+  --tip-bg:#E4E9F0; --tip-ink:#0F141A;
+}
+*{box-sizing:border-box}
+html{color-scheme:light dark}
+body{margin:0;background:var(--ground);color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-variant-numeric:tabular-nums}
+a{color:var(--accent)}
+.wrap{max-width:1040px;margin:0 auto;padding:18px 20px 60px}
+header.site{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;padding:14px 0 10px;border-bottom:1px solid var(--line);margin-bottom:16px}
+header.site .brand{font-weight:700;color:var(--navy);font-size:16px;text-decoration:none}
+header.site nav{display:flex;gap:14px;flex-wrap:wrap}
+header.site nav a{color:var(--muted);text-decoration:none;font-size:13.5px}
+header.site nav a.on{color:var(--ink);font-weight:600}
+h1{font-size:19px;margin:0 0 3px;font-weight:650;color:var(--navy);text-wrap:balance}
+h2{font-size:15px;margin:18px 0 6px;color:var(--navy)}
+.sub{color:var(--muted);font-size:13px;margin:0 0 14px;max-width:72ch}
+p{max-width:72ch}
+.bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+select,button{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
+button{cursor:pointer}button.on{background:var(--ink);color:var(--ground);border-color:var(--ink)}
+button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.card{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 4px 4px;overflow-x:auto}
+.card svg{width:100%;height:auto;display:block}
+.note{background:var(--shade);border-left:3px solid var(--accent);padding:10px 13px;margin:14px 0;font-size:13px;border-radius:0 6px 6px 0;max-width:none}
+.note b{font-weight:620}
+.note.warn{border-left-color:var(--warn)}
+.key{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:10px 2px}
+.key i{display:inline-block;width:20px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+.cap{font-size:12px;color:var(--muted);line-height:1.55;margin:8px 2px 0;max-width:none}
+text{font-family:inherit}
+.ax{font-size:10.5px;fill:var(--muted)}
+.axl{font-size:11px;fill:var(--muted)}
+.grid{stroke:var(--line);stroke-width:1}
+.lvlval{font-size:9.5px;font-weight:700}
+.lvlnm{font-size:9.5px}
+.mklab{font-size:9px;fill:var(--muted)}
+.lbl{paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+/* status strip: the as-of state of what is on screen */
+.status{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:3px 9px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
+.status::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.status.stale::before{background:var(--warn)}
+.status.cache::before{background:var(--warn)}
+.status.none::before{background:var(--bad)}
+.status.none{color:var(--bad)}
+/* tooltips */
+.tip{position:fixed;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);padding:7px 10px;border-radius:6px;font-size:12px;opacity:0;transition:opacity .08s;z-index:9;line-height:1.45;max-width:260px}
+.tip b{display:block;margin-bottom:2px}
+@media (prefers-reduced-motion: reduce){.tip{transition:none}}
+/* city page */
+.pickwrap{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px}
+#pick,#pickW{width:470px;max-width:100%;display:block}
+.pickttl{font-size:12px;color:var(--muted);margin:0 0 4px}
+#skRow{margin:12px 0 10px;font-size:12.5px}
+#skRow .lbl2{display:inline-block;width:88px;font-weight:620;color:var(--muted);font-size:12px}
+button.sk{font-size:11.5px;padding:1px 8px;margin:2px 2px;border-radius:10px;border:1.4px solid var(--c);color:var(--c);background:var(--panel)}
+button.sk.on{background:var(--c);color:var(--panel);border-color:var(--c)}
+.ladtxt{font-size:8.5px;font-weight:700;fill:#fff}
+/* map page */
+.how{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;background:var(--shade);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:14px 0;font-size:12.5px}
+.how h3{margin:0 0 6px;font-size:12px;color:var(--ink)}
+.how p{margin:0 0 6px;color:var(--muted);line-height:1.5}
+.how .chip{display:inline-block;width:13px;height:13px;border-radius:50%;border:1px solid var(--ink);vertical-align:-2px;margin-right:5px}
+.state{fill:none;stroke:var(--map-line);stroke-width:1.4}
+.state2{fill:none;stroke:var(--muted);stroke-width:.55;opacity:.8}
+.dot{cursor:pointer}
+.dot:hover circle:last-child{stroke:var(--ink);stroke-width:2}
+#modeTitle{font-size:13px;font-weight:700;color:var(--navy);margin:2px 2px 8px;letter-spacing:.02em}
+/* hurricane page */
+.coast{fill:var(--map-land);stroke:var(--muted);stroke-width:.8}
+.secttl{font-size:13px;font-weight:700;color:var(--navy);margin:20px 2px 6px}
+.stormrow{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;font-size:13px;margin:4px 0}
+.stormrow b{color:var(--navy)}
+/* tables */
+table{border-collapse:collapse;width:100%;font-size:13px;background:var(--panel);border:1px solid var(--line)}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+/* footer */
+footer.site{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px;line-height:1.55}
+footer.site p{max-width:none;margin:6px 0}
+/* embed target */
+body.embed{background:var(--panel)}
+body.embed .wrap{padding:8px 10px 10px;max-width:none}

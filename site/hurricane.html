@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hurricane tracking</title>
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+<h1>Hurricane tracking</h1>
+<p class="sub">National Hurricane Center forecast tracks, cones of uncertainty and seven-day formation odds,
+drawn from NHC&rsquo;s own roster and NOAA&rsquo;s public GIS service, refreshed every half hour.</p>
+<div class="bar">
+  <button id="b1" class="on">Atlantic</button>
+  <button id="b2">Pacific</button>
+  <span id="pageStatus"></span>
+</div>
+<div id="modeTitle"></div>
+<div class="card"><svg id="basin" viewBox="0 0 980 600"></svg></div>
+<p class="cap" id="basinCap"></p>
+<div class="secttl">ACTIVE STORMS</div>
+<div id="storms"></div>
+<p class="cap" id="season"></p>
+<p class="cap">Point colour: major hurricane red, hurricane orange, tropical storm blue, depression or
+remnant pale. The map&rsquo;s advisory number is the one carried by the geometry, which can trail the
+roster&rsquo;s by one advisory for a few minutes after an update. Times in point labels are NHC&rsquo;s.</p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/hurricane.js"></script>
+<script>WXC.chrome('hurricane.html'); WXHur.init();</script>
+</body>
+</html>

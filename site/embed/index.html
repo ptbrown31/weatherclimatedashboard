@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>City chart</title>
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+</head>
+<body class="embed">
+<div class="wrap">
+<div class="bar" style="margin-bottom:6px"><span id="chartStatus"></span><span id="pageStatus" style="display:none"></span></div>
+<div class="card"><svg id="chart" viewBox="0 0 960 390"></svg></div>
+<div class="key">
+  <span><i style="border-color:var(--obs)"></i>Observed (METAR)</span>
+  <span><i style="border-color:var(--nws)"></i>NWS now</span>
+  <span><i style="border-color:var(--nws);border-top-style:dotted"></i>NWS as issued</span>
+  <span><i style="border-color:var(--nbm);border-top-style:dashed"></i>NBM</span>
+  <span><i style="border-color:var(--lamp);border-top-style:dotted"></i>LAMP</span>
+</div>
+<p class="cap">US government weather data; nothing here is an official National Weather Service product.</p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/market.js"></script>
+<script src="js/chart-city.js"></script>
+<script>WXCity.init({});</script>
+</body>
+</html>

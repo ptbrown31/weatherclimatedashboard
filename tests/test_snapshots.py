@@ -139,6 +139,13 @@ class AsIssued(unittest.TestCase):
     def test_missing(self):
         self.assertEqual(snapshots._as_issued_key(self.st, "KPHX", "hourly", "20260821T070000Z"), (None, False))
 
+    def test_bulletin_cycle_at_exactly_midnight_counts_as_pre_day(self):
+        # NBM stamps carry minutes only; a 07:00Z cycle against a 07:00:00Z cutoff is pre-day
+        for stamp in ("20260821T0600Z", "20260821T0700Z", "20260821T0800Z"):
+            self.st.put(f"archive/KLAX/nbh_{stamp}.txt.gz", b"x")
+        key, pre = snapshots._as_issued_key(self.st, "KLAX", "nbh", "20260821T070000Z")
+        self.assertEqual((snapshots._stamp_of(key), pre), ("20260821T0700Z", True))
+
 
 class FieldAndRoster(unittest.TestCase):
     def test_assets_exist_and_field_is_deterministic(self):

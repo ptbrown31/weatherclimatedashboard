@@ -7,3 +7,6 @@ __pycache__/
 .env
 # local verification output
 verify-out/
+
+# editor/agent local config
+.claude/

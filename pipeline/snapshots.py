@@ -65,6 +65,15 @@ def _stamp_of(key: str) -> str:
     return base.split("_", 1)[1].split(".", 1)[0]
 
 
+def _norm_stamp(stamp: str) -> str:
+    """Stamps come in two widths: NWS issuances carry seconds (YYYYMMDDTHHMMSSZ)
+    while bulletin cycles carry minutes (YYYYMMDDTHHMMZ). Compared as strings
+    the shorter one sorts AFTER a cutoff at the same instant ('Z' > '0'), which
+    would exclude a cycle issued exactly at local midnight. Pad to seconds
+    before any comparison."""
+    return stamp if len(stamp) >= 16 else stamp[:13] + "00Z"
+
+
 def _read_gz(store: Storage, key: str) -> Optional[bytes]:
     raw = store.get(key)
     return gzip.decompress(raw) if raw else None
@@ -218,7 +227,8 @@ def _as_issued_key(store: Storage, sid: str, kind: str, cutoff_stamp: str, keys:
     keys = keys if keys is not None else store.list(f"archive/{sid}/{kind}_")
     if not keys:
         return None, False
-    pre = [k for k in keys if _stamp_of(k) <= cutoff_stamp]
+    cut = _norm_stamp(cutoff_stamp)
+    pre = [k for k in keys if _norm_stamp(_stamp_of(k)) <= cut]
     return (pre[-1], True) if pre else (keys[0], False)
 
 
