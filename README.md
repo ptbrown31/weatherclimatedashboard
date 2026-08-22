@@ -56,16 +56,28 @@ honours it, so two issuances less than an hour apart can reach the archive as on
 
 ## Snapshots
 
-The browser reads only these (all JSON, short `Cache-Control`, each stamped `asof`):
+The browser reads only these (all JSON, short `Cache-Control`). Every file carries two clocks:
+`asof`, the time the data is good to (for observations, the last successful pull), and `written`,
+when the file was built, so a feed that has stopped shows as an ageing as-of rather than a fresh
+file. Every level carries its provenance: which cycle supplied it, whether that cycle was issued
+before the day began, and whether it is an official product value or an extreme over hourly rows.
 
 | Key | Cadence | Contents |
 | --- | --- | --- |
-| `snapshots/obs/{STATION}.json` | 10 min | last 72 h of reports, today's and yesterday's extremes, the latest raw report |
-| `snapshots/summary.json` | 10 min | every station: position, observed extremes so far, forecast levels, day markers |
-| `snapshots/manifest.json` | 10 min | as-of per data type, cadences, archive depth |
-| `snapshots/forecast/{STATION}.json` | 30 min | standing NWS (hourly + official day/night), NBM, LAMP, MAV; the as-issued pre-day cycle per source with its level for the day; yesterday's as-issued |
-| `snapshots/field.json` | 30 min | the map shading: inverse-distance interpolation of tomorrow's NWS highs and lows (derived) |
-| `snapshots/hurricane.json` | 30 min | active storms with points, track, cone, past track; outlook regions; season counts |
+| `snapshots/obs/{STATION}.json` | 10 min | last 72 h of reports, today's and yesterday's extremes (with report type and decode source), the latest raw report, `recordEnd`, `fetchOk` |
+| `snapshots/summary.json` | 10 min | every station: position, observed extremes so far (with `obsDay`), standing and as-issued forecast levels with flags (`nwsOfficialHighToday`, `{src}IssuedPreDay`, `{src}HighTodayFrom`), day markers, `alarms` |
+| `snapshots/manifest.json` | 10 min | as-of per data type (read from the files that hold the data), cadences, archive depth, alarms, unhealed observation gaps |
+| `snapshots/forecast/{STATION}.json` | 30 min | standing NWS (hourly + official day/night), NBM, LAMP, MAV; per source the as-issued pre-day trace and the level for the day picked per extreme (`levelCycleHigh`, `levelCycleLow`, `levelPreDay`); yesterday's as-issued |
+| `snapshots/field.json` | 30 min | the map shading: inverse-distance interpolation of tomorrow's NWS highs and lows (derived), with the date it is for per station |
+| `snapshots/hurricane.json` | 30 min | active storms with points, track, cone, past track (re-fetched only when the advisory changed); outlook regions; season counts (once a day) |
+| `snapshots/scorecard.json` | daily | per station and source: n, MAE, bias, share within 1° and 2°; the last 14 scored days |
+| `snapshots/normals/{STATION}.json` | weekly | NCEI 2006-2020 daily normals, with the GHCN station id and its distance from the airport |
+| `snapshots/climate.json` | daily | NCEI, GML, STAR series and the RAPID annual means |
+
+Jobs run inside one wall-clock budget: a scheduled invocation sets the budget, the archive step
+reserves time for the steps after it, and every step records what it skipped rather than being
+killed mid-write. A station whose forecast build fails keeps its previous snapshot, flagged
+`staleSince`.
 
 ## Configuration
 
@@ -88,13 +100,21 @@ Two decode conventions are top-level constants in `pipeline/gov_weather.py`, nev
 parsing logic: `TEMP_SOURCE` (`remarks` tenths or `body` whole degrees) and `INCLUDE_SPECI`.
 Every observation file stamps the convention it was decoded with.
 
-## Seeding the archive
+## Seeding the archive and backfilling observations
 
 An archive written by the earlier reference archiver can be imported once:
 
     python3 scripts/seed_archive.py /path/to/archive [--backend s3 --bucket ...]
 
 Files are scanned with the scrub needles before they are written; nothing is overwritten.
+
+The observation record heals gaps of up to 72 hours itself. aviationweather.gov holds 30 days, so
+a longer gap (the days before the site went live, or an outage) is filled once with
+
+    python3 scripts/backfill_obs.py --from 2026-08-13
+
+Run it soon after deploying: the 30-day window slides, and the scorecard can only score days that
+have observations. `manifest.json` lists stations with an unhealed gap under `obsUnhealed`.
 
 ## Layout
 

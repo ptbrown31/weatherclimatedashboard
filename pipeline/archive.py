@@ -65,6 +65,7 @@ from .storage import Storage
 
 GRIDS_KEY = "archive/_meta/grids.json"
 HEALTH_KEY = "archive/_meta/health.json"
+OBS_FETCH_KEY = "archive/_meta/obs_fetch.json"   # the last successful observation pull: what obs data is good to
 GRID_MAX_AGE_H = 24            # the docs ask that the points mapping be re-checked periodically
 OBS_MIN_H, OBS_MAX_H = 6, 72   # fresh pull per pass, and the most a pass will reach back to heal a gap
 BULLETIN_LOOKBACK_H = {"nbh": 36, "nbs": 36, "lamp": 24, "mav": 36}
@@ -106,6 +107,17 @@ class Deadline:
 
     def over(self, need: float = 0.0) -> bool:
         return self.remaining() < need
+
+
+def remaining_budget(cfg: dict, reserve: float = 0.0) -> Optional[float]:
+    """Seconds this job may use. A chain of jobs shares one absolute end
+    (cfg['_deadline_end'], set by run.chain from the invocation budget);
+    `reserve` holds back time for the jobs that follow."""
+    end = cfg.get("_deadline_end")
+    if end is not None:
+        return max(30.0, end - time.time() - reserve)
+    b = cfg.get("pass_budget_seconds")
+    return max(30.0, b - reserve) if b else None
 
 
 # ---------------------------------------------------------------- grids
@@ -289,40 +301,53 @@ def _new_day_file(day: str) -> dict:
             "rows": {}}
 
 
-def obs_watermark(store: Storage, now: dt.datetime) -> Optional[dt.datetime]:
-    """The newest observation time already on record, from the two most
-    recent day files. None when the record is empty."""
-    newest = None
-    for h in (0, 24):
+def obs_watermarks(store: Storage, now: dt.datetime) -> dict:
+    """The newest observation time already on record PER STATION, from the
+    three most recent day files. A station missing from the result has
+    nothing on record in that window."""
+    newest: dict = {}
+    for h in (0, 24, 48):
         raw = _ungz(store.get(f"archive/obs/{(now - dt.timedelta(hours=h)).strftime('%Y%m%d')}.json.gz"))
         if not raw:
             continue
-        for ob in json.loads(raw).get("rows", {}).values():
-            t = ob.get("obsTime")
-            if t is not None and (newest is None or t > newest):
-                newest = t
-        if newest is not None:
-            break
-    return dt.datetime.fromtimestamp(newest, dt.timezone.utc) if newest is not None else None
+        for k, ob in json.loads(raw).get("rows", {}).items():
+            sid, t = k.split("|", 1)[0], ob.get("obsTime")
+            if t is not None and t > newest.get(sid, 0):
+                newest[sid] = t
+    return {sid: dt.datetime.fromtimestamp(t, dt.timezone.utc) for sid, t in newest.items()}
+
+
+def obs_watermark(store: Storage, now: dt.datetime) -> Optional[dt.datetime]:
+    """The newest observation time on record across all stations."""
+    wms = obs_watermarks(store, now)
+    return max(wms.values()) if wms else None
 
 
 def archive_observations(store: Storage, stations: list, now: dt.datetime, log: Callable,
                          min_hours: int = OBS_MIN_H, max_hours: int = OBS_MAX_H) -> int:
     """
     Re-read the recent hours for every station and upsert into the UTC-day
-    files. The window reaches back to the newest observation already stored
-    (plus an hour), between min_hours and max_hours, so a gap heals itself
-    while the feed still holds the data; a gap longer than max_hours is for
-    scripts/backfill_obs.py. Returns 1 on error, 0 otherwise.
+    files. The window reaches back to the STALEST station's newest stored
+    observation (plus an hour), between min_hours and max_hours, so a gap
+    heals itself while the feed still holds the data, and a single station
+    that fell behind is caught up with the rest. A gap longer than max_hours
+    is reported (run record and manifest) and is for scripts/backfill_obs.py.
+    On success the pull time is recorded as what the observation data is
+    good to. Returns 1 on error, 0 otherwise.
     """
-    hours = min_hours
-    wm = obs_watermark(store, now)
-    if wm is not None:
-        hours = int(max(min_hours, min(max_hours, (now - wm).total_seconds() / 3600 + 1)))
-    else:
+    wms = obs_watermarks(store, now)
+    gaps = {sid: (now - wms[sid]).total_seconds() / 3600 for sid in stations if sid in wms}
+    missing = [sid for sid in stations if sid not in wms]
+    stalest = max(gaps.values()) if gaps else None
+    if missing or stalest is None:
         hours = max_hours
+    else:
+        hours = int(max(min_hours, min(max_hours, stalest + 1)))
+    unhealed = sorted([sid for sid, g in gaps.items() if g > max_hours])
     if hours > min_hours:
-        log(kind="obs", note=f"record ends {wm.isoformat() if wm else 'never'}; pulling {hours}h")
+        log(kind="obs", note=f"stalest station gap {round(stalest or 0, 1)}h, {len(missing)} without record; pulling {hours}h")
+    if unhealed:
+        log(kind="obs", warning=f"gap longer than {max_hours}h at {unhealed}; run scripts/backfill_obs.py", stations=unhealed)
     truncated: list = []
     try:
         rows = gw.fetch_observations_raw(stations, hours, on_truncated=truncated.append)
@@ -346,7 +371,13 @@ def archive_observations(store: Storage, stations: list, now: dt.datetime, log: 
             merged["updated"] = now.isoformat()
             store.put(key, _gz(json.dumps(merged, separators=(",", ":")).encode()), "application/gzip")
         log(kind="obs", day=day, rows=len(merged["rows"]), added=added, updated=updated)
+    store.put(OBS_FETCH_KEY, json.dumps({"fetchedAt": _iso_z(now), "hours": hours, "rows": len(rows),
+                                         "unhealed": unhealed or None}).encode(), "application/json")
     return 0
+
+
+def _iso_z(t: dt.datetime) -> str:
+    return t.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 # ---------------------------------------------------------------- health
@@ -382,7 +413,7 @@ def one_pass(cfg: dict, store: Storage, sources: Optional[dict] = None,
     global LAST_STATUS
     gw.set_user_agent(cfg.get("user_agent", ""))
     sources = sources or cfg.get("sources", {})
-    deadline = Deadline(deadline_seconds or cfg.get("pass_budget_seconds"))
+    deadline = Deadline(deadline_seconds or remaining_budget(cfg, reserve=cfg.get("_reserve_seconds", 0.0)))
     now = dt.datetime.now(dt.timezone.utc)
     pulled = _stamp(now)
     entries: list = []

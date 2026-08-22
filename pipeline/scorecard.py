@@ -54,7 +54,8 @@ def _cycle_time(stamp: str) -> dt.datetime:
 
 def pre_day_cycle(keys: list, kind: str, midnight: dt.datetime) -> Optional[tuple]:
     """The latest key of one kind issued in the 24 h before midnight, or
-    None. Returns (key, lead_hours)."""
+    None. Returns (key, lead_hours). Kept for tests and tools; the scorer
+    itself picks per extreme through snapshots.pick_levels."""
     cut = sn._norm_stamp(midnight.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     pre = [k for k in keys if sn._norm_stamp(sn._stamp_of(k)) <= cut]
     if not pre:
@@ -67,24 +68,28 @@ def pre_day_cycle(keys: list, kind: str, midnight: dt.datetime) -> Optional[tupl
 
 
 def forecast_for_day(store: Storage, by_kind: dict, source: str, c: dict, tz, day: dt.date) -> Optional[dict]:
-    """{high, low, cycle, lead} for one source and one local day, or None."""
+    """{high, low, cycleHigh, cycleLow, lead} for one source and one local
+    day, or None. The high and the low are each taken from the newest
+    pre-day cycle that carries them (see snapshots.pick_levels): a source's
+    last pre-midnight run usually holds the day's maximum but not its
+    minimum, which sits in the run before."""
     midnight = _local_midnight(day, tz)
+    cut = midnight.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     kind = {"nws": "daily", "nbm": "nbs", "mav": "mav", "lamp": "lamp"}[source]
-    pick = pre_day_cycle(by_kind.get(kind, []), kind, midnight)
+    lv = sn.pick_levels(store, kind, by_kind.get(kind, []), cut, c, tz, day.isoformat(), max_lead_h=MAX_LEAD_H)
     from_hourly = False
-    if not pick and source == "nbm":
+    if lv["highToday"] is None and lv["lowToday"] is None and source == "nbm":
         # days before the short-range bulletin was archived: the hourly
         # bulletin's extremes over the day stand in, and the row says so
-        pick = pre_day_cycle(by_kind.get("nbh", []), "nbh", midnight)
-        kind, from_hourly = "nbh", True
-    if not pick:
+        lv = sn.pick_levels(store, "nbh", by_kind.get("nbh", []), cut, c, tz, day.isoformat(), max_lead_h=MAX_LEAD_H)
+        from_hourly = True
+    if lv["highToday"] is None and lv["lowToday"] is None:
         return None
-    key, lead = pick
-    lv = sn._as_issued_levels(store, kind, key, c, tz, day.isoformat())
-    if lv.get("highToday") is None and lv.get("lowToday") is None:
-        return None
-    out = {"high": lv.get("highToday"), "low": lv.get("lowToday"), "cycle": sn._stamp_of(key), "lead": lead}
-    if from_hourly:
+    cyc = lv["levelCycleHigh"] or lv["levelCycleLow"]
+    lead = round((midnight - _cycle_time(cyc)).total_seconds() / 3600, 1) if cyc else None
+    out = {"high": lv["highToday"], "low": lv["lowToday"], "cycle": cyc, "cycleHigh": lv["levelCycleHigh"],
+           "cycleLow": lv["levelCycleLow"], "lead": lead}
+    if from_hourly or lv.get("fromHourly"):
         out["fromHourly"] = True
     return out
 
@@ -136,10 +141,10 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
         local_today = now.astimezone(tz).date()
         last = local_today - dt.timedelta(days=1)
         obs = observed_days(store, sid, tz, c["unit"], first, last)
-        keys = store.list(f"archive/{sid}/")
-        by_kind: dict = {}
-        for k in keys:
-            by_kind.setdefault(k.rsplit("/", 1)[-1].split("_", 1)[0], []).append(k)
+        # the scorecard reaches back to the first observed day, so its listing
+        # window is the record's age (bounded by the 30-day backfill horizon)
+        hours = int((now - dt.datetime.combine(first, dt.time(0), tzinfo=dt.timezone.utc)).total_seconds() / 3600) + 48
+        by_kind = {k: sn.list_recent(store, sid, k, now, hours) for k in ("daily", "nbs", "nbh", "mav", "lamp")}
         days = []
         for diso, o in sorted(obs.items()):
             d = dt.date.fromisoformat(diso)

@@ -784,6 +784,14 @@ def fetch_current_storms() -> list[dict]:
 _NHC_LAYERS: dict | None = None
 
 
+def reset_nhc_layers() -> None:
+    """Forget the layer index. A warm process (a Lambda container) would
+    otherwise keep a renumbered index for its whole life; the hurricane job
+    calls this once per pass, one small request."""
+    global _NHC_LAYERS
+    _NHC_LAYERS = None
+
+
 def fetch_nhc_layer(name: str) -> list[dict]:
     """GeoJSON features of one named layer, e.g. 'AT1 Forecast Cone' or
     'Seven-Day: Potential Development Region'. Empty when the layer does not

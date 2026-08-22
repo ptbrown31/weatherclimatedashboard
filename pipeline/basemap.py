@@ -24,8 +24,11 @@ import math
 import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ASSETS = os.path.join(ROOT, "site", "assets")
+GEO = os.path.join(ROOT, "geo")                  # vendored TopoJSON inputs; not published
+ASSETS = os.path.join(ROOT, "site", "assets")   # the small projected outputs pages load
 CONFIG = os.path.join(ROOT, "config")
+# world-atlas abbreviates two names the pages and any future market roster use in full
+CNAME = {"Dominican Rep.": "Dominican Republic", "Bahamas": "Bahamas, The"}
 
 W, H, PAD = 960.0, 600.0, 12.0            # the CONUS viewBox
 WW, WH = 960.0, 480.0                     # the world picker viewBox
@@ -148,7 +151,7 @@ def point_in_rings(x: float, y: float, rings) -> bool:
 def build_assets(cities: list) -> dict:
     """Project everything and write the four output files. `cities` is the
     roster as (sid, name, lat, lon, tz, unit) tuples."""
-    topo, ring_coords = decode_topo(os.path.join(ASSETS, "states-10m.json"))
+    topo, ring_coords = decode_topo(os.path.join(GEO, "states-10m.json"))
     polys = []
     for g in topo["objects"]["states"]["geometries"]:
         if g["properties"].get("name") is None or g["id"] in SKIP:
@@ -213,7 +216,7 @@ def build_assets(cities: list) -> dict:
                     nation.append(r)
 
     # world picker (Natural Earth via world-atlas), coarse: it is a click target
-    wtopo, wring = decode_topo(os.path.join(ASSETS, "countries-50m.json"))
+    wtopo, wring = decode_topo(os.path.join(GEO, "countries-50m.json"))
     wpaths = []
     for g in wtopo["objects"]["countries"]["geometries"]:
         for ring in geom_rings(g, wring):
@@ -247,6 +250,7 @@ def build_assets(cities: list) -> dict:
         rr = [simplify(r, 0.04) for r in geom_rings(g, wring) if in_hbox(r)]
         rr = [r for r in rr if len(r) > 5]
         if rr:
+            nm = CNAME.get(nm, nm)
             countries[nm] = rr
             ccent[nm] = centroid(rr)
     states_ll, scent = {}, {}
@@ -270,13 +274,17 @@ def build_assets(cities: list) -> dict:
 
     os.makedirs(ASSETS, exist_ok=True)
     os.makedirs(CONFIG, exist_ok=True)
+    # three assets, each loaded only by the pages that need it: the CONUS
+    # outline (map and city pickers), the world picker (city page), and the
+    # hurricane geography with the nation coastline (hurricane page)
     with open(os.path.join(ASSETS, "basemap.json"), "w") as fh:
-        json.dump({"viewBox": f"0 0 {W:.0f} {H:.0f}", "statePaths": state_paths, "statesByName": by_state,
-                   "stateCenters": state_centers, "nationLonLat": nation, "worldPaths": " ".join(wpaths),
-                   "worldViewBox": f"0 0 {WW:.0f} {WH:.0f}"}, fh, separators=(",", ":"))
+        json.dump({"viewBox": f"0 0 {W:.0f} {H:.0f}", "statePaths": state_paths}, fh, separators=(",", ":"))
+    with open(os.path.join(ASSETS, "world.json"), "w") as fh:
+        json.dump({"viewBox": f"0 0 {WW:.0f} {WH:.0f}", "worldPaths": " ".join(wpaths)}, fh, separators=(",", ":"))
     with open(os.path.join(ASSETS, "hurricane-geo.json"), "w") as fh:
-        json.dump({"bbox": HBOX, "countries": countries, "states": states_ll,
-                   "centroids": {**ccent, **scent}}, fh, separators=(",", ":"))
+        json.dump({"bbox": HBOX, "asof": "Census Bureau cartographic boundaries (us-atlas) and Natural Earth (world-atlas), public domain",
+                   "countries": countries, "states": states_ll, "centroids": {**ccent, **scent}, "nation": nation,
+                   "counties": {}, "tcw": [], "listed": []}, fh, separators=(",", ":"))
     with open(os.path.join(CONFIG, "cities.json"), "w") as fh:
         json.dump(roster, fh, indent=1)
     with open(os.path.join(CONFIG, "field_grid.json"), "w") as fh:

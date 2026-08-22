@@ -45,7 +45,9 @@ Canada, no forecast elsewhere. Times are the station&rsquo;s local time.</p>
 <script src="js/chart-city.js"></script>
 <script>
 WXC.chrome('city.html');
-fetch('assets/basemap.json').then(r => r.json()).catch(() => null).then(bm => WXCity.init({ basemap: bm }));
+Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
+             fetch('assets/world.json').then(r => r.json()).catch(() => null)])
+  .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null }));
 </script>
 </body>
 </html>

@@ -112,7 +112,7 @@ def rapid_amoc() -> tuple:
     rows = [[yr, round(sum(v) / len(v), 3)] for yr, v in sorted(by_year.items()) if len(v) >= 360]
     if len(rows) >= 15:
         return rows, "live"
-    with open(os.path.join(ROOT, "site", "assets", "rapid_amoc_annual.json")) as fh:
+    with open(os.path.join(ROOT, "geo", "rapid_amoc_annual.json")) as fh:
         return json.load(fh)["rows"], "vendored"
 
 

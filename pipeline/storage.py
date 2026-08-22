@@ -38,7 +38,10 @@ class Storage:
     def exists(self, key: str) -> bool:
         raise NotImplementedError
 
-    def list(self, prefix: str) -> list:
+    def list(self, prefix: str, start_after: Optional[str] = None) -> list:
+        """Keys under prefix in sorted order; with start_after, only keys
+        that sort after it (S3's StartAfter), which bounds a listing of
+        stamped archive keys to a time window."""
         raise NotImplementedError
 
     def put_if_absent(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
@@ -98,14 +101,19 @@ class LocalStorage(Storage):
         # object can be fetched again while the source still has it
         return os.path.isfile(p) and os.path.getsize(p) > 0
 
-    def list(self, prefix: str) -> list:
+    def list(self, prefix: str, start_after: Optional[str] = None) -> list:
+        # walk only the directory the prefix names, so a bounded listing of
+        # one station does not scan the whole data root
+        top = os.path.join(self.root, os.path.dirname(prefix)) if prefix else self.root
+        if not os.path.isdir(top):
+            return []
         out = []
-        for dirpath, _dirs, files in os.walk(self.root):
+        for dirpath, _dirs, files in os.walk(top):
             for fn in files:
                 if fn.startswith(".tmp-"):
                     continue
                 key = os.path.relpath(os.path.join(dirpath, fn), self.root).replace(os.sep, "/")
-                if key.startswith(prefix):
+                if key.startswith(prefix) and (start_after is None or key > start_after):
                     out.append(key)
         return sorted(out)
 
@@ -193,11 +201,14 @@ class S3Storage(Storage):
                     raise
         return Storage.put_if_absent(self, key, data, content_type)
 
-    def list(self, prefix: str) -> list:
+    def list(self, prefix: str, start_after: Optional[str] = None) -> list:
         out = []
         paginator = self.client.get_paginator("list_objects_v2")
         full = f"{self.prefix}/{prefix}" if self.prefix else prefix
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=full):
+        kwargs = {"Bucket": self.bucket, "Prefix": full}
+        if start_after:
+            kwargs["StartAfter"] = f"{self.prefix}/{start_after}" if self.prefix else start_after
+        for page in paginator.paginate(**kwargs):
             for obj in page.get("Contents", []):
                 k = obj["Key"]
                 if self.prefix:

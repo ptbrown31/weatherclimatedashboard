@@ -36,9 +36,16 @@ def _register():
     JOBS["climate"] = climate.climate_pass
 
     def chain(*names):
+        # one absolute deadline for the whole chain; the archive step (the
+        # only one that downloads bulk bulletins) reserves time for the rest
         def run(cfg, store):
+            import time
+            budget = cfg.get("pass_budget_seconds")
+            if budget:
+                cfg["_deadline_end"] = time.time() + budget
             worst = 0
-            for n in names:
+            for i, n in enumerate(names):
+                cfg["_reserve_seconds"] = 240.0 if (n == "archive" and i < len(names) - 1) else 0.0
                 worst = max(worst, JOBS[n](cfg, store))
             return worst
         return run

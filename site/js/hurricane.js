@@ -1,6 +1,8 @@
 /* Hurricane tracking: NHC forecast tracks, cones and formation odds over the
    basin geography. Data in: hurricane.json (storms, outlook, season) and
-   assets/hurricane-geo.json + assets/basemap.json (nation coastline).
+   assets/hurricane-geo.json (countries, coastal states, nation coastline).
+   The drawn position is labelled from the geometry's own point and advisory,
+   because the GIS service can trail NHC's roster by several advisories.
    Equirectangular fitted to the basin box with independent x/y scales so
    the panel fills its frame (a deliberate stretch, not an error). */
 window.WXHur = (() => {
@@ -44,7 +46,7 @@ window.WXHur = (() => {
       s.points.forEach((p, i) => {
         svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: p.tau === 0 ? 6 : 4.5, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 }));
         if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + p.kt + 'kt' : ''), { x: X(p.lon) + 8, y: Y(p.lat) + (i % 2 ? 14 : -8), 'font-size': 9, fill: 'var(--ink)', class: 'lbl' }));
-        if (p.tau === 0) svg.appendChild(txt(s.classification + ' ' + s.name + ' · ' + s.intensityKt + 'kt · adv ' + (s.geometryAdvisory || s.advisory),
+        if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · ' + (p.kt != null ? p.kt : s.intensityKt) + 'kt · adv ' + (s.geometryAdvisory || s.advisory) + (s.geometryStale ? ' (stale)' : ''),
           { x: X(p.lon) + 10, y: Y(p.lat) - 20, 'font-size': 12.5, 'font-weight': 700, fill: 'var(--navy)', class: 'lbl' }));
       });
     });
@@ -83,10 +85,8 @@ window.WXHur = (() => {
   async function init() {
     tip = WXC.tooltip();
     const r = await WXD.get('hurricane.json', 30);
-    const [geo, bm] = await Promise.all([
-      fetch('assets/hurricane-geo.json').then(x => x.json()).catch(() => null),
-      fetch('assets/basemap.json').then(x => x.json()).catch(() => null)]);
-    H = r.data; GEO = geo; NATION = bm ? bm.nationLonLat : null;
+    const geo = await fetch('assets/hurricane-geo.json').then(x => x.json()).catch(() => null);
+    H = r.data; GEO = geo; NATION = geo ? geo.nation : null;
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 30));
     if (!H) { $('#basin').innerHTML = ''; $('#basin').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
     [['b1', 'AL'], ['b2', 'EP']].forEach(([id, b]) => { $('#' + id).onclick = () => { basin = b; document.querySelectorAll('.bar button').forEach(x => x.classList.remove('on')); $('#' + id).classList.add('on'); draw(); }; });
