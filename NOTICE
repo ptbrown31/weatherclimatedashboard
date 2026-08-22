@@ -1,0 +1,19 @@
+This work incorporates material produced by the National Weather Service, the
+National Hurricane Center, the National Centers for Environmental Information,
+the Global Monitoring Laboratory, the Center for Satellite Applications and
+Research, and other components of the National Oceanic and Atmospheric
+Administration. Pursuant to 17 U.S.C. 403, that material is a work of the
+United States Government, is in the public domain, and is not subject to
+copyright protection. Nothing on this site is an official National Weather
+Service product, and nothing here implies endorsement or affiliation with NOAA
+or the National Weather Service. Where this site smooths, interpolates or
+otherwise computes from government data, the result is labelled as derived
+rather than presented as an official product.
+
+Country basemap outlines derive from Natural Earth (public domain). US state
+and county geometry derives from the US Census Bureau's cartographic boundary
+files (public domain).
+
+Altimetry acknowledgment: sea level data provided by the NOAA Laboratory for
+Satellite Altimetry. AMOC annual means: data from the RAPID AMOC monitoring
+project, funded by the UK Natural Environment Research Council.

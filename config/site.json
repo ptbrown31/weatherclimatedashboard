@@ -1,0 +1,38 @@
+{
+  "site_name": "weather-tools-site",
+  "domain": "PLACEHOLDER.example",
+  "data_base_url": "/data",
+  "user_agent": "weather-tools-site/0.1 (ptbrown31@gmail.com)",
+
+  "storage": {
+    "backend": "local",
+    "root": "./data",
+    "bucket": "",
+    "endpoint": "",
+    "prefix": "",
+    "region": ""
+  },
+
+  "cadence_minutes": {
+    "obs": 10,
+    "forecast": 30,
+    "archive": 30,
+    "hurricane": 30
+  },
+  "daily_utc": "09:30",
+
+  "sources": {
+    "nws": true,
+    "nbm": true,
+    "lamp": true,
+    "mav": true,
+    "obs_record": true
+  },
+
+  "market_overlay": {
+    "standalone": "placeholder",
+    "embed": "off"
+  },
+
+  "disclosure": "Built by Patrick Brown, a Trend Analytics, LLC employee (a subsidiary of Interactive Brokers) working with ForecastEx. Not an Interactive Brokers or ForecastEx product. Not investment advice."
+}

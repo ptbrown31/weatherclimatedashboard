@@ -1,0 +1,10 @@
+# operational data, never committed
+data/
+archive/
+dist/
+__pycache__/
+*.pyc
+.env
+.scrub-needles
+# local verification output
+verify-out/
