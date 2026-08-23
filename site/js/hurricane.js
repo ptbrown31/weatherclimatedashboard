@@ -33,7 +33,7 @@ window.WXHur = (() => {
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   const RAMP = ['#fde8c8', '#f9cf94', '#f2ad5e', '#e68a2e', '#cf6a14', '#a84e0b', '#7a3607'];
-  let H = null, GEO = null, NATION = null, MK = null, RK = null, basin = 'AL', tip = null;
+  let H = null, GEO = null, NATION = null, MK = null, RK = null, SZN = null, basin = 'AL', tip = null;
 
   const cents = v => (v == null ? null : Math.round(v * 100));
   const local = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -344,13 +344,186 @@ window.WXHur = (() => {
     const periods = sym => { const m = market(sym); if (!m) return []; return [...new Set(m.contracts.map(c => c.spec))].sort((a, b) => specNum(a) - specNum(b)).map(sp => ({ sp, label: (m.contracts.find(c => c.spec === sp) || {}).expiryLabel || sp, rows: m.contracts.filter(c => c.spec === sp).sort((a, b) => a.strike - b.strike).map(c => ({ label: c.label, c })) })); };
     const mname = sym => (market(sym) || {}).name || sym;
     const thisYear = String((H.season || {}).year || new Date().getUTCFullYear());
-    periods('TROPA').forEach(p => lad.appendChild(ladderPanel(COUNT.TROPA + ', ' + p.label + ' (TROPA)', p.rows, 'Yes price of “count above N”' + (s.named != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.named + ' so far' : ''), mname('TROPA'))));
-    periods('HCAB').forEach(p => lad.appendChild(ladderPanel(COUNT.HCAB + ', ' + p.label + ' (HCAB)', p.rows, 'Yes price of “at least N”' + (s.hurricanes != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.hurricanes + ' so far' : ''), mname('HCAB'))));
-    if (!market('TROPA')) lad.appendChild(ladderPanel(COUNT.TROPA + ' (TROPA)', [], ''));
-    if (!market('HCAB')) lad.appendChild(ladderPanel(COUNT.HCAB + ' (HCAB)', [], ''));
-    periods('MHCMA').forEach(p => lad.appendChild(ladderPanel(COUNT.MHCMA.replace('by month', '') + p.label + ' (MHCMA)', p.rows, 'Yes price of “count above N” in that month', mname('MHCMA'))));
+    // the current period of each count product gets the cumulative panel beside its
+    // ladder; other listing periods (a following season, a later month) keep the
+    // plain ladder, since the season they price has not started
+    const thisMonth = new Date().getUTCMonth();
+    COUNT_PANELS.forEach(cfg => {
+      const ps = periods(cfg.sym);
+      if (!ps.length) { lad.appendChild(ladderPanel(COUNT[cfg.sym] + ' (' + cfg.sym + ')', [], '')); return; }
+      const isNow = p => cfg.monthly ? monthOfSpec(p.sp) === thisMonth : String(p.label).indexOf(thisYear) >= 0;
+      ps.forEach(p => {
+        if (isNow(p) && SZN) {
+          const wrap = h('div', { class: 'cwrap' }, [h('div', { class: 'lt', text: cfg.title + ' in ' + p.label + ' (' + cfg.sym + ')' })]);
+          wrap.appendChild(countPanel(cfg, p));
+          lad.appendChild(wrap);
+        } else {
+          lad.appendChild(ladderPanel(cfg.title + ', ' + p.label + ' (' + cfg.sym + ')', p.rows,
+            cfg.step ? 'Yes price of “count above N”' : 'Yes price of “at least N”', mname(cfg.sym)));
+        }
+      });
+    });
     $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids (hover shows both bids). There are no sellers on this exchange, only bids to buy Yes or No. Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
   }
+
+  // ---- the season's count so far, beside the ladder that prices it
+  //
+  // One panel per count product, on a shared vertical axis of storm count: on
+  // the left how many have formed against the pace of an average season, on the
+  // right the price of the Yes contract for "at least N" at each level, so the
+  // two can be read across. The pace curve is the 1991-2020 climatological
+  // formation calendar from the NHC best tracks; when a seasonal forecast total
+  // is configured the curve is scaled to it, because a seasonal forecast is not
+  // a government product and this site does not supply one by default.
+  const COUNT_PANELS = [
+    { sym: 'TROPA', key: 'named', title: 'Named storms', step: 1 },      // "Above N" pays at N+1
+    { sym: 'HCAB', key: 'hurricanes', title: 'Hurricanes', step: 0 },    // "At Least N" pays at N
+    { sym: 'MHCMA', key: 'majors', title: 'Major hurricanes', step: 1, monthly: true },
+  ];
+  const dstr = ms => MONTHS[new Date(ms).getUTCMonth()].slice(0, 3) + ' ' + new Date(ms).getUTCDate();
+
+  // the climatology curve as [timestamp, cumulative mean] for the panel's window
+  function climSeries(key, year, month) {
+    const cl = SZN && SZN.climatology; if (!cl || !cl[key]) return null;
+    const [m0, d0] = cl.start.split('-').map(Number);
+    const t0 = Date.UTC(year, m0 - 1, d0);
+    let pts = cl[key].map((v, i) => [t0 + i * 864e5, v]);
+    if (month == null) return pts;
+    // a monthly product: the cumulative count within that month alone
+    const inM = pts.filter(p => new Date(p[0]).getUTCMonth() === month);
+    if (!inM.length) return null;
+    const before = pts.filter(p => p[0] < inM[0][0]).pop();
+    const base = before ? before[1] : 0;
+    return inM.map(p => [p[0], Math.round((p[1] - base) * 1000) / 1000]);
+  }
+
+  function countPanel(cfg, period) {
+    const year = (H.season || {}).year || new Date().getUTCFullYear();
+    const month = cfg.monthly ? monthOfSpec(period.sp) : null;
+    const clim = climSeries(cfg.key, year, month);
+    const events = ((SZN && SZN.season && SZN.season[cfg.key]) || [])
+      .filter(e => month == null || new Date(e.date + 'T00:00:00Z').getUTCMonth() === month);
+    const bars = period.rows.map(r => ({ n: r.c.strike + cfg.step, c: r.c })).filter(b => b.n != null).sort((a, b) => a.n - b.n);
+    const fc = (SZN && SZN.forecast) || {};
+    const target = fc[cfg.key] != null ? fc[cfg.key] : (SZN && SZN.climatology && (month == null ? SZN.climatology.totals[cfg.key] : (SZN.climatology.monthlyMajors || {})[String(month + 1).padStart(2, '0')]));
+    const scale = (fc[cfg.key] != null && clim && clim.length && clim[clim.length - 1][1] > 0) ? fc[cfg.key] / clim[clim.length - 1][1] : 1;
+    const curve = clim ? clim.map(p => [p[0], p[1] * scale]) : null;
+
+    const W = 960, Hh = 288, L = 52, R = 468, RL = 556, RR = 928, T = 30, B = 236;
+    const ymax = Math.max(1, ...bars.map(b => b.n), events.length, curve ? Math.ceil(curve[curve.length - 1][1]) : 0) + 1;
+    const y = n => B - (n / ymax) * (B - T);
+    const t0 = curve ? curve[0][0] : Date.UTC(year, 4, 1), t1 = curve ? curve[curve.length - 1][0] : Date.UTC(year, 10, 30);
+    const x = t => L + ((t - t0) / (t1 - t0)) * (R - L);
+    const px = p => RL + (p / 100) * (RR - RL);
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'cpanel' });
+
+    // shared count axis
+    const stepN = ymax > 14 ? 2 : 1;
+    for (let n = 0; n <= ymax; n += stepN) {
+      svg.appendChild(el('line', { x1: L, x2: R, y1: y(n), y2: y(n), class: 'grid' }));
+      svg.appendChild(el('line', { x1: RL, x2: RR, y1: y(n), y2: y(n), class: 'grid' }));
+      svg.appendChild(txt(n, { x: L - 7, y: y(n) + 3.5, 'text-anchor': 'end', class: 'ax' }));
+    }
+    svg.appendChild(txt('count', { x: 14, y: (T + B) / 2, class: 'axl', transform: 'rotate(-90 14 ' + ((T + B) / 2) + ')', 'text-anchor': 'middle' }));
+
+    // a hover band over the left plot: the pace and the count on any date. It goes
+    // in before the curve and the storm dots, so a dot on top of it wins the pointer.
+    const now0 = Date.now();
+    const band = el('rect', { x: L, y: T, width: R - L, height: B - T, fill: 'transparent' });
+    band.addEventListener('mousemove', e => {
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const t = t0 + ((q.x - L) / (R - L)) * (t1 - t0);
+      const cp = curve ? curve.reduce((a, p) => Math.abs(p[0] - t) < Math.abs(a[0] - t) ? p : a) : null;
+      const formed = events.filter(ev => Date.parse(ev.date + 'T00:00:00Z') <= t).length;
+      tip.show(e, tip.rows(dstr(t) + ', ' + year, [
+        ['Formed by this date', t > now0 ? 'not yet' : String(formed)],
+        ['An average season by now', cp ? (Math.round(cp[1] * 10) / 10) : null],
+        [fc[cfg.key] != null ? 'Scaled to the forecast total' : (month == null ? 'Average season total' : 'An average ' + MONTHS[month]),
+         target != null ? String(Math.round(target * 100) / 100) : null],
+      ], 'pace from the ' + esc((SZN.climatology || {}).period || '') + ' formation calendar in the NHC best tracks'));
+    });
+    band.addEventListener('mouseleave', () => tip.hide());
+    svg.appendChild(band);
+
+    // the pace of an average season, and the ground it covers
+    if (curve) {
+      const d = curve.map((p, i) => (i ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
+      svg.appendChild(el('path', { d: d + 'L' + x(t1).toFixed(1) + ',' + y(0) + 'L' + x(t0).toFixed(1) + ',' + y(0) + 'Z', fill: 'var(--cool)', 'fill-opacity': .12, 'pointer-events': 'none' }));
+      svg.appendChild(el('path', { d, fill: 'none', stroke: 'var(--cool)', 'stroke-width': 2, 'pointer-events': 'none' }));
+    }
+    if (month == null) for (let mo = new Date(t0).getUTCMonth(); mo <= new Date(t1).getUTCMonth(); mo++) {
+      const tm = Date.UTC(year, mo, 1);
+      if (tm < t0 || tm > t1) continue;
+      svg.appendChild(el('line', { x1: x(tm), x2: x(tm), y1: T, y2: B, class: 'grid' }));
+      svg.appendChild(txt(MONTHS[mo], { x: x(tm), y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
+    }
+    if (month != null) for (let dd = 1; dd <= 31; dd += 7) {
+      const tm = Date.UTC(year, month, dd);
+      if (tm < t0 || tm > t1) continue;
+      svg.appendChild(txt(dstr(tm), { x: x(tm), y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
+    }
+
+    // what actually formed, as a step
+    const now = Date.now();
+    if (events.length) {
+      let d = 'M' + x(t0).toFixed(1) + ',' + y(0);
+      events.forEach((e, i) => {
+        const tx = x(Date.parse(e.date + 'T00:00:00Z'));
+        d += 'L' + tx.toFixed(1) + ',' + y(i) + 'L' + tx.toFixed(1) + ',' + y(i + 1);
+      });
+      d += 'L' + x(Math.min(now, t1)).toFixed(1) + ',' + y(events.length);
+      svg.appendChild(el('path', { d, fill: 'none', stroke: 'var(--obs)', 'stroke-width': 2, 'pointer-events': 'none' }));
+      events.forEach((e, i) => {
+        const tx = x(Date.parse(e.date + 'T00:00:00Z')), ty = y(i + 1);
+        const dot = el('circle', { cx: tx, cy: ty, r: 5, fill: 'var(--obs)', stroke: 'var(--panel)', 'stroke-width': 1 });
+        attach(dot, tip.rows(esc(e.name) + ' — ' + cfg.title.toLowerCase().replace(/s$/, '') + ' number ' + (i + 1),
+          [['Reached the threshold', dstr(Date.parse(e.date + 'T00:00:00Z')) + ', ' + year], ['Storm', esc(e.id || '')],
+           ['Season count after it', String(i + 1)]], 'from the NHC best tracks'));
+        svg.appendChild(dot);
+      });
+    }
+    // today
+    if (now > t0 && now < t1) {
+      svg.appendChild(el('line', { x1: x(now), x2: x(now), y1: T - 6, y2: B, stroke: 'var(--muted)', 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+      svg.appendChild(txt('today', { x: x(now) + 4, y: T + 4, class: 'ax' }));
+    }
+    // the count so far, large, and what the pace says
+    const paceNow = curve ? (curve.find(p => p[0] >= now) || curve[curve.length - 1])[1] : null;
+    svg.appendChild(txt(String(events.length), { x: L + 12, y: T + 34, 'font-size': 30, 'font-weight': 700, fill: 'var(--navy)' }));
+    const tgt = target == null ? null : Math.round(target * 100) / 100;
+    const note = 'so far · ' + (fc[cfg.key] != null
+      ? (esc(fc.label || fc.source || 'forecast') + ' ' + fc[cfg.key])
+      : (tgt == null ? 'no climatology for this period'
+         : month == null ? 'an average season ends near ' + tgt
+         : 'an average ' + MONTHS[month] + ' has ' + tgt));
+    svg.appendChild(txt(note, { x: L + 12, y: T + 56, class: 'ax' }));
+    if (paceNow != null) svg.appendChild(txt('pace implied by today: ' + (Math.round(paceNow * 10) / 10), { x: L + 12, y: T + 70, class: 'ax' }));
+
+    // the ladder, on the same count axis
+    svg.appendChild(txt('The market’s ladder', { x: RL, y: T - 10, class: 'axl', 'font-weight': 700 }));
+    [0, 25, 50, 75, 100].forEach(p => {
+      svg.appendChild(el('line', { x1: px(p), x2: px(p), y1: T, y2: B, class: 'grid' }));
+      svg.appendChild(txt(p, { x: px(p), y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    svg.appendChild(txt('price of Yes (at least N), ¢', { x: (RL + RR) / 2, y: B + 32, 'text-anchor': 'middle', class: 'axl' }));
+    bars.forEach(b => {
+      const v = yes(b.c), yy = y(b.n);
+      if (v == null) { svg.appendChild(txt('no bids', { x: px(0) + 4, y: yy + 3.5, class: 'ax' })); return; }
+      const bar = el('rect', { x: px(0), y: yy - 5, width: Math.max(px(v) - px(0), 1), height: 10, fill: 'var(--accent)' });
+      attach(bar, tip.rows(contractTitle({ name: (market(cfg.sym) || {}).name }, b.c),
+        [['At least', String(b.n)]].concat(quoteRows(b.c)), asofFoot()));
+      svg.appendChild(bar);
+      svg.appendChild(txt(v + '¢', { x: px(v) + 4, y: yy + 3.5, class: 'ax', 'font-weight': 700, 'pointer-events': 'none' }));
+    });
+    if (target != null) {
+      svg.appendChild(el('line', { x1: RL, x2: RR, y1: y(target), y2: y(target), stroke: 'var(--cool)', 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
+      svg.appendChild(txt(fc[cfg.key] != null ? 'forecast total' : (month == null ? 'average season' : 'average ' + MONTHS[month]),
+        { x: RR, y: y(target) - 5, 'text-anchor': 'end', class: 'ax', fill: 'var(--cool)' }));
+    }
+    return svg;
+  }
+  const monthOfSpec = sp => { const p = String(sp).split('.'); return p.length >= 2 ? (+p[1]) - 1 : null; };
 
   // ---- the landfall board
   function drawLandfall() {
@@ -435,9 +608,10 @@ window.WXHur = (() => {
     tip = WXC.tooltip();
     const r = await WXD.get('hurricane.json', 30);
     const rk = await WXD.get('reask.json', 10);
+    const sz = await WXD.get('season.json', 1440);
     const mk = await WXM.loadGroup('hurricane');
     const geo = await fetch('assets/hurricane-geo.json').then(x => x.json()).catch(() => null);
-    H = r.data; GEO = geo; NATION = geo ? geo.nation : null; RK = rk.data; MK = WXM.hurricaneMarkets();
+    H = r.data; GEO = geo; NATION = geo ? geo.nation : null; RK = rk.data; SZN = sz.data; MK = WXM.hurricaneMarkets();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 30));
     if (mk) { const q = WXC.statusEl([mk], 10); q.insertBefore(document.createTextNode('Quotes: '), q.firstChild); st.appendChild(q); }
     if (!H) { $('#basin').innerHTML = ''; $('#basin').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }

@@ -14,8 +14,13 @@ Jobs:
     quotes       exchange top of book: station ladders, hurricane
                  and climate products, market archive              (every 10 min)
     reask        vendor live-storm wind probabilities (gated off)  (with quotes)
+    scorecard    forecast errors scored against the observed day   (once a day)
+    normals      NCEI daily climate normals per station            (once a day, refreshed weekly)
+    climate      the long global series behind the climate page    (once a day)
+    season       Atlantic season so far against the average pace   (once a day)
     market       quotes, then reask: one scheduled invocation
     half-hourly  archive, then forecast, then hurricane: one scheduled invocation
+    daily        scorecard, normals, climate, season: one scheduled invocation
     all          everything once, in order (local runs)
 """
 from __future__ import annotations
@@ -30,7 +35,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, market, reask
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -38,6 +43,7 @@ def _register():
     JOBS["scorecard"] = scorecard.scorecard_pass
     JOBS["normals"] = normals.normals_pass
     JOBS["climate"] = climate.climate_pass
+    JOBS["season"] = season.season_pass
     JOBS["quotes"] = market.quotes_pass
     JOBS["reask"] = reask.reask_pass
 
@@ -64,15 +70,15 @@ def _register():
         return run
 
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane")
-    JOBS["daily"] = chain("scorecard", "normals", "climate")
+    JOBS["daily"] = chain("scorecard", "normals", "climate", "season")
     JOBS["market"] = chain("quotes", "reask")
-    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate")
+    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season")
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.run", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | market | half-hourly | daily | all")
+    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | market | half-hourly | daily | all")
     ap.add_argument("--config", help="path to site.json (default config/site.json)")
     ap.add_argument("--backend", choices=["local", "s3"], help="override storage backend")
     ap.add_argument("--root", help="local backend: data directory")

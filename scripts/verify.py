@@ -157,6 +157,16 @@ def run(no_build: bool) -> int:
                 vendor = page.locator("#vendor").inner_text()
                 chk.add(f"{scheme} hurricane: tiles, count ladders and the landfall board", tiles >= 3 and ladders >= 2 and lf_rows >= 2, f"tiles={tiles} ladders={ladders} landfall rows={lf_rows}")
                 chk.add(f"{scheme} hurricane: vendor lane reports its state", "Not enabled" in vendor or "Lane on" in vendor or "LiveCyc" in vendor, vendor[:80])
+                # ---- the season-count panels: cumulative beside the ladder
+                panels = page.locator(".cwrap").count()
+                chk.add(f"{scheme} hurricane: a cumulative panel per count product", panels >= 2, f"panels={panels}")
+                if panels:
+                    page.locator(".cwrap").first.locator("circle").first.hover(force=True); page.wait_for_timeout(150)
+                    t_st = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} hover: a formation dot names the storm and the running count", "Reached the threshold" in t_st, t_st[:80])
+                    page.locator(".cwrap").first.locator("rect[fill='var(--accent)']").first.hover(force=True); page.wait_for_timeout(150)
+                    t_bar = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} hover: a ladder bar names the count it pays at", "At least" in t_bar and "Yes bid" in t_bar, t_bar[:80])
                 dots = page.locator("#basin circle").count()
                 chk.add(f"{scheme} hurricane: reference locations drawn", dots >= 100, f"circles={dots}")
                 page.locator("#basin circle").nth(40).hover(force=True); page.wait_for_timeout(120)

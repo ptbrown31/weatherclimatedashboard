@@ -44,5 +44,13 @@
     "base_url": "",
     "api_key": ""
   },
-  "_reask_note": "both values come from the environment (WX_REASK_BASE_URL, WX_REASK_API_KEY); leave them empty here"
+  "_reask_note": "both values come from the environment (WX_REASK_BASE_URL, WX_REASK_API_KEY); leave them empty here",
+  "season_forecast": {
+    "named": null,
+    "hurricanes": null,
+    "majors": null,
+    "source": "",
+    "label": ""
+  },
+  "_season_forecast_note": "A seasonal hurricane outlook is a forecast total for the whole season, not a government observation product, so nothing is filled in here by default and the season figure falls back to the climatological mean. Fill the three counts in with a published outlook and name it in source and label to draw it as a second line."
 }

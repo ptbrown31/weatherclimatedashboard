@@ -140,3 +140,7 @@ body.embed .wrap{padding:8px 10px 10px;max-width:none}
 /* scorecard: the divergence figure's view buttons */
 button.vbtn{font-size:12.5px}
 button.vbtn.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+/* hurricane: the season-count panels, cumulative beside the ladder */
+.cwrap{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px;grid-column:1/-1}
+.cwrap .lt{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:2px}
+svg.cpanel{width:100%;height:auto;display:block}

@@ -14,6 +14,7 @@ Sources, all US government, all public domain, no key and no subscription.
   NOMADS                GFS MOS text (MAV)          -> independent daily max/min
   api.weather.gov       CLI text product            -> official daily climate report
   NHC / NOAA GIS        storms, cones, tracks       -> the hurricane page
+  NHC HURDAT2           Atlantic best-track archive -> the season pace figure
 
 Run it standalone for a quick look at three stations:
     python3 -m pipeline.gov_weather KLAX KPHX
@@ -943,3 +944,40 @@ def fetch_wind_probabilities(url: str) -> list[dict]:
     One attempt with a short timeout: this runs last in the half-hourly
     chain and must not be able to eat the chain's remaining budget."""
     return parse_wind_probabilities(_fetch(url, tries=1, timeout=20).decode("ascii", "replace"))
+
+
+# ===========================================================================
+# NHC best-track archive (HURDAT2)
+# ===========================================================================
+# HURDAT2 is the Atlantic best-track database: every system back to 1851,
+# post-season reanalysed and quality controlled. That reanalysis is what makes
+# it the right basis for a climatological pace, and it is also why it only
+# covers completed seasons -- a year is not added until the following spring.
+# The season to date therefore comes from the live ATCF best tracks instead
+# (pipeline/hurricane.py), and the two are never mixed for the same year.
+#
+# The file name carries the last season included and the date the file was
+# cut, e.g. hurdat2-1851-2025-02272026.txt, and changes about once a year, so
+# it is discovered from the directory listing rather than written down here.
+# The same directory holds the eastern North Pacific database
+# (hurdat2-nepac-1949-...) and a couple of older Atlantic layouts
+# (hurdat2-atl-...); the pattern below matches only the current Atlantic file.
+HURDAT_DIR = "https://www.nhc.noaa.gov/data/hurdat/"
+_HURDAT_ATLANTIC = re.compile(r"hurdat2-1851-(\d{4})-(\d+)\.txt")
+
+
+def latest_hurdat_url() -> str:
+    """The newest Atlantic HURDAT2 file NHC is publishing, as a full URL.
+    The listing names each file twice (href and link text), so collect a set;
+    the season year is fixed width and leads the cut date, so a plain sort
+    puts the newest season last."""
+    names = sorted({m.group(0) for m in _HURDAT_ATLANTIC.finditer(_get_text(HURDAT_DIR, timeout=60))})
+    if not names:
+        raise RuntimeError(f"no Atlantic HURDAT2 file found in {HURDAT_DIR}")
+    return HURDAT_DIR + names[-1]
+
+
+def fetch_hurdat(url: str) -> str:
+    """The best-track archive itself, about 7 MB of ASCII. Pulled roughly once
+    a year in practice: what it feeds is cached against the file name."""
+    return _get_text(url, timeout=180)
