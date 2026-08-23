@@ -306,3 +306,35 @@ class Gates(unittest.TestCase):
         self.assertEqual(snap["asof"], "2026-08-23T10:00:00Z")       # the previous snapshot stands
         summary = json.loads(self.st.get("snapshots/market/summary.json"))
         self.assertIn("KSFO", summary["partialKept"])
+        row = next(r for r in summary["cities"] if r["station"] == "KSFO")
+        self.assertTrue(row["partial"]); self.assertEqual(row["day"], "2026-08-23")
+        # a deadline-cut group keeps its previous snapshot; with no previous snapshot a cut station writes nothing
+        self.st.put("snapshots/market/hurricane.json", json.dumps({"asof": "2026-08-23T10:00:00Z", "markets": [{"symbol": "HLF"}]}).encode())
+
+        def fake_tree2():
+            return {"categories": {"g": {"name": "Major Weather Events", "parent_id": None, "markets": [{"symbol": "HLF", "conid": 2}]},
+                                   "h": {"name": "Sydney", "parent_id": None, "markets": [{"symbol": "SHSSY", "conid": 3}]}}}
+        dl2 = arch.Deadline(None)
+
+        def fake_quote2(conid):
+            dl2.end = _time.time() - 1
+            return {"bid": 0.1, "ask": 0.2}
+        syd = {"market_name": "Sydney Daily Temperature High", "symbol": "SHSSY", "contracts": [
+            {"conid": 31, "side": "Y", "expiration": "20260824", "strike": 20.0, "strike_label": "Above 20", "time_specifier": "2026.8.24"},
+            {"conid": 32, "side": "Y", "expiration": "20260824", "strike": 21.0, "strike_label": "Above 21", "time_specifier": "2026.8.24"}]}
+
+        def fake_market2(conid):
+            return syd if conid == 3 else MARKET
+        ex.fetch_tree, ex.fetch_market, ex.fetch_quote, market.QUOTE_WORKERS = fake_tree2, fake_market2, fake_quote2, 1
+        try:
+            market.quotes_job({"sources": {"exchange": True}, "exchange": {"quote_workers": 1}}, self.st, self.log,
+                              dt.datetime(2026, 8, 23, 18, 0, tzinfo=U), deadline=dl2)
+        finally:
+            ex.fetch_tree, ex.fetch_market, ex.fetch_quote, market.QUOTE_WORKERS = orig
+        hur = json.loads(self.st.get("snapshots/market/hurricane.json"))
+        self.assertEqual(hur["asof"], "2026-08-23T10:00:00Z")
+        # the first run wrote YSSY as unlisted (its symbol was not in that tree); the cut second run left it untouched
+        ys = json.loads(self.st.get("snapshots/market/YSSY.json"))
+        self.assertEqual((ys["days"], ys["symbols"]), ({}, {}))
+        row = next(r for r in json.loads(self.st.get("snapshots/market/summary.json"))["cities"] if r["station"] == "YSSY")
+        self.assertTrue(row["partial"]); self.assertEqual(row["asof"], "2026-08-23T18:00:00Z")   # the unlisted snapshot it kept

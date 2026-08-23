@@ -213,7 +213,7 @@ def yes_quote(qy: Optional[dict], qn: Optional[dict]) -> dict:
 
 def mid(q: dict) -> Optional[float]:
     """The Yes midpoint when both sides exist, else the one side that does.
-    This is the 'implied probability' the internal dashboard shows; it is not
+    This is what the pages call the implied probability; it is not
     fee-adjusted (the exchange charges half a cent a side at execution)."""
     b, a = q.get("bid"), q.get("ask")
     if b is not None and a is not None:

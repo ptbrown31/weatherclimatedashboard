@@ -135,7 +135,7 @@ window.WXCity = (() => {
       row.appendChild(div);
     });
     row.appendChild(h('div', { class: 'cap', text: 'Strike ladder: ' + lad.label + (lad.live ? '; the number is the Yes midpoint in cents, or the one side quoted (*) where the book is one-sided; bid and ask on hover.' : '.') }));
-    if (lad.live && window.WX && WX.target === 'embed') row.appendChild(h('div', { class: 'cap', text: (WX.disclosure || '') + ' Prices are the exchange’s published quotes at the time shown, not a quote or offer, and can be stale.' }));
+
   }
 
   function draw() {
@@ -344,6 +344,15 @@ window.WXCity = (() => {
         let pv = -1e9; endLabs.forEach(L => { let yy = Math.max(L.y, p0); if (yy - pv < 11) yy = pv + 11; pv = yy; g.appendChild(txt(L.s, { x: S.R + 6, y: yy + 3, 'font-size': 9, 'font-weight': 700, fill: L.col })); });
       });
     }
+
+    // the embed has no footer and no strike row: when it shows live prices, the
+    // disclosure and the not-a-quote sentence go directly under the chart
+    const card = svg.closest ? svg.closest('.card') : null;
+    let emb = document.getElementById('embedDisclosure');
+    if (market && lad && lad.live && window.WX && WX.target === 'embed' && card) {
+      if (!emb) { emb = h('p', { class: 'cap', id: 'embedDisclosure' }); card.insertAdjacentElement('afterend', emb); }
+      emb.textContent = (WX.disclosure || '') + ' Prices are the exchange’s published quotes at the time shown, not a quote or offer, and can be stale.';
+    } else if (emb) emb.remove();
 
     // ---- titles
     g.appendChild(txt(c.city + ' (' + c.station + ') — ' + dateShort(d0, tz), { x: S.L, y: 16, 'font-size': 14, 'font-weight': 700, fill: 'var(--navy)' }));

@@ -41,7 +41,7 @@ from .storage import Storage
 SCHEMA = 1
 SOURCE = "ForecastEx public market data"
 HISTORY_HOURS = 48          # per-strike quote history carried in a station snapshot
-QUOTE_WORKERS = 4           # measured 2026-08-23: no throttling at four; the internal capture uses ten
+QUOTE_WORKERS = 4           # measured 2026-08-23: no throttling at four concurrent requests
 PREFIX = "snapshots/market/"
 
 
@@ -63,7 +63,7 @@ def _quote_rows(contracts: Dict[str, Dict[float, dict]], fetch: Callable, deadli
         row = {"strike": strike, "label": slot.get("label"), "expiration": slot.get("expiration"),
                "conid": slot.get("Y") or slot.get("N")}
         if deadline.over(5):
-            row.update(ex.yes_quote(None, None)); row["error"] = "deadline"
+            row.update(ex.yes_quote(None, None)); row["error"] = "deadline"; row["mid"] = None
             return day, row
         try:
             qy = fetch(slot["Y"]) if slot.get("Y") else None
@@ -252,12 +252,15 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         st = by_station.get(sid)
         prev_raw = store.get(f"{PREFIX}{sid}.json")
         prev = json.loads(prev_raw) if prev_raw else None
-        if st is not None and st["partial"] and prev:
+        if st is not None and st["partial"]:
             # the deadline cut this ladder short: a partial ladder would carry a fresh as-of time and a
-            # median computed from the strikes that happened to come first, so the previous snapshot stands
+            # median computed from the strikes that happened to come first, so the previous snapshot
+            # stands (or, with none, nothing is written) and the summary row says so
             partial_kept.append(sid)
+            mk = day_markers(c, now)
             summary_rows.append({"station": sid, "listed": True, "symbols": {s: m["symbol"] for s, m in st["markets"].items()},
-                                 "asof": prev.get("asof"), "partial": True})
+                                 "asof": prev.get("asof") if prev else None, "partial": True,
+                                 "day": mk["day"], "tomorrow": mk["tomorrow"]})
             continue
         if st is None:
             # not listed today (or its contract lists failed): keep the previous
@@ -285,12 +288,17 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
                 row[f"quoted{side.capitalize()}{when}"] = sum(1 for r in rs if r.get("mid") is not None)
         summary_rows.append(row)
 
+    for name, items in groups.items():
+        cut = any(c.get("error") == "deadline" for m in items for c in m.get("contracts") or [])
+        if cut and store.get(f"{PREFIX}{name}.json"):
+            partial_kept.append(name)
+            log(kind="market", step="group", group=name, kept="previous snapshot: the deadline cut this group's quotes short")
+            continue
+        store.put(f"{PREFIX}{name}.json", json.dumps(_group_snapshot(name, now, items), separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     summary = {"schema": SCHEMA, "source": SOURCE, "asof": _iso(now), "written": _iso(now), "quoted": quoted, "failed": failed,
                "listErrors": list_errors[:20], "unmatched": unmatched, "partialKept": partial_kept,
                "deadline": bool(partial_kept), "cities": summary_rows}
     store.put(f"{PREFIX}summary.json", json.dumps(summary, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
-    for name, items in groups.items():
-        store.put(f"{PREFIX}{name}.json", json.dumps(_group_snapshot(name, now, items), separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     stamp = now.strftime("%Y%m%d/%H%M%S")
     store.put(f"archive/market/{stamp}.json.gz",
               gzip.compress(json.dumps({"asof": _iso(now), "rows": archive_rows}, separators=(",", ":")).encode()), "application/gzip")

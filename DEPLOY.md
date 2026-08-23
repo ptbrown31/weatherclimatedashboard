@@ -154,7 +154,7 @@ takes minutes to an hour.
 | Forecast bulletins missed (NOMADS outage) | The archive catches up from the bucket for about two days; nothing to do unless the outage was longer, in which case those NBM cycles are gone. |
 | Change the roster or decode constants | Edit `pipeline/cities.py` / `pipeline/gov_weather.py`, run `scripts/build_assets.py`, repackage (step 4) and rebuild the site (step 6). |
 | Rotate the User-Agent contact | `aws cloudformation deploy ... --parameter-overrides UserAgent=...` |
-| Exchange endpoints unreachable from AWS (a CDN block; it happened to the owner's other system once) | The quote pass fails whole, snapshots stay as they were and the pages show their age; the `exchange` source reaches the streak alarm after six passes. Nothing to do but wait or move the quote job off AWS; there is no proxy in this stack. |
+| Exchange endpoints unreachable from AWS (a CDN in front of them can block an address range) | The quote pass fails whole, snapshots stay as they were and the pages show their age; the `exchange` source reaches the streak alarm after six passes. Nothing to do but wait or move the quote job off AWS; there is no proxy in this stack. |
 | Market overlay needs to go dark | `market_overlay.standalone` to `off` in `config/site.json`, rebuild and sync the site (step 6); the pipeline can keep quoting. |
 | Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs plus about 200k for the quote job (45 objects a pass, 144 passes a day), roughly $2 a month in total; Lambda stays inside the always-free allowance (the quote pass is about 90 s at 512 MB). `aws ce` or the billing console. |
 
