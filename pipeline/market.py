@@ -29,7 +29,7 @@ import gzip
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from . import archive as arch
 from . import basemap
@@ -81,7 +81,8 @@ def _quote_rows(contracts: Dict[str, Dict[float, dict]], fetch: Callable, deadli
         for day, row in pool.map(one, jobs):
             out[day].append(row)
     for d in out:
-        out[d].sort(key=lambda r: r["strike"])
+        # numbers first in numeric order, then named strikes alphabetically
+        out[d].sort(key=lambda r: (0, r["strike"], "") if isinstance(r["strike"], (int, float)) else (1, 0, str(r["strike"])))
     return out
 
 
@@ -167,6 +168,25 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         # difference can be checked against the tree by hand
         log(kind="market", step="unmatched", stations=unmatched)
     hur_markets = ex.category_markets(tree, ex.HURRICANE_CATEGORY)
+    # a live storm's own wind markets are listed under a category this job cannot
+    # know in advance, so they are matched by storm code off the NHC roster and
+    # the vendor lane's storms, and added to the hurricane group either way
+    names = set()
+    for key in ("snapshots/hurricane.json", "snapshots/reask.json"):
+        raw = store.get(key)
+        if not raw:
+            continue
+        try:
+            for st_ in (json.loads(raw).get("storms") or []):
+                if st_.get("name"):
+                    names.add(st_["name"])
+        except ValueError:
+            pass
+    have = {m["symbol"] for m in hur_markets}
+    wind = [m for m in ex.storm_wind_markets(tree, sorted(names)) if m["symbol"] not in have]
+    if wind:
+        log(kind="market", step="storm-wind", storms=sorted(names), markets=[m["symbol"] for m in wind])
+    hur_markets = hur_markets + wind
     clim_markets = [bysym[s] for s in ex.CLIMATE_SYMBOLS if s in bysym]
     to_list = [("station", sid, side, bysym[sym]) for sid, ss in wanted.items() for side, sym in ss.items()]
     to_list += [("hurricane", m["symbol"], None, m) for m in hur_markets]
@@ -212,17 +232,19 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
     for kind, key, side, m, mkt, err in listed:
         if kind == "station" or mkt is None:
             continue
-        grouped_all = ex.group_contracts(mkt, None)
-        # products with monthly or yearly specifiers are grouped by the raw specifier instead
-        spec_groups: Dict[str, Dict[float, dict]] = {}
+        # products with monthly or yearly specifiers are grouped by the raw specifier
+        # instead of a weather day. A strike is not always a number: the exchange's
+        # "which location records the highest wind" contracts carry a place name as
+        # the strike, so the key is the number when there is one and the strike's
+        # own label otherwise, and the row reports which it was.
+        spec_groups: Dict[str, Dict[Any, dict]] = {}
         for cn in mkt.get("contracts") or []:
             spec = str(cn.get("time_specifier") or "")
-            try:
-                strike = float(cn.get("strike"))
-            except (TypeError, ValueError):
+            key_, num = ex.strike_key(cn)
+            if key_ is None:
                 continue
-            slot = spec_groups.setdefault(spec, {}).setdefault(strike, {"label": cn.get("strike_label"), "expiration": cn.get("expiration"),
-                                                                        "expiryLabel": cn.get("expiry_label")})
+            slot = spec_groups.setdefault(spec, {}).setdefault(key_, {"label": cn.get("strike_label"), "expiration": cn.get("expiration"),
+                                                                      "expiryLabel": cn.get("expiry_label"), "numeric": num})
             sd = str(cn.get("side") or "").upper()
             if sd in ("Y", "N") and cn.get("conid"):
                 slot[sd] = cn["conid"]
@@ -232,12 +254,12 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             for r in rs:
                 quoted += r.get("error") is None
                 failed += r.get("error") is not None
-                contracts.append({"spec": spec, "expiryLabel": (spec_groups[spec][r["strike"]]).get("expiryLabel"), **r})
+                meta = spec_groups[spec][r["strike"]]
+                contracts.append({"spec": spec, "expiryLabel": meta.get("expiryLabel"), "numeric": meta.get("numeric"), **r})
                 archive_rows.append({"market": m["symbol"], "spec": spec, **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
         groups[kind].append({"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"), "conid": m["conid"],
                              "category": m.get("category"), "seriesKey": ex.CLIMATE_SYMBOLS.get(m["symbol"]),
                              "contracts": contracts})
-        del grouped_all
     log(kind="market", step="quotes", quoted=quoted, failed=failed, seconds=round(time.time() - t0, 1),
         deadline=deadline.over(0))
 

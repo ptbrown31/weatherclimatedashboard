@@ -338,3 +338,70 @@ class Gates(unittest.TestCase):
         self.assertEqual((ys["days"], ys["symbols"]), ({}, {}))
         row = next(r for r in json.loads(self.st.get("snapshots/market/summary.json"))["cities"] if r["station"] == "YSSY")
         self.assertTrue(row["partial"]); self.assertEqual(row["asof"], "2026-08-23T18:00:00Z")   # the unlisted snapshot it kept
+
+
+class StormWindContracts(unittest.TestCase):
+    """The two products that appear only while a storm is live: a gust ladder per
+    reference location, and a pool contract whose strikes are place names."""
+
+    TREE = {"categories": {
+        "g1": {"name": "Environmental", "parent_id": None, "markets": []},
+        "g2": {"name": "Major Weather Events", "parent_id": "g1", "markets": [{"symbol": "HLF", "name": "Hurricane Landfall", "conid": 10}]},
+        # the exchange lists a live storm's markets somewhere this job cannot predict
+        "g9": {"name": "Live Storm", "parent_id": None, "markets": [
+            {"symbol": "LERBR", "name": "Erin — Brownsville peak gust", "conid": 21},
+            {"symbol": "LERTA", "name": "Erin — Tampa peak gust", "conid": 22},
+            {"symbol": "LHLERG", "name": "Erin — highest wind, Gulf Coast", "conid": 23},
+            {"symbol": "LFIBR", "name": "Fiona — Brownsville peak gust", "conid": 24},
+            {"symbol": "LOFUS", "name": "US Total Layoffs", "conid": 25},
+        ]},
+    }}
+
+    def test_matches_by_storm_code_not_by_pattern(self):
+        got = ex.storm_wind_markets(self.TREE, ["Erin"])
+        self.assertEqual(sorted(m["symbol"] for m in got), ["LERBR", "LERTA", "LHLERG"])
+        # a symbol that merely starts with L is not swept in, and another storm is not either
+        self.assertNotIn("LOFUS", [m["symbol"] for m in got])
+        self.assertNotIn("LFIBR", [m["symbol"] for m in got])
+
+    def test_several_storms_at_once(self):
+        got = {m["symbol"]: m for m in ex.storm_wind_markets(self.TREE, ["Erin", "Fiona"])}
+        self.assertEqual(sorted(got), ["LERBR", "LERTA", "LFIBR", "LHLERG"])
+        self.assertEqual(got["LERBR"]["product"], "L")
+        self.assertEqual(got["LERBR"]["location"], "BR")
+        self.assertEqual(got["LHLERG"]["product"], "LHL")
+        self.assertEqual(ex.storm_wind_markets(self.TREE, []), [])
+
+    def test_storm_code_is_the_first_two_letters(self):
+        self.assertEqual(ex.storm_code("Erin"), "ER")
+        self.assertEqual(ex.storm_code("van der Meer"), "VA")
+        self.assertEqual(ex.storm_code(""), "")
+
+    def test_a_pool_contract_keeps_its_named_strikes(self):
+        from pipeline import archive as arch
+        pool = {"market_name": "Erin — highest wind, Gulf Coast", "symbol": "LHLERG", "contracts": [
+            {"conid": 1, "side": "Y", "strike": "Tampa", "strike_label": "Tampa", "time_specifier": "2026.9", "expiry_label": "September 2026"},
+            {"conid": 2, "side": "N", "strike": "Tampa", "strike_label": "Tampa", "time_specifier": "2026.9"},
+            {"conid": 3, "side": "Y", "strike": None, "strike_label": "Brownsville", "time_specifier": "2026.9"},
+        ]}
+        tmp = tempfile.TemporaryDirectory()
+        st = storage.LocalStorage(tmp.name)
+
+        def fake_tree():
+            return {"categories": {"g": {"name": "Live Storm", "parent_id": None, "markets": [{"symbol": "LHLERG", "conid": 23}]}}}
+        st.put("snapshots/hurricane.json", json.dumps({"storms": [{"name": "Erin"}]}).encode())
+        orig = (ex.fetch_tree, ex.fetch_market, ex.fetch_quote)
+        ex.fetch_tree, ex.fetch_market, ex.fetch_quote = fake_tree, (lambda c: pool), (lambda c: {"bid": 0.2, "ask": 0.3})
+        try:
+            market.quotes_job({"sources": {"exchange": True}, "exchange": {"quote_workers": 1}}, st, lambda **k: None,
+                              dt.datetime(2026, 9, 3, 12, 0, tzinfo=U), deadline=arch.Deadline(None))
+        finally:
+            ex.fetch_tree, ex.fetch_market, ex.fetch_quote = orig
+        grp = json.loads(st.get("snapshots/market/hurricane.json"))
+        m = next(x for x in grp["markets"] if x["symbol"] == "LHLERG")
+        strikes = sorted(c["strike"] for c in m["contracts"])
+        self.assertEqual(strikes, ["Brownsville", "Tampa"])          # named strikes survive
+        self.assertTrue(all(c["numeric"] is False for c in m["contracts"]))
+        tampa = next(c for c in m["contracts"] if c["strike"] == "Tampa")
+        self.assertEqual((tampa["bid"], tampa["ask"]), (0.2, 0.3))   # and the Yes side is quoted
+        tmp.cleanup()

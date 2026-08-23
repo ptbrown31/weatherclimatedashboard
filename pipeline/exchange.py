@@ -150,6 +150,36 @@ def category_markets(tree: dict, category_name: str) -> List[dict]:
     return out
 
 
+def storm_code(name: str) -> str:
+    """The exchange builds a storm's live-wind symbols from the first two
+    letters of its name, so Erin becomes ER."""
+    letters = "".join(ch for ch in str(name or "") if ch.isalpha())
+    return letters[:2].upper()
+
+
+def storm_wind_markets(tree: dict, names: list) -> List[dict]:
+    """Every live-wind market belonging to one of the named storms.
+
+    Two products appear once a storm is active: L<storm><location>, a gust
+    threshold ladder for one reference location, and LHL<storm><pool letter>,
+    "which location in this pool records the highest wind", whose strikes are
+    place names rather than numbers. They are matched by storm code rather than
+    by category, because the category they are listed under is not known until
+    the exchange lists them, and a bare symbol pattern would also catch
+    unrelated products that happen to start with an L.
+    """
+    if not names:
+        return []
+    codes = {storm_code(n) for n in names if storm_code(n)}
+    out = []
+    for sym, m in markets_by_symbol(tree).items():
+        if any(sym.startswith("LHL" + c) and len(sym) == len("LHL" + c) + 1 for c in codes):
+            out.append({**m, "product": "LHL", "storm": sym[3:5]})
+        elif any(sym.startswith("L" + c) and len(sym) == len("L" + c) + 2 for c in codes):
+            out.append({**m, "product": "L", "storm": sym[1:3], "location": sym[3:5]})
+    return out
+
+
 def symbols_for(city: dict) -> Dict[str, str]:
     """The daily temperature symbols a station can have: high and low for the
     Fahrenheit (US) listings, high only for the Celsius ones."""
@@ -171,6 +201,20 @@ def day_of(spec: str) -> Optional[str]:
         return dt.date(int(parts[0]), int(parts[1]), int(parts[2])).isoformat()
     except ValueError:
         return None
+
+
+def strike_key(contract: dict):
+    """(key, numeric) for one contract's strike. Temperature and count contracts
+    carry a number; the "which location records the highest wind" contracts carry
+    a place name instead, so those key on the strike's label and are marked
+    non-numeric. Returns (None, None) when there is nothing to key on."""
+    raw = contract.get("strike")
+    try:
+        return float(raw), True
+    except (TypeError, ValueError):
+        pass
+    label = contract.get("strike_label") or (str(raw).strip() if raw not in (None, "") else "")
+    return (label, False) if label else (None, None)
 
 
 def group_contracts(market: dict, days: Optional[set] = None) -> Dict[str, Dict[float, dict]]:
