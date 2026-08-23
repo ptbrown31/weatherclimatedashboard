@@ -24,7 +24,12 @@ window.WXD = (() => {
     const url = `${base()}/snapshots/${key}`;
     const ck = 'wx:' + key;
     try {
-      const r = await fetch(url, { cache: 'no-store' });
+      // No cache mode: the snapshots carry max-age=60 with stale-while-revalidate,
+      // so the browser's own cache honours the same freshness the CDN does and a
+      // second page in a session does not refetch data it loaded seconds ago.
+      // Age is always computed from the payload's own `asof`, so a copy served
+      // from cache still reports its true age in the status strip.
+      const r = await fetch(url);
       if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + key);
       const data = await r.json();
       try { localStorage.setItem(ck, JSON.stringify({ at: Date.now(), data })); } catch (e) { /* quota: fine */ }

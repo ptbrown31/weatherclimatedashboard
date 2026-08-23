@@ -12,6 +12,12 @@ the cycle that was standing before the day began:
     MAV   the GFS MOS N/X row
     LAMP  the max and min of the last pre-day hourly run (25 h horizon)
 
+The exchange's own implied median for the day is carried alongside them,
+read from the last quote pass before the same local midnight, so the
+market can be plotted on the same axis as the forecasts. It is not folded
+into the skill statistics below: those describe forecast products, and a
+market is not one.
+
 A source is scored for a day only when its pre-day cycle was issued within
 the 24 hours before local midnight; older cycles are longer-lead forecasts
 and would not be a fair comparison. The lead (hours from issuance to
@@ -28,6 +34,7 @@ Writes snapshots/scorecard.json.
 """
 from __future__ import annotations
 import datetime as dt
+import gzip
 import json
 import time
 from typing import Callable, Optional
@@ -35,6 +42,7 @@ from zoneinfo import ZoneInfo
 
 from . import gov_weather as gw
 from . import basemap
+from . import exchange as ex
 from . import snapshots as sn
 from .storage import Storage
 
@@ -94,6 +102,57 @@ def forecast_for_day(store: Storage, by_kind: dict, source: str, c: dict, tz, da
     return out
 
 
+# ------------------------------------------------------- the exchange's median
+MARKET_PREFIX = "archive/market/"
+
+
+def market_pass_before(store: Storage, when: dt.datetime, cache: dict) -> Optional[dict]:
+    """The newest quote-archive pass at or before `when` (UTC), parsed, or None.
+    Keys are archive/market/{YYYYMMDD}/{HHMMSS}.json.gz, stamped in UTC, so the
+    newest one is the last key that sorts at or before the wanted time. Listings
+    and bodies are cached because every station in a zone shares one instant."""
+    for back in (0, 1):
+        ymd = (when - dt.timedelta(days=back)).strftime("%Y%m%d")
+        if ymd not in cache["list"]:
+            cache["list"][ymd] = sorted(store.list(f"{MARKET_PREFIX}{ymd}/"))
+        keys = cache["list"][ymd]
+        if back == 0:
+            cut = when.strftime("%H%M%S")
+            keys = [k for k in keys if k.rsplit("/", 1)[-1][:6] <= cut]
+        if keys:
+            key = keys[-1]
+            if key not in cache["body"]:
+                raw = store.get(key)
+                try:
+                    cache["body"][key] = json.loads(gzip.decompress(raw)) if raw else None
+                except (OSError, ValueError):
+                    cache["body"][key] = None
+            return cache["body"][key]
+    return None
+
+
+def market_levels(store: Storage, c: dict, tz, day: dt.date, cache: dict) -> Optional[dict]:
+    """{high, low, asof} — the exchange's implied median for one station and
+    local day, from the last quote pass before that day's local midnight, the
+    same moment the model cycles are picked at. None when the quote archive does
+    not reach back that far or the day was not listed."""
+    body = market_pass_before(store, _local_midnight(day, tz).astimezone(dt.timezone.utc), cache)
+    if not body:
+        return None
+    diso, out = day.isoformat(), {}
+    for side in ("high", "low"):
+        rows = [{"strike": r.get("strike"), "mid": ex.mid(r)} for r in body.get("rows") or []
+                if r.get("station") == c["station"] and r.get("day") == diso and r.get("side") == side
+                and r.get("strike") is not None]
+        m = ex.implied_median(rows, side) if rows else None
+        if m and m.get("value") is not None:
+            out[side] = m["value"]
+    if not out:
+        return None
+    out["asof"] = body.get("asof")
+    return out
+
+
 def observed_days(store: Storage, sid: str, tz, unit: str, first: dt.date, last: dt.date) -> dict:
     """{local day: {high, low, n}} from the observation record for one station."""
     days = []
@@ -136,6 +195,7 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
     first = dt.datetime.strptime(obs_days[0], "%Y%m%d").date()
     stations = {}
     pooled = {s: {"high": [], "low": []} for s in SOURCES}
+    mcache = {"list": {}, "body": {}}       # shared across stations: one pass covers every station
     for c in roster:
         sid, tz = c["station"], ZoneInfo(c["tz"])
         local_today = now.astimezone(tz).date()
@@ -155,6 +215,11 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
                     row[s] = {"high": f["high"], "low": f["low"], "cycle": f["cycle"], "lead": f["lead"],
                               "errHigh": round(f["high"] - o["high"], 1) if f["high"] is not None else None,
                               "errLow": round(f["low"] - o["low"], 1) if f["low"] is not None else None}
+            mk = market_levels(store, c, tz, d, mcache)
+            if mk:
+                row["fx"] = {"high": mk.get("high"), "low": mk.get("low"), "asof": mk.get("asof"),
+                             "errHigh": round(mk["high"] - o["high"], 1) if mk.get("high") is not None else None,
+                             "errLow": round(mk["low"] - o["low"], 1) if mk.get("low") is not None else None}
             days.append(row)
         summary = {}
         for s in SOURCES:
@@ -176,7 +241,8 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
             "decode": {"TEMP_SOURCE": gw.TEMP_SOURCE, "INCLUDE_SPECI": gw.INCLUDE_SPECI},
             "method": "error = forecast minus observed (positive runs warm); pre-day cycle within 24 h of local midnight; "
                       "observed = METAR extreme over the local day; days with fewer than 12 reports not scored",
-            "sources": {"nws": "NWS day/night product", "nbm": "NBM NBS TXN", "mav": "GFS MOS N/X", "lamp": "LAMP hourly extremes"},
+            "sources": {"nws": "NWS day/night product", "nbm": "NBM NBS TXN", "mav": "GFS MOS N/X", "lamp": "LAMP hourly extremes",
+                        "fx": "ForecastEx implied median, from the last quote before local midnight"},
             "overall": overall, "stations": stations}
     store.put("snapshots/scorecard.json", json.dumps(snap, separators=(",", ":")).encode(), "application/json",
               "public, max-age=600, stale-while-revalidate=3600, stale-if-error=604800")

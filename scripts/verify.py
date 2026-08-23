@@ -186,6 +186,20 @@ def run(no_build: bool) -> int:
                 # ---- scorecard hover: overall, station and day cells
                 page.goto(f"{srv.url}/scorecard.html")
                 page.wait_for_timeout(900)
+                # ---- the divergence figure: four views, ranking column and hover
+                fig_rows = page.locator("#divsvg g").count()
+                chk.add(f"{scheme} scorecard: divergence figure draws a row per station", fig_rows >= 20, f"rows={fig_rows}")
+                page.locator("#divsvg circle").first.hover(force=True); page.wait_for_timeout(120)
+                t_dot = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} hover: figure dot shows the forecast and its gap from consensus", "Consensus median" in t_dot and "From the consensus" in t_dot, t_dot[:80])
+                titles = []
+                for i in range(4):
+                    page.locator("#divControls button").nth(i).click(); page.wait_for_timeout(250)
+                    titles.append(page.locator("#divTitle").inner_text())
+                chk.add(f"{scheme} scorecard: all four views render a titled figure", len([t for t in titles if t]) == 4 and page.locator("#divsvg g").count() >= 20, "; ".join(t[:26] for t in titles))
+                page.locator("#divControls button").first.click(); page.wait_for_timeout(250)
+                col = page.locator("#divsvg text", has_text="Consensus error").count()
+                chk.add(f"{scheme} scorecard: the scored view ranks by consensus error", col == 1, f"header={col}")
                 page.locator("#overall td").nth(2).hover(force=True); page.wait_for_timeout(120)
                 t_ov = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: scorecard overall cell shows the source's statistics", "all stations" in t_ov and "MAE" in t_ov, t_ov[:80])
