@@ -10,9 +10,13 @@
    market-data endpoints (pipeline/market.py): per-station ladders with the
    Yes-side top of book, a rolling two-day history of each strike's quote,
    the market-implied medians, and the hurricane and climate product groups.
-   The numbers are the exchange's own, not fee adjusted; "implied" means the
-   Yes bid/ask midpoint. Pages call load()/loadSummary()/loadGroup() first
-   and then the synchronous accessors below.
+   The numbers are the exchange's own, not fee adjusted. On this exchange
+   there are no sellers: every resting order is a bid to buy Yes or a bid to
+   buy No, and the two sides of a pair sum to one dollar. The feed's "ask"
+   on a Yes contract is therefore one dollar less the No bid, and the pages
+   say "No bid"; the Yes price shown is the midpoint between the Yes bid
+   and one dollar less the No bid. Pages call load()/loadSummary()/
+   loadGroup() first and then the synchronous accessors below.
 
    'placeholder' reproduces the reference package's labelled synthetic data:
    deterministic ladders and a shaped price path so the layout has something
@@ -139,9 +143,12 @@ window.WXM = (() => {
 
   // ---- live accessors
   const cents = v => (v == null ? null : Math.round(v * 100));
-  // `yes` is the Yes midpoint in cents when both sides exist; with a one-sided
-  // book it is that side's price and `side` says which ('bid' or 'ask')
+  // `yes` is the Yes price in cents: the midpoint when both sides have bids;
+  // with bids on one side only it is that side's implied Yes price and
+  // `side` says which ('bid' = Yes bids only, 'ask' = No bids only).
+  // `noBid` is the No bid in cents (one dollar less the feed's Yes ask).
   const row = r => ({ strike: r.strike, yes: cents(r.mid), bid: cents(r.bid), ask: cents(r.ask), bidSize: r.bidSize, askSize: r.askSize, from: r.from, label: r.label,
+                      noBid: r.ask == null ? null : 100 - cents(r.ask), noBidSize: r.askSize,
                       conid: r.conid, expiration: r.expiration, error: r.error || null,
                       side: r.bid != null && r.ask != null ? 'mid' : (r.bid != null ? 'bid' : (r.ask != null ? 'ask' : null)) });
 
@@ -162,8 +169,8 @@ window.WXM = (() => {
   }
 
   // the day's ladders for the city page: high side P(high > K), low side
-  // P(low < K), on one shared temperature axis; yes is the midpoint in cents
-  // (null where the contract has no book), bid/ask the top of book
+  // P(low < K), on one shared temperature axis; yes is the Yes price in cents
+  // (null where the contract has no bids), bid and noBid the best bids
   function ladder(city, levels) {
     if (!on()) return null;
     if (!live()) return ladderPlaceholder(city, levels);
@@ -206,7 +213,7 @@ window.WXM = (() => {
       asof: g.asof,
       contracts: (m.contracts || []).filter(c => c.mid != null && yearOf(c.spec)).map(c => ({
         year: yearOf(c.spec), threshold: c.strike, label: c.label, expiryLabel: c.expiryLabel || String(yearOf(c.spec)),
-        yes: c.mid, bid: c.bid, ask: c.ask, bidSize: c.bidSize, askSize: c.askSize, from: c.from, conid: c.conid, expiration: c.expiration, spec: c.spec,
+        yes: c.mid, bid: c.bid, ask: c.ask, noBid: c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100, bidSize: c.bidSize, askSize: c.askSize, noBidSize: c.askSize, from: c.from, conid: c.conid, expiration: c.expiration, spec: c.spec,
         label2: 'ForecastEx quote, ' + asofText(S.groups.climate) })),
     })).filter(p => p.contracts.length);
   }

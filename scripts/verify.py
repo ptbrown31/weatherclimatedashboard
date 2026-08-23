@@ -138,7 +138,7 @@ def run(no_build: bool) -> int:
                     locator.hover(force=True); page.wait_for_timeout(120)
                     return page.locator("#tip").inner_text()
                 t_chip = tip_after(page.locator("#skRow button").nth(2))
-                chk.add(f"{scheme} hover: strike chip shows the book", "Bid" in t_chip and "Ask" in t_chip and "Quotes as of" in t_chip, t_chip[:80])
+                chk.add(f"{scheme} hover: strike chip shows the book", "Yes bid" in t_chip and "No bid" in t_chip and "Quotes as of" in t_chip, t_chip[:80])
                 t_lvl = tip_after(page.locator("#chart text.lvlnm").first)
                 chk.add(f"{scheme} hover: level label names the source, cycle and value", "forecast" in t_lvl and "Cycle" in t_lvl and "Value" in t_lvl, t_lvl[:80])
                 t_pick = tip_after(page.locator("#pick g").nth(3))

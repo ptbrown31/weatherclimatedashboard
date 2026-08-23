@@ -99,12 +99,15 @@ window.WXClimate = (() => {
       const col = priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
       const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' })
                      : el('circle', { cx, cy, r: 8, fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' });
-      const book = c.bid != null && c.ask != null ? null : (c.bid != null ? 'bid only; Yes shown is the bid' : (c.ask != null ? 'ask only; Yes shown is the ask' : 'no book'));
+      const noBid = c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100;
+      const book = c.bid != null && c.ask != null ? null : (c.bid != null ? 'Yes bids only; the Yes price shown is the Yes bid' : (c.ask != null ? 'No bids only; the Yes price shown is one dollar less the No bid' : 'no bids'));
       const html = () => tip.rows(product.name + ' — ' + c.label, [
         ['Settles', c.expiryLabel], ['Expires', /\d{1,2}, \d{4}/.test(c.expiryLabel || '') ? null : expLabel(c.expiration)],
-        ['Yes', cents(c.yes)],
-        ['Bid / Ask', c.bid != null || c.ask != null ? cents(c.bid) + size(c.bidSize) + ' / ' + cents(c.ask) + size(c.askSize) : null],
-        ['Book', c.from === 'no' ? (book ? book + '; ' : '') + 'derived from the No side' : book],
+        ['Yes price', cents(c.yes) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
+        ['Yes bid', c.bid != null ? cents(c.bid) + size(c.bidSize) : null],
+        ['No bid', noBid != null ? cents(noBid) + size(c.askSize) : null],
+        ['Buy Yes now at', c.ask != null ? cents(c.ask) : null],
+        ['Bids', c.from === 'no' ? (book ? book + '; ' : '') + 'quoted from the No contract' : book],
         ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + (key.startsWith('temp') ? c.threshold.toFixed(2) : c.threshold) + ')']],
         c.label2 || WXM.LABEL);
       m.onmousemove = e => tip.show(e, html());

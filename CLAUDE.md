@@ -45,10 +45,12 @@ this one has to stay up and stay fresh on its own.
 
 `site/js/market.js` is the only place market data enters the pages; `pipeline/exchange.py` is the
 only place the exchange is called. `market_overlay` per target: `live` on the standalone site (the
-quote job's snapshots: Yes bid/ask/mid per listed strike, two-day quote history, implied medians,
+quote job's snapshots: Yes bid, No bid and Yes price midpoint per listed strike, two-day quote history, implied medians,
 hurricane and climate groups), `off` in the embed unless `?market=on`, `placeholder` for the
 reference package's synthetic ladders. Prices are the exchange's, in cents, with their as-of time,
-never fee adjusted; the pages never compute a fair value, a model probability or a disagreement
+never fee adjusted. Exchange language: there are no sellers, only bids to buy Yes or No that sum to $1;
+the feed's "ask" on a Yes contract is one dollar less the No bid and the pages never say "ask", "sell"
+or "offer". The pages never compute a fair value, a model probability or a disagreement
 score (those are internal systems and stay out of this repo). When off, the layout reserves no
 space for market elements.
 

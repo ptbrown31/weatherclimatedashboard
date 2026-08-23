@@ -194,8 +194,11 @@ def group_contracts(market: dict, days: Optional[set] = None) -> Dict[str, Dict[
 
 def yes_quote(qy: Optional[dict], qn: Optional[dict]) -> dict:
     """Top of book in Yes terms. The Yes book is used when it has either
-    side; otherwise the No book is complemented (yes bid = 1 - no ask). Sizes
-    are contracts. `from` records which book the numbers came from."""
+    side; otherwise the No contract's bids are complemented (yes bid = 1 - no
+    ask). Sizes are contracts. `from` records which contract the numbers came
+    from. Language note: the exchange has no sellers, only bids to buy Yes or
+    No that sum to one dollar; the feed's "ask" on a Yes contract is one
+    dollar less the best No bid, and the pages say "No bid"."""
     def num(d, k):
         v = (d or {}).get(k)
         try:
@@ -212,9 +215,10 @@ def yes_quote(qy: Optional[dict], qn: Optional[dict]) -> dict:
 
 
 def mid(q: dict) -> Optional[float]:
-    """The Yes midpoint when both sides exist, else the one side that does.
-    This is what the pages call the implied probability; it is not
-    fee-adjusted (the exchange charges half a cent a side at execution)."""
+    """The Yes price: midway between the Yes bid and one dollar less the No
+    bid when both exist, else the one side that does. This is what the pages
+    call the implied probability; it is not fee-adjusted (the exchange charges
+    $0.01 per contract to each side at execution, per its FAQ)."""
     b, a = q.get("bid"), q.get("ask")
     if b is not None and a is not None:
         return round((b + a) / 2, 4)

@@ -30,7 +30,7 @@ than it is.</p>
 <tr><td>GFS MOS</td><td>NOMADS MAV text bulletins</td><td>A single-model statistical product with no forecaster editing; the cleanest independent comparison on the scorecard.</td></tr>
 <tr><td>Hurricanes</td><td>NHC CurrentStorms.json, NOAA GIS service, NHC wind speed probabilities (PWSAT), ATCF best tracks</td><td>Roster, geometry, five-day wind probabilities at coastal locations, and season counts.</td></tr>
 <tr><td>Basemaps</td><td>US Census Bureau boundaries; Natural Earth countries</td><td>Public domain.</td></tr>
-<tr><td>Contract prices</td><td>ForecastEx public market-data endpoints</td><td>Top of book for the daily temperature, hurricane and climate contracts, read every 10 minutes. Prices are the exchange&rsquo;s own, shown as the Yes-side bid, ask and midpoint in cents, not fee adjusted. The &ldquo;implied&rdquo; temperature is the strike where the Yes price crosses 50&cent;, interpolated between strikes.</td></tr>
+<tr><td>Contract prices</td><td>ForecastEx public market-data endpoints</td><td>The best bids for the daily temperature, hurricane and climate contracts, read every 10 minutes. On this exchange there are no sellers: every order is a bid to buy Yes or a bid to buy No, and the two sides of a contract sum to one dollar. Pages show the Yes bid and the No bid in cents, and a Yes price midway between the Yes bid and one dollar less the No bid; nothing is fee adjusted (the exchange charges $0.01 per contract to each side at execution). The &ldquo;implied&rdquo; temperature is the strike where the Yes price crosses 50&cent;, interpolated between strikes.</td></tr>
 <tr><td>Live-storm wind probabilities</td><td>Reask (vendor), when enabled</td><td>Probability that the peak gust exceeds each threshold at the 163 reference locations the exchange&rsquo;s wind contracts settle at, shown as published with the vendor&rsquo;s mark. Off unless the site operator has enabled it with their own credential; the hurricane page says which.</td></tr>
 </table>
 
@@ -59,7 +59,7 @@ WXC.chrome('about.html');
 document.getElementById('disclosure').textContent = (window.WX && WX.disclosure) || '';
 document.getElementById('disclosureTop').textContent = (window.WX && WX.disclosure) || '';
 document.getElementById('marketNote').textContent = (window.WX && WX.market === 'live')
-  ? 'Contract prices on this site are read from the exchange\u2019s public market-data endpoints on a ten-minute cycle and shown with the time they were read; they are not a quote, not an offer, and can be stale. Nothing here is investment advice.'
+  ? 'Contract prices on this site are read from the exchange\u2019s public market-data endpoints on a ten-minute cycle and shown with the time they were read; they are the exchange\u2019s published bids, not a bid or a solicitation to trade by this site, and can be stale. Nothing here is investment advice.'
   : 'This site shows no live market prices. Where market elements appear they are labelled placeholders that exist to show layout, not values.';
 WXD.get('manifest.json').then(r => {
   const d = r.data && r.data.decode;

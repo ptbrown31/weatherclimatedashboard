@@ -67,19 +67,23 @@ window.WXHur = (() => {
   const exAsof = () => { if (!MK || !MK.asof) return null; const ms = Date.parse(MK.asof); return dateShort(ms, local()) + ', ' + clockFull(ms, local()) + (MK.stale ? ' (stale)' : ''); };
   // "20261130" -> "Nov 30, 2026"
   const expDate = s => (s && /^\d{8}$/.test(String(s)) ? MONTHS[+String(s).slice(4, 6) - 1] + ' ' + (+String(s).slice(6, 8)) + ', ' + String(s).slice(0, 4) : (s || null));
-  // one side of the book with its size: "8¢ ×1000"
+  // one best bid with its size: "8¢ ×1000". There are no sellers on this exchange:
+  // the feed's "ask" on a Yes contract is one dollar less the No bid, shown as such.
   const side = (p, sz) => (p == null ? '—' : cents(p) + '¢' + (sz != null ? ' ×' + Math.round(sz) : ''));
-  function bookNote(c) {
+  const noBid = c => (c && c.ask != null ? Math.round((1 - c.ask) * 100) / 100 : null);
+  function bidsNote(c) {
     if (!c || c.mid == null) return null;
     const notes = [];
-    if (c.bid == null || c.ask == null) notes.push('one-sided (' + (c.bid == null ? 'ask' : 'bid') + ' only)');
-    if (c.from === 'no') notes.push('from the No book');
+    if (c.bid == null || c.ask == null) notes.push(c.bid == null ? 'No bids only' : 'Yes bids only');
+    if (c.from === 'no') notes.push('quoted from the No contract');
     return notes.join(', ') || null;
   }
   // the rows every contract tooltip shares
   const quoteRows = c => (!c ? [] : [
-    ['Yes bid', side(c.bid, c.bidSize)], ['Yes ask', side(c.ask, c.askSize)],
-    ['Mid', c.mid == null ? 'no book' : pct(cents(c.mid))], ['Book', bookNote(c)], ['Settles', expDate(c.expiration)]]);
+    ['Yes bid', side(c.bid, c.bidSize)], ['No bid', side(noBid(c), c.askSize)],
+    ['Yes price', c.mid == null ? 'no bids' : pct(cents(c.mid)) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
+    ['Buy Yes now at', c.ask == null ? null : pct(cents(c.ask))], ['Buy No now at', c.bid == null ? null : pct(100 - cents(c.bid))],
+    ['Bids', bidsNote(c)], ['Settles', expDate(c.expiration)]]);
   // "<market> — <strike label> (<listing period>)"; a date-strike label ("By Nov 30, 2026") already names its period
   const contractTitle = (m, c) => esc((m && m.name) || '') + ' — ' + esc(c.label) + (c.expiryLabel && !/^By /.test(c.label) ? ' (' + esc(c.expiryLabel) + ')' : '');
   const asofFoot = () => { const a = exAsof(); return a ? 'as of ' + a : null; };
@@ -98,7 +102,7 @@ window.WXHur = (() => {
   // ---- the exchange's hurricane group, by symbol
   const market = sym => (MK ? MK.markets.find(m => m.symbol === sym) : null);
   const yes = c => (c && c.mid != null ? cents(c.mid) : null);
-  const quoteText = c => (!c ? 'not listed' : (c.mid == null ? 'no book' : 'Yes ' + pct(cents(c.mid)) + ' (bid ' + pct(cents(c.bid)) + ' · ask ' + pct(cents(c.ask)) + (c.from === 'no' ? ', from the No book' : '') + ')'));
+  const quoteText = c => (!c ? 'not listed' : (c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid)) + ' (bid ' + pct(cents(c.bid)) + ' · ask ' + pct(cents(c.ask)) + (c.from === 'no' ? ', from the No book' : '') + ')'));
   function landfallQuotes() {
     const m = market('HLF'); if (!m) return null;
     const out = {};
@@ -220,11 +224,11 @@ window.WXHur = (() => {
       if (html) attach(p, html);
       svg.appendChild(p);
     };
-    // fill and tooltip for a region: shaded by the landfall contract's Yes mid where one is listed with a book
+    // fill and tooltip for a region: shaded by the landfall contract's Yes price where one is listed with bids
     const fillFor = (label, nm) => {
       const c = lf ? lf[label] : null;
       const season = c && c.expiryLabel ? c.expiryLabel : (hlf && hlf.contracts[0] && hlf.contracts[0].expiryLabel) || 'season';
-      const rows = c ? [['Landfall contract (' + esc(season) + ')', c.mid == null ? 'no book' : 'Yes ' + pct(cents(c.mid))]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Mid' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
+      const rows = c ? [['Landfall contract (' + esc(season) + ')', c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid))]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Yes price' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
       const html = tip.rows(esc(nm), rows, c ? null : (lf ? 'no landfall contract listed for this region' : null));
       return [c && c.mid != null ? ramp(c.mid) : 'var(--map-land)', html];
     };
@@ -254,7 +258,7 @@ window.WXHur = (() => {
     $('#basinCap').textContent = (counts.storms ? '' : 'No active tropical cyclones in this basin at the last update. ') +
       'Orange dashed regions are NHC seven-day formation odds; cones and tracks draw automatically when a storm is active. ' +
       (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that part of the map shows storms only. ' : '') +
-      (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for bid and ask); unshaded regions have no listed contract or no book. ' : '') +
+      (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for the Yes and No bids); unshaded regions have no listed contract or no bids. ' : '') +
       (vendorShown ? 'Red dots scale with the vendor’s probability of a gust above 80 mph at that reference location (' + ((RK && RK.attribution) || 'Powered by Reask') + '). ' : '');
     if (vendorShown) svg.appendChild(txt((RK && RK.attribution) || 'Powered by Reask', { x: W - 10, y: Hh - 10, 'text-anchor': 'end', 'font-size': 12, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl' }));
     const key = $('#basinKey'); key.innerHTML = '';
@@ -306,7 +310,7 @@ window.WXHur = (() => {
       const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
         h('span', { class: 'lk', text: r.label }),
         h('span', { class: 'lb' }, [h('i', { style: 'width:' + (y == null ? 0 : y) + '%' })]),
-        h('span', { class: 'lv', text: y == null ? 'no book' : y + '¢' + (one ? '*' : '') }),
+        h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
       ]);
       if (r.c) attach(bar, tip.rows(contractTitle({ name: mname }, r.c), quoteRows(r.c), asofFoot()));
       div.appendChild(bar);
@@ -341,7 +345,7 @@ window.WXHur = (() => {
     if (!market('TROPA')) lad.appendChild(ladderPanel(COUNT.TROPA + ' (TROPA)', [], ''));
     if (!market('HCAB')) lad.appendChild(ladderPanel(COUNT.HCAB + ' (HCAB)', [], ''));
     periods('MHCMA').forEach(p => lad.appendChild(ladderPanel(COUNT.MHCMA.replace('by month', '') + p.label + ' (MHCMA)', p.rows, 'Yes price of “count above N” in that month', mname('MHCMA'))));
-    $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes-side midpoint in cents, or the one side quoted where the book is one-sided (hover shows bid and ask). Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
+    $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids (hover shows both bids). There are no sellers on this exchange, only bids to buy Yes or No. Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
   }
 
   // ---- the landfall board
@@ -350,16 +354,16 @@ window.WXHur = (() => {
     const m = market('HLF');
     if (!m) { host.appendChild(h('p', { class: 'cap', text: WXM.on() ? 'Landfall contracts not in the quote snapshot.' : 'The market layer is off.' })); return; }
     const tb = h('table');
-    tb.appendChild(h('tr', {}, [h('th', { text: 'Region (' + (m.contracts[0] && m.contracts[0].expiryLabel || 'season') + ')' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'Yes ask' }), h('th', { class: 'num', text: 'Mid' }), h('th', { text: 'On the map' })]));
+    tb.appendChild(h('tr', {}, [h('th', { text: 'Region (' + (m.contracts[0] && m.contracts[0].expiryLabel || 'season') + ')' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'No bid' }), h('th', { class: 'num', text: 'Yes price' }), h('th', { text: 'On the map' })]));
     m.contracts.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
       const k = regionKey(c.label);
       const onMap = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]) ? 'shaded' : 'not drawn';
-      const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(c.ask)) }), h('td', { class: 'num', text: c.mid == null ? 'no book' : pct(cents(c.mid)) }), h('td', { text: onMap })]);
+      const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) }), h('td', { text: onMap })]);
       attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat([['On the map', onMap]]), asofFoot()));
       tb.appendChild(tr);
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
-    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '; “mid” is the Yes midpoint where both sides are quoted, else the one side shown.' }));
+    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. The Yes price is midway between the Yes bid and one dollar less the No bid where both sides have bids, else the one side shown; there are no sellers, only bids to buy Yes or No.' }));
   }
 
   // ---- the vendor lane
@@ -412,9 +416,9 @@ window.WXHur = (() => {
     if (!others.length) { host.appendChild(h('p', { class: 'cap', text: 'Nothing beyond the count and landfall contracts is listed at the moment.' })); return; }
     others.forEach(m => {
       const tb = h('table');
-      tb.appendChild(h('tr', {}, [h('th', { text: m.name + ' (' + m.symbol + ')' }), h('th', { text: 'Settles' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'Yes ask' }), h('th', { class: 'num', text: 'Mid' })]));
+      tb.appendChild(h('tr', {}, [h('th', { text: m.name + ' (' + m.symbol + ')' }), h('th', { text: 'Settles' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'No bid' }), h('th', { class: 'num', text: 'Yes price' })]));
       m.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec) || a.strike - b.strike).forEach(c => {
-        const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(c.ask)) }), h('td', { class: 'num', text: c.mid == null ? 'no book' : pct(cents(c.mid)) })]);
+        const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) })]);
         attach(tr, tip.rows(contractTitle(m, c), quoteRows(c), asofFoot()));
         tb.appendChild(tr);
       });

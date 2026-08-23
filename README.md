@@ -74,7 +74,7 @@ before the day began, and whether it is an official product value or an extreme 
 | `snapshots/scorecard.json` | daily | per station and source: n, MAE, bias, share within 1° and 2°; the last 14 scored days |
 | `snapshots/normals/{STATION}.json` | weekly | NCEI 2006-2020 daily normals, with the GHCN station id and its distance from the airport |
 | `snapshots/climate.json` | daily | NCEI, GML, STAR series and the RAPID annual means |
-| `snapshots/market/{STATION}.json` | 10 min | the station's listed strikes for today and tomorrow with Yes bid/ask/mid and sizes, the implied medians, and each strike's quote history (two days, 10-minute samples) |
+| `snapshots/market/{STATION}.json` | 10 min | the station's listed strikes for today and tomorrow with the best bids and sizes (the feed's `ask` on a Yes contract is one dollar less the No bid), the Yes price midpoint, the implied medians, and each strike's quote history (two days, 10-minute samples) |
 | `snapshots/market/summary.json` | 10 min | per station: listed or not, the implied medians for today and tomorrow |
 | `snapshots/market/hurricane.json`, `climate.json` | 10 min | every contract of the exchange's hurricane category and of the climate products, with quotes |
 | `snapshots/reask.json` | 10 min | the vendor lane: its state when off; per storm the latest LiveCyc ladder and the interim and final settlement files when on |
@@ -136,7 +136,7 @@ The market layer lives in `site/js/market.js` behind one switch (`market_overlay
 `config/site.json`, overridable by `?market=`). The standalone site ships `live`: the quote job
 (`pipeline/market.py`, every 10 minutes) reads the exchange's three public market-data endpoints
 (category tree, a market's contracts, a contract's top of book; no key) and writes per-station
-snapshots with the Yes-side bid, ask and midpoint of every listed strike for the station's today
+snapshots with the Yes bid, the No bid and the Yes price midpoint of every listed strike for the station's today
 and tomorrow, a rolling two-day history of each strike's quote, the market-implied median (the
 strike where the Yes price crosses 50¢), and the hurricane and climate product groups. Pages show
 prices in cents with the time they were read; nothing is fee adjusted. `placeholder` keeps the

@@ -48,10 +48,12 @@ window.WXCity = (() => {
     const im = side === 'h' ? lad.impliedHigh : lad.impliedLow;
     const rows = [
       ['Contract', L.label || (cmp + L.strike)],
-      [L.side === 'mid' ? 'Yes midpoint' : (L.side === 'bid' ? 'Yes bid only' : (L.side === 'ask' ? 'Yes ask only' : 'Yes')), L.yes == null ? 'no book' : L.yes + '¢'],
-      ['Bid', L.bid == null ? '—' : cents(L.bid) + size(L.bidSize)],
-      ['Ask', L.ask == null ? '—' : cents(L.ask) + size(L.askSize)],
-      ['Book', L.from === 'no' ? 'from the No side' : (L.side === 'mid' ? 'two-sided' : (L.side ? 'one-sided' : null))],
+      [L.side === 'mid' ? 'Yes price (midpoint)' : (L.side === 'bid' ? 'Yes price (Yes bids only)' : (L.side === 'ask' ? 'Yes price (No bids only)' : 'Yes price')), L.yes == null ? 'no bids' : L.yes + '¢'],
+      ['Yes bid', L.bid == null ? '—' : cents(L.bid) + size(L.bidSize)],
+      ['No bid', L.noBid == null ? '—' : cents(L.noBid) + size(L.noBidSize)],
+      ['Buy Yes now at', L.noBid == null ? null : (100 - L.noBid) + '¢'],
+      ['Buy No now at', L.bid == null ? null : (100 - L.bid) + '¢'],
+      ['Quoted from', L.from === 'no' ? 'the No contract' : null],
       ['Last 10 min', last && prev ? ((last.v - prev.v > 0 ? '+' : '') + (last.v - prev.v) + '¢') : null],
       ['First sample', first && first !== last ? first.v + '¢ at ' + WXC.clock(first.t, c.tz) : null],
       ['Implied median', im && im.value != null ? WXC.deg(im.value) : (im && im.edge ? 'beyond the ladder (' + im.edge + ')' : null)],
@@ -59,7 +61,7 @@ window.WXCity = (() => {
       ['Quotes as of', lad.asof ? WXC.clockFull(Date.parse(lad.asof), Intl.DateTimeFormat().resolvedOptions().timeZone) : null],
     ];
     return tip.rows(cmp + L.strike + '°' + unit + ' — ' + (side === 'h' ? 'daily high above' : 'daily low below') + ' ' + L.strike,
-      rows, 'the exchange’s Yes price, not fee adjusted · click to pin');
+      rows, 'Yes and No bids sum to $1; there are no sellers · not fee adjusted · click to pin');
   }
 
   // a picker dot: tomorrow's numbers against the forecast, then today so far
@@ -190,7 +192,7 @@ window.WXCity = (() => {
       });
       row.appendChild(div);
     });
-    row.appendChild(h('div', { class: 'cap', text: 'Strike ladder: ' + lad.label + (lad.live ? '; the number is the Yes midpoint in cents, or the one side quoted (*) where the book is one-sided; bid and ask on hover.' : '.') }));
+    row.appendChild(h('div', { class: 'cap', text: 'Strike ladder: ' + lad.label + (lad.live ? '; the number is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids; hover for the bids.' : '.') }));
 
   }
 
@@ -394,9 +396,9 @@ window.WXCity = (() => {
       [['high', '>'], ['low', '<']].forEach(([m, cmp]) => {
         lad[m].forEach(L => {
           const yy = y(L.strike);
-          if (L.yes == null) {                     // listed, no book on either side
+          if (L.yes == null) {                     // listed, no bids on either side
             g.appendChild(bind(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'transparent', stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2' }), () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
-            g.appendChild(txt('no book', { x: S.LX + S.LW / 2, y: yy + 3.2, class: 'ax', 'text-anchor': 'middle', 'pointer-events': 'none' }));
+            g.appendChild(txt('no bids', { x: S.LX + S.LW / 2, y: yy + 3.2, class: 'ax', 'text-anchor': 'middle', 'pointer-events': 'none' }));
           } else {
             const gw = L.yes / 100 * S.LW;
             const yb = el('rect', { x: S.LX, y: yy - 5.5, width: Math.max(gw, 1), height: 11, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
@@ -411,10 +413,10 @@ window.WXCity = (() => {
       });
       if (lad.live && !lad.listed) g.appendChild(txt('no contracts listed for this day', { x: S.LX + S.LW / 2, y: (S.T + S.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
       [0, 50, 100].forEach(p => g.appendChild(txt(p + (p === 100 ? '¢' : ''), { x: lx(p), y: S.B + 15, 'text-anchor': 'middle', class: 'ax' })));
-      g.appendChild(txt('Yes green, No red' + (lad.live ? ' · dotted: one-sided book' : ' · placeholders'), { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
+      g.appendChild(txt('Yes green, No red' + (lad.live ? ' · dotted: bids on one side only' : ' · placeholders'), { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
       const obsRows = (ob && ob.rows) || [];
       const fseries = [AI.nws && AI.nws.rows, AI.nbm && AI.nbm.rows, fc && fc.nws && fc.nws.hourly, fc && fc.nbm && fc.nbm.hourly];
-      const how = lad.live ? 'ForecastEx Yes midpoint, or the one side quoted, sampled every 10 minutes' : 'placeholder';
+      const how = lad.live ? 'ForecastEx Yes price, midway between the Yes bid and one dollar less the No bid, sampled every 10 minutes' : 'placeholder';
       [['h', 'Yes price — high strikes (' + how + ')', S.PH0, S.PH1], ['l', 'Yes price — low strikes (' + how + ')', S.PL0, S.PL1]].forEach(([side, ttl, p0, p1]) => {
         const ypp = v => p1 - (v / 100) * (p1 - p0);
         g.appendChild(el('line', { x1: S.L, x2: S.R, y1: p0 - 24, y2: p0 - 24, stroke: 'var(--line)' }));
@@ -439,7 +441,7 @@ window.WXCity = (() => {
     let emb = document.getElementById('embedDisclosure');
     if (market && lad && lad.live && window.WX && WX.target === 'embed' && card) {
       if (!emb) { emb = h('p', { class: 'cap', id: 'embedDisclosure' }); card.insertAdjacentElement('afterend', emb); }
-      emb.textContent = (WX.disclosure || '') + ' Prices are the exchange’s published quotes at the time shown, not a quote or offer, and can be stale.';
+      emb.textContent = (WX.disclosure || '') + ' Prices are the exchange’s published quotes at the time shown, not a bid or a solicitation to trade by this site, and can be stale.';
     } else if (emb) emb.remove();
 
     // ---- titles
@@ -474,13 +476,13 @@ window.WXCity = (() => {
       if (inPrice) {
         HV.prices.filter(s => (hoverSide === 'h') === (s.label[0] === '>')).forEach(s => {
           const p = near(s.pts);
-          if (p) rows.push([sw(s.col) + 'Yes ' + s.label, (p.side && p.side !== 'mid' ? p.v + '¢ (' + p.side + ' only)' : p.v + '¢') + (p.bid != null && p.ask != null ? ' · ' + p.bid + '/' + p.ask : '')]);
+          if (p) rows.push([sw(s.col) + 'Yes ' + s.label, (p.side && p.side !== 'mid' ? p.v + '¢ (' + (p.side === 'bid' ? 'Yes bids only' : 'No bids only') + ')' : p.v + '¢') + (p.bid != null && p.ask != null ? ' · Yes bid ' + p.bid + ' / No bid ' + (100 - p.ask) : '')]);
         });
         const o = HV.series.find(s => s.nm === 'Observed'); const op = o && near(o.pts);
         if (op) rows.push([sw(COL.obs) + 'Observed', op.v.toFixed(1) + '°']);
       }
       if (!rows.length) { tip.hide(); if (hline) hline.remove(); hline = null; return; }
-      tip.show(e, tip.rows(ts, rows, inPrice ? 'Yes price in cents; bid/ask where both sides were quoted' : null));
+      tip.show(e, tip.rows(ts, rows, inPrice ? 'Yes price in cents, midway between the Yes bid and one dollar less the No bid' : null));
       if (!hline || !hline.isConnected) { hline = el('line', { stroke: 'var(--muted)', 'stroke-width': .8, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }); svg.appendChild(hline); }
       hline.setAttribute('x1', q.x); hline.setAttribute('x2', q.x); hline.setAttribute('y1', S.T); hline.setAttribute('y2', HV.market ? S.PL1 : S.B);
     });
