@@ -19,9 +19,12 @@ this one has to stay up and stay fresh on its own.
   Data on AWS, NOMADS, NHC, NCEI, NOAA GML, NOAA/NESDIS STAR. No Open-Meteo, no commercial vendors.
   Documented exceptions: Natural Earth basemap outlines (public domain) and the RAPID AMOC annual means
   (UK NERC, acknowledged in NOTICE), which the owner chose to keep; the exchange's public market-data
-  endpoints for contract prices (owner's decision 2026-08-23, `pipeline/exchange.py`); and the vendor
+  endpoints for contract prices (owner's decision 2026-08-23, `pipeline/exchange.py`); the vendor
   lane for live-storm wind probabilities (`pipeline/reask.py`), which is off by default, needs a
-  credential from the environment, and shows the vendor's numbers as published under its mark.
+  credential from the environment, and shows the vendor's numbers as published under its mark; and the
+  seasonal hurricane forecast total in `season_forecast` (Colorado State University, owner's decision
+  2026-08-23), which is attributed wherever it is drawn and falls back to the climatological pace when
+  empty. The hurricane count panels draw both paces so the forecast is never the only line shown.
 - **Observations come from aviationweather.gov METAR, not api.weather.gov.** api.weather.gov also
   serves the five-minute ASOS stream, and a daily maximum over five-minute data lands at or above one
   over hourly METARs. The contracts settle on METARs. The reasoning is in `pipeline/gov_weather.py`.

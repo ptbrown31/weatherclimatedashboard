@@ -26,3 +26,9 @@ an Interactive Brokers or ForecastEx product.
 Live-storm wind probabilities, where the site operator has enabled that lane,
 are provided by Reask and displayed as published under the "Powered by Reask"
 mark; the reference-location registry (geo/reask_locations.csv) is Reask's.
+
+The seasonal Atlantic hurricane totals used to scale the pace curve on the
+hurricane page are the Colorado State University Tropical Meteorology Project's
+forecast, labelled with its issue date wherever it is drawn. It is not a
+government product; the climatological pace beside it is, computed here from
+the NHC HURDAT2 best-track archive.

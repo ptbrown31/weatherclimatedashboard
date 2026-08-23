@@ -405,12 +405,21 @@ window.WXHur = (() => {
       .filter(e => month == null || new Date(e.date + 'T00:00:00Z').getUTCMonth() === month);
     const bars = period.rows.map(r => ({ n: r.c.strike + cfg.step, c: r.c })).filter(b => b.n != null).sort((a, b) => a.n - b.n);
     const fc = (SZN && SZN.forecast) || {};
-    const target = fc[cfg.key] != null ? fc[cfg.key] : (SZN && SZN.climatology && (month == null ? SZN.climatology.totals[cfg.key] : (SZN.climatology.monthlyMajors || {})[String(month + 1).padStart(2, '0')]));
-    const scale = (fc[cfg.key] != null && clim && clim.length && clim[clim.length - 1][1] > 0) ? fc[cfg.key] / clim[clim.length - 1][1] : 1;
-    const curve = clim ? clim.map(p => [p[0], p[1] * scale]) : null;
+    const cl = (SZN && SZN.climatology) || {};
+    // the climatological pace for this window, and the same shape scaled to a
+    // seasonal forecast total when one is configured. A monthly window scales by
+    // the season's ratio, not its own, so August keeps its share of the season.
+    const seasonTotal = (cl.totals || {})[cfg.key];
+    const ratio = (fc[cfg.key] != null && seasonTotal) ? fc[cfg.key] / seasonTotal : null;
+    const curve = clim;
+    const fcurve = ratio && clim ? clim.map(p => [p[0], p[1] * ratio]) : null;
+    const climTarget = month == null ? seasonTotal : (cl.monthlyMajors || {})[String(month + 1).padStart(2, '0')];
+    const fcTarget = ratio != null && climTarget != null ? Math.round(climTarget * ratio * 100) / 100 : null;
+    const target = fcTarget != null ? fcTarget : climTarget;
 
-    const W = 960, Hh = 288, L = 52, R = 468, RL = 556, RR = 928, T = 30, B = 236;
-    const ymax = Math.max(1, ...bars.map(b => b.n), events.length, curve ? Math.ceil(curve[curve.length - 1][1]) : 0) + 1;
+    const W = 960, Hh = 302, L = 52, R = 468, RL = 556, RR = 928, T = 30, B = 236;
+    const ymax = Math.max(1, ...bars.map(b => b.n), events.length,
+      curve ? Math.ceil(curve[curve.length - 1][1]) : 0, fcurve ? Math.ceil(fcurve[fcurve.length - 1][1]) : 0) + 1;
     const y = n => B - (n / ymax) * (B - T);
     const t0 = curve ? curve[0][0] : Date.UTC(year, 4, 1), t1 = curve ? curve[curve.length - 1][0] : Date.UTC(year, 10, 30);
     const x = t => L + ((t - t0) / (t1 - t0)) * (R - L);
@@ -436,21 +445,30 @@ window.WXHur = (() => {
       const t = t0 + ((q.x - L) / (R - L)) * (t1 - t0);
       const cp = curve ? curve.reduce((a, p) => Math.abs(p[0] - t) < Math.abs(a[0] - t) ? p : a) : null;
       const formed = events.filter(ev => Date.parse(ev.date + 'T00:00:00Z') <= t).length;
+      const fp = fcurve ? fcurve.reduce((a, p) => Math.abs(p[0] - t) < Math.abs(a[0] - t) ? p : a) : null;
       tip.show(e, tip.rows(dstr(t) + ', ' + year, [
         ['Formed by this date', t > now0 ? 'not yet' : String(formed)],
-        ['An average season by now', cp ? (Math.round(cp[1] * 10) / 10) : null],
-        [fc[cfg.key] != null ? 'Scaled to the forecast total' : (month == null ? 'Average season total' : 'An average ' + MONTHS[month]),
-         target != null ? String(Math.round(target * 100) / 100) : null],
-      ], 'pace from the ' + esc((SZN.climatology || {}).period || '') + ' formation calendar in the NHC best tracks'));
+        ['An average season by now', cp ? String(Math.round(cp[1] * 10) / 10) : null],
+        [fp ? esc(fc.label || 'Forecast') + ' pace by now' : null, fp ? String(Math.round(fp[1] * 10) / 10) : null],
+        [month == null ? 'An average season ends near' : 'An average ' + MONTHS[month], climTarget != null ? String(Math.round(climTarget * 100) / 100) : null],
+        [fcTarget != null ? esc(fc.label || 'Forecast') + ' total' : null, fcTarget != null ? String(fcTarget) : null],
+      ].filter(r => r[0]), 'pace from the ' + esc(cl.period || '') + ' formation calendar in the NHC best tracks'
+        + (fc.source ? '; forecast total from ' + esc(fc.source) : '')));
     });
     band.addEventListener('mouseleave', () => tip.hide());
     svg.appendChild(band);
 
-    // the pace of an average season, and the ground it covers
-    if (curve) {
-      const d = curve.map((p, i) => (i ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
+    // both paces: the one that is filled is the one the ladder's marker follows
+    const lead = fcurve || curve;
+    if (lead) {
+      const d = lead.map((p, i) => (i ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
       svg.appendChild(el('path', { d: d + 'L' + x(t1).toFixed(1) + ',' + y(0) + 'L' + x(t0).toFixed(1) + ',' + y(0) + 'Z', fill: 'var(--cool)', 'fill-opacity': .12, 'pointer-events': 'none' }));
       svg.appendChild(el('path', { d, fill: 'none', stroke: 'var(--cool)', 'stroke-width': 2, 'pointer-events': 'none' }));
+    }
+    if (fcurve && curve) {
+      svg.appendChild(el('path', { d: curve.map((p, i) => (i ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(''),
+        fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.4, 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
+      svg.appendChild(txt('an average season', { x: x(t1) - 4, y: y(curve[curve.length - 1][1]) - 5, 'text-anchor': 'end', class: 'ax lbl', fill: 'var(--muted)' }));
     }
     if (month == null) for (let mo = new Date(t0).getUTCMonth(); mo <= new Date(t1).getUTCMonth(); mo++) {
       const tm = Date.UTC(year, mo, 1);
@@ -489,16 +507,19 @@ window.WXHur = (() => {
       svg.appendChild(txt('today', { x: x(now) + 4, y: T + 4, class: 'ax' }));
     }
     // the count so far, large, and what the pace says
-    const paceNow = curve ? (curve.find(p => p[0] >= now) || curve[curve.length - 1])[1] : null;
+    const at = c => c ? (c.find(p => p[0] >= now) || c[c.length - 1])[1] : null;
+    const paceNow = at(lead), climNow = at(curve);
     svg.appendChild(txt(String(events.length), { x: L + 12, y: T + 34, 'font-size': 30, 'font-weight': 700, fill: 'var(--navy)' }));
-    const tgt = target == null ? null : Math.round(target * 100) / 100;
+    const climTgt = climTarget == null ? null : Math.round(climTarget * 100) / 100;
     const note = 'so far · ' + (fc[cfg.key] != null
-      ? (esc(fc.label || fc.source || 'forecast') + ' ' + fc[cfg.key])
-      : (tgt == null ? 'no climatology for this period'
-         : month == null ? 'an average season ends near ' + tgt
-         : 'an average ' + MONTHS[month] + ' has ' + tgt));
+      ? esc(fc.label || fc.source || 'forecast') + ' ' + fc[cfg.key] + (month != null && fcTarget != null ? ', ' + MONTHS[month] + ' share ' + fcTarget : '')
+      : (climTgt == null ? 'no climatology for this period'
+         : month == null ? 'an average season ends near ' + climTgt
+         : 'an average ' + MONTHS[month] + ' has ' + climTgt));
     svg.appendChild(txt(note, { x: L + 12, y: T + 56, class: 'ax' }));
-    if (paceNow != null) svg.appendChild(txt('pace implied by today: ' + (Math.round(paceNow * 10) / 10), { x: L + 12, y: T + 70, class: 'ax' }));
+    if (paceNow != null) svg.appendChild(txt('pace implied by today: ' + (Math.round(paceNow * 10) / 10)
+      + (fcurve && climNow != null ? ' (an average season ' + (Math.round(climNow * 10) / 10) + ')' : ''),
+      { x: L + 12, y: T + 70, class: 'ax' }));
 
     // the ladder, on the same count axis
     svg.appendChild(txt('The market’s ladder', { x: RL, y: T - 10, class: 'axl', 'font-weight': 700 }));
@@ -516,11 +537,24 @@ window.WXHur = (() => {
       svg.appendChild(bar);
       svg.appendChild(txt(v + '¢', { x: px(v) + 4, y: yy + 3.5, class: 'ax', 'font-weight': 700, 'pointer-events': 'none' }));
     });
+    // where each pace finishes, marked on the ladder and named underneath it, so
+    // the labels cannot land on a bar's price
+    const marks = [];
     if (target != null) {
       svg.appendChild(el('line', { x1: RL, x2: RR, y1: y(target), y2: y(target), stroke: 'var(--cool)', 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
-      svg.appendChild(txt(fc[cfg.key] != null ? 'forecast total' : (month == null ? 'average season' : 'average ' + MONTHS[month]),
-        { x: RR, y: y(target) - 5, 'text-anchor': 'end', class: 'ax', fill: 'var(--cool)' }));
+      marks.push(['var(--cool)', (fcTarget != null ? esc(fc.label || 'forecast') : (month == null ? 'an average season' : 'an average ' + MONTHS[month])) + ' ' + (Math.round(target * 100) / 100)]);
     }
+    if (fcTarget != null && climTarget != null && Math.abs(climTarget - fcTarget) > 0.05) {
+      svg.appendChild(el('line', { x1: RL, x2: RR, y1: y(climTarget), y2: y(climTarget), stroke: 'var(--muted)', 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
+      marks.push(['var(--muted)', (month == null ? 'an average season' : 'an average ' + MONTHS[month]) + ' ' + (Math.round(climTarget * 100) / 100)]);
+    }
+    let mx = RL;
+    marks.forEach(([col, label]) => {
+      svg.appendChild(el('line', { x1: mx, x2: mx + 14, y1: B + 44, y2: B + 44, stroke: col, 'stroke-dasharray': '5 4' }));
+      const t = txt(label, { x: mx + 18, y: B + 47.5, class: 'ax', fill: col });
+      svg.appendChild(t);
+      mx += 26 + label.length * 5.4;
+    });
     return svg;
   }
   const monthOfSpec = sp => { const p = String(sp).split('.'); return p.length >= 2 ? (+p[1]) - 1 : null; };

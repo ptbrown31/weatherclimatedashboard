@@ -77,7 +77,7 @@ before the day began, and whether it is an official product value or an extreme 
 | `snapshots/market/{STATION}.json` | 10 min | the station's listed strikes for today and tomorrow with the best bids and sizes (the feed's `ask` on a Yes contract is one dollar less the No bid), the Yes price midpoint, the implied medians, and each strike's quote history (two days, 10-minute samples) |
 | `snapshots/market/summary.json` | 10 min | per station: listed or not, the implied medians for today and tomorrow |
 | `snapshots/market/hurricane.json`, `climate.json` | 10 min | every contract of the exchange's hurricane category and of the climate products, with quotes |
-| `snapshots/season.json` | daily | the Atlantic season's formations to date from the ATCF best tracks, and the 1991-2020 cumulative formation calendar from NHC HURDAT2, so the count contracts can be read against the pace of an average season |
+| `snapshots/season.json` | daily | the Atlantic season's formations to date from the ATCF best tracks, and the 1991-2020 cumulative formation calendar from NHC HURDAT2, so the count contracts can be read against the pace of an average season, plus the seasonal forecast total from `season_forecast` when one is configured |
 | `snapshots/reask.json` | 10 min | the vendor lane: its state when off; per storm the latest LiveCyc ladder and the interim and final settlement files when on |
 | `archive/market/{YYYYMMDD}/{HHMMSS}.json.gz` | 10 min | every quote of the pass, append-only (expires after 400 days on AWS) |
 

@@ -46,11 +46,11 @@
   },
   "_reask_note": "both values come from the environment (WX_REASK_BASE_URL, WX_REASK_API_KEY); leave them empty here",
   "season_forecast": {
-    "named": null,
-    "hurricanes": null,
-    "majors": null,
-    "source": "",
-    "label": ""
+    "named": 9,
+    "hurricanes": 4,
+    "majors": 1,
+    "source": "Colorado State University Tropical Meteorology Project",
+    "label": "CSU, 8 Jul 2026"
   },
-  "_season_forecast_note": "A seasonal hurricane outlook is a forecast total for the whole season, not a government observation product, so nothing is filled in here by default and the season figure falls back to the climatological mean. Fill the three counts in with a published outlook and name it in source and label to draw it as a second line."
+  "_season_forecast_note": "A seasonal hurricane forecast is not a government product, so this is an owner's choice and is attributed wherever it is drawn. Empty values fall back to the climatological pace alone. Update the numbers and the label together when CSU revises."
 }
