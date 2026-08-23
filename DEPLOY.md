@@ -158,29 +158,30 @@ takes minutes to an hour.
 | Market overlay needs to go dark | `market_overlay.standalone` to `off` in `config/site.json`, rebuild and sync the site (step 6); the pipeline can keep quoting. |
 | Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs plus about 200k for the quote job (45 objects a pass, 144 passes a day), roughly $2 a month in total; Lambda stays inside the always-free allowance (the quote pass is about 90 s at 512 MB). `aws ce` or the billing console. |
 
-## 10. The vendor lane (live-storm wind probabilities), optional
+## 10. The vendor lane (live-storm wind probabilities)
 
-Off by default, and gated three ways: `sources.reask` in `config/site.json` must be `true` (then
-repackage and upload the code, step 4) AND the function must carry the vendor's API base URL and
-the credential. Neither value is in the repository. Read them into shell variables without echo
-so they never land in shell history, then pass them as parameters:
+`sources.reask` in `config/site.json` is `true`, so the lane runs as soon as the function carries
+the vendor's API base URL and the credential; without them every pass writes a status snapshot
+saying so and the hurricane page reports the lane off. `REASK_BASE_URL` lives in
+`ops/aws/deploy.env`; the key is appended to that gitignored file by the owner (or exported in
+the shell), never written by a script and never shown:
 
-    read -rs REASK_KEY; read -r REASK_BASE
-    aws cloudformation deploy ... --parameter-overrides ... \
-        ReaskBaseUrl="$REASK_BASE" ReaskApiKey="$REASK_KEY"
+    chmod 600 ops/aws/deploy.env
+    printf 'REASK_API_KEY=%s\n' "$(read -rs k; echo "$k")" >> ops/aws/deploy.env   # paste, Enter; nothing echoes
+    ./ops/aws/deploy.sh vendor
 
-Both parameters are `NoEcho`: they become function environment variables (`WX_REASK_BASE_URL`,
-`WX_REASK_API_KEY`), never template outputs. The base URL must be https; the client refuses
-redirects so the key is never re-sent to another host. Every later `stack` deploy must pass
-them again, or CloudFormation resets them to empty and the lane switches itself off (the
-hurricane page then says "no credential configured"). With all three gates open the `market`
-schedule polls the vendor's listing every 10 minutes and fetches each new forecast cycle,
-interim and final file, archiving every file under `data/archive/reask/`. `snapshots/reask.json`
-reports the lane's state either way, and the hurricane page shows it.
+Both values become `NoEcho` stack parameters and function environment variables
+(`WX_REASK_BASE_URL`, `WX_REASK_API_KEY`), never template outputs. The base URL must be https; the
+client refuses redirects so the key is never re-sent to another host. Every later `stack` deploy
+reads the same two variables from `deploy.env`, so they persist; if they are missing from the
+environment at that time, CloudFormation resets them to empty and the lane switches itself off.
+With both in place the `market` schedule polls the vendor's listing every 10 minutes and fetches
+each new forecast cycle, interim and final file, archiving every file under `data/archive/reask/`.
+`snapshots/reask.json` reports the lane's state either way.
 
-Before enabling: the vendor's terms require its mark on every figure that shows the data and a
-credential of the site's own, separate from any other system's pull. Confirm both with the vendor
-in writing and keep the confirmation with the deployment records.
+Every figure that shows the vendor's data carries its mark (the hurricane page does this
+itself). The first real storm delivery should be checked against `data/archive/reask/` by hand:
+the parser was built from the documented file shapes without a live storm to test on.
 
 ## Cloudflare alternative
 

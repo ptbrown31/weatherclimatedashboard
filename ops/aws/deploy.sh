@@ -7,6 +7,7 @@
 #   ops/aws/deploy.sh seed        # import an existing archive and backfill observations into S3
 #   ops/aws/deploy.sh site        # build both targets for deployment and upload them
 #   ops/aws/deploy.sh check       # is it alive: manifest as-of, alarms, schedules
+#   ops/aws/deploy.sh vendor      # the live-storm lane: stack deploy with the vendor base URL and key
 #
 # Settings come from ops/aws/deploy.env (copy deploy.env.example; gitignored)
 # or from the environment. Nothing here stores a credential: the AWS CLI's own
@@ -58,7 +59,13 @@ phase_preflight() {
 phase_stack() {
   need aws "brew install awscli"
   [ -n "$USER_AGENT" ] || die "USER_AGENT is empty"
+  # the vendor lane's two values ride along whenever they are set (deploy.env or the
+  # environment), so a later stack deploy never resets them to empty; neither is echoed
+  local vendor_params=()
+  [ -n "${REASK_BASE_URL:-}" ] && vendor_params+=("ReaskBaseUrl=$REASK_BASE_URL")
+  [ -n "${REASK_API_KEY:-}" ] && vendor_params+=("ReaskApiKey=$REASK_API_KEY")
   say "deploying stack $STACK in $REGION (this takes 5-15 minutes: CloudFront is slow to create)"
+  [ ${#vendor_params[@]} -eq 2 ] && say "vendor lane parameters: set (values not shown)"
   aws cloudformation deploy \
     --stack-name "$STACK" \
     --template-file "$HERE/template.yaml" \
@@ -69,11 +76,22 @@ phase_stack() {
       "UserAgent=$USER_AGENT" \
       "DomainName=$DOMAIN" \
       "CertificateArn=$CERT_ARN" \
-      "AlarmEmail=$ALARM_EMAIL"
+      "AlarmEmail=$ALARM_EMAIL" \
+      "${vendor_params[@]}"
   say "outputs"
   aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs" --output table
   [ -n "$ALARM_EMAIL" ] && echo "Confirm the SNS subscription email from AWS, or the alarms go nowhere."
   true
+}
+
+phase_vendor() {
+  # the live-storm lane: both values must be present; they go to the function as
+  # NoEcho parameters and nothing here prints them
+  [ -n "${REASK_BASE_URL:-}" ] || die "REASK_BASE_URL is empty (deploy.env or the environment)"
+  [ -n "${REASK_API_KEY:-}" ] || die "REASK_API_KEY is empty (deploy.env or the environment; see DEPLOY.md section 10)"
+  case "$REASK_BASE_URL" in https://*) ;; *) die "REASK_BASE_URL must be https" ;; esac
+  phase_stack
+  say "the next market pass (every 10 minutes) polls the vendor; check with: ops/aws/deploy.sh check"
 }
 
 phase_code() {
@@ -164,6 +182,7 @@ case "${1:-}" in
   seed)      phase_seed ;;
   site)      phase_site ;;
   check)     phase_check ;;
+  vendor)    phase_vendor ;;
   all)       phase_preflight; phase_stack; phase_code; phase_seed; phase_site; phase_check ;;
   *) sed -n '2,14p' "$0"; exit 2 ;;
 esac

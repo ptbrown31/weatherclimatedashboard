@@ -26,7 +26,7 @@
     "mav": true,
     "obs_record": false,
     "exchange": true,
-    "reask": false
+    "reask": true
   },
   "_sources_note": "obs_record is owned by the 10-minute obs job; set it true only when running the archive job alone. reask needs WX_REASK_API_KEY in the environment as well.",
   "market_overlay": {
