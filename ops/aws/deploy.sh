@@ -139,10 +139,18 @@ m=json.load(sys.stdin); now=dt.datetime.now(dt.timezone.utc)
 for k,v in m["asof"].items():
     age = None if not v else round((now-dt.datetime.fromisoformat(v.replace("Z","+00:00"))).total_seconds()/60)
     print(f"  {k:10s} as of {v}  ({age} min ago)" if v else f"  {k:10s} none yet")
-print("  alarms:", m.get("alarms")); print("  archive days:", m.get("archiveDays")); print("  unhealed obs gaps:", m.get("obsUnhealed"))' \
+print("  alarms:", m.get("alarms"), " market lane alarms:", m.get("marketAlarms")); print("  archive days:", m.get("archiveDays")); print("  unhealed obs gaps:", m.get("obsUnhealed")); print("  vendor lane enabled:", m.get("reaskEnabled"))' \
     || echo "  manifest not served yet (run the site and code phases; the obs job writes it within 10 minutes)"
   say "schedules"
   aws scheduler list-schedules --name-prefix "$STACK" --query "Schedules[].{Name:Name,State:State}" --output table
+  say "quote lane: ${url}data/snapshots/market/summary.json"
+  curl -sS --max-time 30 "${url}data/snapshots/market/summary.json" | python3 -c '
+import json, sys
+m = json.load(sys.stdin)
+print("  as of:", m.get("asof"), " quoted:", m.get("quoted"), " failed:", m.get("failed"), " listed stations:", sum(1 for c in m.get("cities", []) if c.get("listed")))
+print("  roster stations without a listed symbol:", sorted((m.get("unmatched") or {}).keys()) or "none", " partial ladders kept:", m.get("partialKept"))' \
+    || echo "  quote summary not served yet (the market job writes it within 10 minutes)"
+
   say "alarms"
   aws cloudwatch describe-alarms --alarm-name-prefix "$STACK" --query "MetricAlarms[].{Alarm:AlarmName,State:StateValue}" --output table
   say "last 20 log lines"

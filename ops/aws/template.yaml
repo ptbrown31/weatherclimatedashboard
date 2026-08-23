@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Weather tools site: one private S3 bucket (site files at the root, snapshots and the
   archive under data/), a CloudFront distribution with Origin Access Control, one Lambda
-  function that runs every pipeline job, four EventBridge schedules, and an error alarm.
+  function that runs every pipeline job (archive, snapshots, hurricane, exchange quotes, the
+  gated vendor lane, the daily jobs), four EventBridge schedules, and an error alarm.
   Deployment-agnostic application code; this template is the only AWS-specific artefact
   besides pipeline/handler.py. See DEPLOY.md for the steps around it.
 
@@ -37,7 +38,12 @@ Parameters:
     NoEcho: true
     Description: >
       Optional credential for the vendor live-storm wind lane (sources.reask in config/site.json must
-      also be true). Leave empty to keep the lane off. Never written to the repository.
+      also be true, and ReaskBaseUrl set). Leave empty to keep the lane off. Never written to the repository.
+  ReaskBaseUrl:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional https base URL of the vendor's API for the live-storm wind lane. Leave empty to keep the lane off.
 
 Conditions:
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
@@ -254,6 +260,7 @@ Resources:
           WX_USER_AGENT: !Ref UserAgent
           WX_DOMAIN: !Ref DomainName
           WX_REASK_API_KEY: !Ref ReaskApiKey
+          WX_REASK_BASE_URL: !Ref ReaskBaseUrl
       # placeholder body; DEPLOY.md replaces it with dist/lambda.zip
       Code:
         ZipFile: |
@@ -285,15 +292,18 @@ Resources:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: !Sub "${SiteName}-obs"
-      ScheduleExpression: rate(10 minutes)
+      ScheduleExpression: cron(0/10 * * * ? *)
+      ScheduleExpressionTimezone: UTC
       FlexibleTimeWindow: { Mode: "OFF" }
       Target:
         Arn: !GetAtt Pipeline.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
         Input: '{"job": "obs"}'
         RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 300 }
-  # the exchange quotes, offset from the observation job so the two ten-minute
-  # lanes never share a minute; the quote pass takes about 90 s
+  # the exchange quotes at :03, :13, ... and the observations at :00, :10, ...:
+  # both are clock-minute crons, so the two ten-minute lanes never share a
+  # minute; the quote pass takes about 90 s. Each lane keeps its own health
+  # file regardless (pipeline/archive.py).
   ScheduleMarket:
     Type: AWS::Scheduler::Schedule
     Properties:

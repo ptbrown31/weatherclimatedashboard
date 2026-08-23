@@ -610,10 +610,12 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
         rows.append(row)
     raw_health = store.get(arch.HEALTH_KEY)
     health = json.loads(raw_health) if raw_health else {}
-    alarms = [s for s, h in health.items() if not s.startswith("_") and isinstance(h, dict) and h.get("fail_streak", 0) >= arch.FAIL_STREAK_ALARM]
+    alarms = arch.alarms_in(health)                       # the weather sources: this lane's own
+    raw_mh = store.get(arch.MARKET_HEALTH_KEY)
+    market_alarms = arch.alarms_in(json.loads(raw_mh) if raw_mh else {})   # shown, never raised here
     summary = {"schema": SCHEMA, "asof": obs_asof, "written": _iso(now), "forecastAsof": fc_asof, "obsAsof": obs_asof,
                "decode": {"TEMP_SOURCE": gw.TEMP_SOURCE, "INCLUDE_SPECI": gw.INCLUDE_SPECI},
-               "alarms": alarms, "cities": rows}
+               "alarms": alarms, "marketAlarms": market_alarms, "cities": rows}
     store.put("snapshots/summary.json", json.dumps(summary, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
 
     depth = store.list("archive/obs/")
@@ -629,7 +631,7 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
                 "reaskEnabled": bool(json.loads(rsk).get("enabled")) if rsk else False,
                 "cadenceMinutes": cfg.get("cadence_minutes", {}),
                 "archiveDays": len(depth), "stations": [c["station"] for c in roster],
-                "decode": summary["decode"], "alarms": alarms, "obsUnhealed": fetch.get("unhealed")}
+                "decode": summary["decode"], "alarms": alarms, "marketAlarms": market_alarms, "obsUnhealed": fetch.get("unhealed")}
     store.put("snapshots/manifest.json", json.dumps(manifest, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     log(kind="summary", stations=len(rows), archiveDays=len(depth), obsAsof=obs_asof, forecastAsof=fc_asof, alarms=alarms)
     return {"summary": len(rows), "alarms": alarms}

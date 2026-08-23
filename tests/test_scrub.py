@@ -17,6 +17,9 @@ class ScrubTrackedFiles(unittest.TestCase):
         hits, skipped = scrub.scan(scrub.tracked_files(), builtin + ext)
         self.assertEqual(hits, [], "forbidden strings in tracked files:\n" + "\n".join(hits[:20]))
 
+    def test_vendor_slots_empty(self):
+        self.assertEqual(scrub.config_slots(), [])
+
     def test_scan_catches_a_key_header(self):
         import tempfile
         # the needle is assembled at runtime so this source file does not carry it

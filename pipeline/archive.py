@@ -64,7 +64,10 @@ from .cities import CITIES
 from .storage import Storage
 
 GRIDS_KEY = "archive/_meta/grids.json"
-HEALTH_KEY = "archive/_meta/health.json"
+HEALTH_KEY = "archive/_meta/health.json"                 # the weather sources' failure streaks
+MARKET_HEALTH_KEY = "archive/_meta/health_market.json"   # the exchange and vendor lanes': a separate file,
+                                                         # because those lanes run on their own schedule and a
+                                                         # shared read-modify-write would lose updates
 OBS_FETCH_KEY = "archive/_meta/obs_fetch.json"   # the last successful observation pull: what obs data is good to
 GRID_MAX_AGE_H = 24            # the docs ask that the points mapping be re-checked periodically
 OBS_MIN_H, OBS_MAX_H = 6, 72   # fresh pull per pass, and the most a pass will reach back to heal a gap
@@ -381,10 +384,12 @@ def _iso_z(t: dt.datetime) -> str:
 
 
 # ---------------------------------------------------------------- health
-def update_health(store: Storage, results: dict, now: dt.datetime) -> dict:
+def update_health(store: Storage, results: dict, now: dt.datetime, key: str = HEALTH_KEY) -> dict:
     """Per-source failure streaks, kept across passes so a source that fails
-    quietly every pass becomes an alarm (see handler.py)."""
-    raw = store.get(HEALTH_KEY)
+    quietly every pass becomes an alarm (see handler.py). Each lane keeps its
+    own file (`key`), so lanes that overlap in time never overwrite each
+    other's streaks; a lane raises only on its own sources."""
+    raw = store.get(key)
     health = json.loads(raw) if raw else {}
     for source, r in results.items():
         h = health.setdefault(source, {"fail_streak": 0, "last_ok": None, "last_error": None})
@@ -396,8 +401,13 @@ def update_health(store: Storage, results: dict, now: dt.datetime) -> dict:
             h["fail_streak"] = h.get("fail_streak", 0) + 1
             h["last_error"] = r.get("error")
     health["_updated"] = now.isoformat()
-    store.put(HEALTH_KEY, json.dumps(health, indent=1).encode(), "application/json")
+    store.put(key, json.dumps(health, indent=1).encode(), "application/json")
     return health
+
+
+def alarms_in(health: dict) -> list:
+    return [s for s, h in (health or {}).items() if not s.startswith("_") and isinstance(h, dict)
+            and h.get("fail_streak", 0) >= FAIL_STREAK_ALARM]
 
 
 # ---------------------------------------------------------------- one pass

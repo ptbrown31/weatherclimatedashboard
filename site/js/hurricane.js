@@ -150,11 +150,13 @@ window.WXHur = (() => {
       'Orange dashed regions are NHC seven-day formation odds; cones and tracks draw automatically when a storm is active. ' +
       (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that part of the map shows storms only. ' : '') +
       (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for bid and ask); unshaded regions have no listed contract or no book. ' : '') +
-      (vendorShown ? 'Red dots scale with the vendor’s probability of a gust above 80 mph at that reference location. ' : '');
+      (vendorShown ? 'Red dots scale with the vendor’s probability of a gust above 80 mph at that reference location (' + ((RK && RK.attribution) || 'Powered by Reask') + '). ' : '');
+    if (vendorShown) svg.appendChild(txt((RK && RK.attribution) || 'Powered by Reask', { x: W - 10, y: Hh - 10, 'text-anchor': 'end', 'font-size': 12, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl' }));
     const key = $('#basinKey'); key.innerHTML = '';
-    if (lf) {
-      const sw = [0.05, 0.25, 0.5, 0.75].map(p => '<span><i style="background:' + ramp(p) + ';border-color:' + ramp(p) + '"></i>' + Math.round(p * 100) + '¢</span>').join('');
-      key.innerHTML = '<span>Landfall contract, Yes price:</span>' + sw + '<span><i style="border-color:var(--muted)"></i>reference location</span>';
+    if (lf || vendorShown) {
+      const sw = lf ? [0.05, 0.25, 0.5, 0.75].map(p => '<span><i style="background:' + ramp(p) + ';border-color:' + ramp(p) + '"></i>' + Math.round(p * 100) + '¢</span>').join('') : '';
+      key.innerHTML = (lf ? '<span>Landfall contract, Yes price:</span>' + sw : '') + '<span><i style="border-color:var(--muted)"></i>reference location</span>' +
+        (vendorShown ? '<span><i style="border-color:rgba(192,57,43,.75)"></i>vendor P(gust &gt; 80 mph), ' + ((RK && RK.attribution) || 'Powered by Reask') + '</span>' : '');
     }
   }
 
@@ -187,10 +189,11 @@ window.WXHur = (() => {
     if (sub) div.appendChild(h('div', { class: 'cap', style: 'margin:0 0 6px', text: sub }));
     rows.forEach(r => {
       const y = yes(r.c);
-      const bar = h('div', { class: 'lrow', title: quoteText(r.c) }, [
+      const one = r.c && r.c.mid != null && (r.c.bid == null || r.c.ask == null);
+      const bar = h('div', { class: 'lrow' + (one ? ' one' : ''), title: quoteText(r.c) + (one ? ' — one-sided book' : '') }, [
         h('span', { class: 'lk', text: r.label }),
         h('span', { class: 'lb' }, [h('i', { style: 'width:' + (y == null ? 0 : y) + '%' })]),
-        h('span', { class: 'lv', text: y == null ? 'no book' : y + '¢' }),
+        h('span', { class: 'lv', text: y == null ? 'no book' : y + '¢' + (one ? '*' : '') }),
       ]);
       div.appendChild(bar);
     });
@@ -211,17 +214,16 @@ window.WXHur = (() => {
       $('#laddersCap').textContent = WXM.on() ? 'Exchange quotes unavailable.' : 'The market layer is off; no contract prices are shown.';
       return;
     }
-    const byStrike = sym => { const m = market(sym); return m ? m.contracts.slice().sort((a, b) => a.strike - b.strike).map(c => ({ label: c.label, c })) : []; };
-    lad.appendChild(ladderPanel(COUNT.TROPA + ' (TROPA)', byStrike('TROPA'), 'P(count above N) as the Yes price; ' + (s.named != null ? s.named + ' so far' : '')));
-    lad.appendChild(ladderPanel(COUNT.HCAB + ' (HCAB)', byStrike('HCAB'), 'P(at least N) as the Yes price; ' + (s.hurricanes != null ? s.hurricanes + ' so far' : '')));
-    const mh = market('MHCMA');
-    if (mh) {
-      const specNum = sp => sp.split('.').reduce((a, v, i) => a + (+v) * (i ? 1 : 100), 0);   // '2026.8' -> 202608, '2026.10' -> 202610
-      const specs = [...new Set(mh.contracts.map(c => c.spec))].sort((a, b) => specNum(a) - specNum(b));
-      specs.forEach(sp => lad.appendChild(ladderPanel(COUNT.MHCMA.replace('by month', '') + mh.contracts.find(c => c.spec === sp).expiryLabel + ' (MHCMA)',
-        mh.contracts.filter(c => c.spec === sp).sort((a, b) => a.strike - b.strike).map(c => ({ label: c.label, c })), 'P(count above N) in that month')));
-    }
-    $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes-side midpoint in cents, bid and ask on hover. Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
+    // one ladder per listing period (a market carries next season's contracts well ahead of time)
+    const specNum = sp => sp.split('.').reduce((a, v, i) => a + (+v) * (i === 0 ? 10000 : (i === 1 ? 100 : 1)), 0);   // '2026.8' -> 20260800, '2026.12' -> 20261200
+    const periods = sym => { const m = market(sym); if (!m) return []; return [...new Set(m.contracts.map(c => c.spec))].sort((a, b) => specNum(a) - specNum(b)).map(sp => ({ sp, label: (m.contracts.find(c => c.spec === sp) || {}).expiryLabel || sp, rows: m.contracts.filter(c => c.spec === sp).sort((a, b) => a.strike - b.strike).map(c => ({ label: c.label, c })) })); };
+    const thisYear = String((H.season || {}).year || new Date().getUTCFullYear());
+    periods('TROPA').forEach(p => lad.appendChild(ladderPanel(COUNT.TROPA + ', ' + p.label + ' (TROPA)', p.rows, 'Yes price of “count above N”' + (s.named != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.named + ' so far' : ''))));
+    periods('HCAB').forEach(p => lad.appendChild(ladderPanel(COUNT.HCAB + ', ' + p.label + ' (HCAB)', p.rows, 'Yes price of “at least N”' + (s.hurricanes != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.hurricanes + ' so far' : ''))));
+    if (!market('TROPA')) lad.appendChild(ladderPanel(COUNT.TROPA + ' (TROPA)', [], ''));
+    if (!market('HCAB')) lad.appendChild(ladderPanel(COUNT.HCAB + ' (HCAB)', [], ''));
+    periods('MHCMA').forEach(p => lad.appendChild(ladderPanel(COUNT.MHCMA.replace('by month', '') + p.label + ' (MHCMA)', p.rows, 'Yes price of “count above N” in that month')));
+    $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes-side midpoint in cents, or the one side quoted where the book is one-sided (hover shows bid and ask). Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
   }
 
   // ---- the landfall board
@@ -237,7 +239,7 @@ window.WXHur = (() => {
       tb.appendChild(h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(c.ask)) }), h('td', { class: 'num', text: c.mid == null ? 'no book' : pct(cents(c.mid)) }), h('td', { text: onMap })]));
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
-    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '.' }));
+    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '; “mid” is the Yes midpoint where both sides are quoted, else the one side shown.' }));
   }
 
   // ---- the vendor lane
@@ -299,7 +301,8 @@ window.WXHur = (() => {
     const mk = await WXM.loadGroup('hurricane');
     const geo = await fetch('assets/hurricane-geo.json').then(x => x.json()).catch(() => null);
     H = r.data; GEO = geo; NATION = geo ? geo.nation : null; RK = rk.data; MK = WXM.hurricaneMarkets();
-    const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r].concat(mk ? [mk] : []), 30));
+    const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 30));
+    if (mk) { const q = WXC.statusEl([mk], 10); q.insertBefore(document.createTextNode('Quotes: '), q.firstChild); st.appendChild(q); }
     if (!H) { $('#basin').innerHTML = ''; $('#basin').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
     [['b1', 'AL'], ['b2', 'EP']].forEach(([id, b]) => { $('#' + id).onclick = () => { basin = b; document.querySelectorAll('.bar button').forEach(x => x.classList.remove('on')); $('#' + id).classList.add('on'); draw(); }; });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); drawOthers();

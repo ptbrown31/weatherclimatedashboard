@@ -23,6 +23,7 @@ mode are decompressed and scanned too. Skipped files are listed.
 """
 from __future__ import annotations
 import gzip
+import json
 import os
 import subprocess
 import sys
@@ -107,6 +108,23 @@ def scan(paths: list, all_needles: list) -> tuple:
     return hits, skipped
 
 
+def config_slots() -> list:
+    """The vendor lane's credential and host belong to the environment, never
+    to config/site.json; a value pasted there for a local run must not be
+    committed. Returns hits in the same format as scan()."""
+    path = os.path.join(ROOT, "config", "site.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    hits = []
+    for field in ("api_key", "base_url"):
+        if ((cfg.get("reask") or {}).get(field) or "").strip():
+            hits.append(f"config/site.json: reask.{field} is filled in; it must stay empty (set WX_REASK_* in the environment)")
+    return hits
+
+
 def main(argv) -> int:
     args = [a for a in argv if not a.startswith("--")]
     require_external = "--no-external" not in argv
@@ -118,6 +136,7 @@ def main(argv) -> int:
         return 2
     paths = walk(args[0]) if args else tracked_files()
     hits, skipped = scan(paths, builtin + ext)
+    hits += config_slots()
     for s in skipped:
         print(f"  skipped (binary): {os.path.relpath(s, ROOT)}")
     if hits:

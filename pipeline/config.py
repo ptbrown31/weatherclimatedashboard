@@ -17,6 +17,7 @@ Environment overrides (highest precedence):
     WX_USER_AGENT          the User-Agent sent to every government endpoint
     WX_DOMAIN              the site's domain
     WX_REASK_API_KEY       the vendor lane's credential; never in site.json, never in the repo
+    WX_REASK_BASE_URL      the vendor lane's API base (https); set with the key, never in the repo
 """
 from __future__ import annotations
 import json
@@ -35,6 +36,7 @@ _ENV = {
     ("user_agent",): "WX_USER_AGENT",
     ("domain",): "WX_DOMAIN",
     ("reask", "api_key"): "WX_REASK_API_KEY",
+    ("reask", "base_url"): "WX_REASK_BASE_URL",
 }
 
 

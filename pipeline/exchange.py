@@ -8,12 +8,13 @@ symbol and underlying conid), a market's contract list, and a contract's top
 of book. No key, no cookie; the same descriptive User-Agent the government
 calls send. Everything measured 2026-08-23, directly from an AWS address:
 
-  - all three answer 200 with no proxy (the internal system once needed one
-    after a CDN block, so a pass that loses every request keeps the previous
-    snapshot and counts a failure streak like any other source);
+  - all three answer 200 with no proxy; a pass that loses every request
+    keeps the previous snapshot and counts a failure streak like any other
+    source, because a CDN in front of the endpoints can block an address
+    range without notice;
   - a quote is one request per contract: a multi-conid query returns 500;
   - four concurrent workers fetched 120 quotes in 7.6 s with no throttling,
-    about 0.25 s each; the internal capture runs ten workers every 10 min.
+    about 0.25 s each.
 
 Payload shapes actually consumed:
 
@@ -30,7 +31,8 @@ Daily temperature markets: symbol UH+code / UL+code for the US high and low
 (Fahrenheit strikes, "Above K" = P(daily high > K), "Below K" = P(daily low
 < K), the settlement convention being strict), SH+code for the international
 highs (Celsius strikes, no low markets listed). `time_specifier` names the
-weather day, `expiration` the day after it. Every strike is listed twice,
+weather day; `expiration` is the settlement date the exchange assigns (the
+next calendar day for the US listings). Every strike is listed twice,
 one Yes and one No contract; the No book mirrors the Yes book, so only Yes
 is quoted and No is used only when Yes has no book at all.
 """

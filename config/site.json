@@ -41,7 +41,8 @@
     "quote_workers": 4
   },
   "reask": {
-    "base_url": "https://forecastex.reask.earth/v1",
+    "base_url": "",
     "api_key": ""
-  }
+  },
+  "_reask_note": "both values come from the environment (WX_REASK_BASE_URL, WX_REASK_API_KEY); leave them empty here"
 }

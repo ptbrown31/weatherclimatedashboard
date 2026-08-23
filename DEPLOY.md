@@ -156,21 +156,27 @@ takes minutes to an hour.
 | Rotate the User-Agent contact | `aws cloudformation deploy ... --parameter-overrides UserAgent=...` |
 | Exchange endpoints unreachable from AWS (a CDN block; it happened to the owner's other system once) | The quote pass fails whole, snapshots stay as they were and the pages show their age; the `exchange` source reaches the streak alarm after six passes. Nothing to do but wait or move the quote job off AWS; there is no proxy in this stack. |
 | Market overlay needs to go dark | `market_overlay.standalone` to `off` in `config/site.json`, rebuild and sync the site (step 6); the pipeline can keep quoting. |
-| Cost check | S3 PUT count (about 200k a month) is the only meaningful line; `aws ce` or the billing console. |
+| Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs plus about 200k for the quote job (45 objects a pass, 144 passes a day), roughly $2 a month in total; Lambda stays inside the always-free allowance (the quote pass is about 90 s at 512 MB). `aws ce` or the billing console. |
 
 ## 10. The vendor lane (live-storm wind probabilities), optional
 
-Off by default, and doubly gated: `sources.reask` in `config/site.json` must be `true` (then
-repackage and upload the code, step 4) AND the function must carry the credential:
+Off by default, and gated three ways: `sources.reask` in `config/site.json` must be `true` (then
+repackage and upload the code, step 4) AND the function must carry the vendor's API base URL and
+the credential. Neither value is in the repository. Read them into shell variables without echo
+so they never land in shell history, then pass them as parameters:
 
-    aws cloudformation deploy ... --parameter-overrides ... ReaskApiKey=<the key>
+    read -rs REASK_KEY; read -r REASK_BASE
+    aws cloudformation deploy ... --parameter-overrides ... \
+        ReaskBaseUrl="$REASK_BASE" ReaskApiKey="$REASK_KEY"
 
-The parameter is `NoEcho`: it is stored as a function environment variable (`WX_REASK_API_KEY`),
-never in the repository or the template outputs. Paste it yourself; do not put it in a file the
-repo can see. With both gates open the `market` schedule polls the vendor's listing every 10
-minutes and fetches each new forecast cycle, interim and final file, archiving every file under
-`data/archive/reask/`. `snapshots/reask.json` reports the lane's state either way, and the
-hurricane page shows it.
+Both parameters are `NoEcho`: they become function environment variables (`WX_REASK_BASE_URL`,
+`WX_REASK_API_KEY`), never template outputs. The base URL must be https; the client refuses
+redirects so the key is never re-sent to another host. Every later `stack` deploy must pass
+them again, or CloudFormation resets them to empty and the lane switches itself off (the
+hurricane page then says "no credential configured"). With all three gates open the `market`
+schedule polls the vendor's listing every 10 minutes and fetches each new forecast cycle,
+interim and final file, archiving every file under `data/archive/reask/`. `snapshots/reask.json`
+reports the lane's state either way, and the hurricane page shows it.
 
 Before enabling: the vendor's terms require its mark on every figure that shows the data and a
 credential of the site's own, separate from any other system's pull. Confirm both with the vendor

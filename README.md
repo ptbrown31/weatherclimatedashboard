@@ -14,7 +14,7 @@ step (`DEPLOY.md`, added with the deployment templates).
 
     python3 -m unittest discover -s tests          # no network
     python3 scripts/build_assets.py                # project the map geometry once (outputs are committed)
-    python3 -m pipeline.run --job all              # archive, forecast, obs and hurricane passes into ./data
+    python3 -m pipeline.run --job all              # every job once (archive, forecast, obs, hurricane, quotes, reask, daily) into ./data
     python3 scripts/scrub.py                       # refuse to publish strings that must stay private
 
 Python 3.9 or later, standard library only. `boto3` is needed only when the `s3` storage backend
@@ -159,7 +159,8 @@ both degradation paths; it needs `python3 -m pip install playwright`.
                    scorecard.py, normals.py, climate.py, basemap.py, storage.py, config.py,
                    run.py (command line), handler.py (the only vendor-specific file: AWS Lambda)
     site/          the static frontend; site/assets/ holds the small projected geometry
-    geo/           vendored public-domain TopoJSON inputs; not published
+    geo/           vendored inputs, not served: public-domain TopoJSON, and the exchange's wind
+                   reference-location list (id, name, position; the vendor's registry, see NOTICE)
     samples/       snapshots for offline local mode (checked in)
     scripts/       build.py, serve_local.py, verify.py, build_assets.py, scrub.py,
                    seed_archive.py, backfill_obs.py, make_samples.py, package_lambda.py

@@ -939,5 +939,7 @@ def parse_wind_probabilities(text: str) -> list[dict]:
 
 
 def fetch_wind_probabilities(url: str) -> list[dict]:
-    """The PWSAT text behind a roster entry's windSpeedProbabilities link."""
-    return parse_wind_probabilities(_get_text(url, timeout=60))
+    """The PWSAT text behind a roster entry's windSpeedProbabilities link.
+    One attempt with a short timeout: this runs last in the half-hourly
+    chain and must not be able to eat the chain's remaining budget."""
+    return parse_wind_probabilities(_fetch(url, tries=1, timeout=20).decode("ascii", "replace"))

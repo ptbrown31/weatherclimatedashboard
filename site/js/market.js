@@ -139,7 +139,10 @@ window.WXM = (() => {
 
   // ---- live accessors
   const cents = v => (v == null ? null : Math.round(v * 100));
-  const row = r => ({ strike: r.strike, yes: cents(r.mid), bid: cents(r.bid), ask: cents(r.ask), bidSize: r.bidSize, askSize: r.askSize, from: r.from, label: r.label });
+  // `yes` is the Yes midpoint in cents when both sides exist; with a one-sided
+  // book it is that side's price and `side` says which ('bid' or 'ask')
+  const row = r => ({ strike: r.strike, yes: cents(r.mid), bid: cents(r.bid), ask: cents(r.ask), bidSize: r.bidSize, askSize: r.askSize, from: r.from, label: r.label,
+                      side: r.bid != null && r.ask != null ? 'mid' : (r.bid != null ? 'bid' : (r.ask != null ? 'ask' : null)) });
 
   // implied high/low for the map: the market-implied median for the
   // station's tomorrow, against the NWS forecast for the same day
@@ -185,7 +188,7 @@ window.WXM = (() => {
     ser.forEach(s => {
       const b = s[1], a = s[2];
       const v = b != null && a != null ? (b + a) / 2 : (b != null ? b : a);
-      if (v != null) pts.push({ t: s[0] * 60000, v: Math.round(v), bid: b, ask: a });
+      if (v != null) pts.push({ t: s[0] * 60000, v: Math.round(v), bid: b, ask: a, side: b != null && a != null ? 'mid' : (b != null ? 'bid' : 'ask') });
     });
     return pts;
   }

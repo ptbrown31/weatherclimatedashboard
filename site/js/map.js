@@ -5,7 +5,8 @@
    pre-projected). Modes: tomorrow's highs and lows shaded by the NWS
    forecast, and today's observed-so-far against the forecast that was
    issued for the day. With the market layer on, the dots carry the gap
-   between the placeholder implied value and the NWS forecast instead. */
+   between the market-implied median (live: the exchange's ladder; else a
+   labelled placeholder) and the NWS forecast instead. */
 window.WXMap = (() => {
   const { el, txt, h, $, deg } = WXC;
   const RAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
@@ -72,7 +73,9 @@ window.WXMap = (() => {
           'NWS high issued for today ' + deg(c.nwsIssuedHigh != null ? c.nwsIssuedHigh : c.nwsHighToday) + '<br>' +
           'Observed so far today ' + deg(c.obsHighSoFar) + (c.obsLowSoFar != null ? ' / ' + deg(c.obsLowSoFar) : '') +
           (m && m.impliedHigh != null ? '<br>Implied high ' + deg(m.impliedHigh) + (m.divHigh != null ? ' (' + (m.divHigh > 0 ? '+' : '') + m.divHigh + '°)' : '') + ' — ' + (WXM.live() ? 'ForecastEx implied median' : 'placeholder') : '') +
-          (m && m.impliedLow != null ? '<br>Implied low ' + deg(m.impliedLow) + (m.divLow != null ? ' (' + (m.divLow > 0 ? '+' : '') + m.divLow + '°)' : '') : ''));
+          (m && m.impliedHigh == null && m.edgeHigh ? '<br>Implied high beyond the listed ladder (' + m.edgeHigh + ' every strike)' : '') +
+          (m && m.impliedLow != null ? '<br>Implied low ' + deg(m.impliedLow) + (m.divLow != null ? ' (' + (m.divLow > 0 ? '+' : '') + m.divLow + '°)' : '') : '') +
+          (m && m.impliedLow == null && m.edgeLow ? '<br>Implied low beyond the listed ladder (' + m.edgeLow + ' every strike)' : ''));
       };
       g.onmouseleave = () => tip.hide();
       g.onclick = () => { location.href = 'city.html?station=' + c.station; };
@@ -96,7 +99,7 @@ window.WXMap = (() => {
     const legend = $('#legend');
     legend.innerHTML = '';
     if (mode === 'obs') legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Running above the NWS high issued for the day</span><span><i style="border-color:var(--cool)"></i>Running below</span><span>Radius scales with the gap · number is the observed high so far</span>';
-    else if (WXM.on()) { const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder'; legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Tomorrow’s contracts not listed yet, or no book' : 'No value') + '</span><span>Pale shading is the NWS forecast level (derived)</span>'; }
+    else if (WXM.on()) { const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder'; legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Tomorrow’s contracts not listed yet, no book, or the median sits beyond the ladder' : 'No value') + '</span><span>Pale shading is the NWS forecast level (derived)</span>'; }
     else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
   }
 

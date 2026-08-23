@@ -130,3 +130,4 @@ body.embed .wrap{padding:8px 10px 10px;max-width:none}
 .lrow .lv{width:56px;flex:none;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
 .pws th,.pws td{padding:4px 8px}
 .attrib{font-weight:600}
+.lrow.one .lb i{background:repeating-linear-gradient(90deg,var(--yes) 0 6px,transparent 6px 9px)}

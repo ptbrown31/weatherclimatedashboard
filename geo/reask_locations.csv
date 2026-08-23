@@ -1,164 +1,164 @@
-ID,Region Group,Subregion,Country / Territory,Admin / State,Display Location,Latitude,Longitude,grid_center_lat,grid_center_lon,n_land_pixels
-BR,US Gulf/Atlantic,Texas Gulf,United States,TX,Brownsville,25.9017,-97.4975,25.9033203125,-97.4951171875,297
-CC,US Gulf/Atlantic,Texas Gulf,United States,TX,Corpus Christi,27.8006,-97.3964,27.7978515625,-97.3974609375,150
-PL,US Gulf/Atlantic,Texas Gulf,United States,TX,Port Lavaca,28.6147,-96.6261,28.6181640625,-96.6259765625,177
-GA,US Gulf/Atlantic,Texas Gulf,United States,TX,Galveston,29.3013,-94.7977,29.3017578125,-94.7998046875,67
-HO,US Gulf/Atlantic,Texas Gulf,United States,TX,Houston,29.7604,-95.3698,29.7607421875,-95.3662109375,311
-PA,US Gulf/Atlantic,Texas Gulf,United States,TX,Port Arthur,29.8849,-93.9399,29.8876953125,-93.9404296875,218
-LC,US Gulf/Atlantic,Louisiana,United States,LA,Lake Charles,30.2266,-93.2174,30.2294921875,-93.2177734375,295
-LA,US Gulf/Atlantic,Louisiana,United States,LA,Lafayette,30.2241,-92.0198,30.2197265625,-92.0166015625,311
-BT,US Gulf/Atlantic,Louisiana,United States,LA,Baton Rouge,30.4515,-91.1871,30.4541015625,-91.1865234375,301
-NO,US Gulf/Atlantic,Louisiana,United States,LA,New Orleans,29.9511,-90.0715,29.9462890625,-90.0732421875,300
-GU,US Gulf/Atlantic,Mississippi/Alabama,United States,MS,Gulfport,30.3674,-89.0928,30.3662109375,-89.0966796875,166
-MO,US Gulf/Atlantic,Mississippi/Alabama,United States,AL,Mobile,30.6954,-88.0399,30.6982421875,-88.0419921875,214
-PE,US Gulf/Atlantic,Florida Panhandle,United States,FL,Pensacola,30.4213,-87.2169,30.4248046875,-87.2216796875,188
-FW,US Gulf/Atlantic,Florida Panhandle,United States,FL,Fort Walton Beach,30.4058,-86.6188,30.4052734375,-86.6162109375,137
-PC,US Gulf/Atlantic,Florida Panhandle,United States,FL,Panama City Beach,30.1766,-85.8055,30.1806640625,-85.8056640625,98
-AP,US Gulf/Atlantic,Florida Big Bend,United States,FL,Apalachicola,29.7258,-84.9832,29.7216796875,-84.9853515625,126
-TL,US Gulf/Atlantic,Florida Big Bend,United States,FL,Tallahassee,30.4383,-84.2807,30.4345703125,-84.2822265625,309
-ST,US Gulf/Atlantic,Florida Big Bend,United States,FL,Steinhatchee,29.6711,-83.3879,29.6728515625,-83.3837890625,245
-CK,US Gulf/Atlantic,Florida Big Bend,United States,FL,Cedar Key,29.1386,-83.0351,29.1357421875,-83.0322265625,56
-GV,US Gulf/Atlantic,Florida Big Bend,United States,FL,Gainesville,29.6516,-82.3248,29.6533203125,-82.3291015625,304
-TS,US Gulf/Atlantic,Florida West Coast,United States,FL,Tarpon Springs,28.1461,-82.7568,28.1494140625,-82.7587890625,180
-CL,US Gulf/Atlantic,Florida West Coast,United States,FL,Clearwater,27.9659,-82.8001,27.9638671875,-82.7978515625,169
-TA,US Gulf/Atlantic,Florida West Coast,United States,FL,Tampa,27.9506,-82.4572,27.9541015625,-82.4560546875,251
-SP,US Gulf/Atlantic,Florida West Coast,United States,FL,St. Petersburg,27.7676,-82.6403,27.7685546875,-82.6416015625,171
-SA,US Gulf/Atlantic,Florida West Coast,United States,FL,Sarasota,27.3364,-82.5307,27.3388671875,-82.5341796875,204
-FM,US Gulf/Atlantic,Florida West Coast,United States,FL,Fort Myers,26.6406,-81.8723,26.6357421875,-81.8701171875,263
-NA,US Gulf/Atlantic,Florida West Coast,United States,FL,Naples,26.142,-81.7948,26.1376953125,-81.7919921875,173
-HS,US Gulf/Atlantic,Florida South/East,United States,FL,Homestead,25.4687,-80.4776,25.4638671875,-80.4736328125,299
-KW,US Gulf/Atlantic,Florida South/East,United States,FL,Key West,24.5551,-81.78,24.5556640625,-81.7822265625,24
-MI,US Gulf/Atlantic,Florida South/East,United States,FL,Miami,25.7617,-80.1918,25.7568359375,-80.1904296875,142
-FL,US Gulf/Atlantic,Florida South/East,United States,FL,Fort Lauderdale,26.1224,-80.1373,26.1181640625,-80.1416015625,222
-BN,US Gulf/Atlantic,Florida South/East,United States,FL,Boca Raton,26.3683,-80.1289,26.3720703125,-80.1318359375,261
-WP,US Gulf/Atlantic,Florida South/East,United States,FL,West Palm Beach,26.7153,-80.0534,26.7138671875,-80.0537109375,180
-VR,US Gulf/Atlantic,Florida Central/East,United States,FL,Vero Beach,27.6386,-80.3973,27.6416015625,-80.3955078125,203
-ME,US Gulf/Atlantic,Florida Central/East,United States,FL,Melbourne,28.0836,-80.6081,28.0810546875,-80.6103515625,185
-OR,US Gulf/Atlantic,Florida Central/East,United States,FL,Orlando,28.5383,-81.3792,28.5400390625,-81.3818359375,300
-DB,US Gulf/Atlantic,Florida Central/East,United States,FL,Daytona Beach,29.2108,-81.0228,29.2138671875,-81.0205078125,179
-JA,US Gulf/Atlantic,Florida Northeast,United States,FL,Jacksonville,30.3322,-81.6557,30.3369140625,-81.6552734375,262
-BW,US Gulf/Atlantic,Georgia,United States,GA,Brunswick,31.1499,-81.4915,31.1474609375,-81.4892578125,180
-SV,US Gulf/Atlantic,Georgia,United States,GA,Savannah,32.0809,-81.0912,32.0849609375,-81.0888671875,309
-CH,US Gulf/Atlantic,South Carolina,United States,SC,Charleston,32.7765,-79.9311,32.7783203125,-79.9267578125,200
-MB,US Gulf/Atlantic,South Carolina,United States,SC,Myrtle Beach,33.6891,-78.8867,33.6865234375,-78.8818359375,157
-WI,US Gulf/Atlantic,North Carolina,United States,NC,Wilmington,34.2257,-77.9447,34.2236328125,-77.9443359375,312
-MC,US Gulf/Atlantic,North Carolina,United States,NC,Morehead City,34.7229,-76.726,34.7216796875,-76.7236328125,143
-HT,US Gulf/Atlantic,North Carolina,United States,NC,Buxton / Cape Hatteras,35.2677,-75.5427,35.2685546875,-75.5419921875,35
-NG,US Gulf/Atlantic,North Carolina,United States,NC,Nags Head,35.9574,-75.6241,35.9619140625,-75.6201171875,58
-VB,US Gulf/Atlantic,Virginia,United States,VA,Virginia Beach,36.8529,-75.978,36.8505859375,-75.9814453125,153
-NF,US Gulf/Atlantic,Virginia,United States,VA,Norfolk,36.8508,-76.2859,36.8505859375,-76.2841796875,272
-RI,US Gulf/Atlantic,Virginia,United States,VA,Richmond,37.5407,-77.436,37.5439453125,-77.4365234375,326
-CX,US Gulf/Atlantic,Virginia,United States,VA,Cape Charles,37.2679,-76.0174,37.2705078125,-76.0205078125,126
-CE,US Gulf/Atlantic,Virginia,United States,VA,Chincoteague,37.9332,-75.3788,37.9345703125,-75.3759765625,115
-WD,US Gulf/Atlantic,Mid-Atlantic,United States,DC,Washington DC,38.9072,-77.0369,38.9111328125,-77.0361328125,315
-OC,US Gulf/Atlantic,Mid-Atlantic,United States,MD,Ocean City MD,38.3365,-75.0849,38.3349609375,-75.0830078125,93
-AC,US Gulf/Atlantic,Mid-Atlantic,United States,NJ,Atlantic City,39.3643,-74.4229,39.3603515625,-74.4189453125,87
-PH,US Gulf/Atlantic,Mid-Atlantic,United States,PA,Philadelphia,39.9526,-75.1652,39.9560546875,-75.1611328125,309
-LB,US Gulf/Atlantic,New York / Long Island,United States,NY,Long Branch,40.3043,-73.9924,40.3076171875,-73.9892578125,153
-NY,US Gulf/Atlantic,New York / Long Island,United States,NY,New York City,40.7128,-74.006,40.7080078125,-74.0087890625,269
-BS,US Gulf/Atlantic,New York / Long Island,United States,NY,Bay Shore,40.7251,-73.2454,40.7275390625,-73.2470703125,253
-EH,US Gulf/Atlantic,New York / Long Island,United States,NY,East Hampton,40.9634,-72.1848,40.9619140625,-72.1826171875,158
-SF,US Gulf/Atlantic,Connecticut / Rhode Island,United States,CT,Stamford,41.0534,-73.5387,41.0498046875,-73.5400390625,220
-NH,US Gulf/Atlantic,Connecticut / Rhode Island,United States,CT,New Haven,41.3083,-72.9279,41.3037109375,-72.9248046875,296
-NL,US Gulf/Atlantic,Connecticut / Rhode Island,United States,CT,New London,41.3557,-72.0995,41.3525390625,-72.0947265625,242
-PR,US Gulf/Atlantic,Connecticut / Rhode Island,United States,RI,Providence,41.824,-71.4128,41.8212890625,-71.4111328125,342
-VH,US Gulf/Atlantic,Massachusetts,United States,MA,Vineyard Haven / Martha's Vineyard,41.4543,-70.6036,41.4501953125,-70.6005859375,135
-NT,US Gulf/Atlantic,Massachusetts,United States,MA,Nantucket,41.2835,-70.0995,41.2841796875,-70.1025390625,99
-PM,US Gulf/Atlantic,Massachusetts,United States,MA,Plymouth,41.9584,-70.6673,41.9580078125,-70.6689453125,232
-BO,US Gulf/Atlantic,Massachusetts,United States,MA,Boston,42.3601,-71.0589,42.3583984375,-71.0595703125,279
-PS,US Gulf/Atlantic,New England,United States,NH,Portsmouth,43.0718,-70.7626,43.0712890625,-70.7666015625,237
-PO,US Gulf/Atlantic,New England,United States,ME,Portland,43.6591,-70.2568,43.6572265625,-70.2587890625,239
-RK,US Gulf/Atlantic,New England,United States,ME,Rockland,44.1034,-69.1089,44.1064453125,-69.1064453125,205
-BA,US Gulf/Atlantic,New England,United States,ME,Bath,43.9101,-69.8214,43.9111328125,-69.8193359375,255
-NB,Atlantic Canada,New Brunswick,Canada,NB,St. Andrews,45.0731,-67.0523,45.0732421875,-67.0556640625,138
-JO,Atlantic Canada,New Brunswick,Canada,NB,Saint John,45.2733,-66.0633,45.2685546875,-66.0595703125,222
-BH,US Gulf/Atlantic,New England,United States,ME,Bar Harbor,44.3876,-68.2039,44.3896484375,-68.2080078125,163
-CS,Atlantic Canada,Nova Scotia,Canada,NS,Clark's Harbour,43.4486,-65.6387,43.4521484375,-65.6396484375,87
-TP,Mexico/Central America,Tamaulipas / Veracruz,Mexico,Tamaulipas,Tampico,22.2331,-97.8611,22.2314453125,-97.8564453125,191
-TU,Mexico/Central America,Tamaulipas / Veracruz,Mexico,Veracruz,Tuxpan,20.9573,-97.4069,20.9619140625,-97.4072265625,275
-VE,Mexico/Central America,Tamaulipas / Veracruz,Mexico,Veracruz,Veracruz,19.1738,-96.1342,19.1748046875,-96.1376953125,162
-CZ,Mexico/Central America,Southern Gulf Mexico,Mexico,Veracruz,Coatzacoalcos,18.149,-94.4447,18.1494140625,-94.4482421875,149
-VI,Mexico/Central America,Southern Gulf Mexico,Mexico,Tabasco,Villahermosa,17.9895,-92.9475,17.9931640625,-92.9443359375,281
-CD,Mexico/Central America,Yucatán / Campeche,Mexico,Campeche,Ciudad del Carmen,18.6386,-91.835,18.6376953125,-91.8310546875,57
-CP,Mexico/Central America,Yucatán / Campeche,Mexico,Campeche,Campeche,19.8301,-90.5349,19.8291015625,-90.5322265625,175
-MD,Mexico/Central America,Yucatán / Campeche,Mexico,Yucatán,Mérida,20.9674,-89.5926,20.9716796875,-89.5947265625,285
-RL,Mexico/Central America,Yucatán / Campeche,Mexico,Yucatán,Río Lagartos,21.596,-88.1577,21.5966796875,-88.1591796875,147
-CN,Mexico/Central America,Quintana Roo,Mexico,Quintana Roo,Cancún,21.1619,-86.8515,21.1572265625,-86.8505859375,228
-PY,Mexico/Central America,Quintana Roo,Mexico,Quintana Roo,Playa del Carmen,20.6296,-87.0739,20.6298828125,-87.0751953125,151
-TM,Mexico/Central America,Quintana Roo,Mexico,Quintana Roo,Chetumal,18.5001,-88.2961,18.5009765625,-88.2958984375,158
-BZ,Mexico/Central America,Belize / Guatemala,Belize,Belize District,Belize City,17.5046,-88.1962,17.5048828125,-88.1982421875,67
-PB,Mexico/Central America,Belize / Guatemala,Guatemala,Izabal,Puerto Barrios,15.7175,-88.5927,15.7177734375,-88.5888671875,220
-CB,Mexico/Central America,Honduras,Honduras,Atlántida,La Ceiba,15.7703,-86.7914,15.7666015625,-86.7919921875,166
-TR,Mexico/Central America,Honduras,Honduras,Colon,Trujillo,15.9192,-85.9503,15.9228515625,-85.9521484375,157
-BP,Mexico/Central America,Nicaragua,Nicaragua,RACCN,Bilwi / Puerto Cabezas,14.0351,-83.3888,14.0380859375,-83.3935546875,164
-PZ,Mexico/Central America,Nicaragua,Nicaragua,RACCN,Prinzapolka,13.407,-83.562,13.4033203125,-83.5595703125,137
-BL,Mexico/Central America,Nicaragua,Nicaragua,RACCS,Bluefields,12.0137,-83.7635,12.0166015625,-83.7646484375,177
-LI,Mexico/Central America,Costa Rica,Costa Rica,Limón,Limón,9.9907,-83.035,9.9951171875,-83.0322265625,98
-CO,Mexico/Central America,Panama,Panama,Colón,Colón,9.359,-79.9014,9.3603515625,-79.8974609375,139
-CG,Northern South America,Colombia,Colombia,Bolívar,Cartagena,10.391,-75.4794,10.3955078125,-75.4833984375,192
-BQ,Northern South America,Colombia,Colombia,Atlántico,Barranquilla,10.9685,-74.7813,10.9716796875,-74.7802734375,270
-SM,Northern South America,Colombia,Colombia,Magdalena,Santa Marta,11.2408,-74.199,11.2451171875,-74.1943359375,156
-MN,Northern South America,Colombia,Colombia,Córdoba,Montería,8.748,-75.8814,8.7451171875,-75.8837890625,273
-MR,Northern South America,Venezuela / ABC Islands,Venezuela,Zulia,Maracaibo,10.6427,-71.6125,10.6396484375,-71.6162109375,157
-AR,Northern South America,Venezuela / ABC Islands,Aruba,Aruba,Oranjestad,12.5211,-69.9683,12.5244140625,-69.9658203125,129
-CW,Northern South America,Venezuela / ABC Islands,Curaçao,Curaçao,Willemstad,12.1224,-68.8824,12.1240234375,-68.8818359375,165
-CA,Northern South America,Venezuela,Venezuela,Distrito Capital,Caracas,10.4806,-66.9036,10.4833984375,-66.8994140625,273
-PU,Northern South America,Venezuela,Venezuela,Carabobo,Puerto Cabello,10.4711,-68.0088,10.4736328125,-68.0126953125,146
-CU,Northern South America,Venezuela,Venezuela,Sucre,Cumaná,10.4564,-64.1675,10.4541015625,-64.1650390625,139
-TT,Northern South America,Trinidad and Tobago,Trinidad and Tobago,Trinidad,Port of Spain,10.6549,-61.5019,10.6591796875,-61.4990234375,197
-TB,Northern South America,Trinidad and Tobago,Trinidad and Tobago,Tobago,Scarborough,11.1823,-60.7352,11.1865234375,-60.7373046875,119
-SG,Caribbean Islands,Windward Islands,Grenada,Saint George,St. George's,12.0564,-61.7485,12.0556640625,-61.7529296875,114
-KT,Caribbean Islands,Windward Islands,Saint Vincent and the Grenadines,Saint George,Kingstown,13.16,-61.2248,13.1591796875,-61.2255859375,129
-BG,Caribbean Islands,Windward Islands,Barbados,Saint Michael,Bridgetown,13.0975,-59.6167,13.1005859375,-59.6142578125,121
-CR,Caribbean Islands,Windward Islands,Saint Lucia,Castries,Castries,14.0101,-60.9875,14.0087890625,-60.9912109375,162
-FD,Caribbean Islands,Lesser Antilles,Martinique,Martinique,Fort-de-France,14.6161,-61.0589,14.6142578125,-61.0595703125,182
-RO,Caribbean Islands,Lesser Antilles,Dominica,Saint George,Roseau,15.3092,-61.3794,15.3076171875,-61.3818359375,157
-PT,Caribbean Islands,Lesser Antilles,Guadeloupe,Guadeloupe,Pointe-à-Pitre,16.2411,-61.5331,16.2451171875,-61.5283203125,172
-BD,Caribbean Islands,Lesser Antilles,Montserrat,Saint Peter,Brades,16.7918,-62.2106,16.7919921875,-62.2119140625,67
-AG,Caribbean Islands,Lesser Antilles,Antigua and Barbuda,Saint John,St. John's,17.1274,-61.8468,17.1240234375,-61.8505859375,139
-BE,Caribbean Islands,Lesser Antilles,Saint Kitts and Nevis,Saint George Basseterre,Basseterre,17.3026,-62.7177,17.2998046875,-62.7197265625,78
-MG,Caribbean Islands,Lesser Antilles,Saint Martin,Saint Martin,Marigot,18.0675,-63.083,18.0712890625,-63.0810546875,65
-TV,Caribbean Islands,Lesser Antilles,Anguilla,Anguilla,The Valley,18.2148,-63.0578,18.2177734375,-63.0615234375,62
-RT,Caribbean Islands,Virgin Islands,British Virgin Islands,Tortola,Road Town,18.4241,-64.6206,18.4228515625,-64.6240234375,59
-CM,Caribbean Islands,Virgin Islands,U.S. Virgin Islands,St. Thomas,Charlotte Amalie,18.3419,-64.9307,18.3447265625,-64.9267578125,67
-SX,Caribbean Islands,Virgin Islands,U.S. Virgin Islands,St. Croix,Christiansted,17.7466,-64.7032,17.7490234375,-64.7021484375,98
-SJ,Caribbean Islands,Puerto Rico,Puerto Rico,PR,San Juan,18.4655,-66.1057,18.4619140625,-66.1083984375,121
-PN,Caribbean Islands,Puerto Rico,Puerto Rico,PR,Ponce,18.0111,-66.6141,18.0126953125,-66.6162109375,214
-MZ,Caribbean Islands,Puerto Rico,Puerto Rico,PR,Mayagüez,18.2011,-67.1396,18.1982421875,-67.1435546875,204
-PJ,Caribbean Islands,Dominican Republic,Dominican Republic,La Altagracia,Punta Cana,18.5601,-68.3725,18.5595703125,-68.3740234375,181
-SD,Caribbean Islands,Dominican Republic,Dominican Republic,Distrito Nacional,Santo Domingo,18.4861,-69.9312,18.4814453125,-69.9267578125,208
-LR,Caribbean Islands,Dominican Republic,Dominican Republic,La Romana,La Romana,18.4273,-68.9728,18.4228515625,-68.9697265625,196
-PP,Caribbean Islands,Dominican Republic,Dominican Republic,Puerto Plata,Puerto Plata,19.7808,-70.6871,19.7802734375,-70.6884765625,176
-LE,Caribbean Islands,Haiti,Haiti,Sud,Les Cayes,18.2,-73.75,18.1982421875,-73.7451171875,150
-AU,Caribbean Islands,Haiti,Haiti,Ouest,Port-au-Prince,18.5944,-72.3074,18.5986328125,-72.3095703125,207
-HI,Caribbean Islands,Haiti,Haiti,Nord,Cap-Haïtien,19.7594,-72.1982,19.7607421875,-72.2021484375,145
-JC,Caribbean Islands,Haiti,Haiti,Sud-Est,Jacmel,18.2342,-72.5358,18.2373046875,-72.5341796875,206
-GO,Caribbean Islands,Haiti,Haiti,Artibonite,Gonaïves,19.45,-72.6833,19.4482421875,-72.6806640625,217
-PV,Caribbean Islands,Turks and Caicos,Turks and Caicos,Providenciales,Providenciales,21.7738,-72.2659,21.7724609375,-72.2705078125,65
-TK,Caribbean Islands,Turks and Caicos,Turks and Caicos,Grand Turk,Cockburn Town,21.4675,-71.1389,21.4697265625,-71.1376953125,12
-NS,Caribbean Islands,Bahamas,Bahamas,New Providence,Nassau,25.0443,-77.3504,25.0439453125,-77.3486328125,122
-FR,Caribbean Islands,Bahamas,Bahamas,Grand Bahama,Freeport,26.5333,-78.7,26.5380859375,-78.6962890625,132
-MH,Caribbean Islands,Bahamas,Bahamas,Abaco,Marsh Harbour,26.5412,-77.0636,26.5380859375,-77.0654296875,91
-DT,Caribbean Islands,Bahamas,Bahamas,Harbour Island,Dunmore Town,25.5021,-76.634,25.5029296875,-76.6357421875,66
-KI,Caribbean Islands,Jamaica,Jamaica,Kingston,Kingston,17.9712,-76.7936,17.9736328125,-76.7919921875,163
-MJ,Caribbean Islands,Jamaica,Jamaica,St. James,Montego Bay,18.4762,-77.8939,18.4716796875,-77.8955078125,182
-BC,Caribbean Islands,Cuba,Cuba,Guantánamo,Baracoa,20.3471,-74.4968,20.3466796875,-74.4970703125,178
-SO,Caribbean Islands,Cuba,Cuba,Santiago de Cuba,Santiago de Cuba,20.0169,-75.8302,20.0146484375,-75.8349609375,224
-HG,Caribbean Islands,Cuba,Cuba,Holguín,Holguín,20.8869,-76.2595,20.8837890625,-76.2548828125,283
-CY,Caribbean Islands,Cuba,Cuba,Camagüey,Camagüey,21.3808,-77.9169,21.3818359375,-77.9150390625,284
-CI,Caribbean Islands,Cuba,Cuba,Cienfuegos,Cienfuegos,22.1496,-80.4466,22.1533203125,-80.4443359375,210
-SC,Caribbean Islands,Cuba,Cuba,Villa Clara,Santa Clara,22.4069,-79.9647,22.4072265625,-79.9658203125,283
-MT,Caribbean Islands,Cuba,Cuba,Matanzas,Matanzas,23.0411,-81.5775,23.0419921875,-81.5771484375,254
-HA,Caribbean Islands,Cuba,Cuba,La Habana,Havana,23.1136,-82.3666,23.1103515625,-82.3681640625,201
-PD,Caribbean Islands,Cuba,Cuba,Pinar del Río,Pinar del Río,22.4244,-83.7013,22.4267578125,-83.7060546875,282
-HM,Caribbean Islands,Bermuda,Bermuda,Hamilton,Hamilton,32.2948,-64.7814,32.2900390625,-64.7802734375,31
-GC,Caribbean Islands,Cayman Islands,Cayman Islands,Grand Cayman,George Town (Cayman),19.2866,-81.3744,19.2822265625,-81.3720703125,43
-PG,US Gulf/Atlantic,Florida Gulf,United States,FL,Punta Gorda,26.9298,-82.0454,26.9287109375,-82.0458984375,217
-CV,US Gulf/Atlantic,Florida Atlantic,United States,FL,Cape Canaveral,28.3922,-80.6077,28.3935546875,-80.6103515625,100
-MA,US Gulf/Atlantic,Florida Keys,United States,FL,Marathon,24.7137,-81.0905,24.7119140625,-81.0888671875,12
-HY,US Gulf/Atlantic,Massachusetts,United States,MA,Hyannis,41.6528,-70.2828,41.6552734375,-70.2783203125,193
-RN,Mexico/Central America,Bay Islands,Honduras,Islas de la Bahía,Roatán,16.318,-86.537,16.3134765625,-86.5380859375,46
-SN,Caribbean Islands,Western Caribbean,Colombia,San Andrés y Providencia,San Andrés,12.5847,-81.7006,12.5830078125,-81.7041015625,17
-CT,Caribbean Islands,Bahamas,Bahamas,Long Island,Clarence Town,23.1069,-74.9633,23.1103515625,-74.9658203125,47
-AT,Caribbean Islands,Bahamas,Bahamas,Andros,Andros Town,24.7,-77.7667,24.7021484375,-77.7685546875,112
-GE,Caribbean Islands,Bahamas,Bahamas,Great Exuma,George Town (Exuma),23.5167,-75.7667,23.5205078125,-75.7666015625,53
+ID,Region Group,Subregion,Country / Territory,Admin / State,Display Location,Latitude,Longitude
+BR,US Gulf/Atlantic,Texas Gulf,United States,TX,Brownsville,25.9017,-97.4975
+CC,US Gulf/Atlantic,Texas Gulf,United States,TX,Corpus Christi,27.8006,-97.3964
+PL,US Gulf/Atlantic,Texas Gulf,United States,TX,Port Lavaca,28.6147,-96.6261
+GA,US Gulf/Atlantic,Texas Gulf,United States,TX,Galveston,29.3013,-94.7977
+HO,US Gulf/Atlantic,Texas Gulf,United States,TX,Houston,29.7604,-95.3698
+PA,US Gulf/Atlantic,Texas Gulf,United States,TX,Port Arthur,29.8849,-93.9399
+LC,US Gulf/Atlantic,Louisiana,United States,LA,Lake Charles,30.2266,-93.2174
+LA,US Gulf/Atlantic,Louisiana,United States,LA,Lafayette,30.2241,-92.0198
+BT,US Gulf/Atlantic,Louisiana,United States,LA,Baton Rouge,30.4515,-91.1871
+NO,US Gulf/Atlantic,Louisiana,United States,LA,New Orleans,29.9511,-90.0715
+GU,US Gulf/Atlantic,Mississippi/Alabama,United States,MS,Gulfport,30.3674,-89.0928
+MO,US Gulf/Atlantic,Mississippi/Alabama,United States,AL,Mobile,30.6954,-88.0399
+PE,US Gulf/Atlantic,Florida Panhandle,United States,FL,Pensacola,30.4213,-87.2169
+FW,US Gulf/Atlantic,Florida Panhandle,United States,FL,Fort Walton Beach,30.4058,-86.6188
+PC,US Gulf/Atlantic,Florida Panhandle,United States,FL,Panama City Beach,30.1766,-85.8055
+AP,US Gulf/Atlantic,Florida Big Bend,United States,FL,Apalachicola,29.7258,-84.9832
+TL,US Gulf/Atlantic,Florida Big Bend,United States,FL,Tallahassee,30.4383,-84.2807
+ST,US Gulf/Atlantic,Florida Big Bend,United States,FL,Steinhatchee,29.6711,-83.3879
+CK,US Gulf/Atlantic,Florida Big Bend,United States,FL,Cedar Key,29.1386,-83.0351
+GV,US Gulf/Atlantic,Florida Big Bend,United States,FL,Gainesville,29.6516,-82.3248
+TS,US Gulf/Atlantic,Florida West Coast,United States,FL,Tarpon Springs,28.1461,-82.7568
+CL,US Gulf/Atlantic,Florida West Coast,United States,FL,Clearwater,27.9659,-82.8001
+TA,US Gulf/Atlantic,Florida West Coast,United States,FL,Tampa,27.9506,-82.4572
+SP,US Gulf/Atlantic,Florida West Coast,United States,FL,St. Petersburg,27.7676,-82.6403
+SA,US Gulf/Atlantic,Florida West Coast,United States,FL,Sarasota,27.3364,-82.5307
+FM,US Gulf/Atlantic,Florida West Coast,United States,FL,Fort Myers,26.6406,-81.8723
+NA,US Gulf/Atlantic,Florida West Coast,United States,FL,Naples,26.142,-81.7948
+HS,US Gulf/Atlantic,Florida South/East,United States,FL,Homestead,25.4687,-80.4776
+KW,US Gulf/Atlantic,Florida South/East,United States,FL,Key West,24.5551,-81.78
+MI,US Gulf/Atlantic,Florida South/East,United States,FL,Miami,25.7617,-80.1918
+FL,US Gulf/Atlantic,Florida South/East,United States,FL,Fort Lauderdale,26.1224,-80.1373
+BN,US Gulf/Atlantic,Florida South/East,United States,FL,Boca Raton,26.3683,-80.1289
+WP,US Gulf/Atlantic,Florida South/East,United States,FL,West Palm Beach,26.7153,-80.0534
+VR,US Gulf/Atlantic,Florida Central/East,United States,FL,Vero Beach,27.6386,-80.3973
+ME,US Gulf/Atlantic,Florida Central/East,United States,FL,Melbourne,28.0836,-80.6081
+OR,US Gulf/Atlantic,Florida Central/East,United States,FL,Orlando,28.5383,-81.3792
+DB,US Gulf/Atlantic,Florida Central/East,United States,FL,Daytona Beach,29.2108,-81.0228
+JA,US Gulf/Atlantic,Florida Northeast,United States,FL,Jacksonville,30.3322,-81.6557
+BW,US Gulf/Atlantic,Georgia,United States,GA,Brunswick,31.1499,-81.4915
+SV,US Gulf/Atlantic,Georgia,United States,GA,Savannah,32.0809,-81.0912
+CH,US Gulf/Atlantic,South Carolina,United States,SC,Charleston,32.7765,-79.9311
+MB,US Gulf/Atlantic,South Carolina,United States,SC,Myrtle Beach,33.6891,-78.8867
+WI,US Gulf/Atlantic,North Carolina,United States,NC,Wilmington,34.2257,-77.9447
+MC,US Gulf/Atlantic,North Carolina,United States,NC,Morehead City,34.7229,-76.726
+HT,US Gulf/Atlantic,North Carolina,United States,NC,Buxton / Cape Hatteras,35.2677,-75.5427
+NG,US Gulf/Atlantic,North Carolina,United States,NC,Nags Head,35.9574,-75.6241
+VB,US Gulf/Atlantic,Virginia,United States,VA,Virginia Beach,36.8529,-75.978
+NF,US Gulf/Atlantic,Virginia,United States,VA,Norfolk,36.8508,-76.2859
+RI,US Gulf/Atlantic,Virginia,United States,VA,Richmond,37.5407,-77.436
+CX,US Gulf/Atlantic,Virginia,United States,VA,Cape Charles,37.2679,-76.0174
+CE,US Gulf/Atlantic,Virginia,United States,VA,Chincoteague,37.9332,-75.3788
+WD,US Gulf/Atlantic,Mid-Atlantic,United States,DC,Washington DC,38.9072,-77.0369
+OC,US Gulf/Atlantic,Mid-Atlantic,United States,MD,Ocean City MD,38.3365,-75.0849
+AC,US Gulf/Atlantic,Mid-Atlantic,United States,NJ,Atlantic City,39.3643,-74.4229
+PH,US Gulf/Atlantic,Mid-Atlantic,United States,PA,Philadelphia,39.9526,-75.1652
+LB,US Gulf/Atlantic,New York / Long Island,United States,NY,Long Branch,40.3043,-73.9924
+NY,US Gulf/Atlantic,New York / Long Island,United States,NY,New York City,40.7128,-74.006
+BS,US Gulf/Atlantic,New York / Long Island,United States,NY,Bay Shore,40.7251,-73.2454
+EH,US Gulf/Atlantic,New York / Long Island,United States,NY,East Hampton,40.9634,-72.1848
+SF,US Gulf/Atlantic,Connecticut / Rhode Island,United States,CT,Stamford,41.0534,-73.5387
+NH,US Gulf/Atlantic,Connecticut / Rhode Island,United States,CT,New Haven,41.3083,-72.9279
+NL,US Gulf/Atlantic,Connecticut / Rhode Island,United States,CT,New London,41.3557,-72.0995
+PR,US Gulf/Atlantic,Connecticut / Rhode Island,United States,RI,Providence,41.824,-71.4128
+VH,US Gulf/Atlantic,Massachusetts,United States,MA,Vineyard Haven / Martha's Vineyard,41.4543,-70.6036
+NT,US Gulf/Atlantic,Massachusetts,United States,MA,Nantucket,41.2835,-70.0995
+PM,US Gulf/Atlantic,Massachusetts,United States,MA,Plymouth,41.9584,-70.6673
+BO,US Gulf/Atlantic,Massachusetts,United States,MA,Boston,42.3601,-71.0589
+PS,US Gulf/Atlantic,New England,United States,NH,Portsmouth,43.0718,-70.7626
+PO,US Gulf/Atlantic,New England,United States,ME,Portland,43.6591,-70.2568
+RK,US Gulf/Atlantic,New England,United States,ME,Rockland,44.1034,-69.1089
+BA,US Gulf/Atlantic,New England,United States,ME,Bath,43.9101,-69.8214
+NB,Atlantic Canada,New Brunswick,Canada,NB,St. Andrews,45.0731,-67.0523
+JO,Atlantic Canada,New Brunswick,Canada,NB,Saint John,45.2733,-66.0633
+BH,US Gulf/Atlantic,New England,United States,ME,Bar Harbor,44.3876,-68.2039
+CS,Atlantic Canada,Nova Scotia,Canada,NS,Clark's Harbour,43.4486,-65.6387
+TP,Mexico/Central America,Tamaulipas / Veracruz,Mexico,Tamaulipas,Tampico,22.2331,-97.8611
+TU,Mexico/Central America,Tamaulipas / Veracruz,Mexico,Veracruz,Tuxpan,20.9573,-97.4069
+VE,Mexico/Central America,Tamaulipas / Veracruz,Mexico,Veracruz,Veracruz,19.1738,-96.1342
+CZ,Mexico/Central America,Southern Gulf Mexico,Mexico,Veracruz,Coatzacoalcos,18.149,-94.4447
+VI,Mexico/Central America,Southern Gulf Mexico,Mexico,Tabasco,Villahermosa,17.9895,-92.9475
+CD,Mexico/Central America,Yucatán / Campeche,Mexico,Campeche,Ciudad del Carmen,18.6386,-91.835
+CP,Mexico/Central America,Yucatán / Campeche,Mexico,Campeche,Campeche,19.8301,-90.5349
+MD,Mexico/Central America,Yucatán / Campeche,Mexico,Yucatán,Mérida,20.9674,-89.5926
+RL,Mexico/Central America,Yucatán / Campeche,Mexico,Yucatán,Río Lagartos,21.596,-88.1577
+CN,Mexico/Central America,Quintana Roo,Mexico,Quintana Roo,Cancún,21.1619,-86.8515
+PY,Mexico/Central America,Quintana Roo,Mexico,Quintana Roo,Playa del Carmen,20.6296,-87.0739
+TM,Mexico/Central America,Quintana Roo,Mexico,Quintana Roo,Chetumal,18.5001,-88.2961
+BZ,Mexico/Central America,Belize / Guatemala,Belize,Belize District,Belize City,17.5046,-88.1962
+PB,Mexico/Central America,Belize / Guatemala,Guatemala,Izabal,Puerto Barrios,15.7175,-88.5927
+CB,Mexico/Central America,Honduras,Honduras,Atlántida,La Ceiba,15.7703,-86.7914
+TR,Mexico/Central America,Honduras,Honduras,Colon,Trujillo,15.9192,-85.9503
+BP,Mexico/Central America,Nicaragua,Nicaragua,RACCN,Bilwi / Puerto Cabezas,14.0351,-83.3888
+PZ,Mexico/Central America,Nicaragua,Nicaragua,RACCN,Prinzapolka,13.407,-83.562
+BL,Mexico/Central America,Nicaragua,Nicaragua,RACCS,Bluefields,12.0137,-83.7635
+LI,Mexico/Central America,Costa Rica,Costa Rica,Limón,Limón,9.9907,-83.035
+CO,Mexico/Central America,Panama,Panama,Colón,Colón,9.359,-79.9014
+CG,Northern South America,Colombia,Colombia,Bolívar,Cartagena,10.391,-75.4794
+BQ,Northern South America,Colombia,Colombia,Atlántico,Barranquilla,10.9685,-74.7813
+SM,Northern South America,Colombia,Colombia,Magdalena,Santa Marta,11.2408,-74.199
+MN,Northern South America,Colombia,Colombia,Córdoba,Montería,8.748,-75.8814
+MR,Northern South America,Venezuela / ABC Islands,Venezuela,Zulia,Maracaibo,10.6427,-71.6125
+AR,Northern South America,Venezuela / ABC Islands,Aruba,Aruba,Oranjestad,12.5211,-69.9683
+CW,Northern South America,Venezuela / ABC Islands,Curaçao,Curaçao,Willemstad,12.1224,-68.8824
+CA,Northern South America,Venezuela,Venezuela,Distrito Capital,Caracas,10.4806,-66.9036
+PU,Northern South America,Venezuela,Venezuela,Carabobo,Puerto Cabello,10.4711,-68.0088
+CU,Northern South America,Venezuela,Venezuela,Sucre,Cumaná,10.4564,-64.1675
+TT,Northern South America,Trinidad and Tobago,Trinidad and Tobago,Trinidad,Port of Spain,10.6549,-61.5019
+TB,Northern South America,Trinidad and Tobago,Trinidad and Tobago,Tobago,Scarborough,11.1823,-60.7352
+SG,Caribbean Islands,Windward Islands,Grenada,Saint George,St. George's,12.0564,-61.7485
+KT,Caribbean Islands,Windward Islands,Saint Vincent and the Grenadines,Saint George,Kingstown,13.16,-61.2248
+BG,Caribbean Islands,Windward Islands,Barbados,Saint Michael,Bridgetown,13.0975,-59.6167
+CR,Caribbean Islands,Windward Islands,Saint Lucia,Castries,Castries,14.0101,-60.9875
+FD,Caribbean Islands,Lesser Antilles,Martinique,Martinique,Fort-de-France,14.6161,-61.0589
+RO,Caribbean Islands,Lesser Antilles,Dominica,Saint George,Roseau,15.3092,-61.3794
+PT,Caribbean Islands,Lesser Antilles,Guadeloupe,Guadeloupe,Pointe-à-Pitre,16.2411,-61.5331
+BD,Caribbean Islands,Lesser Antilles,Montserrat,Saint Peter,Brades,16.7918,-62.2106
+AG,Caribbean Islands,Lesser Antilles,Antigua and Barbuda,Saint John,St. John's,17.1274,-61.8468
+BE,Caribbean Islands,Lesser Antilles,Saint Kitts and Nevis,Saint George Basseterre,Basseterre,17.3026,-62.7177
+MG,Caribbean Islands,Lesser Antilles,Saint Martin,Saint Martin,Marigot,18.0675,-63.083
+TV,Caribbean Islands,Lesser Antilles,Anguilla,Anguilla,The Valley,18.2148,-63.0578
+RT,Caribbean Islands,Virgin Islands,British Virgin Islands,Tortola,Road Town,18.4241,-64.6206
+CM,Caribbean Islands,Virgin Islands,U.S. Virgin Islands,St. Thomas,Charlotte Amalie,18.3419,-64.9307
+SX,Caribbean Islands,Virgin Islands,U.S. Virgin Islands,St. Croix,Christiansted,17.7466,-64.7032
+SJ,Caribbean Islands,Puerto Rico,Puerto Rico,PR,San Juan,18.4655,-66.1057
+PN,Caribbean Islands,Puerto Rico,Puerto Rico,PR,Ponce,18.0111,-66.6141
+MZ,Caribbean Islands,Puerto Rico,Puerto Rico,PR,Mayagüez,18.2011,-67.1396
+PJ,Caribbean Islands,Dominican Republic,Dominican Republic,La Altagracia,Punta Cana,18.5601,-68.3725
+SD,Caribbean Islands,Dominican Republic,Dominican Republic,Distrito Nacional,Santo Domingo,18.4861,-69.9312
+LR,Caribbean Islands,Dominican Republic,Dominican Republic,La Romana,La Romana,18.4273,-68.9728
+PP,Caribbean Islands,Dominican Republic,Dominican Republic,Puerto Plata,Puerto Plata,19.7808,-70.6871
+LE,Caribbean Islands,Haiti,Haiti,Sud,Les Cayes,18.2,-73.75
+AU,Caribbean Islands,Haiti,Haiti,Ouest,Port-au-Prince,18.5944,-72.3074
+HI,Caribbean Islands,Haiti,Haiti,Nord,Cap-Haïtien,19.7594,-72.1982
+JC,Caribbean Islands,Haiti,Haiti,Sud-Est,Jacmel,18.2342,-72.5358
+GO,Caribbean Islands,Haiti,Haiti,Artibonite,Gonaïves,19.45,-72.6833
+PV,Caribbean Islands,Turks and Caicos,Turks and Caicos,Providenciales,Providenciales,21.7738,-72.2659
+TK,Caribbean Islands,Turks and Caicos,Turks and Caicos,Grand Turk,Cockburn Town,21.4675,-71.1389
+NS,Caribbean Islands,Bahamas,Bahamas,New Providence,Nassau,25.0443,-77.3504
+FR,Caribbean Islands,Bahamas,Bahamas,Grand Bahama,Freeport,26.5333,-78.7
+MH,Caribbean Islands,Bahamas,Bahamas,Abaco,Marsh Harbour,26.5412,-77.0636
+DT,Caribbean Islands,Bahamas,Bahamas,Harbour Island,Dunmore Town,25.5021,-76.634
+KI,Caribbean Islands,Jamaica,Jamaica,Kingston,Kingston,17.9712,-76.7936
+MJ,Caribbean Islands,Jamaica,Jamaica,St. James,Montego Bay,18.4762,-77.8939
+BC,Caribbean Islands,Cuba,Cuba,Guantánamo,Baracoa,20.3471,-74.4968
+SO,Caribbean Islands,Cuba,Cuba,Santiago de Cuba,Santiago de Cuba,20.0169,-75.8302
+HG,Caribbean Islands,Cuba,Cuba,Holguín,Holguín,20.8869,-76.2595
+CY,Caribbean Islands,Cuba,Cuba,Camagüey,Camagüey,21.3808,-77.9169
+CI,Caribbean Islands,Cuba,Cuba,Cienfuegos,Cienfuegos,22.1496,-80.4466
+SC,Caribbean Islands,Cuba,Cuba,Villa Clara,Santa Clara,22.4069,-79.9647
+MT,Caribbean Islands,Cuba,Cuba,Matanzas,Matanzas,23.0411,-81.5775
+HA,Caribbean Islands,Cuba,Cuba,La Habana,Havana,23.1136,-82.3666
+PD,Caribbean Islands,Cuba,Cuba,Pinar del Río,Pinar del Río,22.4244,-83.7013
+HM,Caribbean Islands,Bermuda,Bermuda,Hamilton,Hamilton,32.2948,-64.7814
+GC,Caribbean Islands,Cayman Islands,Cayman Islands,Grand Cayman,George Town (Cayman),19.2866,-81.3744
+PG,US Gulf/Atlantic,Florida Gulf,United States,FL,Punta Gorda,26.9298,-82.0454
+CV,US Gulf/Atlantic,Florida Atlantic,United States,FL,Cape Canaveral,28.3922,-80.6077
+MA,US Gulf/Atlantic,Florida Keys,United States,FL,Marathon,24.7137,-81.0905
+HY,US Gulf/Atlantic,Massachusetts,United States,MA,Hyannis,41.6528,-70.2828
+RN,Mexico/Central America,Bay Islands,Honduras,Islas de la Bahía,Roatán,16.318,-86.537
+SN,Caribbean Islands,Western Caribbean,Colombia,San Andrés y Providencia,San Andrés,12.5847,-81.7006
+CT,Caribbean Islands,Bahamas,Bahamas,Long Island,Clarence Town,23.1069,-74.9633
+AT,Caribbean Islands,Bahamas,Bahamas,Andros,Andros Town,24.7,-77.7667
+GE,Caribbean Islands,Bahamas,Bahamas,Great Exuma,George Town (Exuma),23.5167,-75.7667

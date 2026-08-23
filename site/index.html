@@ -12,8 +12,9 @@
 <div class="wrap">
 <h1>US daily temperature stations</h1>
 <p class="sub">Every station that daily temperature contracts settle on, on one canvas. The shading is the
-National Weather Service forecast; the dots show how today is running against the forecast that was
-issued for it. Click a city for its chart.</p>
+National Weather Service forecast. In the tomorrow views the dots show where the exchange&rsquo;s
+market-implied median sits against that forecast; in the today view, how the day is running against the
+forecast that was issued for it. Click a city for its chart.</p>
 <div class="bar">
   <button id="m1" class="on">Tomorrow&rsquo;s highs</button>
   <button id="m2">Tomorrow&rsquo;s lows</button>
@@ -25,8 +26,9 @@ issued for it. Click a city for its chart.</p>
 <div class="key" id="legend"></div>
 <p class="cap">Not on this canvas: <span id="intl"></span></p>
 <div class="how">
-<div><h3>THE DOTS</h3><p>One dot per station. In the today view, colour is the sign of observed-so-far minus
-the NWS high issued for the day, and size is the gap.</p>
+<div><h3>THE DOTS</h3><p>One dot per station. In the tomorrow views, colour is the sign of the market-implied
+median minus the NWS forecast and size is the gap; grey means no listed contracts or no book yet. In the
+today view, colour is the sign of observed-so-far minus the NWS high issued for the day.</p>
 <p><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p></div>
 <div><h3>THE SHADING</h3><p>The pale field is the NWS forecast, cool blues to warm reds, interpolated between the
 listed stations. It is derived here, not an NWS product; the official field is the NDFD grid.</p></div>

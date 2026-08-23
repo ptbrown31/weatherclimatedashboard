@@ -145,7 +145,7 @@ def hurricane_pass(cfg: dict, store: Storage) -> int:
                 storm["windProbs"] = old.get("windProbs")
             else:
                 try:
-                    storm["windProbs"] = gw.fetch_wind_probabilities(storm["windProbsUrl"])[:40]
+                    storm["windProbs"] = gw.fetch_wind_probabilities(storm["windProbsUrl"])[:40]   # one try, 20 s: bounded
                 except Exception as e:
                     snap["errors"].append(f"{s['id']} wind probabilities: {type(e).__name__}: {e}")
                     storm["windProbs"] = (old or {}).get("windProbs")

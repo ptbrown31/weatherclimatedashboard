@@ -177,7 +177,7 @@ class VendorLane(unittest.TestCase):
                 return json.dumps({"storms": []}).encode()
             raise AssertionError(path)
 
-        cfg = {"sources": {"reask": True}, "reask": {"api_key": "k"}}
+        cfg = {"sources": {"reask": True}, "reask": {"api_key": "k", "base_url": "https://vendor.invalid/v1"}}
         out = reask.reask_job(cfg, self.st, self.log, NOW, fetch=fetch)
         self.assertTrue(out["ok"])
         self.assertEqual(out["storms"], 1)
@@ -203,7 +203,7 @@ class VendorLane(unittest.TestCase):
     def test_list_failure_keeps_previous(self):
         def fetch(path, params=None):
             raise OSError("down")
-        cfg = {"sources": {"reask": True}, "reask": {"api_key": "k"}}
+        cfg = {"sources": {"reask": True}, "reask": {"api_key": "k", "base_url": "https://vendor.invalid/v1"}}
         self.st.put(reask.KEY, json.dumps({"asof": "2026-08-23T00:00:00Z", "storms": [{"name": "Milton", "year": 2026, "livecyc": {"forecastTime": "2026-08-23T00:00:00Z"}}],
                                            "polled": "2026-08-23T00:10:00Z"}).encode())
         out = reask.reask_job(cfg, self.st, self.log, NOW, fetch=fetch)
@@ -238,3 +238,71 @@ class QuoteJob(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Gates(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.logs = []
+
+    def log(self, **kw):
+        self.logs.append(kw)
+
+    def test_exchange_switch_off_skips(self):
+        out = market.quotes_job({"sources": {"exchange": False}}, self.st, self.log, NOW)
+        self.assertTrue(out["skipped"])
+        self.assertIsNone(self.st.get("snapshots/market/summary.json"))
+
+    def test_vendor_lane_needs_base_url_and_https(self):
+        out = reask.reask_job({"sources": {"reask": True}, "reask": {"api_key": "k", "base_url": ""}}, self.st, self.log, NOW)
+        self.assertFalse(out["attempted"])
+        self.assertEqual(json.loads(self.st.get(reask.KEY))["reason"], "no base URL configured")
+        with self.assertRaises(ValueError):
+            reask._get("http://example.invalid", "/livecyc/tcwind/list", "k")
+
+    def test_lane_health_files_are_separate(self):
+        from pipeline import archive as arch
+        arch.update_health(self.st, {"nws": {"ok": False, "error": "x"}}, NOW)
+        arch.update_health(self.st, {"exchange": {"ok": False, "error": "y"}}, NOW, key=arch.MARKET_HEALTH_KEY)
+        weather = json.loads(self.st.get(arch.HEALTH_KEY))
+        mkt = json.loads(self.st.get(arch.MARKET_HEALTH_KEY))
+        self.assertIn("nws", weather); self.assertNotIn("exchange", weather)
+        self.assertIn("exchange", mkt); self.assertNotIn("nws", mkt)
+        for _ in range(arch.FAIL_STREAK_ALARM - 1):
+            arch.update_health(self.st, {"exchange": {"ok": False, "error": "y"}}, NOW, key=arch.MARKET_HEALTH_KEY)
+        self.assertEqual(arch.alarms_in(json.loads(self.st.get(arch.MARKET_HEALTH_KEY))), ["exchange"])
+        self.assertEqual(arch.alarms_in(json.loads(self.st.get(arch.HEALTH_KEY))), [])
+
+    def test_partial_ladder_keeps_previous_snapshot(self):
+        from pipeline import archive as arch
+        prev = {"asof": "2026-08-23T10:00:00Z", "days": {"2026-08-23": {"high": [{"strike": 72.0, "mid": 0.5}]}}, "history": {}}
+        self.st.put("snapshots/market/KSFO.json", json.dumps(prev).encode())
+        calls = {"n": 0}
+
+        def fake_tree():
+            return {"categories": {"g": {"name": "San Francisco", "parent_id": None, "markets": [{"symbol": "UHSFO", "conid": 1}]}}}
+
+        def fake_market(conid):
+            return MARKET
+
+        import time as _time
+        dl = arch.Deadline(None)
+
+        def fake_quote(conid):
+            calls["n"] += 1
+            dl.end = _time.time() - 1                   # the budget runs out after the first quote
+            return {"bid": 0.4, "ask": 0.6}
+        orig = (ex.fetch_tree, ex.fetch_market, ex.fetch_quote, market.QUOTE_WORKERS)
+        ex.fetch_tree, ex.fetch_market, ex.fetch_quote, market.QUOTE_WORKERS = fake_tree, fake_market, fake_quote, 1
+        try:
+            out = market.quotes_job({"sources": {"exchange": True}, "exchange": {"quote_workers": 1}}, self.st, self.log,
+                                    dt.datetime(2026, 8, 23, 18, 0, tzinfo=U), deadline=dl)
+        finally:
+            ex.fetch_tree, ex.fetch_market, ex.fetch_quote, market.QUOTE_WORKERS = orig
+        self.assertEqual(calls["n"], 1)
+        self.assertEqual(out["quoted"], 1)
+        snap = json.loads(self.st.get("snapshots/market/KSFO.json"))
+        self.assertEqual(snap["asof"], "2026-08-23T10:00:00Z")       # the previous snapshot stands
+        summary = json.loads(self.st.get("snapshots/market/summary.json"))
+        self.assertIn("KSFO", summary["partialKept"])

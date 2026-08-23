@@ -9,26 +9,22 @@ final settlement file ("Metryc"). It is the one non-government weather
 source on this site, and it is gated twice:
 
   - `sources.reask` in config/site.json must be true, and
-  - an API key must be present (WX_REASK_API_KEY in the environment; never
-    in the repository). Without both, the pass writes a status snapshot that
-    says the lane is off and touches nothing else.
+  - the API base URL and key must be present (WX_REASK_BASE_URL and
+    WX_REASK_API_KEY in the environment; neither is in the repository).
+    Without all three, the pass writes a status snapshot that says the lane
+    is off and touches nothing else.
 
 Terms, from the vendor's agreement with the exchange: every figure that shows
 this data carries the "Powered by Reask" mark, and a site that displays it
 pulls with its own credential. The pages show the vendor's numbers as
 published; nothing here widens, holds or combines them.
 
-Endpoints (all GET, header x-api-key):
-  {base}/livecyc/tcwind/list                 -> {"storms": [{"storm_name", "storm_year",
-                                                 "forecasts": [{"forecast_datetime", "last_modified"}], "last_modified"}]}
-  {base}/livecyc/tcwind/probabilities?storm_name=&storm_year=&forecast_start_time=&format=csv
-  {base}/metryc/interim/tcwind/list, /metryc/interim/tcwind/probabilities?storm_name=&storm_year=&format=csv
-  {base}/metryc/historical/tcwind/list, /metryc/historical/tcwind/peak_gust?storm_name=&storm_year=&format=csv
-
-CSV columns: ID (the two-letter reference location), Region Group, Subregion,
-Country / Territory, Admin / State, Display Location, Latitude, Longitude,
-n_land_pixels, covered, grid_center_lat, grid_center_lon, prob_60mph ..
-prob_200mph (percent); the final file carries PeakGust_mph instead.
+Requests are GET with the key in a header, over https only, and redirects
+are refused so the key is never re-sent to another host. A listing is
+{"storms": [{"storm_name", "storm_year", "forecasts": [{"forecast_datetime",
+"last_modified"}], "last_modified"}]}; a probability file is CSV with one row
+per reference location (ID, Display Location, Latitude, Longitude, covered,
+prob_<N>mph in percent); the final file carries PeakGust_mph instead.
 
 Every file fetched is archived once (archive/reask/{storm}_{year}/...) and
 the snapshot carries the latest cycle per storm. The lane was built against
@@ -57,13 +53,23 @@ from .storage import Storage
 SCHEMA = 1
 KEY = "snapshots/reask.json"
 ATTRIBUTION = "Powered by Reask"
-DEFAULT_BASE = "https://forecastex.reask.earth/v1"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect would carry the key to whatever host answers; refuse it."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, f"redirect refused (to {newurl.split('?')[0]})", headers, fp)
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
 
 
 def _get(base: str, path: str, api_key: str, params: Optional[dict] = None, timeout: int = 30) -> bytes:
+    if not base.lower().startswith("https://"):
+        raise ValueError("the vendor base URL must be https")
     url = base.rstrip("/") + path + (("?" + urllib.parse.urlencode(params)) if params else "")
     req = urllib.request.Request(url, headers={"x-api-key": api_key, "User-Agent": gw.USER_AGENT, "Accept": "*/*"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with _OPENER.open(req, timeout=timeout) as r:
         return r.read()
 
 
@@ -122,11 +128,11 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
     rcfg = cfg.get("reask") or {}
     enabled = bool((cfg.get("sources") or {}).get("reask"))
     api_key = (rcfg.get("api_key") or "").strip()
-    base = rcfg.get("base_url") or DEFAULT_BASE
+    base = (rcfg.get("base_url") or "").strip()
     prev_raw = store.get(KEY)
     prev = json.loads(prev_raw) if prev_raw else {}
-    if not enabled or not api_key:
-        reason = "lane off in config" if not enabled else "no credential configured"
+    if not enabled or not api_key or not base:
+        reason = "lane off in config" if not enabled else ("no credential configured" if not api_key else "no base URL configured")
         snap = {"schema": SCHEMA, "enabled": False, "reason": reason, "written": _iso(now), "asof": None,
                 "attribution": ATTRIBUTION, "storms": []}
         store.put(KEY, json.dumps(snap, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
@@ -232,10 +238,12 @@ def reask_pass(cfg: dict, store: Storage) -> int:
     try:
         out = reask_job(cfg, store, log, now)
         if out.get("attempted"):
-            health = arch.update_health(store, {"reask": {"ok": bool(out.get("ok")), "error": "; ".join(out.get("errors") or [])[:300] or None}}, now)
+            # a failed poll counts toward the streak alarm; it is not an invocation error, because the
+            # quote job in the same invocation has already done its work
+            health = arch.update_health(store, {"reask": {"ok": bool(out.get("ok")), "error": "; ".join(out.get("errors") or [])[:300] or None}}, now,
+                                        key=arch.MARKET_HEALTH_KEY)
             if (health.get("reask") or {}).get("fail_streak", 0) >= arch.FAIL_STREAK_ALARM:
                 alarms = ["reask"]
-            errors = 0 if out.get("ok") else 1
     except Exception as e:  # noqa: BLE001
         errors = 1
         log(kind="reask", error=f"{type(e).__name__}: {e}")

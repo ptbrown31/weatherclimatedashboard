@@ -98,7 +98,7 @@ def _carry_history(prev: Optional[dict], days: dict, now: dt.datetime, keep_days
                 continue
             hs = hist.setdefault(day, {}).setdefault(side, {})
             for r in rows:
-                if r.get("error") == "deadline":
+                if r.get("error"):                 # a failed request is not a 'no book' sample
                     continue
                 key = str(r["strike"]).rstrip("0").rstrip(".") if "." in str(r["strike"]) else str(r["strike"])
                 ser = hs.setdefault(key, [])
@@ -138,6 +138,9 @@ def _group_snapshot(name: str, now: dt.datetime, items: List[dict]) -> dict:
 
 
 def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline: Optional[arch.Deadline] = None) -> dict:
+    if not (cfg.get("sources") or {}).get("exchange", True):
+        log(kind="market", skipped="sources.exchange is off")
+        return {"skipped": True, "quoted": 0, "failed": 0, "stations": 0}
     deadline = deadline or arch.Deadline(arch.remaining_budget(cfg))
     xcfg = cfg.get("exchange") or {}
     ex.set_base_url(xcfg.get("base_url") or ex.BASE_URL)
@@ -152,9 +155,17 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
 
     # ---- contract lists: one request per listed market, concurrently
     wanted = {}                                  # sid -> {side: symbol} for symbols the tree lists
+    unmatched = {}                               # sid -> the symbols derived but absent from the tree
     for c in roster:
         syms = ex.symbols_for(c)
         wanted[c["station"]] = {side: sym for side, sym in syms.items() if sym in bysym}
+        if not wanted[c["station"]]:
+            unmatched[c["station"]] = sorted(syms.values())
+    if unmatched:
+        # a station whose derived symbol is not in the tree is either not listed or listed under a
+        # code this mapping does not know (exchange.CODE_OVERRIDES); the summary names them so the
+        # difference can be checked against the tree by hand
+        log(kind="market", step="unmatched", stations=unmatched)
     hur_markets = ex.category_markets(tree, ex.HURRICANE_CATEGORY)
     clim_markets = [bysym[s] for s in ex.CLIMATE_SYMBOLS if s in bysym]
     to_list = [("station", sid, side, bysym[sym]) for sid, ss in wanted.items() for side, sym in ss.items()]
@@ -185,7 +196,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         mk = day_markers(c, now)
         grouped = ex.group_contracts(mkt, {mk["day"], mk["tomorrow"]})
         rows = _quote_rows(grouped, ex.fetch_quote, deadline)
-        st = by_station.setdefault(key, {"markets": {}, "days": {}, "listed": {}})
+        st = by_station.setdefault(key, {"markets": {}, "days": {}, "listed": {}, "partial": False})
         st["markets"][side] = {"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"), "conid": m["conid"]}
         st["listed"][side] = sorted(grouped.keys())
         for day, rs in rows.items():
@@ -193,6 +204,8 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             for r in rs:
                 quoted += r.get("error") is None
                 failed += r.get("error") is not None
+                if r.get("error") == "deadline":
+                    st["partial"] = True
                 archive_rows.append({"station": key, "day": day, "side": side, **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
 
     groups: Dict[str, List[dict]] = {"hurricane": [], "climate": []}
@@ -233,11 +246,19 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
 
     # ---- write: per station, summary, groups, archive
     summary_rows = []
+    partial_kept: List[str] = []
     for c in roster:
         sid = c["station"]
         st = by_station.get(sid)
         prev_raw = store.get(f"{PREFIX}{sid}.json")
         prev = json.loads(prev_raw) if prev_raw else None
+        if st is not None and st["partial"] and prev:
+            # the deadline cut this ladder short: a partial ladder would carry a fresh as-of time and a
+            # median computed from the strikes that happened to come first, so the previous snapshot stands
+            partial_kept.append(sid)
+            summary_rows.append({"station": sid, "listed": True, "symbols": {s: m["symbol"] for s, m in st["markets"].items()},
+                                 "asof": prev.get("asof"), "partial": True})
+            continue
         if st is None:
             # not listed today (or its contract lists failed): keep the previous
             # snapshot if there is one, else write an explicit unlisted one
@@ -265,15 +286,17 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         summary_rows.append(row)
 
     summary = {"schema": SCHEMA, "source": SOURCE, "asof": _iso(now), "written": _iso(now), "quoted": quoted, "failed": failed,
-               "listErrors": list_errors[:20], "cities": summary_rows}
+               "listErrors": list_errors[:20], "unmatched": unmatched, "partialKept": partial_kept,
+               "deadline": bool(partial_kept), "cities": summary_rows}
     store.put(f"{PREFIX}summary.json", json.dumps(summary, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     for name, items in groups.items():
         store.put(f"{PREFIX}{name}.json", json.dumps(_group_snapshot(name, now, items), separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     stamp = now.strftime("%Y%m%d/%H%M%S")
     store.put(f"archive/market/{stamp}.json.gz",
               gzip.compress(json.dumps({"asof": _iso(now), "rows": archive_rows}, separators=(",", ":")).encode()), "application/gzip")
-    arch.update_health(store, {"exchange": {"ok": True}}, now)
-    log(kind="market", step="written", stations=len(by_station), groups={k: len(v) for k, v in groups.items()}, archiveRows=len(archive_rows))
+    arch.update_health(store, {"exchange": {"ok": True}}, now, key=arch.MARKET_HEALTH_KEY)
+    log(kind="market", step="written", stations=len(by_station), partialKept=partial_kept,
+        groups={k: len(v) for k, v in groups.items()}, archiveRows=len(archive_rows))
     return {"quoted": quoted, "failed": failed, "stations": len(by_station)}
 
 
@@ -296,7 +319,7 @@ def quotes_pass(cfg: dict, store: Storage) -> int:
     except Exception as e:  # noqa: BLE001 - recorded, counted toward the streak
         errors = 1
         log(kind="market", error=f"{type(e).__name__}: {e}")
-        health = arch.update_health(store, {"exchange": {"ok": False, "error": f"{type(e).__name__}: {e}"}}, now)
+        health = arch.update_health(store, {"exchange": {"ok": False, "error": f"{type(e).__name__}: {e}"}}, now, key=arch.MARKET_HEALTH_KEY)
         if (health.get("exchange") or {}).get("fail_streak", 0) >= arch.FAIL_STREAK_ALARM:
             alarms = ["exchange"]
     arch.LAST_STATUS = {"job": "quotes", "errors": errors, "alarms": alarms, "seconds": round(time.time() - t0, 1), "entries": entries}

@@ -72,7 +72,7 @@ parameters: `station`, `theme`, `market`.
                      run.py (command line), handler.py (the only vendor-specific file)
     site/            the static frontend; js/market.js is the market seam; embed/ is the iframe target
     site/assets/     small projected geometry the pages load (generated)
-    geo/             vendored public-domain TopoJSON inputs; not published
+    geo/             vendored inputs, not served: public-domain TopoJSON and the exchange's wind reference-location list
     samples/         snapshots for offline local mode (checked in)
     scripts/         build.py, serve_local.py, verify.py, build_assets.py, scrub.py,
                      seed_archive.py, backfill_obs.py, make_samples.py, package_lambda.py
