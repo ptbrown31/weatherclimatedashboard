@@ -75,14 +75,14 @@ text{font-family:inherit}
 .status.none::before{background:var(--bad)}
 .status.none{color:var(--bad)}
 /* tooltips */
-.tip{position:fixed;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);padding:7px 10px;border-radius:6px;font-size:12px;opacity:0;transition:opacity .08s;z-index:9;line-height:1.45;max-width:320px}
+.tip{position:fixed;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);padding:7px 10px;border-radius:6px;font-size:12px;opacity:0;transition:opacity .08s;z-index:9;line-height:1.45;max-width:340px}
 .tip b{display:block;margin-bottom:2px}
-.tip .tg{display:grid;grid-template-columns:auto auto;column-gap:12px;row-gap:1px}
+.tip .tg{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px;row-gap:1px}
 .tip .tk{opacity:.75;white-space:nowrap}
-.tip .tv{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tip .tv{text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .tip .tf{margin-top:4px;opacity:.75;font-size:11px}
 .tip[data-pinned="1"]{pointer-events:auto;user-select:text;outline:1px solid var(--accent)}
-.tip .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.tip .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(128,128,128,.7)}
 @media (prefers-reduced-motion: reduce){.tip{transition:none}}
 /* city page */
 .pickwrap{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px}

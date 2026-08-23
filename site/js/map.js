@@ -46,11 +46,13 @@ window.WXMap = (() => {
 
   // the market-implied median for one side, as a tooltip value: the number
   // with its gap against the NWS forecast, or the reason there is none
+  const STATE_TEXT = { unavailable: 'quotes unavailable', unlisted: 'no market listed', day: 'quote summary is for another day',
+                       'tomorrow-unlisted': 'tomorrow’s contracts not listed yet', 'no-bids': 'no bids yet' };
   function impliedText(m, v, d, edge) {
     if (!m) return 'not listed yet';
     if (v != null) return deg(v) + gap(d);
     if (edge) return edge === 'above' ? 'above the top strike' : 'below the bottom strike';
-    return 'no bids yet';
+    return STATE_TEXT[m.state] || 'no bids yet';
   }
 
   function dotTip(c) {

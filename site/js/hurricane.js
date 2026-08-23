@@ -102,7 +102,7 @@ window.WXHur = (() => {
   // ---- the exchange's hurricane group, by symbol
   const market = sym => (MK ? MK.markets.find(m => m.symbol === sym) : null);
   const yes = c => (c && c.mid != null ? cents(c.mid) : null);
-  const quoteText = c => (!c ? 'not listed' : (c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid)) + ' (bid ' + pct(cents(c.bid)) + ' · ask ' + pct(cents(c.ask)) + (c.from === 'no' ? ', from the No book' : '') + ')'));
+  const quoteText = c => (!c ? 'not listed' : (c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid)) + ' (Yes bid ' + pct(cents(c.bid)) + ' · No bid ' + pct(cents(noBid(c))) + (c.from === 'no' ? ', quoted from the No contract' : '') + ')'));
   function landfallQuotes() {
     const m = market('HLF'); if (!m) return null;
     const out = {};
@@ -137,9 +137,9 @@ window.WXHur = (() => {
       // a line is hard to hover at 2px, so each track gets an invisible wide twin for the pointer
       const hitLine = (d, html) => { const q = el('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': 0, 'stroke-width': 9, 'pointer-events': 'stroke' }); attach(q, html); svg.appendChild(q); };
       (s.cone || []).forEach(c => rings(c).forEach(r => {
-        const cone = el('path', { d: path(r, true), fill: 'rgba(100,116,139,.14)', stroke: '#64748b', 'stroke-width': 1 });
-        attach(cone, tip.rows(name + ' — NHC forecast cone', geomRows, fetchedFoot));
-        svg.appendChild(cone);
+        // the cone lets the pointer through: the landfall regions beneath it carry the bids,
+        // and the cone's advisory and fetch time are on every track point
+        svg.appendChild(el('path', { d: path(r, true), fill: 'rgba(100,116,139,.14)', stroke: '#64748b', 'stroke-width': 1, 'pointer-events': 'none' }));
       }));
       (s.past || []).forEach(c => rings(c).forEach(r => {
         svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.3, 'stroke-dasharray': '3 3' }));
@@ -149,6 +149,7 @@ window.WXHur = (() => {
         svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--navy)', 'stroke-width': 2 }));
         hitLine(path(r), tip.rows(name + ' — NHC forecast track', geomRows, fetchedFoot));
       }));
+      const hits = [];
       (s.points || []).forEach((p, i) => {
         svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: p.tau === 0 ? 6 : 4.5, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 }));
         if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + p.kt + 'kt' : ''), { x: X(p.lon) + 8, y: Y(p.lat) + (i % 2 ? 14 : -8), 'font-size': 9, fill: 'var(--ink)', class: 'lbl' }));
@@ -175,8 +176,10 @@ window.WXHur = (() => {
           hit.onmouseleave = () => tip.hide();
           hit.onclick = () => window.open(s.advisoryUrl, '_blank', 'noopener');
         } else attach(hit, html);
-        svg.appendChild(hit);
+        hits.push([now ? 1 : 0, hit]);
       });
+      // the current position's target goes on top, so a slow storm's +12 h point cannot cover it
+      hits.sort((a, b) => a[0] - b[0]).forEach(([, hit]) => svg.appendChild(hit));
     });
     return { storms: storms.length, areas: outl.length };
   }
@@ -248,9 +251,10 @@ window.WXHur = (() => {
     (GEO && GEO.locations || []).forEach(L => {
       if (L.lon < b0 || L.lon > b1 || L.lat < la0 || L.lat > la1) return;
       const v = vendorSite(L.id);
-      const r = v && v.p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(v.p80, 100) / 100) : 2.2;
-      if (v && v.p80 > 0) vendorShown++;
-      const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: v && v.p80 > 0 ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': v ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 });
+      const any = v && v.p.some(x => x > 0);
+      const r = v && v.p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(v.p80, 100) / 100) : (any ? 3 : 2.2);
+      if (any) vendorShown++;
+      const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 });
       attach(c, locationTip(L, v));
       svg.appendChild(c);
     });
@@ -357,7 +361,8 @@ window.WXHur = (() => {
     tb.appendChild(h('tr', {}, [h('th', { text: 'Region (' + (m.contracts[0] && m.contracts[0].expiryLabel || 'season') + ')' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'No bid' }), h('th', { class: 'num', text: 'Yes price' }), h('th', { text: 'On the map' })]));
     m.contracts.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
       const k = regionKey(c.label);
-      const onMap = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]) ? 'shaded' : 'not drawn';
+      const drawn = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]);
+      const onMap = !drawn ? 'not drawn' : (c.mid == null ? 'outline only (no bids)' : 'shaded');
       const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) }), h('td', { text: onMap })]);
       attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat([['On the map', onMap]]), asofFoot()));
       tb.appendChild(tr);

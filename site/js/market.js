@@ -154,15 +154,24 @@ window.WXM = (() => {
 
   // implied high/low for the map: the market-implied median for the
   // station's tomorrow, against the NWS forecast for the same day
+  // `state` names why a value may be missing: 'unavailable' (no quote summary
+  // loaded), 'unlisted' (the station has no market today), 'day' (the summary
+  // is for another day), 'tomorrow-unlisted' (tomorrow's contracts not listed
+  // yet), 'no-bids' (listed, fewer than two strikes with bids), 'ok'
   function implied(city) {
     if (!on()) return null;
     if (!live()) return impliedPlaceholder(city);
     const sm = S.summary && S.summary.data;
-    const r = sm && (sm.cities || []).find(c => c.station === city.station);
-    if (!r || !r.listed || !city.markers || r.tomorrow !== city.markers.tomorrow) return null;
-    const out = { impliedHigh: r.impliedHighTomorrow, impliedLow: r.impliedLowTomorrow, divHigh: null, divLow: null,
+    if (!sm) return { state: 'unavailable', impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: 'quotes unavailable' };
+    const r = (sm.cities || []).find(c => c.station === city.station);
+    if (!r || !r.listed) return { state: 'unlisted', impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: 'no market listed' };
+    if (!city.markers || r.tomorrow !== city.markers.tomorrow) return { state: 'day', impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: 'quote summary is for another day' };
+    const listedTomorrow = (r.quotedHighTomorrow || 0) + (r.quotedLowTomorrow || 0) > 0 || r.impliedHighTomorrow != null || r.impliedLowTomorrow != null || r.impliedHighTomorrowEdge || r.impliedLowTomorrowEdge;
+    const out = { state: listedTomorrow ? 'ok' : 'tomorrow-unlisted', impliedHigh: r.impliedHighTomorrow, impliedLow: r.impliedLowTomorrow, divHigh: null, divLow: null,
                   edgeHigh: r.impliedHighTomorrowEdge, edgeLow: r.impliedLowTomorrowEdge, asof: r.asof,
+                  quotedHigh: r.quotedHighTomorrow, quotedLow: r.quotedLowTomorrow,
                   label: 'ForecastEx implied median, ' + asofText(S.summary) };
+    if (out.state === 'ok' && out.impliedHigh == null && !out.edgeHigh && out.impliedLow == null && !out.edgeLow) out.state = 'no-bids';
     if (out.impliedHigh != null && city.nwsHighTomorrow != null) out.divHigh = Math.round((out.impliedHigh - city.nwsHighTomorrow) * 10) / 10;
     if (out.impliedLow != null && city.nwsLowTomorrow != null) out.divLow = Math.round((out.impliedLow - city.nwsLowTomorrow) * 10) / 10;
     return out;

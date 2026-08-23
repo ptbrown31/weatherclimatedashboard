@@ -13,7 +13,7 @@ window.WXScore = (() => {
 
   const fmt = v => (v == null ? '—' : (Math.round(v * 10) / 10).toFixed(1));
   const pct = v => (v == null ? '—' : Math.round(v * 100) + '%');
-  const signed = v => (v == null ? '—' : (v > 0 ? '+' : '') + fmt(v));
+  const signed = v => { if (v == null) return '—'; const r = Math.round(v * 10) / 10; return (r > 0 ? '+' : '') + fmt(r); };
   const degs = v => (v == null ? '—' : fmt(v) + '°');
   // bias with its lean in words; the rounded value decides, so "+0.0" never reads warm
   function biasWord(v) {
@@ -121,7 +121,7 @@ window.WXScore = (() => {
       let best = null;
       if (scored.length) {
         const m = Math.min(...scored.map(k => Math.abs(d[k].errHigh)));
-        best = scored.filter(k => Math.abs(d[k].errHigh) === m).map(k => NAME[k]).join(' / ') + ' (' + signed(d[scored.find(k => Math.abs(d[k].errHigh) === m)].errHigh) + ')';
+        best = scored.filter(k => Math.abs(d[k].errHigh) === m).map(k => NAME[k] + ' (' + signed(d[k].errHigh) + ')').join(' / ');
       }
       return tip.rows(st.city + ' — ' + d.date, [['Observed high', deg(d.obsHigh)], ['Observed low', deg(d.obsLow)], ['METARs scored', d.n], ['Closest on the high', best]],
         scored.length ? 'error = forecast minus observed' : 'no forecasts scored for this day');

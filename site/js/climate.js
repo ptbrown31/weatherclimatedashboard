@@ -140,7 +140,8 @@ window.WXClimate = (() => {
       tip.show(e, tip.rows(title, [when, ['Value', fv(q[1]) + ' ' + unitShort],
         ['Change over 10 years', d10 == null ? null : sgn(d10) + ' ' + unitShort], ['Latest', latestText]], source));
     });
-    svg.addEventListener('mouseleave', () => { clearDot(); tip.hide(); });
+    svg.addEventListener('mouseleave', () => { clearDot(); tip.hide(); drag = null; });
+    document.addEventListener('mouseup', () => { drag = null; });
 
     // the Climate-at-a-Glance trend tool: drag to fit, dashed extrapolation
     if (pts.length > 4) {

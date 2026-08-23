@@ -40,7 +40,7 @@ window.WXCity = (() => {
   const isoDate = d => { if (!d) return ''; const [y, m, dd] = d.split('-'); return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m - 1] + ' ' + (+dd) + (y ? ', ' + y : ''); };
 
   // one strike of the ladder: the exchange's top of book and the strike's own day so far
-  function ladderTip(L, side, lad, c) {
+  function ladderTip(L, side, lad, c, pinHint) {
     const cmp = side === 'h' ? '>' : '<', unit = c.unit;
     if (!lad.live) return tip.rows(cmp + L.strike + '°' + unit, [['Yes', L.yes + '¢'], ['No', (100 - L.yes) + '¢']], WXM.PLACEHOLDER);
     const path = WXM.pricePath([], [], unit, side, L.strike, c);
@@ -54,16 +54,18 @@ window.WXCity = (() => {
       ['Buy Yes now at', L.noBid == null ? null : (100 - L.noBid) + '¢'],
       ['Buy No now at', L.bid == null ? null : (100 - L.bid) + '¢'],
       ['Quoted from', L.from === 'no' ? 'the No contract' : null],
-      ['Last 10 min', last && prev ? ((last.v - prev.v > 0 ? '+' : '') + (last.v - prev.v) + '¢') : null],
-      ['First sample', first && first !== last ? first.v + '¢ at ' + WXC.clock(first.t, c.tz) : null],
+      ['Since the previous sample', last && prev ? ((last.v - prev.v > 0 ? '+' : '') + (last.v - prev.v) + '¢ (' + Math.round((last.t - prev.t) / 60000) + ' min)') : null],
+      ['First sample', first && first !== last ? first.v + '¢ at ' + WXC.clock(first.t, c.tz) + ' · ' + WXC.dateShort(first.t, c.tz) : null],
       ['Implied median', im && im.value != null ? WXC.deg(im.value) : (im && im.edge ? 'beyond the ladder (' + im.edge + ')' : null)],
       ['Settles', L.expiration ? isoDate(L.expiration.slice(0, 4) + '-' + L.expiration.slice(4, 6) + '-' + L.expiration.slice(6, 8)) : null],
-      ['Quotes as of', lad.asof ? WXC.clockFull(Date.parse(lad.asof), Intl.DateTimeFormat().resolvedOptions().timeZone) : null],
+      ['Quotes as of', lad.asof ? WXC.clockFull(Date.parse(lad.asof), c.tz) + ' · ' + WXC.dateShort(Date.parse(lad.asof), c.tz) : null],
     ];
     return tip.rows(cmp + L.strike + '°' + unit + ' — ' + (side === 'h' ? 'daily high above' : 'daily low below') + ' ' + L.strike,
-      rows, 'Yes and No bids sum to $1; there are no sellers · not fee adjusted · click to pin');
+      rows, 'times in station time · Yes and No bids sum to $1; there are no sellers · not fee adjusted' + (pinHint === false ? ' · click to draw this strike’s price line' : ' · click to pin'));
   }
 
+  const impliedState = m => ({ unavailable: 'quotes unavailable', unlisted: 'no market listed', day: 'quote summary is for another day',
+                                'tomorrow-unlisted': 'tomorrow’s contracts not listed yet', 'no-bids': 'no bids yet' })[m && m.state] || null;
   // a picker dot: tomorrow's numbers against the forecast, then today so far
   function pickTip(c) {
     const m = WXM.on() ? WXM.implied(c) : null, mk = c.markers || {};
@@ -71,8 +73,8 @@ window.WXCity = (() => {
     const rows = [
       ['NWS high / low, tomorrow', c.nwsHighTomorrow != null || c.nwsLowTomorrow != null ? WXC.deg(c.nwsHighTomorrow) + ' / ' + WXC.deg(c.nwsLowTomorrow) : null],
       ['NBM high / low, tomorrow', c.nbmHighTomorrow != null ? WXC.deg(c.nbmHighTomorrow) + ' / ' + WXC.deg(c.nbmLowTomorrow) : null],
-      ['Implied high (ForecastEx)', m ? (m.impliedHigh != null ? WXC.deg(m.impliedHigh) + gap(m.impliedHigh, c.nwsHighTomorrow) : (m.edgeHigh ? 'beyond the ladder (' + m.edgeHigh + ')' : null)) : (WXM.live() ? 'not listed yet' : null)],
-      ['Implied low (ForecastEx)', m ? (m.impliedLow != null ? WXC.deg(m.impliedLow) + gap(m.impliedLow, c.nwsLowTomorrow) : (m.edgeLow ? 'beyond the ladder (' + m.edgeLow + ')' : null)) : null],
+      ['Implied high (' + (WXM.live() ? 'ForecastEx' : 'placeholder') + ')', m ? (m.impliedHigh != null ? WXC.deg(m.impliedHigh) + gap(m.impliedHigh, c.nwsHighTomorrow) : (m.edgeHigh ? 'beyond the ladder (' + m.edgeHigh + ')' : impliedState(m))) : null],
+      ['Implied low (' + (WXM.live() ? 'ForecastEx' : 'placeholder') + ')', m ? (m.impliedLow != null ? WXC.deg(m.impliedLow) + gap(m.impliedLow, c.nwsLowTomorrow) : (m.edgeLow ? 'beyond the ladder (' + m.edgeLow + ')' : impliedState(m))) : null],
       ['NWS high issued for today', c.nwsIssuedHigh != null ? WXC.deg(c.nwsIssuedHigh) : (c.nwsHighToday != null ? WXC.deg(c.nwsHighToday) + ' (standing)' : null)],
       ['Observed so far today', c.obsHighSoFar != null ? WXC.deg(c.obsHighSoFar) + ' / ' + WXC.deg(c.obsLowSoFar) : null],
       ['Latest report', c.obsLatest && c.obsLatest.t ? (c.obsLatest.type || 'METAR') + ' ' + WXC.clock(Date.parse(c.obsLatest.t), c.tz) : null],
@@ -184,7 +186,7 @@ window.WXCity = (() => {
         const key = pfx + ':' + L.strike;
         const one = L.side === 'bid' || L.side === 'ask';
         const b = h('button', { class: 'sk' + (checked.has(key) ? ' on' : ''), text: cmp + L.strike + '°' + (L.yes != null ? ' ' + L.yes + '¢' + (one ? '*' : '') : '') });
-        b.onmousemove = e => tip.show(e, ladderTip(L, pfx, lad, c));
+        b.onmousemove = e => tip.show(e, ladderTip(L, pfx, lad, c, false));
         b.onmouseleave = () => tip.hide();
         b.style.setProperty('--c', skColor(pfx, L.strike, lad));
         b.onclick = () => { checked.has(key) ? checked.delete(key) : checked.add(key); b.classList.toggle('on'); draw(); };
@@ -248,13 +250,20 @@ window.WXCity = (() => {
       if (ai && (ai.highToday != null || ai.lowToday != null)) addLevel(k, ai.highToday, ai.lowToday, ai.preDay || ai.levelPreDay, { cycleHigh: ai.levelCycleHigh || ai.cycle, cycleLow: ai.levelCycleLow || ai.cycle, fromHourly: ai.fromHourly });
       else if (fc && fc[k] && (fc[k].highToday != null || fc[k].lowToday != null)) addLevel(k, fc[k].highToday, fc[k].lowToday, false, { cycleHigh: fc[k].cycle, cycleLow: fc[k].cycle, fromHourly: fc[k].highTodayFrom === 'hourly' || fc[k].partialDay });
     });
-    const levelTip = L => tip.rows(NAME[L.k] + ' — forecast ' + L.kind + ' for ' + isoDate(M.day), [
-      ['Value', WXC.deg(L.v)],
-      ['Cycle', stamp(L.cycle, tz)],
-      ['Issued', L.issued ? 'before the day began (as issued)' : 'the standing forecast; no pre-day cycle in the archive yet'],
-      ['Derived from', L.fromHourly ? 'the hourly series (no day value in that cycle)' : (L.k === 'nws' ? 'the day/night product (official high or low)' : (L.k === 'mav' ? 'the N/X line' : (L.k === 'nbm' ? 'the NBS day max/min line' : 'the hourly series')))],
-    ], DESC[L.k] + ' · click to pin');
-    const bind = (node, html, pin) => { node.addEventListener('mousemove', e => { e.stopPropagation(); tip.show(e, html()); }); node.addEventListener('mouseleave', () => tip.hide()); if (pin) node.addEventListener('click', e => { e.stopPropagation(); tip.pin(e, html()); }); node.setAttribute('data-tip-pin', '1'); node.style.cursor = 'default'; return node; };
+    const levelTip = L => {
+      // every source that sits at exactly this level shares the line, so the tooltip lists them all
+      const same = levels.filter(x => x.kind === L.kind && x.v === L.v);
+      const rows = [['Value', WXC.deg(L.v)]];
+      same.forEach(x => {
+        const pre = same.length > 1 ? NAME[x.k] + ' · ' : '';
+        rows.push([pre + 'Cycle', stamp(x.cycle, tz)]);
+        rows.push([pre + 'Issued', x.issued ? 'before the day began (as issued)' : 'standing forecast; no pre-day cycle in the archive yet']);
+        rows.push([pre + 'Derived from', x.fromHourly ? 'the hourly series (no day value in that cycle)' : (x.k === 'nws' ? 'the day/night product (official high or low)' : (x.k === 'mav' ? 'the N/X line' : (x.k === 'nbm' ? 'the NBS day max/min line' : 'the hourly series')))]);
+      });
+      return tip.rows(same.map(x => NAME[x.k]).join(', ') + ' — forecast ' + L.kind + ' for ' + isoDate(M.day), rows,
+        same.map(x => DESC[x.k]).join('; ') + ' · click to pin');
+    };
+    const bind = (node, html, pin) => { node.addEventListener('mousemove', e => { e.stopPropagation(); tip.show(e, html()); }); node.addEventListener('mouseleave', () => tip.hide()); if (pin) { node.addEventListener('click', e => { e.stopPropagation(); tip.pin(e, html()); }); node.setAttribute('data-tip-pin', '1'); } node.style.cursor = 'default'; return node; };
 
     // NCEI daily normals for the day, drawn as quiet reference ticks in the gutter
     const nm = snaps.nm && snaps.nm.data && snaps.nm.data.days ? snaps.nm.data.days[M.day.slice(5)] : null;
@@ -357,10 +366,10 @@ window.WXCity = (() => {
     if (F.length) g.appendChild(line(F, { stroke: COL.nws, 'stroke-width': 2.4, opacity: .95 }));
     const obsMeta = {};
     ((ob && ob.rows) || []).forEach(r => { obsMeta[P(r.t)] = r; });
-    const obsTip = p => { const r = obsMeta[p.t] || {}; return tip.rows((r.type || 'METAR') + ' observation', [
-      ['Time', WXC.clockFull(p.t, tz)], ['Temperature', WXC.deg(p.v)],
+    const obsTip = p => { const r = obsMeta[p.t] || {}; const inDay = p.t >= d0 && p.t < d1; return tip.rows((r.type || 'METAR') + ' observation' + (inDay ? '' : ' — before the contract day'), [
+      ['Time', WXC.clockFull(p.t, tz) + ' · ' + WXC.dateShort(p.t, tz)], ['Temperature', WXC.deg(p.v)],
       ['Decoded from', SRC[r.src] || r.src || null],
-      ['Counts toward settlement', r.type === 'SPECI' ? 'yes (SPECI reports count)' : 'yes'],
+      ['Counts toward ' + isoDate(M.day).replace(/, \d{4}$/, '') + ' settlement', inDay ? (r.type === 'SPECI' ? 'yes (SPECI reports count)' : 'yes') : 'no (outside the contract day)'],
     ], 'aviationweather.gov METAR · the crosshair lists every series at this time'); };
     if (O.length) {
       g.appendChild(line(O, { stroke: COL.obs, 'stroke-width': 2 }));
@@ -405,8 +414,8 @@ window.WXCity = (() => {
             const nb = el('rect', { x: S.LX + gw, y: yy - 5.5, width: Math.max(S.LW - gw, 1), height: 11, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
             g.appendChild(bind(yb, () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true)); g.appendChild(bind(nb, () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
             if (lad.live && L.side !== 'mid') g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'none', stroke: 'var(--panel)', 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
-            if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt' }));
-            if (S.LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: S.LX + S.LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end' }));
+            if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt', 'pointer-events': 'none' }));
+            if (S.LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: S.LX + S.LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end', 'pointer-events': 'none' }));
           }
           g.appendChild(bind(txt(cmp + L.strike + '°', { x: S.LX + S.LW + 5, y: yy + 3.5, class: 'ax', fill: m === 'high' ? 'var(--warm)' : 'var(--cool)' }), () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
         });
