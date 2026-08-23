@@ -19,6 +19,7 @@ Outputs:
     config/field_grid.json          the shading cells and the screen transform
 """
 from __future__ import annotations
+import csv
 import json
 import math
 import os
@@ -35,6 +36,10 @@ WW, WH = 960.0, 480.0                     # the world picker viewBox
 STEP = 12.0                               # shading cell size, screen px
 SKIP = {"02", "15", "60", "66", "69", "72", "78"}   # AK, HI, territories (Hawaii is on the picker)
 HBOX = [-101.0, 4.0, -40.0, 48.0]         # the Atlantic hurricane box: lon0, lat0, lon1, lat1
+# (state FIPS, county name) -> the label the landfall contract uses
+COUNTIES = {("48", "Harris"): "Harris, Texas", ("12", "Broward"): "Broward, Florida",
+            ("12", "Palm Beach"): "Palm Beach, Florida", ("12", "Miami-Dade"): "Miami-Dade, Florida",
+            ("12", "Hillsborough"): "Hillsborough, Florida", ("12", "Lee"): "Lee, Florida"}
 COASTAL = {"Maine", "New Hampshire", "Massachusetts", "Rhode Island", "Connecticut",
            "New York", "New Jersey", "Pennsylvania", "Delaware", "Maryland", "Virginia",
            "North Carolina", "South Carolina", "Georgia", "Florida", "Alabama",
@@ -264,6 +269,34 @@ def build_assets(cities: list) -> dict:
             states_ll[nm] = rr
             scent[nm] = centroid(rr)
 
+    # the counties the landfall contracts name, from the Census county boundaries
+    # (us-atlas counties-10m; ids are FIPS codes, the state being the first two digits)
+    ctopo, cring = decode_topo(os.path.join(GEO, "counties-10m.json"))
+    counties, cocent = {}, {}
+    for g in ctopo["objects"]["counties"]["geometries"]:
+        fid = str(g["id"]).zfill(5)
+        label = COUNTIES.get((fid[:2], g["properties"].get("name")))
+        if not label:
+            continue
+        rr = [simplify(r, 0.01) for r in geom_rings(g, cring)]
+        rr = [r for r in rr if len(r) > 4]
+        if rr:
+            counties[label] = rr
+            cocent[label] = centroid(rr)
+
+    # the exchange's hurricane wind reference locations (the vendor's registry,
+    # vendored as geo/reask_locations.csv): id, name and position only
+    locations = []
+    with open(os.path.join(GEO, "reask_locations.csv"), newline="", encoding="utf-8") as fh:
+        for row in csv.DictReader(fh):
+            try:
+                locations.append({"id": row["ID"].strip(), "name": row["Display Location"].strip(),
+                                  "lat": round(float(row["Latitude"]), 4), "lon": round(float(row["Longitude"]), 4),
+                                  "region": row.get("Region Group", "").strip(), "country": row.get("Country / Territory", "").strip(),
+                                  "state": row.get("Admin / State", "").strip()})
+            except (KeyError, ValueError):
+                continue
+
     roster = []
     for sid, name, lat, lon, tzname, unit in cities:
         px, py = tr.project(lon, lat)
@@ -283,15 +316,17 @@ def build_assets(cities: list) -> dict:
         json.dump({"viewBox": f"0 0 {WW:.0f} {WH:.0f}", "worldPaths": " ".join(wpaths)}, fh, separators=(",", ":"))
     with open(os.path.join(ASSETS, "hurricane-geo.json"), "w") as fh:
         json.dump({"bbox": HBOX, "asof": "Census Bureau cartographic boundaries (us-atlas) and Natural Earth (world-atlas), public domain",
-                   "countries": countries, "states": states_ll, "centroids": {**ccent, **scent}, "nation": nation,
-                   "counties": {}, "tcw": [], "listed": []}, fh, separators=(",", ":"))
+                   "countries": countries, "states": states_ll, "counties": counties,
+                   "centroids": {**ccent, **scent, **cocent}, "nation": nation,
+                   "locations": locations}, fh, separators=(",", ":"))
     with open(os.path.join(CONFIG, "cities.json"), "w") as fh:
         json.dump(roster, fh, indent=1)
     with open(os.path.join(CONFIG, "field_grid.json"), "w") as fh:
         json.dump({"transform": tr.to_json(), "cells": cells}, fh, separators=(",", ":"))
     return {"rings": len(paths), "statePathsKB": round(len(state_paths) / 1024), "cells": len(cells),
             "nationRings": len(nation), "worldKB": round(len(" ".join(wpaths)) / 1024),
-            "countries": len(countries), "coastalStates": len(states_ll)}
+            "countries": len(countries), "coastalStates": len(states_ll), "counties": len(counties),
+            "locations": len(locations)}
 
 
 def load_roster() -> list:

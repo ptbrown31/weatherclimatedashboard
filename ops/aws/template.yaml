@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Weather tools site: one private S3 bucket (site files at the root, snapshots and the
   archive under data/), a CloudFront distribution with Origin Access Control, one Lambda
-  function that runs every pipeline job, three EventBridge schedules, and an error alarm.
+  function that runs every pipeline job, four EventBridge schedules, and an error alarm.
   Deployment-agnostic application code; this template is the only AWS-specific artefact
   besides pipeline/handler.py. See DEPLOY.md for the steps around it.
 
@@ -31,6 +31,13 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 30
+  ReaskApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Optional credential for the vendor live-storm wind lane (sources.reask in config/site.json must
+      also be true). Leave empty to keep the lane off. Never written to the repository.
 
 Conditions:
   HasDomain: !Not [!Equals [!Ref DomainName, ""]]
@@ -60,6 +67,10 @@ Resources:
             Status: Enabled
             Prefix: data/archive/_runs/
             ExpirationInDays: 90
+          - Id: expire-quote-passes
+            Status: Enabled
+            Prefix: data/archive/market/
+            ExpirationInDays: 400
           - Id: abort-incomplete-uploads
             Status: Enabled
             AbortIncompleteMultipartUpload:
@@ -242,6 +253,7 @@ Resources:
           WX_STORAGE_PREFIX: data
           WX_USER_AGENT: !Ref UserAgent
           WX_DOMAIN: !Ref DomainName
+          WX_REASK_API_KEY: !Ref ReaskApiKey
       # placeholder body; DEPLOY.md replaces it with dist/lambda.zip
       Code:
         ZipFile: |
@@ -279,6 +291,20 @@ Resources:
         Arn: !GetAtt Pipeline.Arn
         RoleArn: !GetAtt SchedulerRole.Arn
         Input: '{"job": "obs"}'
+        RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 300 }
+  # the exchange quotes, offset from the observation job so the two ten-minute
+  # lanes never share a minute; the quote pass takes about 90 s
+  ScheduleMarket:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-market"
+      ScheduleExpression: cron(3,13,23,33,43,53 * * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "market"}'
         RetryPolicy: { MaximumRetryAttempts: 1, MaximumEventAgeInSeconds: 300 }
   ScheduleHalfHourly:
     Type: AWS::Scheduler::Schedule

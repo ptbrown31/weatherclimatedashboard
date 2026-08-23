@@ -28,8 +28,10 @@ than it is.</p>
 <tr><td>NBM guidance</td><td>National Blend of Models text bulletins, NOAA Open Data</td><td>NOAA&rsquo;s calibrated multi-model blend; forecasters start from it when editing the grids, so it is related to the NWS forecast, not independent.</td></tr>
 <tr><td>LAMP guidance</td><td>NOMADS text bulletins</td><td>Observation-updated hourly guidance, 25 hours out. The best same-day trace; it cannot see tomorrow.</td></tr>
 <tr><td>GFS MOS</td><td>NOMADS MAV text bulletins</td><td>A single-model statistical product with no forecaster editing; the cleanest independent comparison on the scorecard.</td></tr>
-<tr><td>Hurricanes</td><td>NHC CurrentStorms.json, NOAA GIS service, ATCF best tracks</td><td>Roster, geometry and season counts.</td></tr>
+<tr><td>Hurricanes</td><td>NHC CurrentStorms.json, NOAA GIS service, NHC wind speed probabilities (PWSAT), ATCF best tracks</td><td>Roster, geometry, five-day wind probabilities at coastal locations, and season counts.</td></tr>
 <tr><td>Basemaps</td><td>US Census Bureau boundaries; Natural Earth countries</td><td>Public domain.</td></tr>
+<tr><td>Contract prices</td><td>ForecastEx public market-data endpoints</td><td>Top of book for the daily temperature, hurricane and climate contracts, read every 10 minutes. Prices are the exchange&rsquo;s own, shown as the Yes-side bid, ask and midpoint in cents, not fee adjusted. The &ldquo;implied&rdquo; temperature is the strike where the Yes price crosses 50&cent;, interpolated between strikes.</td></tr>
+<tr><td>Live-storm wind probabilities</td><td>Reask (vendor), when enabled</td><td>Probability that the peak gust exceeds each threshold at the 163 reference locations the exchange&rsquo;s wind contracts settle at, shown as published with the vendor&rsquo;s mark. Off unless the site operator has enabled it with their own credential; the hurricane page says which.</td></tr>
 </table>
 
 <h2>Methods</h2>
@@ -42,14 +44,13 @@ endorsement by or affiliation with NOAA or the NWS.</p>
 <p id="decode"></p>
 
 <h2>Freshness</h2>
-<p id="fresh">Observations refresh every 10 minutes and forecasts every 30. Each page shows the time of the data it
+<p id="fresh">Observations and contract prices refresh every 10 minutes and forecasts every 30. Each page shows the time of the data it
 is drawing. If the data feed falls behind, the page says so and keeps showing the last data it has; if the
 feed cannot be reached at all, the page shows the last data this browser saved, labelled as such.</p>
 
 <h2>Affiliation</h2>
 <p id="disclosure"></p>
-<p>This site shows no live market prices. Where market elements appear they are labelled placeholders that
-exist to show layout, not values.</p>
+<p id="marketNote"></p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
@@ -57,6 +58,9 @@ exist to show layout, not values.</p>
 WXC.chrome('about.html');
 document.getElementById('disclosure').textContent = (window.WX && WX.disclosure) || '';
 document.getElementById('disclosureTop').textContent = (window.WX && WX.disclosure) || '';
+document.getElementById('marketNote').textContent = (window.WX && WX.market === 'live')
+  ? 'Contract prices on this site are read from the exchange\u2019s public market-data endpoints on a ten-minute cycle and shown with the time they were read; they are not a quote, not an offer, and can be stale. Nothing here is investment advice.'
+  : 'This site shows no live market prices. Where market elements appear they are labelled placeholders that exist to show layout, not values.';
 WXD.get('manifest.json').then(r => {
   const d = r.data && r.data.decode;
   if (d) document.getElementById('decode').textContent = 'Decode convention in force: temperatures from the METAR ' +

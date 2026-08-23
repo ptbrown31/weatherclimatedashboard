@@ -114,3 +114,19 @@ footer.site p{max-width:none;margin:6px 0}
 /* embed target */
 body.embed{background:var(--panel)}
 body.embed .wrap{padding:8px 10px 10px;max-width:none}
+/* hurricane page: season tiles and contract ladders */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin:6px 0 12px}
+.tile{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px}
+.tile .tv{font-size:24px;font-weight:700;color:var(--navy);line-height:1.1}
+.tile .tl{font-size:12px;color:var(--muted);margin-top:2px}
+.tile .ts{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.4}
+.ladders{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.ladder{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px}
+.ladder .lt{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:4px}
+.lrow{display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0}
+.lrow .lk{width:92px;flex:none;color:var(--ink)}
+.lrow .lb{flex:1;height:10px;background:var(--no);border-radius:3px;overflow:hidden}
+.lrow .lb i{display:block;height:100%;background:var(--yes)}
+.lrow .lv{width:56px;flex:none;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+.pws th,.pws td{padding:4px 8px}
+.attrib{font-weight:600}

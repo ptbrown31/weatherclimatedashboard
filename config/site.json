@@ -15,7 +15,8 @@
     "obs": 10,
     "forecast": 30,
     "archive": 30,
-    "hurricane": 30
+    "hurricane": 30,
+    "market": 10
   },
   "daily_utc": "09:30",
   "sources": {
@@ -23,13 +24,24 @@
     "nbm": true,
     "lamp": true,
     "mav": true,
-    "obs_record": false
+    "obs_record": false,
+    "exchange": true,
+    "reask": false
   },
-  "_sources_note": "obs_record is owned by the 10-minute obs job; set it true only when running the archive job alone",
+  "_sources_note": "obs_record is owned by the 10-minute obs job; set it true only when running the archive job alone. reask needs WX_REASK_API_KEY in the environment as well.",
   "market_overlay": {
-    "standalone": "placeholder",
-    "embed": "off"
+    "standalone": "live",
+    "embed": "off",
+    "source": "live"
   },
   "disclosure": "Built by Patrick Brown, a Trend Analytics, LLC employee (a subsidiary of Interactive Brokers) working with ForecastEx. Not an Interactive Brokers or ForecastEx product. Not investment advice.",
-  "site_title": "Weather tools"
+  "site_title": "Weather tools",
+  "exchange": {
+    "base_url": "https://forecasttrader.interactivebrokers.com",
+    "quote_workers": 4
+  },
+  "reask": {
+    "base_url": "https://forecastex.reask.earth/v1",
+    "api_key": ""
+  }
 }

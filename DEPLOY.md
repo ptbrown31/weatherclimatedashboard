@@ -74,7 +74,10 @@ DNS host and wait for status ISSUED. Keep the certificate ARN.
             CertificateArn=arn:aws:acm:us-east-1:...:certificate/... \
             AlarmEmail=you@example.com
 
-Omit `DomainName` and `CertificateArn` to run on the CloudFront hostname only. Outputs:
+Omit `DomainName` and `CertificateArn` to run on the CloudFront hostname only. The stack also
+creates the `market` schedule (every 10 minutes, offset from the observation job) that quotes
+the exchange's listed contracts; no credential is involved. `ReaskApiKey` is an optional
+parameter for the vendor lane (section 10). Outputs:
 
     aws cloudformation describe-stacks --stack-name weather-tools-site \
         --query "Stacks[0].Outputs" --output table
@@ -151,7 +154,27 @@ takes minutes to an hour.
 | Forecast bulletins missed (NOMADS outage) | The archive catches up from the bucket for about two days; nothing to do unless the outage was longer, in which case those NBM cycles are gone. |
 | Change the roster or decode constants | Edit `pipeline/cities.py` / `pipeline/gov_weather.py`, run `scripts/build_assets.py`, repackage (step 4) and rebuild the site (step 6). |
 | Rotate the User-Agent contact | `aws cloudformation deploy ... --parameter-overrides UserAgent=...` |
+| Exchange endpoints unreachable from AWS (a CDN block; it happened to the owner's other system once) | The quote pass fails whole, snapshots stay as they were and the pages show their age; the `exchange` source reaches the streak alarm after six passes. Nothing to do but wait or move the quote job off AWS; there is no proxy in this stack. |
+| Market overlay needs to go dark | `market_overlay.standalone` to `off` in `config/site.json`, rebuild and sync the site (step 6); the pipeline can keep quoting. |
 | Cost check | S3 PUT count (about 200k a month) is the only meaningful line; `aws ce` or the billing console. |
+
+## 10. The vendor lane (live-storm wind probabilities), optional
+
+Off by default, and doubly gated: `sources.reask` in `config/site.json` must be `true` (then
+repackage and upload the code, step 4) AND the function must carry the credential:
+
+    aws cloudformation deploy ... --parameter-overrides ... ReaskApiKey=<the key>
+
+The parameter is `NoEcho`: it is stored as a function environment variable (`WX_REASK_API_KEY`),
+never in the repository or the template outputs. Paste it yourself; do not put it in a file the
+repo can see. With both gates open the `market` schedule polls the vendor's listing every 10
+minutes and fetches each new forecast cycle, interim and final file, archiving every file under
+`data/archive/reask/`. `snapshots/reask.json` reports the lane's state either way, and the
+hurricane page shows it.
+
+Before enabling: the vendor's terms require its mark on every figure that shows the data and a
+credential of the site's own, separate from any other system's pull. Confirm both with the vendor
+in writing and keep the confirmation with the deployment records.
 
 ## Cloudflare alternative
 

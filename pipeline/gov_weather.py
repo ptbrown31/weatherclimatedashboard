@@ -899,3 +899,45 @@ if __name__ == "__main__":
             print(f"  CLI report     max {cli['max_f']} / min {cli['min_f']}  for {cli['summary_date']}")
         if obs.get(s):
             print(f"  latest METAR   {obs[s][-1]['raw'][:88]}")
+
+
+# ===========================================================================
+# NHC wind speed probabilities (PWSAT)
+# ===========================================================================
+_PWS_ROW = re.compile(r"^(.{1,16}?)\s+(34|50|64)\s+(.*)$")
+_PWS_CUM = re.compile(r"(?:\d+|X)\(\s*(\d+|X)\)")
+
+
+def parse_wind_probabilities(text: str) -> list[dict]:
+    """The PWSAT product (NHC's tropical cyclone wind speed probabilities):
+    for each location and threshold (34, 50, 64 kt) the text lists the
+    probability of onset in each period and, in parentheses, the cumulative
+    probability through it. The last cumulative value is the five-day
+    probability. 'X' means under 1 percent. Returns [{location, p34, p50,
+    p64}] in percent, highest 64-kt probability first, rows with nothing
+    above zero dropped."""
+    if "<pre" in text.lower():
+        m = re.search(r"<pre[^>]*>(.*?)</pre>", text, re.S | re.I)
+        if m:
+            import html as _html
+            text = _html.unescape(m.group(1))
+    by_loc: dict = {}
+    for line in text.splitlines():
+        mm = _PWS_ROW.match(line.strip())
+        if not mm:
+            continue
+        loc, kt, rest = mm.group(1).strip(), mm.group(2), mm.group(3)
+        cums = _PWS_CUM.findall(rest)
+        if not cums:
+            continue
+        final = cums[-1]
+        d = by_loc.setdefault(loc, {"location": loc, "p34": 0, "p50": 0, "p64": 0})
+        d[f"p{kt}"] = 0 if final == "X" else int(final)
+    rows = [d for d in by_loc.values() if max(d["p34"], d["p50"], d["p64"]) > 0]
+    rows.sort(key=lambda d: (-d["p64"], -d["p50"], -d["p34"]))
+    return rows
+
+
+def fetch_wind_probabilities(url: str) -> list[dict]:
+    """The PWSAT text behind a roster entry's windSpeedProbabilities link."""
+    return parse_wind_probabilities(_get_text(url, timeout=60))

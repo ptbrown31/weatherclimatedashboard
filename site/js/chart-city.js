@@ -56,7 +56,8 @@ window.WXCity = (() => {
     const svg = $('#pick'); if (!svg) return;
     const pt = $('#pickTitle');
     if (pt) pt.textContent = WXM.on()
-      ? 'United States — dot colour and size: the placeholder implied high against tomorrow’s NWS forecast (not a market value)'
+      ? (WXM.live() ? 'United States — dot colour and size: the market-implied high (ForecastEx) against tomorrow’s NWS forecast'
+                    : 'United States — dot colour and size: the placeholder implied high against tomorrow’s NWS forecast (not a market value)')
       : 'United States — dot colour and size: observed so far against the NWS high issued for the day';
     svg.innerHTML = '';
     svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': 1 }));
@@ -78,10 +79,15 @@ window.WXCity = (() => {
     const keys = [`forecast/${sid}.json`, `obs/${sid}.json`].concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`] : []);
     const r = await WXD.getAll(keys);
     snaps = { fc: r[`forecast/${sid}.json`], ob: r[`obs/${sid}.json`], nm: r[`normals/${sid}.json`] || null };
-    const st = $('#chartStatus'); if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([snaps.ob, snaps.fc], 10)); }
+    const mres = await WXM.load(sid);            // the station's quote snapshot (live market layer only)
+    const st = $('#chartStatus'); if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([snaps.ob, snaps.fc].concat(mres ? [mres] : []), 10)); }
     if (WXM.on()) {
+      // the strikes shown by default: the one nearest 50¢ on each side
       const c = city(), lv = levelsFor(c), lad = WXM.ladder(c, { high: lv.high, low: lv.low });
-      ['high', 'low'].forEach(m => { const atm = lad[m].reduce((a, b) => Math.abs(b.yes - 50) < Math.abs(a.yes - 50) ? b : a); checked.add(m[0] + ':' + atm.strike); });
+      if (lad) ['high', 'low'].forEach(m => {
+        const q = lad[m].filter(L => L.yes != null); if (!q.length) return;
+        const atm = q.reduce((a, b) => Math.abs(b.yes - 50) < Math.abs(a.yes - 50) ? b : a); checked.add(m[0] + ':' + atm.strike);
+      });
     }
     if (summary.base) drawPick(summary.base);
     drawStrikeRow(); draw();
@@ -103,18 +109,24 @@ window.WXCity = (() => {
     row.innerHTML = '';
     if (!WXM.on()) return;
     const c = city(), lv = levelsFor(c), lad = WXM.ladder(c, { high: lv.high, low: lv.low });
+    if (!lad || (lad.live && !lad.listed)) {
+      row.appendChild(h('div', { class: 'cap', text: lad ? 'No daily temperature contracts listed for this station and day on the exchange.' : 'Market data unavailable.' }));
+      return;
+    }
     [['high', 'High strikes', 'h', '>'], ['low', 'Low strikes', 'l', '<']].forEach(([m, lab, pfx, cmp]) => {
+      if (!lad[m].length) return;
       const div = h('div', {}, [h('span', { class: 'lbl2', text: lab })]);
       lad[m].forEach(L => {
         const key = pfx + ':' + L.strike;
-        const b = h('button', { class: 'sk' + (checked.has(key) ? ' on' : ''), text: cmp + L.strike + '°' });
+        const b = h('button', { class: 'sk' + (checked.has(key) ? ' on' : ''), text: cmp + L.strike + '°' + (L.yes != null ? ' ' + L.yes + '¢' : ''),
+          title: L.bid != null || L.ask != null ? 'Yes bid ' + (L.bid != null ? L.bid + '¢' : '—') + ' · ask ' + (L.ask != null ? L.ask + '¢' : '—') : 'no book' });
         b.style.setProperty('--c', skColor(pfx, L.strike, lad));
         b.onclick = () => { checked.has(key) ? checked.delete(key) : checked.add(key); b.classList.toggle('on'); draw(); };
         div.appendChild(b);
       });
       row.appendChild(div);
     });
-    row.appendChild(h('div', { class: 'cap', text: 'Strike ladder: ' + WXM.LABEL + '.' }));
+    row.appendChild(h('div', { class: 'cap', text: 'Strike ladder: ' + lad.label + (lad.live ? '; the number is the Yes midpoint in cents, bid and ask on hover.' : '.') }));
   }
 
   function draw() {
@@ -280,29 +292,39 @@ window.WXCity = (() => {
     // ---- the market layer: ladders on the shared axis, price panels below
     const priceSer = [];
     if (market && lad) {
-      g.appendChild(txt('Strike ladders (' + WXM.LABEL + ')', { x: 946, y: S.T - 8, 'text-anchor': 'end', class: 'axl' }));
+      g.appendChild(txt('Strike ladders (' + lad.label + ')', { x: 946, y: S.T - 8, 'text-anchor': 'end', class: 'axl' }));
       [['high', '>'], ['low', '<']].forEach(([m, cmp]) => {
         lad[m].forEach(L => {
-          const yy = y(L.strike), gw = L.yes / 100 * S.LW;
-          g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: Math.max(gw, 1), height: 11, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 }));
-          g.appendChild(el('rect', { x: S.LX + gw, y: yy - 5.5, width: Math.max(S.LW - gw, 1), height: 11, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 }));
-          if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt' }));
-          if (S.LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: S.LX + S.LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end' }));
+          const yy = y(L.strike);
+          if (L.yes == null) {                     // listed, no book on either side
+            g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'none', stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2' }));
+            g.appendChild(txt('no book', { x: S.LX + S.LW / 2, y: yy + 3.2, class: 'ax', 'text-anchor': 'middle' }));
+          } else {
+            const gw = L.yes / 100 * S.LW;
+            const yb = el('rect', { x: S.LX, y: yy - 5.5, width: Math.max(gw, 1), height: 11, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
+            const nb = el('rect', { x: S.LX + gw, y: yy - 5.5, width: Math.max(S.LW - gw, 1), height: 11, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
+            if (lad.live) [yb, nb].forEach(r => { const t = el('title'); t.textContent = 'Yes bid ' + (L.bid != null ? L.bid + '¢' : '—') + (L.bidSize ? ' ×' + L.bidSize : '') + ' · ask ' + (L.ask != null ? L.ask + '¢' : '—') + (L.askSize ? ' ×' + L.askSize : '') + (L.from === 'no' ? ' (from the No book)' : ''); r.appendChild(t); });
+            g.appendChild(yb); g.appendChild(nb);
+            if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt' }));
+            if (S.LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: S.LX + S.LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end' }));
+          }
           g.appendChild(txt(cmp + L.strike + '°', { x: S.LX + S.LW + 5, y: yy + 3.5, class: 'ax', fill: m === 'high' ? 'var(--warm)' : 'var(--cool)' }));
         });
       });
+      if (lad.live && !lad.listed) g.appendChild(txt('no contracts listed for this day', { x: S.LX + S.LW / 2, y: (S.T + S.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
       [0, 50, 100].forEach(p => g.appendChild(txt(p + (p === 100 ? '¢' : ''), { x: lx(p), y: S.B + 15, 'text-anchor': 'middle', class: 'ax' })));
-      g.appendChild(txt('Yes green, No red · placeholders', { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
+      g.appendChild(txt('Yes green, No red · ' + (lad.live ? 'Yes midpoint' : 'placeholders'), { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
       const obsRows = (ob && ob.rows) || [];
       const fseries = [AI.nws && AI.nws.rows, AI.nbm && AI.nbm.rows, fc.nws && fc.nws.hourly, fc.nbm && fc.nbm.hourly];
-      [['h', 'Yes price — high strikes (placeholder)', S.PH0, S.PH1], ['l', 'Yes price — low strikes (placeholder)', S.PL0, S.PL1]].forEach(([side, ttl, p0, p1]) => {
+      const how = lad.live ? 'ForecastEx Yes midpoint, sampled every 10 minutes' : 'placeholder';
+      [['h', 'Yes price — high strikes (' + how + ')', S.PH0, S.PH1], ['l', 'Yes price — low strikes (' + how + ')', S.PL0, S.PL1]].forEach(([side, ttl, p0, p1]) => {
         const ypp = v => p1 - (v / 100) * (p1 - p0);
         g.appendChild(el('line', { x1: S.L, x2: S.R, y1: p0 - 24, y2: p0 - 24, stroke: 'var(--line)' }));
         g.appendChild(txt(ttl, { x: S.L, y: p0 - 10, class: 'axl' }));
         [0, 50, 100].forEach(p => { g.appendChild(el('line', { x1: S.L, x2: S.R, y1: ypp(p), y2: ypp(p), class: 'grid' })); g.appendChild(txt(p + '¢', { x: S.L - 8, y: ypp(p) + 4, 'text-anchor': 'end', class: 'ax' })); });
         const endLabs = [];
         picked.filter(pk => pk.side === side).forEach(pk => {
-          const pts = WXM.pricePath(obsRows, fseries, unit, pk.side, pk.K).filter(p => p.t >= w0);
+          const pts = WXM.pricePath(obsRows, fseries, unit, pk.side, pk.K, c).filter(p => p.t >= w0);
           if (!pts.length) return;
           priceSer.push({ label: (pk.side === 'h' ? '>' : '<') + pk.K + '°', col: pk.col, pts });
           g.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + ypp(p.v).toFixed(1)).join(''), fill: 'none', stroke: pk.col, 'stroke-width': 1.8 }));
@@ -358,6 +380,7 @@ window.WXCity = (() => {
     const sres = await WXD.get('summary.json');
     summary = sres.data || { cities: [], asof: null };
     if (opts.basemap) summary.base = opts.basemap;
+    await WXM.loadSummary();                      // implied medians for the picker dots (live market layer only)
     const st = $('#pageStatus'); if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([sres], 10)); }
     const want = opts.station || WXC.param('station') || WXC.param('city') || 'KLAX';
     const svg = $('#' + svgId);

@@ -23,7 +23,8 @@ the repo, and refuses to pass without it unless told `--no-external`.
 
 Jobs and their cadence: `archive` (every 30 min, first), `forecast` (after it, from the archive),
 `obs` (every 10 min: the observation record, per-station observation snapshots, `summary.json`,
-`manifest.json`), `hurricane` (every 30 min). `half-hourly` runs archive, forecast and hurricane
+`manifest.json`), `hurricane` (every 30 min), `quotes` and `reask` (every 10 min, together as
+`market`). `half-hourly` runs archive, forecast and hurricane
 in one invocation; `all` runs everything once.
 
 ## What the archive job stores
@@ -73,6 +74,11 @@ before the day began, and whether it is an official product value or an extreme 
 | `snapshots/scorecard.json` | daily | per station and source: n, MAE, bias, share within 1° and 2°; the last 14 scored days |
 | `snapshots/normals/{STATION}.json` | weekly | NCEI 2006-2020 daily normals, with the GHCN station id and its distance from the airport |
 | `snapshots/climate.json` | daily | NCEI, GML, STAR series and the RAPID annual means |
+| `snapshots/market/{STATION}.json` | 10 min | the station's listed strikes for today and tomorrow with Yes bid/ask/mid and sizes, the implied medians, and each strike's quote history (two days, 10-minute samples) |
+| `snapshots/market/summary.json` | 10 min | per station: listed or not, the implied medians for today and tomorrow |
+| `snapshots/market/hurricane.json`, `climate.json` | 10 min | every contract of the exchange's hurricane category and of the climate products, with quotes |
+| `snapshots/reask.json` | 10 min | the vendor lane: its state when off; per storm the latest LiveCyc ladder and the interim and final settlement files when on |
+| `archive/market/{YYYYMMDD}/{HHMMSS}.json.gz` | 10 min | every quote of the pass, append-only (expires after 400 days on AWS) |
 
 Jobs run inside one wall-clock budget: a scheduled invocation sets the budget, the archive step
 reserves time for the steps after it, and every step records what it skipped rather than being
@@ -91,9 +97,11 @@ the same variables):
 | `storage.bucket`, `.endpoint`, `.prefix`, `.region` | `WX_STORAGE_BUCKET` … | s3 backend; set `endpoint` for Cloudflare R2, leave empty for Amazon S3 |
 | `user_agent` | `WX_USER_AGENT` | sent to every government endpoint; api.weather.gov returns 403 without one |
 | `domain` | `WX_DOMAIN` | the site's domain |
-| `cadence_minutes.*` | | how often each job runs: obs 10, forecast 30, archive 30, hurricane 30 |
-| `sources.*` | | switch NBM, LAMP, MAV or the observation record off |
-| `market_overlay` | | `placeholder` or `off`, per build target |
+| `cadence_minutes.*` | | how often each job runs: obs 10, forecast 30, archive 30, hurricane 30, market 10 |
+| `sources.*` | | switch NBM, LAMP, MAV, the observation record, the exchange quotes or the vendor lane off |
+| `market_overlay` | | `live`, `placeholder` or `off` per build target; `source` is what `?market=on` means |
+| `exchange.base_url`, `.quote_workers` | | the exchange's public market-data host and the quote thread pool (4) |
+| `reask.base_url`, `.api_key` | `WX_REASK_API_KEY` | the vendor lane; the key comes only from the environment |
 | `disclosure` | | the affiliation text shown in the footer and about page |
 
 Two decode conventions are top-level constants in `pipeline/gov_weather.py`, never buried in
@@ -125,10 +133,19 @@ files and the same JavaScript; only the generated `config.js` differs. The embed
 `?station=KLAX`, `theme=light|dark` and `market=on|off`.
 
 The market layer lives in `site/js/market.js` behind one switch (`market_overlay` per target in
-`config/site.json`, overridable by `?market=`). The standalone site ships with `placeholder`: the
-reference package's labelled synthetic strike ladders and implied values, there to show layout.
-The embed ships `off`. When off, the pages reserve no space for market elements. No live market
-source exists in this repository.
+`config/site.json`, overridable by `?market=`). The standalone site ships `live`: the quote job
+(`pipeline/market.py`, every 10 minutes) reads the exchange's three public market-data endpoints
+(category tree, a market's contracts, a contract's top of book; no key) and writes per-station
+snapshots with the Yes-side bid, ask and midpoint of every listed strike for the station's today
+and tomorrow, a rolling two-day history of each strike's quote, the market-implied median (the
+strike where the Yes price crosses 50¢), and the hurricane and climate product groups. Pages show
+prices in cents with the time they were read; nothing is fee adjusted. `placeholder` keeps the
+reference package's labelled synthetic ladders. The embed ships `off`; when off, the pages
+reserve no space for market elements.
+
+The one non-government weather source is the vendor lane for live-storm wind probabilities
+(`pipeline/reask.py`), off by default and doubly gated (`sources.reask` and a credential in the
+environment); the hurricane page says whether it is on.
 
 `scripts/serve_local.py` serves a built target (`--fail-fetch` makes every data request answer
 503, to see the degradation paths). `scripts/verify.py` drives Playwright's Chromium over both

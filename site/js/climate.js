@@ -65,7 +65,7 @@ window.WXClimate = (() => {
       const col = priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
       const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1 })
                      : el('circle', { cx, cy, r: 8, fill: col, stroke: 'var(--ink)', 'stroke-width': 1 });
-      m.onmousemove = e => tip.show(e, '<b>' + product.name + ' ' + c.label + '</b>settles ' + c.expiryLabel + '<br>Yes ' + Math.round(c.yes * 100) + '¢ — ' + WXM.LABEL);
+      m.onmousemove = e => tip.show(e, '<b>' + product.name + ' ' + c.label + '</b>settles ' + c.expiryLabel + '<br>Yes ' + Math.round(c.yes * 100) + '¢' + (c.bid != null || c.ask != null ? ' (bid ' + (c.bid != null ? Math.round(c.bid * 100) + '¢' : '—') + ' · ask ' + (c.ask != null ? Math.round(c.ask * 100) + '¢' : '—') + ')' : '') + ' — ' + (c.label2 || WXM.LABEL));
       m.onmouseleave = () => tip.hide();
       svg.appendChild(m);
     });
@@ -112,11 +112,12 @@ window.WXClimate = (() => {
     const off = D.offsetC || 0;
     const series = Object.assign({}, D.series);
     ['tempAnnual', 'tempMonthly'].forEach(k => { if (series[k]) series[k] = series[k].map(q => [q[0], Math.round((q[1] + off) * 1000) / 1000]); });
+    await WXM.loadGroup('climate');
     const products = WXM.climateProducts(series, off);
     const byKey = {}; products.forEach(p => { byKey[p.seriesKey] = p; });
     PANELS.forEach(([k, title, unit]) => { if (series[k]) panel(host, k, title, unit, series[k], byKey[k], off); });
     const notes = Object.entries(D.notes || {}).map(([k, v]) => k + ': ' + v).join('; ');
-    $('#foot').textContent = 'Series: NCEI Climate at a Glance global land+ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? ' Markers are placeholders, not market values.' : '');
+    $('#foot').textContent = 'Series: NCEI Climate at a Glance global land+ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? (WXM.live() ? ' Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price.' : ' Markers are placeholders, not market values.') : '');
   }
   return { init };
 })();

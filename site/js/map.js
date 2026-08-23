@@ -71,7 +71,8 @@ window.WXMap = (() => {
           'NWS high tomorrow ' + deg(c.nwsHighTomorrow) + ' · low ' + deg(c.nwsLowTomorrow) + '<br>' +
           'NWS high issued for today ' + deg(c.nwsIssuedHigh != null ? c.nwsIssuedHigh : c.nwsHighToday) + '<br>' +
           'Observed so far today ' + deg(c.obsHighSoFar) + (c.obsLowSoFar != null ? ' / ' + deg(c.obsLowSoFar) : '') +
-          (m && m.impliedHigh != null ? '<br>Implied high ' + deg(m.impliedHigh) + ' (' + (m.divHigh > 0 ? '+' : '') + m.divHigh + '°) — placeholder' : ''));
+          (m && m.impliedHigh != null ? '<br>Implied high ' + deg(m.impliedHigh) + (m.divHigh != null ? ' (' + (m.divHigh > 0 ? '+' : '') + m.divHigh + '°)' : '') + ' — ' + (WXM.live() ? 'ForecastEx implied median' : 'placeholder') : '') +
+          (m && m.impliedLow != null ? '<br>Implied low ' + deg(m.impliedLow) + (m.divLow != null ? ' (' + (m.divLow > 0 ? '+' : '') + m.divLow + '°)' : '') : ''));
       };
       g.onmouseleave = () => tip.hide();
       g.onclick = () => { location.href = 'city.html?station=' + c.station; };
@@ -95,7 +96,7 @@ window.WXMap = (() => {
     const legend = $('#legend');
     legend.innerHTML = '';
     if (mode === 'obs') legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Running above the NWS high issued for the day</span><span><i style="border-color:var(--cool)"></i>Running below</span><span>Radius scales with the gap · number is the observed high so far</span>';
-    else if (WXM.on()) legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (placeholder)</span><span><i style="border-color:var(--cool)"></i>Implied below (placeholder)</span><span>Pale shading is the NWS forecast level (derived)</span>';
+    else if (WXM.on()) { const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder'; legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Tomorrow’s contracts not listed yet, or no book' : 'No value') + '</span><span>Pale shading is the NWS forecast level (derived)</span>'; }
     else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
   }
 
@@ -104,6 +105,7 @@ window.WXMap = (() => {
     const r = await WXD.getAll(['summary.json', 'field.json']);
     const bm = await fetch('assets/basemap.json').then(x => x.json()).catch(() => null);
     summary = r['summary.json'].data; field = r['field.json'].data; base = bm;
+    await WXM.loadSummary();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r['summary.json'], r['field.json']], 10));
     if (!summary || !base) { $('#map').innerHTML = ''; $('#map').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
     [['m1', 'hi'], ['m2', 'lo'], ['m3', 'obs']].forEach(([id, m]) => {

@@ -11,8 +11,10 @@
 <body>
 <div class="wrap">
 <h1>Hurricane tracking</h1>
-<p class="sub">National Hurricane Center forecast tracks, cones of uncertainty and seven-day formation odds,
-drawn from NHC&rsquo;s own roster and NOAA&rsquo;s public GIS service, refreshed every half hour.</p>
+<p class="sub">National Hurricane Center forecast tracks, cones, wind-speed probabilities and seven-day formation
+odds, drawn from NHC&rsquo;s own roster and NOAA&rsquo;s public GIS service, refreshed every half hour; the
+season&rsquo;s count from the ATCF best tracks; and, where the market layer is on, the exchange&rsquo;s listed
+hurricane contracts at their quoted prices.</p>
 <div class="bar">
   <button id="b1" class="on">Atlantic</button>
   <button id="b2">Pacific</button>
@@ -20,16 +22,35 @@ drawn from NHC&rsquo;s own roster and NOAA&rsquo;s public GIS service, refreshed
 </div>
 <div id="modeTitle"></div>
 <div class="card"><svg id="basin" viewBox="0 0 980 600"></svg></div>
+<div class="key" id="basinKey"></div>
 <p class="cap" id="basinCap"></p>
+
 <div class="secttl">ACTIVE STORMS</div>
 <div id="storms"></div>
-<p class="cap" id="season"></p>
+
+<div class="secttl">SEASON TO DATE AND THE COUNT CONTRACTS</div>
+<div class="tiles" id="tiles"></div>
+<div class="ladders" id="ladders"></div>
+<p class="cap" id="laddersCap"></p>
+
+<div class="secttl">LANDFALL CONTRACTS</div>
+<div id="landfall"></div>
+
+<div class="secttl">LIVE-STORM WIND PROBABILITIES AT THE REFERENCE LOCATIONS</div>
+<div id="vendor"></div>
+
+<div class="secttl">OTHER CONTRACTS LISTED IN THE EXCHANGE&rsquo;S MAJOR WEATHER EVENTS CATEGORY</div>
+<div id="others"></div>
+
 <p class="cap">Point colour: major hurricane red, hurricane orange, tropical storm blue, depression or
 remnant pale. The map&rsquo;s advisory number is the one carried by the geometry, which can trail the
-roster&rsquo;s by one advisory for a few minutes after an update. Times in point labels are NHC&rsquo;s.</p>
+roster&rsquo;s by one advisory for a few minutes after an update. Times in point labels are NHC&rsquo;s.
+Exchange prices are the Yes-side midpoint in cents, as quoted at the time shown, not fee adjusted; the
+small grey dots are the 163 reference locations the exchange&rsquo;s wind contracts settle at.</p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
+<script src="js/market.js"></script>
 <script src="js/hurricane.js"></script>
 <script>WXC.chrome('hurricane.html'); WXHur.init();</script>
 </body>

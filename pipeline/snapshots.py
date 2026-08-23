@@ -618,10 +618,15 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
 
     depth = store.list("archive/obs/")
     hur = store.get("snapshots/hurricane.json")
+    mkt = store.get("snapshots/market/summary.json")
+    rsk = store.get("snapshots/reask.json")
     fetch = json.loads(store.get(arch.OBS_FETCH_KEY) or "{}")
     manifest = {"schema": SCHEMA, "written": _iso(now),
                 "asof": {"obs": obs_asof, "summary": obs_asof, "forecast": fc_asof,
-                         "hurricane": json.loads(hur).get("asof") if hur else None},
+                         "hurricane": json.loads(hur).get("asof") if hur else None,
+                         "market": json.loads(mkt).get("asof") if mkt else None,
+                         "reask": (json.loads(rsk).get("polled") if rsk else None)},
+                "reaskEnabled": bool(json.loads(rsk).get("enabled")) if rsk else False,
                 "cadenceMinutes": cfg.get("cadence_minutes", {}),
                 "archiveDays": len(depth), "stations": [c["station"] for c in roster],
                 "decode": summary["decode"], "alarms": alarms, "obsUnhealed": fetch.get("unhealed")}

@@ -17,3 +17,11 @@ files (public domain).
 Altimetry acknowledgment: sea level data provided by the NOAA Laboratory for
 Satellite Altimetry. AMOC annual means: data from the RAPID AMOC monitoring
 project, funded by the UK Natural Environment Research Council.
+
+Contract prices are read from ForecastEx's public market-data endpoints and
+shown as published, with the time they were read. They are not a quote or an
+offer, and this site is not an Interactive Brokers or ForecastEx product.
+
+Live-storm wind probabilities, where the site operator has enabled that lane,
+are provided by Reask and displayed as published under the "Powered by Reask"
+mark; the reference-location registry (geo/reask_locations.csv) is Reask's.

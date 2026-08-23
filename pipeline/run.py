@@ -11,6 +11,10 @@ Jobs:
     obs          observation record + per-station obs snapshots
                  + summary.json + manifest.json                    (every 10 min)
     hurricane    storms, cones, outlook, season counts             (every 30 min)
+    quotes       exchange top of book: station ladders, hurricane
+                 and climate products, market archive              (every 10 min)
+    reask        vendor live-storm wind probabilities (gated off)  (with quotes)
+    market       quotes, then reask: one scheduled invocation
     half-hourly  archive, then forecast, then hurricane: one scheduled invocation
     all          everything once, in order (local runs)
 """
@@ -26,7 +30,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, market, reask
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -34,6 +38,8 @@ def _register():
     JOBS["scorecard"] = scorecard.scorecard_pass
     JOBS["normals"] = normals.normals_pass
     JOBS["climate"] = climate.climate_pass
+    JOBS["quotes"] = market.quotes_pass
+    JOBS["reask"] = reask.reask_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -52,13 +58,14 @@ def _register():
 
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane")
     JOBS["daily"] = chain("scorecard", "normals", "climate")
-    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "scorecard", "normals", "climate")
+    JOBS["market"] = chain("quotes", "reask")
+    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate")
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.run", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | half-hourly | all")
+    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | market | half-hourly | daily | all")
     ap.add_argument("--config", help="path to site.json (default config/site.json)")
     ap.add_argument("--backend", choices=["local", "s3"], help="override storage backend")
     ap.add_argument("--root", help="local backend: data directory")

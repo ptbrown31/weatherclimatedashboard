@@ -16,6 +16,7 @@ Environment overrides (highest precedence):
     WX_STORAGE_REGION      s3 backend: region (R2 uses "auto")
     WX_USER_AGENT          the User-Agent sent to every government endpoint
     WX_DOMAIN              the site's domain
+    WX_REASK_API_KEY       the vendor lane's credential; never in site.json, never in the repo
 """
 from __future__ import annotations
 import json
@@ -33,6 +34,7 @@ _ENV = {
     ("storage", "region"): "WX_STORAGE_REGION",
     ("user_agent",): "WX_USER_AGENT",
     ("domain",): "WX_DOMAIN",
+    ("reask", "api_key"): "WX_REASK_API_KEY",
 }
 
 

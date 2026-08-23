@@ -135,8 +135,22 @@ def hurricane_pass(cfg: dict, store: Storage) -> int:
             "movementDir": s.get("movementDir"), "movementKt": s.get("movementSpeed"),
             "basin": s["id"][:2].upper(), "updated": s.get("lastUpdate"), "advisory": adv,
             "advisoryUrl": (s.get("publicAdvisory") or {}).get("url"),
+            "windProbsUrl": (s.get("windSpeedProbabilities") or {}).get("url"),
         }
         old = prev_storms.get(s["id"])
+        # NHC's wind speed probabilities (PWSAT): five-day cumulative odds of
+        # 34/50/64 kt at named coastal locations, re-read when the advisory changes
+        if storm["windProbsUrl"] and not deadline.over(20):
+            if old and old.get("advisory") == adv and old.get("windProbs") is not None:
+                storm["windProbs"] = old.get("windProbs")
+            else:
+                try:
+                    storm["windProbs"] = gw.fetch_wind_probabilities(storm["windProbsUrl"])[:40]
+                except Exception as e:
+                    snap["errors"].append(f"{s['id']} wind probabilities: {type(e).__name__}: {e}")
+                    storm["windProbs"] = (old or {}).get("windProbs")
+        else:
+            storm["windProbs"] = (old or {}).get("windProbs")
         roster_same = bool(old and old.get("advisory") == adv and old.get("updated") == s.get("lastUpdate") and old.get("cone"))
         in_sync = bool(old and old.get("geometryAdvisory") and str(old.get("geometryAdvisory")).lstrip("0") == str(adv or "").lstrip("0"))
         # while the service trails the roster, look again at most once an hour
