@@ -91,7 +91,12 @@ def _stations(card: Optional[dict]) -> list:
     """[(station id, station block)] for the Fahrenheit stations, in station
     order, so an exact tie anywhere below resolves to the same station twice."""
     sts = _obj(_obj(card).get("stations"))
-    return [(sid, _obj(sts[sid])) for sid in sorted(sts) if _obj(sts[sid]).get("unit") == "F"]
+    out = []
+    for sid in sorted(sts):
+        st = _obj(sts[sid])
+        if st.get("unit") == "F":
+            out.append((sid, st))
+    return out
 
 
 def _days(st: dict) -> list:
@@ -138,8 +143,9 @@ def accuracy(card: Optional[dict], days: list) -> Optional[dict]:
 
 def largest_error(card: Optional[dict], day: Optional[str]) -> Optional[dict]:
     """The biggest miss on the daily high on one scored day, across every
-    Fahrenheit station and every source. The error is signed, because whether a
-    source ran warm or cold is the interesting half of a large miss."""
+    Fahrenheit station and every source. The error is signed, so a page can say
+    whether the source ran warm or cold, and the observed and forecast highs
+    travel with it so the miss can be read without the scorecard."""
     if not day:
         return None
     best, key = None, None

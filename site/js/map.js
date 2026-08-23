@@ -39,8 +39,8 @@ window.WXMap = (() => {
       card(deg(r.mae) + 'F', TOOL[r.src] + ' ranks ' + ord(i + 1) + ' of ' + a.rank.length,
         'Average error on daily highs, last ' + a.days + ' scored days',
         tip.rows('Accuracy over the last ' + a.days + ' scored days',
-          a.rank.map((x, k) => [ord(k + 1) + ' ' + TOOL[x.src], deg(x.mae) + 'F']),
-          'mean absolute error on the daily high, pooled across every station · click → the scorecard'),
+          a.rank.map((x, k) => [ord(k + 1) + ' ' + TOOL[x.src], deg(x.mae) + 'F  (n ' + x.n + ')']),
+          'mean absolute error on the daily high, pooled across every station. n differs by source, because the archive holds fewer cycles for some of them · click → the scorecard'),
         'scorecard.html');
     }
     const e = head.largestError;

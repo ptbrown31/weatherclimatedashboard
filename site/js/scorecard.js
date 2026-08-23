@@ -354,10 +354,16 @@ window.WXScore = (() => {
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [t]));
     const lead = st.rows[0];
+    // the sources are not archived equally deeply, so the ranking is not
+    // like-for-like and the caption has to say so rather than let n speak alone
+    const ns = st.rows.filter(r => r.high).map(r => r.high.n);
+    const uneven = ns.length > 1 && Math.max(...ns) >= 2 * Math.min(...ns);
     host.appendChild(h('p', { class: 'cap', text: 'Ranked by mean absolute error on the daily high over the ' + st.days +
       ' scored days from ' + st.from + ' to ' + st.to + ', pooled across every station. ' +
       (lead && lead.high ? lead.s.name + ' is closest at ' + degs(lead.high.mae) + '. ' : '') +
-      'Error is forecast minus observed, so a positive bias runs warm.' }));
+      'Error is forecast minus observed, so a positive bias runs warm. ' +
+      (uneven ? 'The sources are not scored on the same days: the archive holds fewer cycles for some of them, so n differs by source and the ranking is not like-for-like. ' +
+        st.rows.filter(r => r.high).map(r => r.s.name + ' ' + r.high.n).join(', ') + '.' : '') }));
   }
 
   // ------------------------------------------------------- the skill tables
