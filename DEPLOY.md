@@ -119,8 +119,23 @@ domain, then build for deployment and upload both targets:
 
     python3 scripts/build.py --deploy
     aws s3 sync dist/standalone s3://<BucketName>/ --delete --exclude "data/*" --exclude "embed/*"
-    aws s3 sync dist/embed s3://<BucketName>/embed/ --delete
+    aws s3 cp dist/standalone/js s3://<BucketName>/js/ --recursive \
+        --cache-control "public, max-age=3600, stale-while-revalidate=86400"
+    aws s3 cp dist/standalone/css s3://<BucketName>/css/ --recursive \
+        --cache-control "public, max-age=3600, stale-while-revalidate=86400"
+    aws s3 cp dist/standalone/assets s3://<BucketName>/assets/ --recursive \
+        --cache-control "public, max-age=86400, stale-while-revalidate=604800"
+    aws s3 cp dist/standalone s3://<BucketName>/ --recursive --exclude "*" --include "*.html" \
+        --include "config.js" --cache-control "public, max-age=60, stale-while-revalidate=300"
+    aws s3 sync dist/embed s3://<BucketName>/embed/ --delete        # then the same cp passes under embed/
     aws cloudfront create-invalidation --distribution-id <DistributionId> --paths "/*"
+
+`ops/aws/deploy.sh site` does all of this; the sync places and prunes files, and the `cp` passes
+set the browser cache headers, which a `sync` alone would skip on any file whose bytes did not
+change. Filenames are not content-hashed, so each `max-age` is also the longest a browser can go
+on the old file after a deploy: entry points a minute, code an hour, projected geometry a day.
+Lengthen them only alongside hashed filenames. Snapshots under `data/` are not touched here; they
+carry the header the pipeline writes (`pipeline/snapshots.py`).
 
 Never sync with a bare `--delete` over the bucket root without the `data/` exclusion: the
 pipeline's objects live under `data/`.
@@ -156,6 +171,7 @@ takes minutes to an hour.
 | Rotate the User-Agent contact | `aws cloudformation deploy ... --parameter-overrides UserAgent=...` |
 | Exchange endpoints unreachable from AWS (a CDN in front of them can block an address range) | The quote pass fails whole, snapshots stay as they were and the pages show their age; the `exchange` source reaches the streak alarm after six passes. Nothing to do but wait or move the quote job off AWS; there is no proxy in this stack. |
 | Market overlay needs to go dark | `market_overlay.standalone` to `off` in `config/site.json`, rebuild and sync the site (step 6); the pipeline can keep quoting. |
+| Traffic cost check | CloudFront's free tier is 1 TB out, 10M requests and 2M function invocations a month. A cold page view measures about 82 KB, 12 requests and 8.5 function invocations, so the function allowance binds first, at roughly 235k views a month; past that the cost is a few dollars per million views. Nothing in the request path can be overloaded: the pipeline runs on a schedule, not on visits. |
 | Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs plus about 200k for the quote job (45 objects a pass, 144 passes a day), roughly $2 a month in total; Lambda stays inside the always-free allowance (the quote pass is about 90 s at 512 MB). `aws ce` or the billing console. |
 
 ## 10. The vendor lane (live-storm wind probabilities)

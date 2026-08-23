@@ -132,6 +132,42 @@ phase_seed() {
   fi
 }
 
+# Browser caching for the site files. The snapshots under data/ carry their own
+# header from the pipeline (pipeline/snapshots.py) and are never touched here.
+#
+# Filenames are not content-hashed, so every max-age below is also the longest a
+# browser can keep serving code from before a deploy reaches it. The entry points
+# stay short so a deploy goes live promptly; code gets an hour, which covers a
+# reading session without stranding anyone on old JavaScript for long; the
+# projected geometry gets a day, because it only changes when the roster or the
+# basemap does. stale-while-revalidate lets the browser paint from cache and
+# refresh behind the render.
+CC_ENTRY="public, max-age=60, stale-while-revalidate=300"
+CC_CODE="public, max-age=3600, stale-while-revalidate=86400"
+CC_ASSET="public, max-age=86400, stale-while-revalidate=604800"
+
+# Stamp one target's files with those headers. `sync --delete` runs first, to
+# place files and prune anything no longer built; the `cp` passes then rewrite
+# every object with its header, because `sync` skips files whose bytes are
+# unchanged and a header-only edit would never reach them.
+upload_target() {
+  local src="$1" dest="$2"; shift 2
+  aws s3 sync "$src" "$dest" --delete "$@"
+  # `if` blocks, not `&&`: the embed target has no assets/ directory and set -e
+  # would abort on a false test
+  if [ -d "$src/js" ]; then
+    aws s3 cp "$src/js/" "$dest/js/" --recursive --only-show-errors --cache-control "$CC_CODE"
+  fi
+  if [ -d "$src/css" ]; then
+    aws s3 cp "$src/css/" "$dest/css/" --recursive --only-show-errors --cache-control "$CC_CODE"
+  fi
+  if [ -d "$src/assets" ]; then
+    aws s3 cp "$src/assets/" "$dest/assets/" --recursive --only-show-errors --cache-control "$CC_ASSET"
+  fi
+  aws s3 cp "$src" "$dest" --recursive --only-show-errors --cache-control "$CC_ENTRY" \
+      --exclude "*" --include "*.html" --include "config.js"
+}
+
 phase_site() {
   need aws "brew install awscli"
   local bucket dist; bucket="$(output BucketName)"; dist="$(output DistributionId)"
@@ -139,9 +175,9 @@ phase_site() {
   say "building both targets for deployment (no sample data bundled)"
   (cd "$ROOT" && WX_DOMAIN="$DOMAIN" python3 scripts/build.py --deploy)
   say "uploading the standalone site to s3://$bucket/ (data/ and embed/ are never touched by this sync)"
-  aws s3 sync "$ROOT/dist/standalone" "s3://$bucket/" --delete --exclude "data/*" --exclude "embed/*"
+  upload_target "$ROOT/dist/standalone" "s3://$bucket" --exclude "data/*" --exclude "embed/*"
   say "uploading the embed to s3://$bucket/embed/"
-  aws s3 sync "$ROOT/dist/embed" "s3://$bucket/embed/" --delete
+  upload_target "$ROOT/dist/embed" "s3://$bucket/embed"
   say "invalidating the CDN cache"
   aws cloudfront create-invalidation --distribution-id "$dist" --paths "/*" --query "Invalidation.{Id:Id,Status:Status}" --output table
   say "site: $(output SiteUrl)"

@@ -147,6 +147,11 @@ The one non-government weather source is the vendor lane for live-storm wind pro
 (`pipeline/reask.py`), off by default and doubly gated (`sources.reask` and a credential in the
 environment); the hurricane page says whether it is on.
 
+Cache headers are set at upload (`ops/aws/deploy.sh site`): a minute on the HTML and `config.js`,
+an hour on the JavaScript and CSS, a day on the projected geometry in `assets/`, and whatever
+`pipeline/snapshots.py` wrote on the snapshots under `data/`. Filenames are not content-hashed, so
+those durations are also how long a browser can serve the old file after a deploy.
+
 `scripts/serve_local.py` serves a built target (`--fail-fetch` makes every data request answer
 503, to see the degradation paths). `scripts/verify.py` drives Playwright's Chromium over both
 targets in light and dark and checks rendering, zero script errors, the overlay-off layout and
