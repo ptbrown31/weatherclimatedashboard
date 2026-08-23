@@ -323,7 +323,7 @@ window.WXCity = (() => {
       });
       if (lad.live && !lad.listed) g.appendChild(txt('no contracts listed for this day', { x: S.LX + S.LW / 2, y: (S.T + S.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
       [0, 50, 100].forEach(p => g.appendChild(txt(p + (p === 100 ? '¢' : ''), { x: lx(p), y: S.B + 15, 'text-anchor': 'middle', class: 'ax' })));
-      g.appendChild(txt('Yes green, No red · ' + (lad.live ? 'Yes midpoint; dotted = one-sided book' : 'placeholders'), { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
+      g.appendChild(txt('Yes green, No red' + (lad.live ? ' · dotted: one-sided book' : ' · placeholders'), { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
       const obsRows = (ob && ob.rows) || [];
       const fseries = [AI.nws && AI.nws.rows, AI.nbm && AI.nbm.rows, fc && fc.nws && fc.nws.hourly, fc && fc.nbm && fc.nbm.hourly];
       const how = lad.live ? 'ForecastEx Yes midpoint, or the one side quoted, sampled every 10 minutes' : 'placeholder';
