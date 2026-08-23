@@ -10,7 +10,7 @@
 window.WXMap = (() => {
   const { el, txt, h, $, deg } = WXC;
   const RAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
-  let summary = null, field = null, base = null, mode = 'hi', tip = null;
+  let summary = null, field = null, base = null, world = null, mode = 'hi', tip = null;
 
   function fieldColor(v) {
     const [a, b] = field.domain, t = Math.max(0, Math.min(1, (v - a) / (b - a))) * (RAMP.length - 1);
@@ -110,36 +110,52 @@ window.WXMap = (() => {
     svg.appendChild(el('path', { d: base.statePaths, class: 'state2' }));
     $('#modeTitle').textContent = M.title();
 
+    plot(svg, summary.cities.filter(c => c.onConus), M, c => c.px, c => c.py, [2, 2, 958, 598], false);
+    const legend = $('#legend');
+    legend.innerHTML = '';
+    if (mode === 'obs') legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Running above the NWS high issued for the day</span><span><i style="border-color:var(--cool)"></i>Running below</span><span>Radius scales with the gap · number is the observed high so far</span>';
+    else if (WXM.on()) { const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder'; legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Tomorrow’s contracts not listed yet, no bids, or the median sits beyond the ladder' : 'No value') + '</span><span>Pale shading is the NWS forecast level (derived)</span>'; }
+    else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
+    drawWorld();
+  }
+
+  // Dots and labels for one canvas. Both maps carry the same encoding, so the
+  // international stations read the same way they do on the city page's picker:
+  // grey where the mode has no value for them, since US government feeds carry
+  // observations everywhere but forecasts only for the US and, through NBM, Canada.
+  const CANDS = [[9, 3], [9, -12], [-9, 3], [-9, -12], [9, 15], [9, -25], [-9, 15], [-9, -25], [0, 24], [0, -33], [18, 3], [-18, 3], [18, 15], [-18, 15], [18, -12], [-18, -12]];
+  function plot(svg, cities, M, fx, fy, bounds, withUnit) {
     const placed = [];
-    const hit = b => b[0] < 2 || b[1] < 2 || b[2] > 958 || b[3] > 598 || placed.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
-    const cities = summary.cities.filter(c => c.onConus);
+    const hit = b => b[0] < bounds[0] || b[1] < bounds[1] || b[2] > bounds[2] || b[3] > bounds[3]
+      || placed.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
     const rows = cities.slice().sort((a, b) => { const av = M.div(a), bv = M.div(b); return (bv == null ? -1 : Math.abs(bv)) - (av == null ? -1 : Math.abs(av)); });
     rows.forEach(c => {
-      const v = M.div(c), av = M.val(c);
+      const v = M.div(c), av = M.val(c), X = fx(c), Y = fy(c);
       const g = el('g', { class: 'dot' });
       let r;
       if (v == null) {
         r = av == null ? 4.5 : 7;
-        g.appendChild(el('circle', { cx: c.px, cy: c.py, r, fill: av == null ? 'var(--line)' : 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': 1.2 }));
+        g.appendChild(el('circle', { cx: X, cy: Y, r, fill: av == null ? 'var(--line)' : 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': 1.2 }));
       } else {
         r = 5.5 + 8.5 * Math.min(Math.abs(v), 5) / 5;
-        g.appendChild(el('circle', { cx: c.px, cy: c.py, r: r + 3.5, fill: 'var(--panel)', 'fill-opacity': .95 }));
-        g.appendChild(el('circle', { cx: c.px, cy: c.py, r, fill: v > 0 ? 'var(--warm)' : (v < 0 ? 'var(--cool)' : 'var(--muted)'), 'fill-opacity': .97, stroke: 'var(--ink)', 'stroke-width': .6 }));
+        g.appendChild(el('circle', { cx: X, cy: Y, r: r + 3.5, fill: 'var(--panel)', 'fill-opacity': .95 }));
+        g.appendChild(el('circle', { cx: X, cy: Y, r, fill: v > 0 ? 'var(--warm)' : (v < 0 ? 'var(--cool)' : 'var(--muted)'), 'fill-opacity': .97, stroke: 'var(--ink)', 'stroke-width': .6 }));
       }
-      placed.push([c.px - r, c.py - r, c.px + r, c.py + r]);
+      placed.push([X - r, Y - r, X + r, Y + r]);
       g.onmousemove = e => tip.show(e, dotTip(c));
       g.onmouseleave = () => tip.hide();
       g.onclick = () => { location.href = 'city.html?station=' + c.station; };
       svg.appendChild(g);
     });
-    const CANDS = [[9, 3], [9, -12], [-9, 3], [-9, -12], [9, 15], [9, -25], [-9, 15], [-9, -25], [0, 24], [0, -33], [18, 3], [-18, 3], [18, 15], [-18, 15], [18, -12], [-18, -12]];
     rows.forEach(c => {
-      const v = M.div(c), av = M.val(c);
+      const v = M.div(c), av = M.val(c), X = fx(c), Y = fy(c);
       if (av == null && v == null) return;
       const big = v != null && Math.abs(v) >= 1.5;
-      const s = c.station.slice(1) + (av != null ? ' ' + av.toFixed(0) + '°' : '') + (big ? ' (' + (v > 0 ? '+' : '') + v.toFixed(0) + ')' : '');
+      // the international stations settle in Celsius, so their labels carry the unit
+      const s = c.station.slice(1) + (av != null ? ' ' + av.toFixed(0) + '°' + (withUnit ? (c.unit || '') : '') : '')
+        + (big ? ' (' + (v > 0 ? '+' : '') + v.toFixed(0) + ')' : '');
       for (const [dx, dy] of CANDS) {
-        const t = txt(s, { x: c.px + dx, y: c.py + dy + 4, class: 'lbl', 'text-anchor': dx < 0 ? 'end' : (dx > 0 ? 'start' : 'middle'),
+        const t = txt(s, { x: X + dx, y: Y + dy + 4, class: 'lbl', 'text-anchor': dx < 0 ? 'end' : (dx > 0 ? 'start' : 'middle'),
           'font-size': big ? 10.5 : 8.5, 'font-weight': 700, fill: big ? 'var(--navy)' : 'var(--ink)' });
         svg.appendChild(t);
         const b = t.getBBox(), bb = [b.x - 1, b.y - 1, b.x + b.width + 1, b.y + b.height + 1];
@@ -147,11 +163,15 @@ window.WXMap = (() => {
         t.remove();
       }
     });
-    const legend = $('#legend');
-    legend.innerHTML = '';
-    if (mode === 'obs') legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Running above the NWS high issued for the day</span><span><i style="border-color:var(--cool)"></i>Running below</span><span>Radius scales with the gap · number is the observed high so far</span>';
-    else if (WXM.on()) { const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder'; legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Tomorrow’s contracts not listed yet, no bids, or the median sits beyond the ladder' : 'No value') + '</span><span>Pale shading is the NWS forecast level (derived)</span>'; }
-    else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
+  }
+
+  // the international stations and Honolulu, on the world canvas below the national one
+  function drawWorld() {
+    const svg = $('#mapW'); if (!svg || !world) return;
+    svg.innerHTML = '';
+    svg.appendChild(el('rect', { x: 0, y: 0, width: 960, height: 480, fill: 'var(--map-sea)' }));
+    svg.appendChild(el('path', { d: world.worldPaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': .8 }));
+    plot(svg, summary.cities.filter(c => !c.onConus), MODES[mode], c => c.wx, c => c.wy, [2, 62, 958, 378], true);
   }
 
   // title text for the off-canvas list: these stations report in their own
@@ -169,8 +189,10 @@ window.WXMap = (() => {
   async function init() {
     tip = WXC.tooltip();
     const r = await WXD.getAll(['summary.json', 'field.json']);
-    const bm = await fetch('assets/basemap.json').then(x => x.json()).catch(() => null);
-    summary = r['summary.json'].data; field = r['field.json'].data; base = bm;
+    const [bm, wd] = await Promise.all([
+      fetch('assets/basemap.json').then(x => x.json()).catch(() => null),
+      fetch('assets/world.json').then(x => x.json()).catch(() => null)]);
+    summary = r['summary.json'].data; field = r['field.json'].data; base = bm; world = wd;
     await WXM.loadSummary();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r['summary.json'], r['field.json']], 10));
     if (!summary || !base) { $('#map').innerHTML = ''; $('#map').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }

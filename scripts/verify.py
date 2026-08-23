@@ -222,6 +222,8 @@ def run(no_build: bool) -> int:
                 page.locator("#map g.dot").nth(2).hover(force=True); page.wait_for_timeout(120)
                 t_md = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: map dot shows tomorrow's forecasts and today so far", "tomorrow" in t_md and "Observed" in t_md, t_md[:80])
+                wdots = page.locator("#mapW g.dot").count()
+                chk.add(f"{scheme} map: the international stations sit on a world canvas below", wdots >= 10, f"dots={wdots}")
                 page.locator("#map rect[data-i]").nth(600).hover(force=True); page.wait_for_timeout(120)
                 t_cell = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: shading cell names the derived field value", "NWS forecast field" in t_cell, t_cell[:80])
