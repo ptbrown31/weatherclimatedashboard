@@ -50,9 +50,16 @@ def _register():
             if budget:
                 cfg["_deadline_end"] = time.time() + budget
             worst = 0
+            alarms: list = []
+            statuses: list = []
             for i, n in enumerate(names):
                 cfg["_reserve_seconds"] = 240.0 if (n == "archive" and i < len(names) - 1) else 0.0
                 worst = max(worst, JOBS[n](cfg, store))
+                # each job leaves its own status; the chain keeps every alarm raised along the way
+                last = archive.LAST_STATUS or {}
+                alarms += [a for a in (last.get("alarms") or []) if a not in alarms]
+                statuses.append({k: v for k, v in last.items() if k != "entries"})
+            archive.LAST_STATUS = {"job": "+".join(names), "alarms": alarms, "jobs": statuses}
             return worst
         return run
 
