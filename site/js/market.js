@@ -142,6 +142,7 @@ window.WXM = (() => {
   // `yes` is the Yes midpoint in cents when both sides exist; with a one-sided
   // book it is that side's price and `side` says which ('bid' or 'ask')
   const row = r => ({ strike: r.strike, yes: cents(r.mid), bid: cents(r.bid), ask: cents(r.ask), bidSize: r.bidSize, askSize: r.askSize, from: r.from, label: r.label,
+                      conid: r.conid, expiration: r.expiration, error: r.error || null,
                       side: r.bid != null && r.ask != null ? 'mid' : (r.bid != null ? 'bid' : (r.ask != null ? 'ask' : null)) });
 
   // implied high/low for the map: the market-implied median for the
@@ -205,7 +206,8 @@ window.WXM = (() => {
       asof: g.asof,
       contracts: (m.contracts || []).filter(c => c.mid != null && yearOf(c.spec)).map(c => ({
         year: yearOf(c.spec), threshold: c.strike, label: c.label, expiryLabel: c.expiryLabel || String(yearOf(c.spec)),
-        yes: c.mid, bid: c.bid, ask: c.ask, label2: 'ForecastEx quote, ' + asofText(S.groups.climate) })),
+        yes: c.mid, bid: c.bid, ask: c.ask, bidSize: c.bidSize, askSize: c.askSize, from: c.from, conid: c.conid, expiration: c.expiration, spec: c.spec,
+        label2: 'ForecastEx quote, ' + asofText(S.groups.climate) })),
     })).filter(p => p.contracts.length);
   }
 

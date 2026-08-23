@@ -95,14 +95,34 @@ window.WXC = (() => {
     return `Data as of ${when} (${age}) · updates every ${cadenceMin} min`;
   }
 
-  // ---- tooltip
+  // ---- tooltip: one shared box, placed beside the pointer and flipped to stay
+  //      on screen; a click pins it (so the text can be read or selected) and a
+  //      click elsewhere or Escape releases it. Content is HTML built by the
+  //      pages from snapshot values; `rows(title, [[label, value], ...])`
+  //      lays out the common two-column form.
   function tooltip() {
     let tip = $('#tip');
-    if (!tip) { tip = h('div', { id: 'tip', class: 'tip' }); document.body.appendChild(tip); }
+    if (!tip) {
+      tip = h('div', { id: 'tip', class: 'tip' }); document.body.appendChild(tip);
+      document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { tip.dataset.pinned = ''; tip.style.opacity = 0; } });
+      document.addEventListener('click', ev => { if (tip.dataset.pinned && !tip.contains(ev.target) && !ev.target.closest('[data-tip-pin]')) { tip.dataset.pinned = ''; tip.style.opacity = 0; } });
+    }
+    const place = e => {
+      const W = tip.offsetWidth || 260, Hh = tip.offsetHeight || 60;
+      let x = e.clientX + 14, y = e.clientY + 14;
+      if (x + W > window.innerWidth - 8) x = Math.max(8, e.clientX - 14 - W);
+      if (y + Hh > window.innerHeight - 8) y = Math.max(8, e.clientY - 14 - Hh);
+      tip.style.left = x + 'px'; tip.style.top = y + 'px';
+    };
     return {
-      show(e, html) { tip.innerHTML = html; tip.style.opacity = 1;
-        tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 270) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; },
-      hide() { tip.style.opacity = 0; },
+      show(e, html) { if (tip.dataset.pinned) return; tip.innerHTML = html; tip.style.opacity = 1; place(e); },
+      hide() { if (tip.dataset.pinned) return; tip.style.opacity = 0; },
+      pin(e, html) { tip.dataset.pinned = ''; tip.innerHTML = html; tip.style.opacity = 1; place(e); tip.dataset.pinned = '1'; tip.classList.add('pinned'); setTimeout(() => tip.classList.remove('pinned'), 400); },
+      pinned: () => !!tip.dataset.pinned,
+      rows(title, pairs, foot) {
+        const body = pairs.filter(p => p && p[1] != null && p[1] !== '').map(p => '<span class="tk">' + p[0] + '</span><span class="tv">' + p[1] + '</span>').join('');
+        return (title ? '<b>' + title + '</b>' : '') + (body ? '<div class="tg">' + body + '</div>' : '') + (foot ? '<div class="tf">' + foot + '</div>' : '');
+      },
     };
   }
 

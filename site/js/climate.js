@@ -1,7 +1,9 @@
 /* The climate page: the settlement-basis series as NOAA and partners
    publish them, with a drag-to-fit trend tool. With the market layer on,
-   placeholder contract markers sit at (expiration, threshold), coloured
-   by a placeholder price, to show the layout. */
+   contract markers sit at (expiration, threshold), coloured by the Yes
+   price. Hover: a dot on the series at the cursor's year with the value,
+   the ten-year change and the latest point; markers carry the quote and
+   pin on click; threshold lines list the expirations that carry them. */
 window.WXClimate = (() => {
   const { el, txt, h, $ } = WXC;
   const RAMP = ['#8b0000', '#d62728', '#ff7f0e', '#ffd700', '#adff2f', '#3ddc84', '#40e0d0', '#4fc3f7', '#1f77b4', '#00008b'];
@@ -13,6 +15,7 @@ window.WXClimate = (() => {
     ['co2', 'Atmospheric CO2', 'ppm, Mauna Loa'],
     ['amoc', 'AMOC overturning at 26°N', 'Sv, RAPID array annual mean'],
   ];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   let tip = null;
 
   function priceColor(p) {
@@ -24,7 +27,22 @@ window.WXClimate = (() => {
     return 'rgb(' + A.map((a, k) => Math.round(a + (B[k] - a) * f)).join(',') + ')';
   }
 
-  function panel(host, key, title, unit, ser, product, offsetC) {
+  // ---- formatting for the hover text
+  const fv = v => (v == null ? '—' : Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2));
+  const sgn = v => (v == null ? '—' : (v > 0 ? '+' : '') + fv(v));
+  const cents = v => (v == null ? '—' : Math.round(v * 100) + '¢');
+  const size = v => (v == null ? '' : ' ×' + Math.round(v));
+  // decimal years carry the month as (m − ½)/12, the NOAA convention; whole years stay as they are
+  const yearLabel = y => (Number.isInteger(y) ? String(y) : MON[Math.max(0, Math.min(11, Math.floor((y - Math.floor(y)) * 12 + 1e-6)))] + ' ' + Math.floor(y));
+  const expLabel = s => { const m = /^(\d{4})(\d{2})(\d{2})$/.exec(s || ''); return m ? MON[+m[2] - 1] + ' ' + (+m[3]) + ', ' + m[1] : null; };
+  // the point nearest a year, by binary search on the sorted series
+  function nearest(ser, yr) {
+    let lo = 0, hi = ser.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (ser[m][0] < yr) lo = m; else hi = m; }
+    return Math.abs(ser[lo][0] - yr) <= Math.abs(ser[hi][0] - yr) ? lo : hi;
+  }
+
+  function panel(host, key, title, unit, ser, product, offsetC, source) {
     const div = h('div', { class: 'panel' });
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
     div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: unit + (product ? ' · markers: ' + WXM.LABEL : '') }));
@@ -33,6 +51,7 @@ window.WXClimate = (() => {
     host.appendChild(div);
 
     const cs = product ? product.contracts : [];
+    const unitShort = unit.split(/[ ,]/)[0];
     const W = 960, L = 56, R = 910, T = 16, B = 296;
     const x0 = X0[key] != null ? X0[key] : Math.min(...cs.map(c => c.year)) - 4;
     const x1 = Math.max(...cs.map(c => c.year), new Date().getUTCFullYear() + 5) + 3;
@@ -41,18 +60,33 @@ window.WXClimate = (() => {
     if (!vals.length) { svg.appendChild(txt('No data available.', { x: L, y: T + 16, class: 'axl' })); return; }
     const lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo) * 0.08 || 1;
     const X = v => L + (v - x0) / (x1 - x0) * (R - L), Y = v => B - (v - (lo - pad)) / ((hi + pad) - (lo - pad)) * (B - T);
+    const last = ser[ser.length - 1];
+    const latestText = fv(last[1]) + ' ' + unitShort + ' (' + yearLabel(last[0]) + ')';
 
     for (let yr = Math.ceil(x0 / 10) * 10; yr <= x1; yr += 10) {
       svg.appendChild(el('line', { x1: X(yr), x2: X(yr), y1: T, y2: B, class: 'grid' }));
       svg.appendChild(txt(yr, { x: X(yr), y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
     }
+    // threshold lines, each with a hit band; hover lists the expirations listed at that level
     const thr = [...new Set(cs.map(c => c.threshold))].sort((a, b) => a - b);
+    const thrTip = v => {
+      const at = cs.filter(c => c.threshold === v);
+      const seen = {}; const rows = [];
+      at.forEach(c => { if (seen[c.expiryLabel]) return; seen[c.expiryLabel] = 1; rows.push([c.expiryLabel, cents(c.yes)]); });
+      return tip.rows('threshold ' + (key.startsWith('temp') ? v.toFixed(2) : v) + ' ' + unit, [['Listed for', rows.length + (rows.length === 1 ? ' expiration' : ' expirations')], ...rows.map(r => [r[0], 'Yes ' + r[1]])],
+        'series now ' + fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - v) + ' vs threshold)');
+    };
     let lastLabY = 1e9;
     thr.slice().reverse().forEach(v => {
       svg.appendChild(el('line', { x1: L, x2: R, y1: Y(v), y2: Y(v), class: 'grid', 'stroke-dasharray': '5 4' }));
+      const hit = el('line', { x1: L, x2: R, y1: Y(v), y2: Y(v), stroke: 'transparent', 'stroke-width': 5, 'data-tip': '1' });
+      hit.onmousemove = e => tip.show(e, thrTip(v)); hit.onmouseleave = () => tip.hide();
+      svg.appendChild(hit);
       if (Math.abs(Y(v) - lastLabY) < 11) return;
       lastLabY = Y(v);
-      svg.appendChild(txt(key.startsWith('temp') ? v.toFixed(2) + '°C' : v, { x: R + 4, y: Y(v) + 3.5, class: 'ax' }));
+      const lab = txt(key.startsWith('temp') ? v.toFixed(2) + '°C' : v, { x: R + 4, y: Y(v) + 3.5, class: 'ax', 'data-tip': '1' });
+      lab.onmousemove = e => tip.show(e, thrTip(v)); lab.onmouseleave = () => tip.hide();
+      svg.appendChild(lab);
     });
     const yt = 5, step = (hi - lo + 2 * pad) / yt;
     for (let i = 0; i <= yt; i++) { const v = lo - pad + i * step; svg.appendChild(txt(v >= 100 ? v.toFixed(0) : v.toFixed(2), { x: L - 8, y: Y(v) + 3.5, 'text-anchor': 'end', class: 'ax' })); }
@@ -63,17 +97,51 @@ window.WXClimate = (() => {
     const mono = key === 'tempMonthly';
     cs.forEach(c => {
       const col = priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
-      const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1 })
-                     : el('circle', { cx, cy, r: 8, fill: col, stroke: 'var(--ink)', 'stroke-width': 1 });
-      m.onmousemove = e => tip.show(e, '<b>' + product.name + ' ' + c.label + '</b>settles ' + c.expiryLabel + '<br>Yes ' + Math.round(c.yes * 100) + '¢' + (c.bid != null || c.ask != null ? ' (bid ' + (c.bid != null ? Math.round(c.bid * 100) + '¢' : '—') + ' · ask ' + (c.ask != null ? Math.round(c.ask * 100) + '¢' : '—') + ')' : '') + ' — ' + (c.label2 || WXM.LABEL));
+      const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' })
+                     : el('circle', { cx, cy, r: 8, fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' });
+      const book = c.bid != null && c.ask != null ? null : (c.bid != null ? 'bid only; Yes shown is the bid' : (c.ask != null ? 'ask only; Yes shown is the ask' : 'no book'));
+      const html = () => tip.rows(product.name + ' — ' + c.label, [
+        ['Settles', c.expiryLabel], ['Expires', /\d{1,2}, \d{4}/.test(c.expiryLabel || '') ? null : expLabel(c.expiration)],
+        ['Yes', cents(c.yes)],
+        ['Bid / Ask', c.bid != null || c.ask != null ? cents(c.bid) + size(c.bidSize) + ' / ' + cents(c.ask) + size(c.askSize) : null],
+        ['Book', c.from === 'no' ? (book ? book + '; ' : '') + 'derived from the No side' : book],
+        ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + (key.startsWith('temp') ? c.threshold.toFixed(2) : c.threshold) + ')']],
+        c.label2 || WXM.LABEL);
+      m.onmousemove = e => tip.show(e, html());
       m.onmouseleave = () => tip.hide();
+      m.onclick = e => tip.pin(e, html());
+      m.style.cursor = 'pointer';
       svg.appendChild(m);
     });
 
+    // ---- pointer state shared by the hover dot and the trend tool
+    let drag = null;
+    const toPt = e => { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); };
+    const toYear = e => x0 + (toPt(e).x - L) / (R - L) * (x1 - x0);
+
+    // the series hover: a dot at the nearest point to the cursor's year; off while
+    // dragging and over markers or threshold hits (those carry their own text)
+    let dot = null;
+    const clearDot = () => { if (dot) { dot.remove(); dot = null; } };
+    const tenYear = q => { const i = nearest(ser, q[0] - 10); const p = ser[i]; return Math.abs(p[0] - (q[0] - 10)) <= 0.6 && p !== q ? q[1] - p[1] : null; };
+    svg.addEventListener('mousemove', e => {
+      if (drag != null || !pts.length || (e.target.closest && e.target.closest('[data-tip]'))) { clearDot(); if (drag != null) tip.hide(); return; }
+      const p = toPt(e);
+      if (p.x < L - 4 || p.x > R + 4 || p.y < T - 4 || p.y > B + 4) { clearDot(); tip.hide(); return; }
+      const q = pts[nearest(pts, x0 + (p.x - L) / (R - L) * (x1 - x0))];
+      if (!dot) { dot = el('circle', { r: 4.5, fill: 'var(--accent)', stroke: 'var(--panel)', 'stroke-width': 1.5, 'pointer-events': 'none' }); svg.appendChild(dot); }
+      dot.setAttribute('cx', X(q[0])); dot.setAttribute('cy', Y(q[1]));
+      const d10 = tenYear(q);
+      // the sea-level series is a ten-day sample, not monthly: say "Date" and keep the decimal year
+      const when = Number.isInteger(q[0]) ? ['Year', yearLabel(q[0])] : key === 'seaLevel' ? ['Date', yearLabel(q[0]) + ' (' + q[0].toFixed(3) + ')'] : ['Month', yearLabel(q[0])];
+      tip.show(e, tip.rows(title, [when, ['Value', fv(q[1]) + ' ' + unitShort],
+        ['Change over 10 years', d10 == null ? null : sgn(d10) + ' ' + unitShort], ['Latest', latestText]], source));
+    });
+    svg.addEventListener('mouseleave', () => { clearDot(); tip.hide(); });
+
     // the Climate-at-a-Glance trend tool: drag to fit, dashed extrapolation
     if (pts.length > 4) {
-      let selRect = null, fitG = null, drag = null;
-      const toYear = e => { const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const q = pt.matrixTransform(svg.getScreenCTM().inverse()); return x0 + (q.x - L) / (R - L) * (x1 - x0); };
+      let selRect = null, fitG = null;
       svg.addEventListener('mousedown', e => { drag = toYear(e); });
       svg.addEventListener('mousemove', e => {
         if (drag == null) return;
@@ -115,7 +183,7 @@ window.WXClimate = (() => {
     await WXM.loadGroup('climate');
     const products = WXM.climateProducts(series, off);
     const byKey = {}; products.forEach(p => { byKey[p.seriesKey] = p; });
-    PANELS.forEach(([k, title, unit]) => { if (series[k]) panel(host, k, title, unit, series[k], byKey[k], off); });
+    PANELS.forEach(([k, title, unit]) => { if (series[k]) panel(host, k, title, unit, series[k], byKey[k], off, (D.sources || {})[k] || ''); });
     const notes = Object.entries(D.notes || {}).map(([k, v]) => k + ': ' + v).join('; ');
     $('#foot').textContent = 'Series: NCEI Climate at a Glance global land+ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? (WXM.live() ? ' Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price.' : ' Markers are placeholders, not market values.') : '');
   }

@@ -22,6 +22,61 @@ window.WXCity = (() => {
 
   let cur = null, checked = new Set(), showYday = false, HV = null, tip = null;
   let summary = null, snaps = {}, svgId = 'chart', onSelect = null;
+  const DESC = { nws: 'the official National Weather Service forecast', nbm: 'National Blend of Models guidance',
+                 lamp: 'LAMP, observation-updated same-day guidance', mav: 'GFS MOS, a single-model statistical forecast' };
+  const SRC = { tgroup: 'remarks T-group, tenths of a degree', body: 'body group, whole degrees' };
+
+  // '20260821T225639Z', '20260821T2030Z' or '2026-08-21T23:00:00Z' -> a local clock reading
+  function stamp(sid, tz) {
+    if (!sid) return null;
+    let m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?Z?$/.exec(sid);
+    const iso = m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] || '00'}Z` : sid;
+    const ms = Date.parse(iso);
+    return isNaN(ms) ? sid : WXC.clockFull(ms, tz) + ' · ' + WXC.dateShort(ms, tz);
+  }
+  const sw = col => '<span class="sw" style="background:' + col + '"></span>';
+  const cents = v => (v == null ? '—' : v + '¢');
+  const size = n => (n ? ' ×' + Math.round(n) : '');
+  const isoDate = d => { if (!d) return ''; const [y, m, dd] = d.split('-'); return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m - 1] + ' ' + (+dd) + (y ? ', ' + y : ''); };
+
+  // one strike of the ladder: the exchange's top of book and the strike's own day so far
+  function ladderTip(L, side, lad, c) {
+    const cmp = side === 'h' ? '>' : '<', unit = c.unit;
+    if (!lad.live) return tip.rows(cmp + L.strike + '°' + unit, [['Yes', L.yes + '¢'], ['No', (100 - L.yes) + '¢']], WXM.PLACEHOLDER);
+    const path = WXM.pricePath([], [], unit, side, L.strike, c);
+    const last = path.length ? path[path.length - 1] : null, prev = path.length > 1 ? path[path.length - 2] : null, first = path.length ? path[0] : null;
+    const im = side === 'h' ? lad.impliedHigh : lad.impliedLow;
+    const rows = [
+      ['Contract', L.label || (cmp + L.strike)],
+      [L.side === 'mid' ? 'Yes midpoint' : (L.side === 'bid' ? 'Yes bid only' : (L.side === 'ask' ? 'Yes ask only' : 'Yes')), L.yes == null ? 'no book' : L.yes + '¢'],
+      ['Bid', L.bid == null ? '—' : cents(L.bid) + size(L.bidSize)],
+      ['Ask', L.ask == null ? '—' : cents(L.ask) + size(L.askSize)],
+      ['Book', L.from === 'no' ? 'from the No side' : (L.side === 'mid' ? 'two-sided' : (L.side ? 'one-sided' : null))],
+      ['Last 10 min', last && prev ? ((last.v - prev.v > 0 ? '+' : '') + (last.v - prev.v) + '¢') : null],
+      ['First sample', first && first !== last ? first.v + '¢ at ' + WXC.clock(first.t, c.tz) : null],
+      ['Implied median', im && im.value != null ? WXC.deg(im.value) : (im && im.edge ? 'beyond the ladder (' + im.edge + ')' : null)],
+      ['Settles', L.expiration ? isoDate(L.expiration.slice(0, 4) + '-' + L.expiration.slice(4, 6) + '-' + L.expiration.slice(6, 8)) : null],
+      ['Quotes as of', lad.asof ? WXC.clockFull(Date.parse(lad.asof), Intl.DateTimeFormat().resolvedOptions().timeZone) : null],
+    ];
+    return tip.rows(cmp + L.strike + '°' + unit + ' — ' + (side === 'h' ? 'daily high above' : 'daily low below') + ' ' + L.strike,
+      rows, 'the exchange’s Yes price, not fee adjusted · click to pin');
+  }
+
+  // a picker dot: tomorrow's numbers against the forecast, then today so far
+  function pickTip(c) {
+    const m = WXM.on() ? WXM.implied(c) : null, mk = c.markers || {};
+    const gap = (v, ref) => (v != null && ref != null ? ' (' + (v - ref > 0 ? '+' : '') + (Math.round((v - ref) * 10) / 10) + '°)' : '');
+    const rows = [
+      ['NWS high / low, tomorrow', c.nwsHighTomorrow != null || c.nwsLowTomorrow != null ? WXC.deg(c.nwsHighTomorrow) + ' / ' + WXC.deg(c.nwsLowTomorrow) : null],
+      ['NBM high / low, tomorrow', c.nbmHighTomorrow != null ? WXC.deg(c.nbmHighTomorrow) + ' / ' + WXC.deg(c.nbmLowTomorrow) : null],
+      ['Implied high (ForecastEx)', m ? (m.impliedHigh != null ? WXC.deg(m.impliedHigh) + gap(m.impliedHigh, c.nwsHighTomorrow) : (m.edgeHigh ? 'beyond the ladder (' + m.edgeHigh + ')' : null)) : (WXM.live() ? 'not listed yet' : null)],
+      ['Implied low (ForecastEx)', m ? (m.impliedLow != null ? WXC.deg(m.impliedLow) + gap(m.impliedLow, c.nwsLowTomorrow) : (m.edgeLow ? 'beyond the ladder (' + m.edgeLow + ')' : null)) : null],
+      ['NWS high issued for today', c.nwsIssuedHigh != null ? WXC.deg(c.nwsIssuedHigh) : (c.nwsHighToday != null ? WXC.deg(c.nwsHighToday) + ' (standing)' : null)],
+      ['Observed so far today', c.obsHighSoFar != null ? WXC.deg(c.obsHighSoFar) + ' / ' + WXC.deg(c.obsLowSoFar) : null],
+      ['Latest report', c.obsLatest && c.obsLatest.t ? (c.obsLatest.type || 'METAR') + ' ' + WXC.clock(Date.parse(c.obsLatest.t), c.tz) : null],
+    ];
+    return tip.rows(c.city + ' (' + c.station + ') — tomorrow ' + isoDate(mk.tomorrow), rows, 'click → this station’s chart');
+  }
 
   function layout(market) {
     return market
@@ -41,8 +96,8 @@ window.WXCity = (() => {
     g.appendChild(el('circle', { cx: X, cy: Y, r: r + 3, fill: 'var(--panel)', 'fill-opacity': .95 }));
     g.appendChild(el('circle', { cx: X, cy: Y, r, fill: v == null ? 'var(--line)' : (v > 0 ? 'var(--warm)' : (v < 0 ? 'var(--cool)' : 'var(--muted)')),
       'fill-opacity': .95, stroke: on ? 'var(--navy)' : 'var(--ink)', 'stroke-width': on ? 4 : .8 }));
-    const t = el('title'); t.textContent = c.city + ' (' + c.station + ')' + (v != null ? ' · ' + (v > 0 ? '+' : '') + v + '°' : '');
-    g.appendChild(t);
+    g.onmousemove = e => { if (tip) tip.show(e, pickTip(c)); };
+    g.onmouseleave = () => { if (tip) tip.hide(); };
     if (on) g.appendChild(txt(c.city, { x: X, y: Y - r - 9, 'text-anchor': 'middle', 'font-size': 26, 'font-weight': 700,
       fill: 'var(--navy)', stroke: 'var(--panel)', 'stroke-width': 6, 'paint-order': 'stroke', 'stroke-linejoin': 'round' }));
     g.onclick = () => select(c.station);
@@ -126,8 +181,9 @@ window.WXCity = (() => {
       lad[m].forEach(L => {
         const key = pfx + ':' + L.strike;
         const one = L.side === 'bid' || L.side === 'ask';
-        const b = h('button', { class: 'sk' + (checked.has(key) ? ' on' : ''), text: cmp + L.strike + '°' + (L.yes != null ? ' ' + L.yes + '¢' + (one ? '*' : '') : ''),
-          title: L.bid != null || L.ask != null ? 'Yes bid ' + (L.bid != null ? L.bid + '¢' : '—') + ' · ask ' + (L.ask != null ? L.ask + '¢' : '—') + (one ? ' (one-sided book: the number is the ' + L.side + ')' : '') : 'no book' });
+        const b = h('button', { class: 'sk' + (checked.has(key) ? ' on' : ''), text: cmp + L.strike + '°' + (L.yes != null ? ' ' + L.yes + '¢' + (one ? '*' : '') : '') });
+        b.onmousemove = e => tip.show(e, ladderTip(L, pfx, lad, c));
+        b.onmouseleave = () => tip.hide();
         b.style.setProperty('--c', skColor(pfx, L.strike, lad));
         b.onclick = () => { checked.has(key) ? checked.delete(key) : checked.add(key); b.classList.toggle('on'); draw(); };
         div.appendChild(b);
@@ -180,16 +236,23 @@ window.WXCity = (() => {
     //      before the day began; the standing official NWS value where no
     //      pre-day cycle exists yet (the archive is young for that source)
     const levels = [];
-    const addLevel = (k, hi, lo, issued) => {
+    const addLevel = (k, hi, lo, issued, meta) => {
       const tag = issued ? ' (issued)' : '';
-      if (hi != null) levels.push({ v: hi, nm: NAME[k] + tag, col: COL[k], k });
-      if (lo != null) levels.push({ v: lo, nm: NAME[k] + tag, col: COL[k], k });
+      if (hi != null) levels.push({ v: hi, nm: NAME[k] + tag, col: COL[k], k, kind: 'high', issued, cycle: meta.cycleHigh, fromHourly: meta.fromHourly });
+      if (lo != null) levels.push({ v: lo, nm: NAME[k] + tag, col: COL[k], k, kind: 'low', issued, cycle: meta.cycleLow, fromHourly: meta.fromHourly });
     };
     ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
       const ai = AI[k];
-      if (ai && (ai.highToday != null || ai.lowToday != null)) addLevel(k, ai.highToday, ai.lowToday, ai.preDay || ai.levelPreDay);
-      else if (fc && fc[k] && (fc[k].highToday != null || fc[k].lowToday != null)) addLevel(k, fc[k].highToday, fc[k].lowToday, false);
+      if (ai && (ai.highToday != null || ai.lowToday != null)) addLevel(k, ai.highToday, ai.lowToday, ai.preDay || ai.levelPreDay, { cycleHigh: ai.levelCycleHigh || ai.cycle, cycleLow: ai.levelCycleLow || ai.cycle, fromHourly: ai.fromHourly });
+      else if (fc && fc[k] && (fc[k].highToday != null || fc[k].lowToday != null)) addLevel(k, fc[k].highToday, fc[k].lowToday, false, { cycleHigh: fc[k].cycle, cycleLow: fc[k].cycle, fromHourly: fc[k].highTodayFrom === 'hourly' || fc[k].partialDay });
     });
+    const levelTip = L => tip.rows(NAME[L.k] + ' — forecast ' + L.kind + ' for ' + isoDate(M.day), [
+      ['Value', WXC.deg(L.v)],
+      ['Cycle', stamp(L.cycle, tz)],
+      ['Issued', L.issued ? 'before the day began (as issued)' : 'the standing forecast; no pre-day cycle in the archive yet'],
+      ['Derived from', L.fromHourly ? 'the hourly series (no day value in that cycle)' : (L.k === 'nws' ? 'the day/night product (official high or low)' : (L.k === 'mav' ? 'the N/X line' : (L.k === 'nbm' ? 'the NBS day max/min line' : 'the hourly series')))],
+    ], DESC[L.k] + ' · click to pin');
+    const bind = (node, html, pin) => { node.addEventListener('mousemove', e => { e.stopPropagation(); tip.show(e, html()); }); node.addEventListener('mouseleave', () => tip.hide()); if (pin) node.addEventListener('click', e => { e.stopPropagation(); tip.pin(e, html()); }); node.setAttribute('data-tip-pin', '1'); node.style.cursor = 'default'; return node; };
 
     // NCEI daily normals for the day, drawn as quiet reference ticks in the gutter
     const nm = snaps.nm && snaps.nm.data && snaps.nm.data.days ? snaps.nm.data.days[M.day.slice(5)] : null;
@@ -229,34 +292,48 @@ window.WXCity = (() => {
     // ---- day markers
     const marks = [['midnight', d0, 'var(--muted)', null], ['sunrise', sr, '#e0a020', '3 3'], ['sunset', ss, '#e0a020', '3 3'], ['day end', d1, 'var(--muted)', null]];
     if (market && M.listed) marks.unshift(['listed', P(M.listed), 'var(--muted)', null]);
+    const MARK_NOTE = { midnight: 'the contract day begins (station local time)', sunrise: 'NOAA solar approximation for the station', sunset: 'NOAA solar approximation for the station',
+                        'day end': 'the contract day ends; the settlement value is the extreme through here', listed: 'when the exchange listed this day’s contracts (the record’s first quote)' };
     marks.forEach(([lb, t, col, dash]) => {
       if (t == null || t < w0 || t > d1) return;
       const a = { x1: x(t), x2: x(t), y1: S.T, y2: S.B, stroke: col, 'stroke-width': lb === 'midnight' ? 1.1 : 0.9 };
       if (dash) a['stroke-dasharray'] = dash;
       g.appendChild(el('line', a));
-      g.appendChild(txt(lb, { x: x(t), y: S.T - 5, 'text-anchor': 'middle', class: 'mklab' }));
+      const html = () => tip.rows(lb.charAt(0).toUpperCase() + lb.slice(1), [['Time', WXC.clockFull(t, tz)]], MARK_NOTE[lb]);
+      g.appendChild(bind(txt(lb, { x: x(t), y: S.T - 5, 'text-anchor': 'middle', class: 'mklab' }), html, false));
     });
 
     // ---- checked strikes: level lines across every panel
     picked.forEach(pk => {
-      g.appendChild(el('line', { x1: S.L, x2: rightEdge, y1: y(pk.K), y2: y(pk.K), stroke: pk.col, 'stroke-width': 1.3, opacity: .5 }));
+      g.appendChild(el('line', { x1: S.L, x2: rightEdge, y1: y(pk.K), y2: y(pk.K), stroke: pk.col, 'stroke-width': 1.3, opacity: .5, 'pointer-events': 'none' }));
       g.appendChild(txt((pk.side === 'h' ? '>' : '<') + pk.K + '°', { x: S.R - 6, y: y(pk.K) - 3, 'text-anchor': 'end', 'font-size': 9, 'font-weight': 700, fill: pk.col, opacity: .85 }));
     });
 
     // ---- level lines across the contract day, values and names in the gutter
-    levels.forEach(L => g.appendChild(el('line', { x1: x(d0), x2: S.R, y1: y(L.v), y2: y(L.v), stroke: L.col, 'stroke-width': 1.25, opacity: .85 })));
+    levels.forEach(L => {
+      g.appendChild(el('line', { x1: x(d0), x2: S.R, y1: y(L.v), y2: y(L.v), stroke: L.col, 'stroke-width': 1.25, opacity: .85, 'pointer-events': 'none' }));
+      g.appendChild(bind(el('line', { x1: x(d0), x2: S.R, y1: y(L.v), y2: y(L.v), stroke: 'transparent', 'stroke-width': 7, 'pointer-events': 'stroke' }), () => levelTip(L), true));
+    });
     const srt = levels.slice().sort((a, b) => b.v - a.v);
     const gap = 13; let prev = -1e9;
     const labY = srt.map(L => { let yy = Math.max(y(L.v), S.T + 6); if (yy - prev < gap) yy = prev + gap; prev = yy; return yy; });
     srt.forEach((L, i) => {
-      g.appendChild(txt(L.v.toFixed(unit === 'F' ? 0 : 1), { x: S.GV, y: y(L.v) + 3.5, class: 'lvlval', fill: L.col }));
+      g.appendChild(bind(txt(L.v.toFixed(unit === 'F' ? 0 : 1), { x: S.GV, y: y(L.v) + 3.5, class: 'lvlval', fill: L.col }), () => levelTip(L), true));
       g.appendChild(el('line', { x1: S.GL0, x2: S.GL1, y1: y(L.v), y2: labY[i], stroke: L.col, 'stroke-width': .7, opacity: .5 }));
-      g.appendChild(txt(L.nm, { x: S.GN, y: labY[i] + 3.5, class: 'lvlnm', fill: L.col }));
+      g.appendChild(bind(txt(L.nm, { x: S.GN, y: labY[i] + 3.5, class: 'lvlnm', fill: L.col }), () => levelTip(L), true));
     });
     if (levels.length) g.appendChild(el('line', { x1: S.R, x2: S.R, y1: S.T, y2: S.B, stroke: 'var(--rule)', 'stroke-width': .9 }));
+    const nmeta = snaps.nm && snaps.nm.data;
+    const normalTip = n => tip.rows('NCEI daily normal ' + n.nm.replace('normal ', '') + ' — ' + isoDate(M.day).replace(/, \d{4}$/, ''), [
+      ['Normal', WXC.deg(n.v)],
+      ['Spread (1 sd)', nm && (n.nm === 'normal high' ? nm.tmaxSd : nm.tminSd) != null ? '±' + (n.nm === 'normal high' ? nm.tmaxSd : nm.tminSd).toFixed(1) + '°' : null],
+      ['Station', nmeta ? (nmeta.ghcn || '') + (nmeta.distanceKm != null ? ' · ' + nmeta.distanceKm + ' km from the airport' : '') : null],
+      ['Dataset', nmeta && nmeta.dataset],
+    ], 'NCEI climate normals · click to pin');
     normals.forEach(n => {
       g.appendChild(el('line', { x1: S.L, x2: S.L + 14, y1: y(n.v), y2: y(n.v), stroke: 'var(--muted)', 'stroke-width': 1.4 }));
-      g.appendChild(txt(n.nm + ' ' + n.v.toFixed(0) + '°', { x: S.L + 17, y: y(n.v) + 3.5, class: 'mklab' }));
+      g.appendChild(bind(el('line', { x1: S.L, x2: S.L + 90, y1: y(n.v), y2: y(n.v), stroke: 'transparent', 'stroke-width': 9, 'pointer-events': 'stroke' }), () => normalTip(n), true));
+      g.appendChild(bind(txt(n.nm + ' ' + n.v.toFixed(0) + '°', { x: S.L + 17, y: y(n.v) + 3.5, class: 'mklab' }), () => normalTip(n), true));
     });
     if (unit === 'C') g.appendChild(txt(N.length ? 'Non-US station: no NWS forecast; NBM guidance covers Canada.' : 'Non-US station: US government feeds carry observations only.',
       { x: S.L + 8, y: S.T + 16, class: 'axl' }));
@@ -276,15 +353,22 @@ window.WXCity = (() => {
     if (LA.length) g.appendChild(line(LA, { stroke: COL.lamp, 'stroke-width': 1.6, 'stroke-dasharray': '1 3', opacity: .9 }));
     if (N.length) g.appendChild(line(N, { stroke: COL.nbm, 'stroke-width': 2, 'stroke-dasharray': '5 4', opacity: .9 }));
     if (F.length) g.appendChild(line(F, { stroke: COL.nws, 'stroke-width': 2.4, opacity: .95 }));
+    const obsMeta = {};
+    ((ob && ob.rows) || []).forEach(r => { obsMeta[P(r.t)] = r; });
+    const obsTip = p => { const r = obsMeta[p.t] || {}; return tip.rows((r.type || 'METAR') + ' observation', [
+      ['Time', WXC.clockFull(p.t, tz)], ['Temperature', WXC.deg(p.v)],
+      ['Decoded from', SRC[r.src] || r.src || null],
+      ['Counts toward settlement', r.type === 'SPECI' ? 'yes (SPECI reports count)' : 'yes'],
+    ], 'aviationweather.gov METAR · the crosshair lists every series at this time'); };
     if (O.length) {
       g.appendChild(line(O, { stroke: COL.obs, 'stroke-width': 2 }));
-      O.forEach(p => g.appendChild(el('circle', { cx: x(p.t), cy: y(p.v), r: 1.9, fill: COL.obs })));
+      O.forEach(p => { g.appendChild(el('circle', { cx: x(p.t), cy: y(p.v), r: 1.9, fill: COL.obs })); g.appendChild(bind(el('circle', { cx: x(p.t), cy: y(p.v), r: 5, fill: 'transparent', 'pointer-events': 'all' }), () => obsTip(p), false)); });
     }
 
     // ---- as-of marker
     const asof = snaps.ob && snaps.ob.asof;
     if (asof && asof > w0 && asof < d1) {
-      g.appendChild(el('line', { x1: x(asof), x2: x(asof), y1: S.T, y2: market ? S.PL1 : S.B, stroke: 'var(--muted)', 'stroke-dasharray': '3 3' }));
+      g.appendChild(el('line', { x1: x(asof), x2: x(asof), y1: S.T, y2: market ? S.PL1 : S.B, stroke: 'var(--muted)', 'stroke-dasharray': '3 3', 'pointer-events': 'none' }));
       g.appendChild(txt('data as of', { x: x(asof) + 5, y: S.T + 30, class: 'axl' }));
     }
 
@@ -293,8 +377,13 @@ window.WXCity = (() => {
     if (Oday.length) {
       const hi2 = Oday.reduce((a, b) => b.v > a.v ? b : a), lo2 = Oday.reduce((a, b) => b.v < a.v ? b : a);
       [['Obs high ', hi2, 'var(--warm)', -5], ['Obs low ', lo2, 'var(--cool)', 13]].forEach(([lb, pt, col, dy]) => {
-        g.appendChild(el('line', { x1: x(w0), x2: rightEdge, y1: y(pt.v), y2: y(pt.v), stroke: col, 'stroke-width': .9, 'stroke-dasharray': '2 2', opacity: .75 }));
-        g.appendChild(txt(lb + pt.v.toFixed(1) + '°', { x: x(w0) + 5, y: y(pt.v) + dy, class: 'axl', fill: col, 'font-weight': 700 }));
+        g.appendChild(el('line', { x1: x(w0), x2: rightEdge, y1: y(pt.v), y2: y(pt.v), stroke: col, 'stroke-width': .9, 'stroke-dasharray': '2 2', opacity: .75, 'pointer-events': 'none' }));
+        const r = obsMeta[pt.t] || {};
+        const html = () => tip.rows('Observed ' + (lb.trim().split(' ')[1]) + ' so far, ' + isoDate(M.day), [
+          ['Value', WXC.deg(pt.v)], ['At', WXC.clockFull(pt.t, tz)], ['Report', (r.type || 'METAR') + (r.src ? ', ' + SRC[r.src] : '')],
+          ['Reports so far today', ob && ob.today && ob.today.n != null ? String(ob.today.n) : null],
+        ], 'the settlement value is this extreme at the end of the contract day');
+        g.appendChild(bind(txt(lb + pt.v.toFixed(1) + '°', { x: x(w0) + 5, y: y(pt.v) + dy, class: 'axl', fill: col, 'font-weight': 700 }), html, true));
       });
     }
 
@@ -306,19 +395,18 @@ window.WXCity = (() => {
         lad[m].forEach(L => {
           const yy = y(L.strike);
           if (L.yes == null) {                     // listed, no book on either side
-            g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'none', stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2' }));
-            g.appendChild(txt('no book', { x: S.LX + S.LW / 2, y: yy + 3.2, class: 'ax', 'text-anchor': 'middle' }));
+            g.appendChild(bind(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'transparent', stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2' }), () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
+            g.appendChild(txt('no book', { x: S.LX + S.LW / 2, y: yy + 3.2, class: 'ax', 'text-anchor': 'middle', 'pointer-events': 'none' }));
           } else {
             const gw = L.yes / 100 * S.LW;
             const yb = el('rect', { x: S.LX, y: yy - 5.5, width: Math.max(gw, 1), height: 11, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
             const nb = el('rect', { x: S.LX + gw, y: yy - 5.5, width: Math.max(S.LW - gw, 1), height: 11, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
-            if (lad.live) [yb, nb].forEach(r => { const t = el('title'); t.textContent = 'Yes bid ' + (L.bid != null ? L.bid + '¢' : '—') + (L.bidSize ? ' ×' + L.bidSize : '') + ' · ask ' + (L.ask != null ? L.ask + '¢' : '—') + (L.askSize ? ' ×' + L.askSize : '') + (L.side !== 'mid' ? ' (one-sided: the bar is the ' + L.side + ')' : '') + (L.from === 'no' ? ' (from the No book)' : ''); r.appendChild(t); });
+            g.appendChild(bind(yb, () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true)); g.appendChild(bind(nb, () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
             if (lad.live && L.side !== 'mid') g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'none', stroke: 'var(--panel)', 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
-            g.appendChild(yb); g.appendChild(nb);
             if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt' }));
             if (S.LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: S.LX + S.LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end' }));
           }
-          g.appendChild(txt(cmp + L.strike + '°', { x: S.LX + S.LW + 5, y: yy + 3.5, class: 'ax', fill: m === 'high' ? 'var(--warm)' : 'var(--cool)' }));
+          g.appendChild(bind(txt(cmp + L.strike + '°', { x: S.LX + S.LW + 5, y: yy + 3.5, class: 'ax', fill: m === 'high' ? 'var(--warm)' : 'var(--cool)' }), () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
         });
       });
       if (lad.live && !lad.listed) g.appendChild(txt('no contracts listed for this day', { x: S.LX + S.LW / 2, y: (S.T + S.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
@@ -382,10 +470,17 @@ window.WXCity = (() => {
       const ts = clock(t, HV.tz) + ' · ' + dateShort(t, HV.tz);
       const near = pts => { let b = null; for (const p of pts) { const d2 = Math.abs(p.t - t); if (d2 <= 45 * 6e4 && (!b || d2 < b.d2)) b = { d2, p }; } return b && b.p; };
       const rows = [];
-      (inTemp ? HV.series : []).forEach(s => { const p = near(s.pts); if (p) rows.push('<span style="color:' + s.col + '">●</span> ' + s.nm + ' <b>' + p.v.toFixed(1) + '°</b>'); });
-      (inPrice ? HV.prices.filter(s => (hoverSide === 'h') === (s.label[0] === '>')) : []).forEach(s => { const p = near(s.pts); if (p) rows.push('<span style="color:' + s.col + '">●</span> Yes ' + s.label + ' <b>' + p.v + '¢</b>'); });
+      (inTemp ? HV.series : []).forEach(s => { const p = near(s.pts); if (p) rows.push([sw(s.col) + s.nm, p.v.toFixed(1) + '°']); });
+      if (inPrice) {
+        HV.prices.filter(s => (hoverSide === 'h') === (s.label[0] === '>')).forEach(s => {
+          const p = near(s.pts);
+          if (p) rows.push([sw(s.col) + 'Yes ' + s.label, (p.side && p.side !== 'mid' ? p.v + '¢ (' + p.side + ' only)' : p.v + '¢') + (p.bid != null && p.ask != null ? ' · ' + p.bid + '/' + p.ask : '')]);
+        });
+        const o = HV.series.find(s => s.nm === 'Observed'); const op = o && near(o.pts);
+        if (op) rows.push([sw(COL.obs) + 'Observed', op.v.toFixed(1) + '°']);
+      }
       if (!rows.length) { tip.hide(); if (hline) hline.remove(); hline = null; return; }
-      tip.show(e, '<b>' + ts + '</b>' + rows.join('<br>'));
+      tip.show(e, tip.rows(ts, rows, inPrice ? 'Yes price in cents; bid/ask where both sides were quoted' : null));
       if (!hline || !hline.isConnected) { hline = el('line', { stroke: 'var(--muted)', 'stroke-width': .8, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }); svg.appendChild(hline); }
       hline.setAttribute('x1', q.x); hline.setAttribute('x2', q.x); hline.setAttribute('y1', S.T); hline.setAttribute('y2', HV.market ? S.PL1 : S.B);
     });

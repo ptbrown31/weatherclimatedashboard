@@ -11,9 +11,15 @@
    reference locations). The drawn storm position is labelled from the
    geometry's own point and advisory, because the GIS service can trail
    NHC's roster. Equirectangular fitted to the basin box with independent
-   x/y scales so the panel fills its frame (a deliberate stretch). */
+   x/y scales so the panel fills its frame (a deliberate stretch).
+
+   Hover detail goes through the shared tooltip (WXC.tooltip): every map
+   region, outlook area, storm point, cone, track, reference dot, tile and
+   table row shows its values in the two-column form; a click pins the box
+   on elements that do not navigate. NHC times are shown in UTC, the
+   exchange's as-of in the viewer's clock. */
 window.WXHur = (() => {
-  const { el, txt, h, $, clockFull } = WXC;
+  const { el, txt, h, $, clockFull, dateShort } = WXC;
   const BASINS = {
     AL: { name: 'Atlantic', box: [-101.0, 4.0, -40.0, 48.0], outlook: 'Atlantic' },
     EP: { name: 'East and Central Pacific', box: [-180.0, 0.0, -85.0, 40.0], outlook: 'Pacific' },
@@ -21,6 +27,11 @@ window.WXHur = (() => {
   // the strike labels the landfall contract uses, where they differ from the geometry's names
   const REGION_ALIAS = { 'The Bahamas': 'Bahamas, The', 'Bahamas': 'Bahamas, The' };
   const COUNT = { TROPA: 'Atlantic named storms', HCAB: 'Atlantic hurricanes', MHCMA: 'Atlantic major hurricanes by month', HCAT4: 'Category 4 hurricane in the US', HLF: 'Hurricane landfall' };
+  // NHC GIS point types; anything not listed shows as its code
+  const TYPES = { HU: 'hurricane', MH: 'major hurricane', TS: 'tropical storm', TD: 'tropical depression', STS: 'subtropical storm', STD: 'subtropical depression',
+    PTC: 'potential tropical cyclone', PC: 'post-tropical cyclone', EX: 'extratropical', RL: 'remnant low', LO: 'low', DB: 'disturbance' };
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   const RAMP = ['#fde8c8', '#f9cf94', '#f2ad5e', '#e68a2e', '#cf6a14', '#a84e0b', '#7a3607'];
   let H = null, GEO = null, NATION = null, MK = null, RK = null, basin = 'AL', tip = null;
 
@@ -48,6 +59,42 @@ window.WXHur = (() => {
     return coords.flat();
   }
 
+  // ---- tooltip text helpers
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // NHC times in UTC: "2026-08-23 12:00Z"
+  const utc = iso => { const ms = iso ? Date.parse(iso) : NaN; return isNaN(ms) ? (iso || '—') : new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + 'Z'; };
+  // the exchange's as-of in the viewer's clock
+  const exAsof = () => { if (!MK || !MK.asof) return null; const ms = Date.parse(MK.asof); return dateShort(ms, local()) + ', ' + clockFull(ms, local()) + (MK.stale ? ' (stale)' : ''); };
+  // "20261130" -> "Nov 30, 2026"
+  const expDate = s => (s && /^\d{8}$/.test(String(s)) ? MONTHS[+String(s).slice(4, 6) - 1] + ' ' + (+String(s).slice(6, 8)) + ', ' + String(s).slice(0, 4) : (s || null));
+  // one side of the book with its size: "8¢ ×1000"
+  const side = (p, sz) => (p == null ? '—' : cents(p) + '¢' + (sz != null ? ' ×' + Math.round(sz) : ''));
+  function bookNote(c) {
+    if (!c || c.mid == null) return null;
+    const notes = [];
+    if (c.bid == null || c.ask == null) notes.push('one-sided (' + (c.bid == null ? 'ask' : 'bid') + ' only)');
+    if (c.from === 'no') notes.push('from the No book');
+    return notes.join(', ') || null;
+  }
+  // the rows every contract tooltip shares
+  const quoteRows = c => (!c ? [] : [
+    ['Yes bid', side(c.bid, c.bidSize)], ['Yes ask', side(c.ask, c.askSize)],
+    ['Mid', c.mid == null ? 'no book' : pct(cents(c.mid))], ['Book', bookNote(c)], ['Settles', expDate(c.expiration)]]);
+  // "<market> — <strike label> (<listing period>)"; a date-strike label ("By Nov 30, 2026") already names its period
+  const contractTitle = (m, c) => esc((m && m.name) || '') + ' — ' + esc(c.label) + (c.expiryLabel && !/^By /.test(c.label) ? ' (' + esc(c.expiryLabel) + ')' : '');
+  const asofFoot = () => { const a = exAsof(); return a ? 'as of ' + a : null; };
+  // hover, leave, and a pinning click, on any element that does not navigate
+  function attach(node, html) {
+    node.onmousemove = e => tip.show(e, typeof html === 'function' ? html() : html);
+    node.onmouseleave = () => tip.hide();
+    node.onclick = e => tip.pin(e, typeof html === 'function' ? html() : html);
+    node.setAttribute('data-tip-pin', '1');
+  }
+  const mph = kt => (kt == null ? null : Math.round(kt * 1.151));
+  const compass = d => (d == null ? null : COMPASS[Math.round(((d % 360) + 360) % 360 / 22.5) % 16]);
+  const position = (lat, lon) => (lat == null || lon == null ? null : Math.abs(lat).toFixed(2) + (lat < 0 ? 'S' : 'N') + ' ' + Math.abs(lon).toFixed(2) + (lon < 0 ? 'W' : 'E'));
+  const typeText = t => (t ? esc(t) + (TYPES[t] ? ' · ' + TYPES[t] : '') : null);
+
   // ---- the exchange's hurricane group, by symbol
   const market = sym => (MK ? MK.markets.find(m => m.symbol === sym) : null);
   const yes = c => (c && c.mid != null ? cents(c.mid) : null);
@@ -64,9 +111,12 @@ window.WXHur = (() => {
   function drawNhc(svg, X, Y, b) {
     const outl = (H.outlook || []).filter(o => (o.basin || '') === BASINS[b].outlook);
     const oplaced = [];
+    const path = (r, close) => r.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join('') + (close ? 'Z' : '');
     outl.forEach(o => rings(o.region).forEach(r => {
-      svg.appendChild(el('path', { d: r.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join('') + 'Z',
-        fill: 'rgba(224,138,30,.13)', stroke: '#e08a1e', 'stroke-width': 1.6, 'stroke-dasharray': '6 4' }));
+      const area = el('path', { d: path(r, true), fill: 'rgba(224,138,30,.13)', stroke: '#e08a1e', 'stroke-width': 1.6, 'stroke-dasharray': '6 4' });
+      attach(area, tip.rows('NHC seven-day formation outlook — ' + esc(BASINS[b].outlook), [['2-day', esc(o.prob2 || '—')], ['7-day', esc(o.prob7 || '—')]],
+        'NHC Tropical Weather Outlook, as of ' + utc(H.outlookAsof || H.asof)));
+      svg.appendChild(area);
       const cx = Math.min(r.reduce((s, p) => s + X(p[0]), 0) / r.length, 905);
       let cy = r.reduce((s, p) => s + Y(p[1]), 0) / r.length;
       while (oplaced.some(q => Math.abs(cx - q[0]) < 115 && Math.abs(cy - q[1]) < 34)) cy += 34;
@@ -76,14 +126,52 @@ window.WXHur = (() => {
     }));
     const storms = (H.storms || []).filter(s => b === 'AL' ? s.basin === 'AL' : s.basin !== 'AL');
     storms.forEach(s => {
-      (s.cone || []).forEach(c => rings(c).forEach(r => svg.appendChild(el('path', { d: r.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join('') + 'Z', fill: 'rgba(100,116,139,.14)', stroke: '#64748b', 'stroke-width': 1 }))));
-      (s.past || []).forEach(c => rings(c).forEach(r => svg.appendChild(el('path', { d: r.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.3, 'stroke-dasharray': '3 3' }))));
-      (s.track || []).forEach(c => rings(c).forEach(r => svg.appendChild(el('path', { d: r.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--navy)', 'stroke-width': 2 }))));
+      const adv = s.geometryAdvisory || s.advisory;
+      const geomRows = [['Advisory', esc(adv)], ['Geometry', s.geometryStale ? 'stale (trails the roster)' : null]];
+      const fetchedFoot = 'fetched ' + utc(s.geometryFetched);
+      const name = esc(s.name);
+      // a line is hard to hover at 2px, so each track gets an invisible wide twin for the pointer
+      const hitLine = (d, html) => { const q = el('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': 0, 'stroke-width': 9, 'pointer-events': 'stroke' }); attach(q, html); svg.appendChild(q); };
+      (s.cone || []).forEach(c => rings(c).forEach(r => {
+        const cone = el('path', { d: path(r, true), fill: 'rgba(100,116,139,.14)', stroke: '#64748b', 'stroke-width': 1 });
+        attach(cone, tip.rows(name + ' — NHC forecast cone', geomRows, fetchedFoot));
+        svg.appendChild(cone);
+      }));
+      (s.past || []).forEach(c => rings(c).forEach(r => {
+        svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.3, 'stroke-dasharray': '3 3' }));
+        hitLine(path(r), tip.rows(name + ' — past track', geomRows, fetchedFoot));
+      }));
+      (s.track || []).forEach(c => rings(c).forEach(r => {
+        svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--navy)', 'stroke-width': 2 }));
+        hitLine(path(r), tip.rows(name + ' — NHC forecast track', geomRows, fetchedFoot));
+      }));
       (s.points || []).forEach((p, i) => {
         svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: p.tau === 0 ? 6 : 4.5, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 }));
         if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + p.kt + 'kt' : ''), { x: X(p.lon) + 8, y: Y(p.lat) + (i % 2 ? 14 : -8), 'font-size': 9, fill: 'var(--ink)', class: 'lbl' }));
         if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · ' + (p.kt != null ? p.kt : s.intensityKt) + 'kt · adv ' + (s.geometryAdvisory || s.advisory) + (s.geometryStale ? ' (stale)' : ''),
           { x: X(p.lon) + 10, y: Y(p.lat) - 20, 'font-size': 12.5, 'font-weight': 700, fill: 'var(--navy)', class: 'lbl' }));
+        // the hover target: an invisible circle wider than the drawn point
+        const now = p.tau === 0;
+        const rows = [
+          ['Valid', esc(p.label || '—')],
+          ['Wind', p.kt != null ? p.kt + ' kt (' + mph(p.kt) + ' mph)' : '—'],
+          ['Type', typeText(p.type || s.classification)],
+          ['Position', position(p.lat, p.lon)],
+          ['Advisory', esc(adv)],
+          now ? null : ['Lead', (p.tau != null ? p.tau : '—') + ' h'],
+          now ? ['Pressure', s.pressureMb ? esc(s.pressureMb) + ' mb' : '—'] : null,
+          now ? ['Movement', s.movementDir != null ? s.movementDir + '° (' + compass(s.movementDir) + ')' + (s.movementKt != null ? ' at ' + s.movementKt + ' kt' : '') : '—'] : null,
+          now ? ['NHC last update', utc(s.updated)] : null,
+        ];
+        const html = tip.rows(esc(p.type || s.classification) + ' ' + name + ' — ' + (now ? 'current position' : 'forecast point'), rows,
+          (s.geometryStale ? 'geometry trails the roster (stale) · ' : '') + (now && s.advisoryUrl ? 'NHC advisory → opens in a new tab' : 'lead time from the advisory'));
+        const hit = el('circle', { cx: X(p.lon), cy: Y(p.lat), r: now ? 11 : 9, fill: '#000', 'fill-opacity': 0, 'pointer-events': 'all', style: 'cursor:pointer' });
+        if (now && s.advisoryUrl) {
+          hit.onmousemove = e => tip.show(e, html);
+          hit.onmouseleave = () => tip.hide();
+          hit.onclick = () => window.open(s.advisoryUrl, '_blank', 'noopener');
+        } else attach(hit, html);
+        svg.appendChild(hit);
       });
     });
     return { storms: storms.length, areas: outl.length };
@@ -102,6 +190,21 @@ window.WXHur = (() => {
     });
     return best;
   }
+  // the tooltip for a reference location, on the map and in the vendor table
+  function locationTip(L, v) {
+    const rows = [['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)]];
+    let foot;
+    if (v) {
+      rows.push(['Storm', esc(v.storm)]);
+      // the ladder, thresholds with at least half a percent, eight at most
+      const ladder = v.thresholds.map((t, i) => (v.p[i] != null && v.p[i] >= 0.5 ? ['&gt; ' + t + ' mph', Math.round(v.p[i]) + '%'] : null)).filter(Boolean).slice(0, 8);
+      ladder.forEach(r => rows.push(r));
+      rows.push(['LiveCyc cycle', utc(v.forecastTime)]);
+      foot = esc((RK && RK.attribution) || 'Powered by Reask') + '; probabilities as published';
+    } else foot = (RK && RK.enabled) ? 'no storm probabilities published' : 'no live-storm probabilities (lane off)';
+    return tip.rows(esc(L.name) + ' (' + esc(L.id) + ')', rows, foot);
+  }
+  const locationById = id => ((GEO && GEO.locations) || []).find(L => L.id === id);
 
   function draw() {
     const B = BASINS[basin];
@@ -111,25 +214,29 @@ window.WXHur = (() => {
     const svg = $('#basin'); svg.innerHTML = '';
     svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
     const lf = basin === 'AL' ? landfallQuotes() : null;
-    const poly = (rr, fill, stroke, sw, title) => {
+    const hlf = market('HLF');
+    const poly = (rr, fill, stroke, sw, html) => {
       const p = el('path', { d: rr.map(r => 'M' + r.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join('L') + 'Z').join(' '), fill, stroke, 'stroke-width': sw });
-      if (title) { const t = el('title'); t.textContent = title; p.appendChild(t); }
+      if (html) attach(p, html);
       svg.appendChild(p);
     };
-    const fillFor = (label) => {
-      if (!lf) return [ 'var(--map-land)', null ];
-      const c = lf[label];
-      return c && c.mid != null ? [ramp(c.mid), label + ': ' + quoteText(c)] : ['var(--map-land)', null];
+    // fill and tooltip for a region: shaded by the landfall contract's Yes mid where one is listed with a book
+    const fillFor = (label, nm) => {
+      const c = lf ? lf[label] : null;
+      const season = c && c.expiryLabel ? c.expiryLabel : (hlf && hlf.contracts[0] && hlf.contracts[0].expiryLabel) || 'season';
+      const rows = c ? [['Landfall contract (' + esc(season) + ')', c.mid == null ? 'no book' : 'Yes ' + pct(cents(c.mid))]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Mid' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
+      const html = tip.rows(esc(nm), rows, c ? null : (lf ? 'no landfall contract listed for this region' : null));
+      return [c && c.mid != null ? ramp(c.mid) : 'var(--map-land)', html];
     };
     if (GEO) {
       Object.entries(GEO.countries || {}).forEach(([nm, rr]) => {
         const label = Object.keys(lf || {}).find(k => regionKey(k) === nm) || nm;
-        const [f, t] = fillFor(label);
+        const [f, t] = fillFor(label, nm);
         poly(rr, f, 'var(--map-line)', .6, t);
       });
       (NATION || []).forEach(r => poly([r], 'var(--map-land)', 'var(--map-line)', .6));
-      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { const [f, t] = fillFor(nm); poly(rr, f, 'var(--map-line)', .7, t); });
-      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { const [f, t] = fillFor(nm); poly(rr, f, 'var(--ink)', .8, t); });
+      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { const [f, t] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7, t); });
+      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { const [f, t] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8, t); });
     }
     const counts = drawNhc(svg, X, Y, basin);
     // the reference locations: small dots, scaled by the vendor's P(gust > 80 mph) when the lane is live
@@ -140,9 +247,7 @@ window.WXHur = (() => {
       const r = v && v.p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(v.p80, 100) / 100) : 2.2;
       if (v && v.p80 > 0) vendorShown++;
       const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: v && v.p80 > 0 ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': v ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 });
-      c.onmousemove = e => tip.show(e, '<b>' + L.name + ' (' + L.id + ')</b>' + (L.state ? L.state + ', ' : '') + L.country +
-        (v ? '<br>' + v.storm + ' · ' + v.thresholds.map((t, i) => v.p[i] >= 0.5 ? t + ' mph: ' + v.p[i] + '%' : null).filter(Boolean).slice(0, 5).join(' · ') + '<br>Reask LiveCyc ' + v.forecastTime : '<br>no live-storm probabilities'));
-      c.onmouseleave = () => tip.hide();
+      attach(c, locationTip(L, v));
       svg.appendChild(c);
     });
     $('#modeTitle').textContent = B.name.toUpperCase() + ' · NHC forecast tracks, cones and formation odds' + (lf ? ' · landfall regions shaded by the exchange’s Yes price' : '');
@@ -173,7 +278,13 @@ window.WXHur = (() => {
       if (s.windProbs && s.windProbs.length) {
         const tb = h('table', { class: 'pws' });
         tb.appendChild(h('tr', {}, [h('th', { text: 'NHC five-day cumulative probability' }), h('th', { class: 'num', text: '≥34 kt' }), h('th', { class: 'num', text: '≥50 kt' }), h('th', { class: 'num', text: '≥64 kt' })]));
-        s.windProbs.slice(0, 14).forEach(r => tb.appendChild(h('tr', {}, [h('td', { text: r.location }), h('td', { class: 'num', text: r.p34 + '%' }), h('td', { class: 'num', text: r.p50 + '%' }), h('td', { class: 'num', text: r.p64 + '%' })])));
+        s.windProbs.slice(0, 14).forEach(r => {
+          const tr = h('tr', {}, [h('td', { text: r.location }), h('td', { class: 'num', text: r.p34 + '%' }), h('td', { class: 'num', text: r.p50 + '%' }), h('td', { class: 'num', text: r.p64 + '%' })]);
+          attach(tr, tip.rows(esc(r.location) + ' — NHC wind speed probabilities',
+            [['≥34 kt (39 mph)', r.p34 != null ? r.p34 + '%' : '—'], ['≥50 kt (58 mph)', r.p50 != null ? r.p50 + '%' : '—'], ['≥64 kt (74 mph)', r.p64 != null ? r.p64 + '%' : '—']],
+            'cumulative through the 5-day forecast, NHC PWSAT, advisory ' + esc(s.advisory)));
+          tb.appendChild(tr);
+        });
         list.appendChild(h('div', { class: 'card', style: 'padding:0;margin:6px 0 12px' }, [tb]));
       }
     });
@@ -181,20 +292,23 @@ window.WXHur = (() => {
   }
 
   // ---- season tiles and the count ladders
-  function tile(label, value, sub) {
-    return h('div', { class: 'tile' }, [h('div', { class: 'tv', text: value == null ? '—' : String(value) }), h('div', { class: 'tl', text: label }), sub ? h('div', { class: 'ts', text: sub }) : h('span')]);
+  function tile(label, value, sub, html) {
+    const t = h('div', { class: 'tile' }, [h('div', { class: 'tv', text: value == null ? '—' : String(value) }), h('div', { class: 'tl', text: label }), sub ? h('div', { class: 'ts', text: sub }) : h('span')]);
+    if (html) attach(t, html);
+    return t;
   }
-  function ladderPanel(title, rows, sub) {
+  function ladderPanel(title, rows, sub, mname) {
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: title })]);
     if (sub) div.appendChild(h('div', { class: 'cap', style: 'margin:0 0 6px', text: sub }));
     rows.forEach(r => {
       const y = yes(r.c);
       const one = r.c && r.c.mid != null && (r.c.bid == null || r.c.ask == null);
-      const bar = h('div', { class: 'lrow' + (one ? ' one' : ''), title: quoteText(r.c) + (one ? ' — one-sided book' : '') }, [
+      const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
         h('span', { class: 'lk', text: r.label }),
         h('span', { class: 'lb' }, [h('i', { style: 'width:' + (y == null ? 0 : y) + '%' })]),
         h('span', { class: 'lv', text: y == null ? 'no book' : y + '¢' + (one ? '*' : '') }),
       ]);
+      if (r.c) attach(bar, tip.rows(contractTitle({ name: mname }, r.c), quoteRows(r.c), asofFoot()));
       div.appendChild(bar);
     });
     if (!rows.length) div.appendChild(h('div', { class: 'cap', text: 'Not listed.' }));
@@ -203,12 +317,15 @@ window.WXHur = (() => {
   function drawSeason() {
     const s = H.season || {};
     const tiles = $('#tiles'); tiles.innerHTML = '';
-    tiles.appendChild(tile('named storms, ' + (s.year || 'this season'), s.named, (s.names || []).join(', ') || 'none yet'));
-    tiles.appendChild(tile('hurricanes', s.hurricanes, 'from the ATCF best tracks'));
-    tiles.appendChild(tile('major hurricanes', s.majors, 'category 3 or stronger'));
+    const seasonTip = tip.rows((s.year || 'This') + ' season to date', [['Named storms', s.named], ['Hurricanes', s.hurricanes], ['Major hurricanes', s.majors]],
+      ((s.names || []).length ? esc((s.names || []).join(', ')) + '<br>' : '') + 'from the ATCF best tracks, computed ' + esc(s.computed || '—'));
+    tiles.appendChild(tile('named storms, ' + (s.year || 'this season'), s.named, (s.names || []).join(', ') || 'none yet', seasonTip));
+    tiles.appendChild(tile('hurricanes', s.hurricanes, 'from the ATCF best tracks', seasonTip));
+    tiles.appendChild(tile('major hurricanes', s.majors, 'category 3 or stronger', seasonTip));
     const cat4 = market('HCAT4');
     if (cat4) cat4.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec)).slice(0, 4).forEach(c =>
-      tiles.appendChild(tile('Cat 4 US landfall ' + c.label.replace(/^By /, 'by '), yes(c) == null ? '—' : yes(c) + '¢', 'Yes price, ' + quoteText(c).replace(/^Yes [^(]*/, '').replace(/[()]/g, ''))));
+      tiles.appendChild(tile('Cat 4 US landfall ' + c.label.replace(/^By /, 'by '), yes(c) == null ? '—' : yes(c) + '¢', 'Yes price, ' + quoteText(c).replace(/^Yes [^(]*/, '').replace(/[()]/g, ''),
+        tip.rows(contractTitle(cat4, c), quoteRows(c).filter(r => r[0] !== 'Settles').concat([['Expiration', expDate(c.expiration)]]), asofFoot()))));
     const lad = $('#ladders'); lad.innerHTML = '';
     if (!MK) {
       $('#laddersCap').textContent = WXM.on() ? 'Exchange quotes unavailable.' : 'The market layer is off; no contract prices are shown.';
@@ -217,12 +334,13 @@ window.WXHur = (() => {
     // one ladder per listing period (a market carries next season's contracts well ahead of time)
     const specNum = sp => sp.split('.').reduce((a, v, i) => a + (+v) * (i === 0 ? 10000 : (i === 1 ? 100 : 1)), 0);   // '2026.8' -> 20260800, '2026.12' -> 20261200
     const periods = sym => { const m = market(sym); if (!m) return []; return [...new Set(m.contracts.map(c => c.spec))].sort((a, b) => specNum(a) - specNum(b)).map(sp => ({ sp, label: (m.contracts.find(c => c.spec === sp) || {}).expiryLabel || sp, rows: m.contracts.filter(c => c.spec === sp).sort((a, b) => a.strike - b.strike).map(c => ({ label: c.label, c })) })); };
+    const mname = sym => (market(sym) || {}).name || sym;
     const thisYear = String((H.season || {}).year || new Date().getUTCFullYear());
-    periods('TROPA').forEach(p => lad.appendChild(ladderPanel(COUNT.TROPA + ', ' + p.label + ' (TROPA)', p.rows, 'Yes price of “count above N”' + (s.named != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.named + ' so far' : ''))));
-    periods('HCAB').forEach(p => lad.appendChild(ladderPanel(COUNT.HCAB + ', ' + p.label + ' (HCAB)', p.rows, 'Yes price of “at least N”' + (s.hurricanes != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.hurricanes + ' so far' : ''))));
+    periods('TROPA').forEach(p => lad.appendChild(ladderPanel(COUNT.TROPA + ', ' + p.label + ' (TROPA)', p.rows, 'Yes price of “count above N”' + (s.named != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.named + ' so far' : ''), mname('TROPA'))));
+    periods('HCAB').forEach(p => lad.appendChild(ladderPanel(COUNT.HCAB + ', ' + p.label + ' (HCAB)', p.rows, 'Yes price of “at least N”' + (s.hurricanes != null && p.label.indexOf(thisYear) >= 0 ? '; ' + s.hurricanes + ' so far' : ''), mname('HCAB'))));
     if (!market('TROPA')) lad.appendChild(ladderPanel(COUNT.TROPA + ' (TROPA)', [], ''));
     if (!market('HCAB')) lad.appendChild(ladderPanel(COUNT.HCAB + ' (HCAB)', [], ''));
-    periods('MHCMA').forEach(p => lad.appendChild(ladderPanel(COUNT.MHCMA.replace('by month', '') + p.label + ' (MHCMA)', p.rows, 'Yes price of “count above N” in that month')));
+    periods('MHCMA').forEach(p => lad.appendChild(ladderPanel(COUNT.MHCMA.replace('by month', '') + p.label + ' (MHCMA)', p.rows, 'Yes price of “count above N” in that month', mname('MHCMA'))));
     $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes-side midpoint in cents, or the one side quoted where the book is one-sided (hover shows bid and ask). Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
   }
 
@@ -236,7 +354,9 @@ window.WXHur = (() => {
     m.contracts.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
       const k = regionKey(c.label);
       const onMap = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]) ? 'shaded' : 'not drawn';
-      tb.appendChild(h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(c.ask)) }), h('td', { class: 'num', text: c.mid == null ? 'no book' : pct(cents(c.mid)) }), h('td', { text: onMap })]));
+      const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(c.ask)) }), h('td', { class: 'num', text: c.mid == null ? 'no book' : pct(cents(c.mid)) }), h('td', { text: onMap })]);
+      attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat([['On the map', onMap]]), asofFoot()));
+      tb.appendChild(tr);
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
     host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '; “mid” is the Yes midpoint where both sides are quoted, else the one side shown.' }));
@@ -267,7 +387,12 @@ window.WXHur = (() => {
         const rows = Object.entries(lc.sites).sort((a, b) => (b[1].p[i80] || 0) - (a[1].p[i80] || 0)).slice(0, 16);
         const tb = h('table');
         tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
-        rows.forEach(([id, r]) => tb.appendChild(h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: r.p[i] + '%' }))))));
+        rows.forEach(([id, r]) => {
+          const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: r.p[i] + '%' }))));
+          const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
+          attach(tr, locationTip(L, { storm: s.name, thresholds: lc.thresholds, p: r.p, forecastTime: lc.forecastTime }));
+          tb.appendChild(tr);
+        });
         host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
       }
       if (s.final && s.final.sites) {
@@ -288,8 +413,11 @@ window.WXHur = (() => {
     others.forEach(m => {
       const tb = h('table');
       tb.appendChild(h('tr', {}, [h('th', { text: m.name + ' (' + m.symbol + ')' }), h('th', { text: 'Settles' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'Yes ask' }), h('th', { class: 'num', text: 'Mid' })]));
-      m.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec) || a.strike - b.strike).forEach(c =>
-        tb.appendChild(h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(c.ask)) }), h('td', { class: 'num', text: c.mid == null ? 'no book' : pct(cents(c.mid)) })])));
+      m.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec) || a.strike - b.strike).forEach(c => {
+        const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(c.ask)) }), h('td', { class: 'num', text: c.mid == null ? 'no book' : pct(cents(c.mid)) })]);
+        attach(tr, tip.rows(contractTitle(m, c), quoteRows(c), asofFoot()));
+        tb.appendChild(tr);
+      });
       host.appendChild(h('div', { class: 'card', style: 'padding:0;margin-bottom:10px' }, [tb]));
     });
   }

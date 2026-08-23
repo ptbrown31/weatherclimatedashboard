@@ -33,14 +33,73 @@ window.WXMap = (() => {
   };
   const tmw = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.tomorrow : ''; };
 
+  // ---- tooltips. Dates on the snapshot are the station's local calendar
+  //      dates as 'YYYY-MM-DD' strings, so they are printed by hand here;
+  //      parsing them through Date would shift them by the browser's zone.
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const isoDate = s => { if (!s || s.length < 10) return ''; return MON[+s.slice(5, 7) - 1] + ' ' + (+s.slice(8, 10)); };
+  const dg = v => (v == null ? '—' : deg(v));
+  const pair = (a, b) => (a == null && b == null ? null : dg(a) + ' / ' + dg(b));
+  const gap = d => (d == null ? '' : ' (' + (d > 0 ? '+' + d : d < 0 ? '−' + Math.abs(d) : '0') + '°)');
+  const srcTag = s => (s === 'tgroup' ? 'tenths' : s === 'body' ? 'whole degrees' : null);
+  const FIELD_FOOT = 'inverse-distance interpolation of the listed stations’ NWS forecasts; not an NWS product';
+
+  // the market-implied median for one side, as a tooltip value: the number
+  // with its gap against the NWS forecast, or the reason there is none
+  function impliedText(m, v, d, edge) {
+    if (!m) return 'not listed yet';
+    if (v != null) return deg(v) + gap(d);
+    if (edge) return edge === 'above' ? 'above the top strike' : 'below the bottom strike';
+    return 'no book yet';
+  }
+
+  function dotTip(c) {
+    const mk = c.markers || {};
+    const m = WXM.on() ? WXM.implied(c) : null;
+    const tag = WXM.live() ? 'ForecastEx' : 'placeholder';
+    const tomorrow = [
+      ['NWS high / low tomorrow', dg(c.nwsHighTomorrow) + ' / ' + dg(c.nwsLowTomorrow)],
+      ['NBM high / low tomorrow', pair(c.nbmHighTomorrow, c.nbmLowTomorrow)],
+      ['GFS MOS high / low tomorrow', pair(c.mavHighTomorrow, c.mavLowTomorrow)],
+      WXM.on() ? ['Implied high (' + tag + ')', impliedText(m, m && m.impliedHigh, m && m.divHigh, m && m.edgeHigh)] : null,
+      WXM.on() ? ['Implied low (' + tag + ')', impliedText(m, m && m.impliedLow, m && m.divLow, m && m.edgeLow)] : null,
+    ];
+    const sh = srcTag(c.obsHighSrc), sl = srcTag(c.obsLowSrc);
+    const obsTag = sh || sl ? ' <span class="tk">(' + (sh === sl || !sl ? sh : !sh ? sl : sh + ' / ' + sl) + ')</span>' : '';
+    let latest = null;
+    if (c.obsLatest && c.obsLatest.t) {
+      const ms = Date.parse(c.obsLatest.t), day = WXC.dateShort(ms, c.tz);
+      latest = (day !== isoDate(mk.day) ? day + ' ' : '') + WXC.clockFull(ms, c.tz) + (c.obsLatest.type ? ' ' + c.obsLatest.type : '');
+    }
+    const today = [
+      c.nwsIssuedHigh != null ? ['NWS high issued for today', deg(c.nwsIssuedHigh)] : ['NWS high today (standing)', dg(c.nwsHighToday)],
+      ['Observed high / low so far', (c.obsHighSoFar == null && c.obsLowSoFar == null) ? '—' : dg(c.obsHighSoFar) + ' / ' + dg(c.obsLowSoFar) + obsTag],
+      ['Latest METAR', latest],
+    ];
+    return tip.rows(c.city + ' (' + c.station + ') — tomorrow ' + isoDate(mk.tomorrow), tomorrow) +
+      tip.rows('<span class="tk" style="display:block;margin-top:5px">Today · ' + isoDate(mk.day) + '</span>', today, 'click → city chart');
+  }
+
+  // one cell of the shading: the interpolated NWS level under the pointer
+  function cellTip(i) {
+    const cell = field.cells[i], M = MODES[mode];
+    if (!cell || M.fld == null) return '';
+    return tip.rows('NWS forecast field (derived)', [[mode === 'lo' ? 'Tomorrow’s low' : 'Tomorrow’s high', deg(cell[M.fld])]], FIELD_FOOT);
+  }
+  const cellIndex = e => { const i = e.target && e.target.getAttribute && e.target.getAttribute('data-i'); return i == null ? null : +i; };
+
   function draw() {
     const svg = $('#map'); svg.innerHTML = '';
     const M = MODES[mode];
     const defs = el('defs'), cp = el('clipPath', { id: 'us' });
     cp.appendChild(el('path', { d: base.statePaths })); defs.appendChild(cp); svg.appendChild(defs);
     if (M.fld != null && field && field.cells) {
-      const fg = el('g', { 'clip-path': 'url(#us)' });
-      field.cells.forEach(cell => fg.appendChild(el('rect', { x: cell[0] - 1, y: cell[1] - 1, width: field.step + 2, height: field.step + 2, fill: fieldColor(cell[M.fld]) })));
+      const fg = el('g', { 'clip-path': 'url(#us)', 'data-tip-pin': '' });
+      field.cells.forEach((cell, i) => fg.appendChild(el('rect', { x: cell[0] - 1, y: cell[1] - 1, width: field.step + 2, height: field.step + 2, fill: fieldColor(cell[M.fld]), 'data-i': i })));
+      // one listener for the whole field, keyed by the cell index on the target
+      fg.onmousemove = e => { const i = cellIndex(e); if (i != null) tip.show(e, cellTip(i)); };
+      fg.onmouseleave = () => tip.hide();
+      fg.onclick = e => { const i = cellIndex(e); if (i != null) tip.pin(e, cellTip(i)); };
       svg.appendChild(fg);
     } else {
       svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)' }));
@@ -66,17 +125,7 @@ window.WXMap = (() => {
         g.appendChild(el('circle', { cx: c.px, cy: c.py, r, fill: v > 0 ? 'var(--warm)' : (v < 0 ? 'var(--cool)' : 'var(--muted)'), 'fill-opacity': .97, stroke: 'var(--ink)', 'stroke-width': .6 }));
       }
       placed.push([c.px - r, c.py - r, c.px + r, c.py + r]);
-      g.onmousemove = e => {
-        const m = WXM.on() ? WXM.implied(c) : null;
-        tip.show(e, '<b>' + c.city + ' (' + c.station + ')</b>' +
-          'NWS high tomorrow ' + deg(c.nwsHighTomorrow) + ' · low ' + deg(c.nwsLowTomorrow) + '<br>' +
-          'NWS high issued for today ' + deg(c.nwsIssuedHigh != null ? c.nwsIssuedHigh : c.nwsHighToday) + '<br>' +
-          'Observed so far today ' + deg(c.obsHighSoFar) + (c.obsLowSoFar != null ? ' / ' + deg(c.obsLowSoFar) : '') +
-          (m && m.impliedHigh != null ? '<br>Implied high ' + deg(m.impliedHigh) + (m.divHigh != null ? ' (' + (m.divHigh > 0 ? '+' : '') + m.divHigh + '°)' : '') + ' — ' + (WXM.live() ? 'ForecastEx implied median' : 'placeholder') : '') +
-          (m && m.impliedHigh == null && m.edgeHigh ? '<br>Implied high beyond the listed ladder (' + m.edgeHigh + ' every strike)' : '') +
-          (m && m.impliedLow != null ? '<br>Implied low ' + deg(m.impliedLow) + (m.divLow != null ? ' (' + (m.divLow > 0 ? '+' : '') + m.divLow + '°)' : '') : '') +
-          (m && m.impliedLow == null && m.edgeLow ? '<br>Implied low beyond the listed ladder (' + m.edgeLow + ' every strike)' : ''));
-      };
+      g.onmousemove = e => tip.show(e, dotTip(c));
       g.onmouseleave = () => tip.hide();
       g.onclick = () => { location.href = 'city.html?station=' + c.station; };
       svg.appendChild(g);
@@ -103,6 +152,18 @@ window.WXMap = (() => {
     else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
   }
 
+  // title text for the off-canvas list: these stations report in their own
+  // unit (Celsius outside the US), so the unit letter is spelled out
+  function intlTitle(c) {
+    const u = v => (v == null ? '—' : deg(v) + (c.unit || ''));
+    const m = WXM.on() ? WXM.implied(c) : null;
+    const parts = [c.city + ' (' + c.station + ')', 'observed so far ' + u(c.obsHighSoFar) + ' / ' + u(c.obsLowSoFar)];
+    if (c.nwsHighTomorrow != null || c.nwsLowTomorrow != null) parts.push('NWS tomorrow ' + u(c.nwsHighTomorrow) + ' / ' + u(c.nwsLowTomorrow));
+    else if (c.nbmHighTomorrow != null || c.nbmLowTomorrow != null) parts.push('NBM tomorrow ' + u(c.nbmHighTomorrow) + ' / ' + u(c.nbmLowTomorrow));
+    if (m && (m.impliedHigh != null || m.impliedLow != null)) parts.push('implied ' + u(m.impliedHigh) + ' / ' + u(m.impliedLow) + (WXM.live() ? '' : ' (placeholder)'));
+    return parts.join(' · ');
+  }
+
   async function init() {
     tip = WXC.tooltip();
     const r = await WXD.getAll(['summary.json', 'field.json']);
@@ -117,7 +178,7 @@ window.WXMap = (() => {
     draw();
     // international stations and Honolulu are not on this canvas; list them
     const intl = summary.cities.filter(c => !c.onConus);
-    const ul = $('#intl'); if (ul) { ul.innerHTML = ''; intl.forEach(c => ul.appendChild(h('a', { href: 'city.html?station=' + c.station, text: c.city + ' ' + (c.obsHighSoFar != null ? deg(c.obsHighSoFar) : ''), style: 'margin-right:14px' }))); }
+    const ul = $('#intl'); if (ul) { ul.innerHTML = ''; intl.forEach(c => ul.appendChild(h('a', { href: 'city.html?station=' + c.station, text: c.city + ' ' + (c.obsHighSoFar != null ? deg(c.obsHighSoFar) : ''), style: 'margin-right:14px', title: intlTitle(c) }))); }
   }
   return { init };
 })();
