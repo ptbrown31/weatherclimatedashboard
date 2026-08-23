@@ -10,7 +10,67 @@
 window.WXMap = (() => {
   const { el, txt, h, $, deg } = WXC;
   const RAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
-  let summary = null, field = null, base = null, world = null, mode = 'hi', tip = null;
+  let summary = null, field = null, base = null, world = null, head = null, mode = 'hi', tip = null;
+  const TOOL = { nws: 'National Weather Service', nbm: 'Blend of Models', lamp: 'Aviation guidance (LAMP)',
+                 mav: 'GFS MOS', fx: 'ForecastEx' };
+  const ord = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
+
+  // The four numbers the day turns on, precomputed by the pipeline so the
+  // landing page stays light. Each is a fact with its own provenance, not a
+  // summary of the site: the accuracy standing, yesterday's largest single
+  // miss, the widest disagreement about tomorrow, and one hurricane contract.
+  function drawCards() {
+    const host = $('#cards'); if (!host) return;
+    host.innerHTML = '';
+    if (!head) return;
+    const card = (value, label, sub, tipHtml, href) => {
+      const d = h('div', { class: 'tile' + (href ? ' link' : '') }, [
+        h('div', { class: 'tv', text: value }), h('div', { class: 'tl', text: label }),
+        sub ? h('div', { class: 'ts', text: sub }) : h('span')]);
+      if (tipHtml) { d.onmousemove = e => tip.show(e, tipHtml); d.onmouseleave = () => tip.hide(); }
+      if (href) d.onclick = () => { location.href = href; };
+      host.appendChild(d);
+    };
+    const a = head.accuracy;
+    if (a && (a.rank || []).length) {
+      // the exchange's own standing when it is scored, otherwise whoever leads
+      const i = Math.max(0, a.rank.findIndex(r => r.src === 'fx'));
+      const r = a.rank[i];
+      card(deg(r.mae) + 'F', TOOL[r.src] + ' ranks ' + ord(i + 1) + ' of ' + a.rank.length,
+        'Average error on daily highs, last ' + a.days + ' scored days',
+        tip.rows('Accuracy over the last ' + a.days + ' scored days',
+          a.rank.map((x, k) => [ord(k + 1) + ' ' + TOOL[x.src], deg(x.mae) + 'F']),
+          'mean absolute error on the daily high, pooled across every station · click → the scorecard'),
+        'scorecard.html');
+    }
+    const e = head.largestError;
+    if (e) card(deg(Math.abs(e.error)) + 'F', 'Largest error, ' + e.city + ' ' + e.side,
+      'Settled ' + deg(e.observed) + ' against ' + deg(e.forecast) + ' from ' + TOOL[e.source],
+      tip.rows(e.city + ' (' + e.station + ') — the day’s largest miss',
+        [['Day', e.date], ['Observed ' + e.side, deg(e.observed)], [TOOL[e.source] + ' forecast', deg(e.forecast)],
+         ['Error', (e.error > 0 ? '+' : '') + (Math.round(e.error * 10) / 10) + '°' + (e.error > 0 ? ', too warm' : ', too cold')]],
+        'the single largest error on the newest scored day · click → that station’s chart'),
+      'city.html?station=' + e.station);
+    const w = head.widestSpread;
+    if (w) card(deg(w.spread) + 'F', 'Widest disagreement, ' + w.city + ' ' + w.side,
+      'Tomorrow: ' + deg(w.low) + ' to ' + deg(w.high) + ' across ' + w.sources.length + ' sources',
+      tip.rows(w.city + ' (' + w.station + ') — the widest spread for ' + w.day,
+        [['Coldest forecast', deg(w.low)], ['Warmest forecast', deg(w.high)], ['Spread', deg(w.spread)],
+         ['Sources', w.sources.map(k => TOOL[k] || k).join(', ')]],
+        'click → the scorecard’s tomorrow view'),
+      'scorecard.html');
+    const hu = head.hurricane;
+    if (hu && hu.yes != null) {
+      const c = Math.round(hu.yes * 100), pay = WXM.payout ? WXM.payout(Math.round((hu.ask != null ? hu.ask : hu.yes) * 100)) : null;
+      card(c + '%', 'At least one major Atlantic hurricane', hu.expiryLabel + (pay ? ' · a Yes pays ' + pay + '×' : ''),
+        tip.rows('The exchange on ' + hu.expiryLabel, [['Contract', hu.label], ['Yes price', c + '¢'],
+          ['Buy Yes now at', hu.ask != null ? Math.round(hu.ask * 100) + '¢' : null],
+          ['Pays', pay ? pay + '× net of fees' : null]], 'click → the hurricane page'),
+        'hurricane.html');
+    }
+  }
+
+
 
   function fieldColor(v) {
     const [a, b] = field.domain, t = Math.max(0, Math.min(1, (v - a) / (b - a))) * (RAMP.length - 1);
@@ -193,6 +253,8 @@ window.WXMap = (() => {
       fetch('assets/basemap.json').then(x => x.json()).catch(() => null),
       fetch('assets/world.json').then(x => x.json()).catch(() => null)]);
     summary = r['summary.json'].data; field = r['field.json'].data; base = bm; world = wd;
+    head = (await WXD.get('headline.json', 10)).data;
+    drawCards();
     await WXM.loadSummary();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r['summary.json'], r['field.json']], 10));
     if (!summary || !base) { $('#map').innerHTML = ''; $('#map').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }

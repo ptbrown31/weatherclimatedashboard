@@ -143,6 +143,19 @@ window.WXM = (() => {
 
   // ---- live accessors
   const cents = v => (v == null ? null : Math.round(v * 100));
+
+  // What a dollar of payout costs, net of the execution fee: buying Yes at `c`
+  // cents costs c + fee and returns 100, so the multiple is 100 / (c + fee).
+  // The fee is config (exchange.fee_per_side) because the exchange's FAQ and the
+  // owner's published convention word it differently; every figure that shows a
+  // multiple also names the fee it used, so the assumption travels with it.
+  const feeCents = () => Math.round(((cfg().feePerSide != null ? cfg().feePerSide : 0.005)) * 1000) / 10;
+  function payout(c) {
+    if (c == null) return null;
+    const cost = c + feeCents();
+    return cost > 0 && cost < 100 ? Math.round((100 / cost) * 10) / 10 : null;
+  }
+  const payoutText = c => { const m = payout(c); return m == null ? null : m + '× net of the ' + feeCents() + '¢ fee'; };
   // `yes` is the Yes price in cents: the midpoint when both sides have bids;
   // with bids on one side only it is that side's implied Yes price and
   // `side` says which ('bid' = Yes bids only, 'ask' = No bids only).
@@ -235,5 +248,5 @@ window.WXM = (() => {
   }
 
   return { mode, on, live, load, loadSummary, loadGroup, implied, ladder, pricePath, climateProducts, hurricaneMarkets, label,
-           get LABEL() { return label(); }, PLACEHOLDER };
+           payout, payoutText, feeCents, get LABEL() { return label(); }, PLACEHOLDER };
 })();

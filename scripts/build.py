@@ -40,6 +40,7 @@ def config_js(cfg: dict, target: str, data_base: str) -> str:
         "dataBaseUrl": data_base,
         "market": market,
         "marketSource": (cfg.get("market_overlay") or {}).get("source", "placeholder"),
+        "feePerSide": (cfg.get("exchange") or {}).get("fee_per_side", 0.005),
         "disclosure": cfg.get("disclosure", ""),
         "cadenceMinutes": cfg.get("cadence_minutes", {}),
         "decode": {"TEMP_SOURCE": None, "INCLUDE_SPECI": None},

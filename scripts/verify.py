@@ -139,6 +139,7 @@ def run(no_build: bool) -> int:
                     return page.locator("#tip").inner_text()
                 t_chip = tip_after(page.locator("#skRow button").nth(2))
                 chk.add(f"{scheme} hover: strike chip shows the book", "Yes bid" in t_chip and "No bid" in t_chip and "Quotes as of" in t_chip, t_chip[:80])
+                chk.add(f"{scheme} hover: strike chip states the payout net of fees", "pays" in t_chip and "×" in t_chip, t_chip[:120])
                 t_lvl = tip_after(page.locator("#chart text.lvlnm").first)
                 chk.add(f"{scheme} hover: level label names the source, cycle and value", "forecast" in t_lvl and "Cycle" in t_lvl and "Value" in t_lvl, t_lvl[:80])
                 t_pick = tip_after(page.locator("#pick g").nth(3))
@@ -210,6 +211,11 @@ def run(no_build: bool) -> int:
                 page.locator("#divControls button").first.click(); page.wait_for_timeout(250)
                 col = page.locator("#divsvg text", has_text="Consensus error").count()
                 chk.add(f"{scheme} scorecard: the scored view ranks by consensus error", col == 1, f"header={col}")
+                srows = page.locator("#standings table tr").count()
+                chk.add(f"{scheme} scorecard: the standings rank every scored tool", srows >= 4, f"rows={srows}")
+                page.locator("#standings table tr").nth(1).locator("td").nth(2).hover(force=True); page.wait_for_timeout(150)
+                t_sd = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} hover: a standings row shows both sides' statistics", "MAE" in t_sd and "daily low" in t_sd, t_sd[:80])
                 page.locator("#overall td").nth(2).hover(force=True); page.wait_for_timeout(120)
                 t_ov = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: scorecard overall cell shows the source's statistics", "all stations" in t_ov and "MAE" in t_ov, t_ov[:80])
@@ -227,6 +233,13 @@ def run(no_build: bool) -> int:
                 page.locator("#map rect[data-i]").nth(600).hover(force=True); page.wait_for_timeout(120)
                 t_cell = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: shading cell names the derived field value", "NWS forecast field" in t_cell, t_cell[:80])
+                # the headline cards are written by the pipeline; absent snapshot must simply draw none
+                cards = page.locator("#cards .tile").count()
+                chk.add(f"{scheme} map: headline cards render, or none when the snapshot is absent", cards == 0 or cards >= 2, f"cards={cards}")
+                if cards:
+                    page.locator("#cards .tile").first.hover(force=True); page.wait_for_timeout(150)
+                    t_cd = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} hover: a headline card explains the number behind it", len(t_cd) > 20, t_cd[:80])
                 chk.add(f"{scheme} hurricane and climate: no script errors", not errs, "; ".join(errs)[:300])
                 ctx.close()
 

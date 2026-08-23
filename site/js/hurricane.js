@@ -82,7 +82,8 @@ window.WXHur = (() => {
   const quoteRows = c => (!c ? [] : [
     ['Yes bid', side(c.bid, c.bidSize)], ['No bid', side(noBid(c), c.askSize)],
     ['Yes price', c.mid == null ? 'no bids' : pct(cents(c.mid)) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
-    ['Buy Yes now at', c.ask == null ? null : pct(cents(c.ask))], ['Buy No now at', c.bid == null ? null : pct(100 - cents(c.bid))],
+    ['Buy Yes now at', c.ask == null ? null : pct(cents(c.ask)) + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
+    ['Buy No now at', c.bid == null ? null : pct(100 - cents(c.bid)) + (WXM.payoutText(100 - cents(c.bid)) ? ' · pays ' + WXM.payoutText(100 - cents(c.bid)) : '')],
     ['Bids', bidsNote(c)], ['Settles', expDate(c.expiration)]]);
   // "<market> — <strike label> (<listing period>)"; a date-strike label ("By Nov 30, 2026") already names its period
   const contractTitle = (m, c) => esc((m && m.name) || '') + ' — ' + esc(c.label) + (c.expiryLabel && !/^By /.test(c.label) ? ' (' + esc(c.expiryLabel) + ')' : '');
@@ -565,17 +566,18 @@ window.WXHur = (() => {
     const m = market('HLF');
     if (!m) { host.appendChild(h('p', { class: 'cap', text: WXM.on() ? 'Landfall contracts not in the quote snapshot.' : 'The market layer is off.' })); return; }
     const tb = h('table');
-    tb.appendChild(h('tr', {}, [h('th', { text: 'Region (' + (m.contracts[0] && m.contracts[0].expiryLabel || 'season') + ')' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'No bid' }), h('th', { class: 'num', text: 'Yes price' }), h('th', { text: 'On the map' })]));
+    tb.appendChild(h('tr', {}, [h('th', { text: 'Region (' + (m.contracts[0] && m.contracts[0].expiryLabel || 'season') + ')' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'No bid' }), h('th', { class: 'num', text: 'Yes price' }), h('th', { class: 'num', text: 'Pays' }), h('th', { text: 'On the map' })]));
     m.contracts.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
       const k = regionKey(c.label);
       const drawn = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]);
       const onMap = !drawn ? 'not drawn' : (c.mid == null ? 'outline only (no bids)' : 'shaded');
-      const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) }), h('td', { text: onMap })]);
+      const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) }),
+        h('td', { class: 'num', text: c.ask == null ? '—' : (WXM.payout(cents(c.ask)) != null ? WXM.payout(cents(c.ask)) + '×' : '—') }), h('td', { text: onMap })]);
       attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat([['On the map', onMap]]), asofFoot()));
       tb.appendChild(tr);
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
-    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. The Yes price is midway between the Yes bid and one dollar less the No bid where both sides have bids, else the one side shown; there are no sellers, only bids to buy Yes or No.' }));
+    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. The Yes price is midway between the Yes bid and one dollar less the No bid where both sides have bids, else the one side shown; there are no sellers, only bids to buy Yes or No. “Pays” is what a dollar of payout costs at the price a Yes could be bought at now, net of the ' + WXM.feeCents() + '¢ per-side execution fee — the same arithmetic behind treating a landfall contract as parametric cover.' }));
   }
 
   // ---- the vendor lane

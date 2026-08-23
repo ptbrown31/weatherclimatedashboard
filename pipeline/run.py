@@ -18,9 +18,11 @@ Jobs:
     normals      NCEI daily climate normals per station            (once a day, refreshed weekly)
     climate      the long global series behind the climate page    (once a day)
     season       Atlantic season so far against the average pace   (once a day)
-    market       quotes, then reask: one scheduled invocation
+    headline     the landing page's few numbers, from the snapshots
+                 already written; no network                       (last in a chain)
+    market       quotes, then reask, then headline: one scheduled invocation
     half-hourly  archive, then forecast, then hurricane: one scheduled invocation
-    daily        scorecard, normals, climate, season: one scheduled invocation
+    daily        scorecard, normals, climate, season, headline: one scheduled invocation
     all          everything once, in order (local runs)
 """
 from __future__ import annotations
@@ -35,7 +37,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -46,6 +48,7 @@ def _register():
     JOBS["season"] = season.season_pass
     JOBS["quotes"] = market.quotes_pass
     JOBS["reask"] = reask.reask_pass
+    JOBS["headline"] = headline.headline_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -69,16 +72,19 @@ def _register():
             return worst
         return run
 
+    # headline reads snapshots the steps before it have just written, so it
+    # goes last in both chains: after quotes for fresh prices, after the
+    # scorecard for the day just scored
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane")
-    JOBS["daily"] = chain("scorecard", "normals", "climate", "season")
-    JOBS["market"] = chain("quotes", "reask")
-    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season")
+    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "headline")
+    JOBS["market"] = chain("quotes", "reask", "headline")
+    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.run", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | market | half-hourly | daily | all")
+    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | market | half-hourly | daily | all")
     ap.add_argument("--config", help="path to site.json (default config/site.json)")
     ap.add_argument("--backend", choices=["local", "s3"], help="override storage backend")
     ap.add_argument("--root", help="local backend: data directory")

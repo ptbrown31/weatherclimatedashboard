@@ -77,6 +77,7 @@ before the day began, and whether it is an official product value or an extreme 
 | `snapshots/market/{STATION}.json` | 10 min | the station's listed strikes for today and tomorrow with the best bids and sizes (the feed's `ask` on a Yes contract is one dollar less the No bid), the Yes price midpoint, the implied medians, and each strike's quote history (two days, 10-minute samples) |
 | `snapshots/market/summary.json` | 10 min | per station: listed or not, the implied medians for today and tomorrow |
 | `snapshots/market/hurricane.json`, `climate.json` | 10 min | every contract of the exchange's hurricane category and of the climate products, with quotes |
+| `snapshots/headline.json` | 10 min | the four numbers the landing page opens with: the accuracy standing, the newest scored day's largest single error, the widest disagreement about tomorrow, and one hurricane contract. Built from snapshots already written, so the landing page fetches one small file instead of the scorecard |
 | `snapshots/season.json` | daily | the Atlantic season's formations to date from the ATCF best tracks, and the 1991-2020 cumulative formation calendar from NHC HURDAT2, so the count contracts can be read against the pace of an average season, plus the seasonal forecast total from `season_forecast` when one is configured |
 | `snapshots/reask.json` | 10 min | the vendor lane: its state when off; per storm the latest LiveCyc ladder and the interim and final settlement files when on |
 | `archive/market/{YYYYMMDD}/{HHMMSS}.json.gz` | 10 min | every quote of the pass, append-only (expires after 400 days on AWS) |
@@ -101,7 +102,8 @@ the same variables):
 | `cadence_minutes.*` | | how often each job runs: obs 10, forecast 30, archive 30, hurricane 30, market 10 |
 | `sources.*` | | switch NBM, LAMP, MAV, the observation record, the exchange quotes or the vendor lane off |
 | `market_overlay` | | `live`, `placeholder` or `off` per build target; `source` is what `?market=on` means |
-| `exchange.base_url`, `.quote_workers` | | the exchange's public market-data host and the quote thread pool (4) |
+| `exchange.base_url`, `.quote_workers`, `.fee_per_side` | | the exchange's public market-data host, the quote thread pool (4), and the per-side execution fee used to state payout multiples (0.005, the owner's published convention) |
+| `season_forecast` | | a seasonal hurricane total to scale the pace curve to, attributed wherever drawn; empty falls back to the climatological pace |
 | `reask.base_url`, `.api_key` | `WX_REASK_API_KEY` | the vendor lane; the key comes only from the environment |
 | `disclosure` | | the affiliation text shown in the footer and about page |
 

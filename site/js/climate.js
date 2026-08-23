@@ -106,7 +106,7 @@ window.WXClimate = (() => {
         ['Yes price', cents(c.yes) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
         ['Yes bid', c.bid != null ? cents(c.bid) + size(c.bidSize) : null],
         ['No bid', noBid != null ? cents(noBid) + size(c.askSize) : null],
-        ['Buy Yes now at', c.ask != null ? cents(c.ask) : null],
+        ['Buy Yes now at', c.ask != null ? cents(c.ask) + (WXM.payoutText(Math.round(c.ask * 100)) ? ' · pays ' + WXM.payoutText(Math.round(c.ask * 100)) : '') : null],
         ['Bids', c.from === 'no' ? (book ? book + '; ' : '') + 'quoted from the No contract' : book],
         ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + (key.startsWith('temp') ? c.threshold.toFixed(2) : c.threshold) + ')']],
         c.label2 || WXM.LABEL);

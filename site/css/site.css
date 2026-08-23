@@ -144,3 +144,5 @@ button.vbtn.on{background:var(--accent);color:var(--accent-ink);border-color:var
 .cwrap{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px;grid-column:1/-1}
 .cwrap .lt{font-size:13px;font-weight:700;color:var(--navy);margin-bottom:2px}
 svg.cpanel{width:100%;height:auto;display:block}
+.tile.link{cursor:pointer}
+.tile.link:hover{border-color:var(--accent)}

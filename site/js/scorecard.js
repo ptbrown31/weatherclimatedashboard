@@ -295,6 +295,71 @@ window.WXScore = (() => {
     return node;
   }
 
+  // ---------------------------------------------------------- the standings
+  // How each tool has done over the last few scored days, ranked by mean
+  // absolute error on the daily high. The exchange's implied median is ranked
+  // alongside the forecasts here, because the question the table answers is
+  // which of them has been closest, and that is arithmetic on published numbers.
+  const WINDOW = 7;
+  function standings() {
+    if (!S || !S.stations) return { rows: [], days: 0, from: null, to: null };
+    const acc = {}, seen = {};
+    SERIES.forEach(x => { acc[x.k] = { high: [], low: [] }; });
+    Object.values(S.stations).forEach(st => {
+      (st.days || []).slice(0, WINDOW).forEach(d => {
+        seen[d.date] = 1;
+        SERIES.forEach(x => {
+          const f = d[x.k]; if (!f) return;
+          if (f.errHigh != null) acc[x.k].high.push(f.errHigh);
+          if (f.errLow != null) acc[x.k].low.push(f.errLow);
+        });
+      });
+    });
+    const stat = e => (e.length ? { n: e.length, mae: e.reduce((a, v) => a + Math.abs(v), 0) / e.length,
+                                    bias: e.reduce((a, v) => a + v, 0) / e.length,
+                                    within1: e.filter(v => Math.abs(v) <= 1).length / e.length,
+                                    within2: e.filter(v => Math.abs(v) <= 2).length / e.length } : null);
+    const rowsOut = SERIES.map(x => ({ s: x, high: stat(acc[x.k].high), low: stat(acc[x.k].low) }))
+      .filter(r => r.high || r.low)
+      .sort((a, b) => (a.high ? a.high.mae : 99) - (b.high ? b.high.mae : 99));
+    const dates = Object.keys(seen).sort();
+    return { rows: rowsOut, days: dates.length, from: dates[0], to: dates[dates.length - 1] };
+  }
+  function drawStandings() {
+    const host = $('#standings'); if (!host) return;
+    host.innerHTML = '';
+    const st = standings();
+    if (!st.rows.length) { host.appendChild(h('p', { class: 'cap', text: 'No scored days yet.' })); return; }
+    const t = h('table');
+    t.appendChild(h('tr', {}, [h('th', { text: '' }), h('th', { text: 'Tool' }), h('th', { class: 'num', text: 'MAE, highs' }),
+      h('th', { class: 'num', text: 'bias' }), h('th', { class: 'num', text: '≤2°' }), h('th', { class: 'num', text: 'n' }),
+      h('th', { class: 'num', text: 'MAE, lows' })]));
+    st.rows.forEach((r, i) => {
+      const tr = h('tr', {}, [
+        h('td', { class: 'num', text: r.high ? String(i + 1) : '—' }),
+        h('td', {}, [h('span', { class: 'sw', style: 'background:' + r.s.col }), document.createTextNode(r.s.name)]),
+        h('td', { class: 'num', text: r.high ? degs(r.high.mae) : '—' }),
+        h('td', { class: 'num', text: r.high ? biasWord(r.high.bias).split(' ·')[0] : '—' }),
+        h('td', { class: 'num', text: r.high ? pct(r.high.within2) : '—' }),
+        h('td', { class: 'num', text: r.high ? String(r.high.n) : '—' }),
+        h('td', { class: 'num', text: r.low ? degs(r.low.mae) : '—' })]);
+      tr.dataset.key = r.s.k;
+      t.appendChild(tr);
+    });
+    bindTips(t, (k) => {
+      const r = st.rows.find(x => x.s.k === k); if (!r) return null;
+      return tip.rows(r.s.name + ' — the last ' + st.days + ' scored days',
+        (r.high ? statRows(r.high) : []).concat(r.low ? statRows(r.low, 'daily low ') : []),
+        r.s.k === 'fx' ? 'the exchange’s implied median, scored the same way as a forecast' : (S.sources || {})[r.s.k]);
+    });
+    host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [t]));
+    const lead = st.rows[0];
+    host.appendChild(h('p', { class: 'cap', text: 'Ranked by mean absolute error on the daily high over the ' + st.days +
+      ' scored days from ' + st.from + ' to ' + st.to + ', pooled across every station. ' +
+      (lead && lead.high ? lead.s.name + ' is closest at ' + degs(lead.high.mae) + '. ' : '') +
+      'Error is forecast minus observed, so a positive bias runs warm.' }));
+  }
+
   // ------------------------------------------------------- the skill tables
   const statRows = (st, prefix = '') => (st ? [
     [prefix + 'n', st.n], [prefix + 'MAE', degs(st.mae)], [prefix + 'bias', biasWord(st.bias)],
@@ -404,7 +469,7 @@ window.WXScore = (() => {
       return;
     }
     $('#since').textContent = 'Scored from ' + S.firstDay + ' (the day the archive started). ' + S.method + '.';
-    drawFigure(); drawOverall(); drawStations();
+    drawFigure(); drawStandings(); drawOverall(); drawStations();
     cur = (location.hash || '').slice(1);
     if (!S.stations[cur]) cur = Object.keys(S.stations)[0];
     drawDays();
