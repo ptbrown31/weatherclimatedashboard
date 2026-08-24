@@ -179,9 +179,13 @@ def run(no_build: bool) -> int:
                     return {"BR": [q(i) for i in range(len(THR))]}
 
                 def _ledger(final):
-                    steps = [{"id": "20260901%02d" % (k * 6), "kind": "livecyc", "at": "t", "ts": "t", "sites": _lad(0.2 + 0.1 * k)}
+                    # a distinct recorded price per delivery, so scrubbing back has to
+                    # move the square rather than leave today's price under an old ladder
+                    steps = [{"id": "20260901%02d" % (k * 6), "kind": "livecyc", "at": "t", "ts": "t", "sites": _lad(0.2 + 0.1 * k),
+                              "prices": {"BR": {str(t): 10.0 + 5 * k for t in THR}}}
                              for k in range(6)]
-                    steps.append({"id": "INT", "kind": "interim", "at": "t", "ts": "t", "sites": _lad(0.95)})
+                    steps.append({"id": "INT", "kind": "interim", "at": "t", "ts": "t", "sites": _lad(0.95),
+                                  "prices": {"BR": {str(t): 44.0 for t in THR}}})
                     return {"schema": 2, "name": "Erin", "year": 2026, "attribution": "Powered by Reask", "thresholds": THR,
                             "steps": steps, "sites": {"BR": {"name": "Brownsville", "firstStep": "2026090100"}},
                             "final": {"BR": 96.0} if final else None}
@@ -230,6 +234,43 @@ def run(no_build: bool) -> int:
                     t_px = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} storm ({tag}): the exchange's price reads against the vendor's probability",
                             "The exchange" in t_px and "The vendor" in t_px, t_px[:80])
+                    # ---- the cursor, and scrubbing across deliveries
+                    ticks = page.locator("#liveStorms svg.stimeline circle, #liveStorms svg.stimeline rect").count()
+                    chk.add(f"{scheme} storm ({tag}): one tick per delivery on the timeline", ticks == 7, f"ticks={ticks}")
+                    strip = page.locator("#liveStorms svg.stimeline").first
+                    read = lambda: page.locator("#liveStorms svg.stimeline text").first.text_content()
+                    chk.add(f"{scheme} storm ({tag}): the cursor starts at the newest delivery",
+                            "delivery 7 of 7" in read() and "(latest)" in read(), read())
+                    cx = lambda: page.eval_on_selector("#liveStorms .scardwrap line.scur", "e => e.getAttribute('x1')")
+                    was = cx()
+                    page.get_by_title("the delivery before this one").first.click()
+                    page.wait_for_timeout(120)
+                    chk.add(f"{scheme} storm ({tag}): stepping back names the delivery it lands on",
+                            "delivery 6 of 7" in read() and "(latest)" not in read(), read())
+                    chk.add(f"{scheme} storm ({tag}): the cursor line moves with the step", cx() != was, f"{was} -> {cx()}")
+                    page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_back = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} storm ({tag}): a past delivery is priced as it stood then, not now",
+                            "at that delivery" in t_back and "35" in t_back, t_back[:120])
+                    box = strip.bounding_box()
+                    page.mouse.move(box["x"] + box["width"] * 0.05, box["y"] + box["height"] / 2)
+                    page.mouse.down()
+                    page.mouse.move(box["x"] + box["width"] * 0.30, box["y"] + box["height"] / 2, steps=6)
+                    page.mouse.up()
+                    page.wait_for_timeout(120)
+                    chk.add(f"{scheme} storm ({tag}): dragging the strip scrubs to another delivery",
+                            "of 7" in read() and "delivery 7 of 7" not in read(), read())
+                    strip.press("ArrowLeft"); page.wait_for_timeout(100)
+                    mid = read()
+                    strip.press("End"); page.wait_for_timeout(120)
+                    chk.add(f"{scheme} storm ({tag}): the arrow keys step and End returns to the latest",
+                            mid != read() and "delivery 7 of 7" in read(), f"{mid} -> {read()}")
+                    page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_now = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} storm ({tag}): the newest delivery carries the current price",
+                            "The exchange, now" in t_now, t_now[:120])
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
                     page.unroute("**/data/snapshots/**")
                 page.goto(f"{srv.url}/hurricane.html")

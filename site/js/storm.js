@@ -49,13 +49,16 @@ window.WXStorm = (() => {
     return c && c.mid != null ? cents(c.mid) : null;
   };
 
-  // ---- one location's card: the ladder through the deliveries
+  // ---- one location's card: the ladder through the deliveries.
+  // Returns the node and a setCursor, so scrubbing moves a line and a few marks
+  // rather than rebuilding every card on every step.
   function card(doc, sid, storm) {
     const meta = doc.sites[sid] || {};
     const thr = doc.thresholds || [];
     const cyc = (doc.steps || []).filter(s => s.kind !== 'final');
     const fin = doc.final || null;
     const mk = lMarket(storm.name, sid);
+    const rungs = [];
     const W = 470, H = 190, L = 34, R = 384, T = 16, B = 150, SETTLE = 424;
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'scard' });
     const n = Math.max(cyc.length, 2);
@@ -96,27 +99,64 @@ window.WXStorm = (() => {
         pts.push([k, p]);
       });
       if (!pts.length) return;
-      svg.appendChild(el('path', { d: pts.map((p, k) => (k ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(''),
-        fill: 'none', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
+      const d = pts.map((p, k) => (k ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
+      // the whole rung stays drawn, faintly, and the part up to the cursor is drawn
+      // over it at full strength: what was known by that delivery reads first, and
+      // what came afterwards is still visible rather than hidden
+      const faint = el('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 1.6, opacity: .22, 'pointer-events': 'none' });
+      const solid = el('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' });
+      svg.appendChild(faint); svg.appendChild(solid);
       const last = pts[pts.length - 1];
-      // the exchange's price for the same rung, on the same scale
-      const price = priceAt(mk, t);
-      if (price != null) {
-        // hollow, to read as the market's price rather than the vendor's line, but
-        // painted transparent so the pointer lands on it instead of the band beneath
-        const sq = el('rect', { x: x(last[0]) + 5, y: y(price) - 3.5, width: 7, height: 7, fill: 'transparent', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'all' });
-        bind(sq, () => tip.rows(esc(meta.name || sid) + ' — above ' + t + ' mph',
-          [['The exchange', price + '¢'], ['The vendor’s latest', last[1] + '%'],
-           ['Difference', (price - last[1] > 0 ? '+' : '') + Math.round((price - last[1]) * 10) / 10 + ' points']],
-          'a price in cents and a probability in percent share the same scale · ' + esc((RK && RK.attribution) || 'Powered by Reask')));
-        svg.appendChild(sq);
-      }
+      rungs.push({ t, col, pts, last, solid });
       // ticks and crosses only once a settled gust exists to compare against
       if (fin && fin[sid] != null) {
         const hit = fin[sid] >= t;
         svg.appendChild(txt(hit ? '✓' : '✕', { x: SETTLE - 8, y: y(last[1]) + 3.5, 'font-size': 10, fill: hit ? 'var(--yes)' : 'var(--muted)' }));
       }
     });
+
+    // the cursor: a line at the delivery being read, a dot on each rung that had a
+    // value there, and the exchange's price as it stood at that same delivery
+    const cline = el('line', { class: 'scur', y1: T, y2: B, stroke: 'var(--ink)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: .6, 'pointer-events': 'none' });
+    svg.appendChild(cline);
+    const marks = el('g');
+    svg.appendChild(marks);
+    function setCursor(ti) {
+      const k = Math.max(0, Math.min(ti, cyc.length - 1));
+      cline.setAttribute('x1', x(k)); cline.setAttribute('x2', x(k));
+      marks.innerHTML = '';
+      const step = cyc[k] || {};
+      const arr = (step.sites && step.sites[sid]) || [];
+      const pr = (step.prices && step.prices[sid]) || {};
+      rungs.forEach(r => {
+        const upto = r.pts.filter(p => p[0] <= k);
+        r.solid.setAttribute('d', upto.length > 1
+          ? upto.map((p, j) => (j ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('')
+          : '');
+        const i = thr.indexOf(r.t);
+        const v = arr.length > i ? arr[i] : null;
+        if (v != null && v > 0) marks.appendChild(el('circle', { cx: x(k), cy: y(v), r: 2.6, fill: r.col, 'pointer-events': 'none' }));
+        // at the newest delivery the live quote is the current price and is fresher
+        // than the one recorded when the delivery landed; further back, only the
+        // recorded price belongs beside that delivery's ladder. A delivery that
+        // arrived before prices were being recorded simply has no square.
+        const live = k === cyc.length - 1 ? priceAt(mk, r.t) : null;
+        const price = live != null ? live : pr[String(r.t)];
+        if (price == null) return;
+        // hollow, to read as the market's price rather than the vendor's line, but
+        // painted transparent so the pointer lands on it instead of the band beneath
+        const sq = el('rect', { x: x(k) + 5, y: y(price) - 3.5, width: 7, height: 7, fill: 'transparent', stroke: r.col, 'stroke-width': 1.6, 'pointer-events': 'all' });
+        bind(sq, () => tip.rows(esc(meta.name || sid) + ' — above ' + r.t + ' mph',
+          [[live != null ? 'The exchange, now' : 'The exchange, at that delivery', Math.round(price) + '¢'],
+           ['The vendor', (v == null ? '—' : v + '%')],
+           ['Difference', v == null ? null : (price - v > 0 ? '+' : '') + Math.round((price - v) * 10) / 10 + ' points'],
+           ['Delivery', label(step)]],
+          (live != null ? 'the price as it stands now, against the latest ladder'
+                        : 'both as they stood at that delivery') + '; a price in cents and a probability in percent share the same scale · '
+          + esc((RK && RK.attribution) || 'Powered by Reask')));
+        marks.appendChild(sq);
+      });
+    }
     if (fin && fin[sid] != null) svg.appendChild(txt(fin[sid] + ' mph', { x: SETTLE - 8, y: B - 2, 'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
 
     const wrap = h('div', { class: 'scardwrap' }, [
@@ -124,7 +164,7 @@ window.WXStorm = (() => {
       h('div', { class: 'cap', style: 'margin:0 0 4px', text: mk ? 'contracts listed · ' + mk.symbol : 'no contracts listed for this location yet' }),
     ]);
     wrap.appendChild(svg);
-    return wrap;
+    return { node: wrap, setCursor };
   }
 
   const label = s => (s.kind === 'interim' ? 'interim settlement' : s.kind === 'final' ? 'final settlement' : String(s.id || '').replace(/^(\d{4})(\d{2})(\d{2})(\d{2})$/, '$2/$3 $4Z'));
@@ -135,6 +175,61 @@ window.WXStorm = (() => {
     node.addEventListener('click', e => { e.stopPropagation(); tip.pin(e, html()); });
     node.setAttribute('data-tip-pin', '1');
     return node;
+  }
+
+  // ---- the timeline across deliveries
+  //
+  // One tick per delivery, in the order they arrived. The strip is sized to the
+  // deliveries that exist now; when the next one lands the page redraws with one
+  // more tick and the cursor stays where the reader left it, or follows the end
+  // if that is where it already was. There is no scale to fix in advance and
+  // nothing beyond the last tick, because the storm's length is not known.
+  function timeline(cyc, onMove) {
+    const W = 960, H = 46, L = 16, R = 936;
+    const n = Math.max(cyc.length, 2);
+    const x = i => L + (i / (n - 1)) * (R - L);
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'stimeline', tabindex: '0',
+                            role: 'slider', 'aria-label': 'vendor delivery' });
+    svg.appendChild(el('line', { x1: L, x2: R, y1: 20, y2: 20, stroke: 'var(--line)', 'stroke-width': 2 }));
+    cyc.forEach((s, i) => {
+      const interim = s.kind === 'interim';
+      svg.appendChild(interim
+        ? el('rect', { x: x(i) - 3.5, y: 16.5, width: 7, height: 7, fill: 'var(--accent)' })
+        : el('circle', { cx: x(i), cy: 20, r: 3, fill: 'var(--muted)' }));
+    });
+    const cur = el('path', { d: '', fill: 'var(--ink)' });
+    const lab = txt('', { x: L, y: 40, class: 'ax', 'font-weight': 700 });
+    svg.appendChild(cur); svg.appendChild(lab);
+    let ti = cyc.length - 1;
+    function place() {
+      const px = x(ti);
+      cur.setAttribute('d', 'M' + px + ' 10L' + (px + 5) + ' 2L' + (px - 5) + ' 2Z');
+      const s = cyc[ti] || {};
+      lab.textContent = label(s) + '  ·  delivery ' + (ti + 1) + ' of ' + cyc.length + (ti === cyc.length - 1 ? ' (latest)' : '');
+      // centred under the cursor, then measured and pulled back inside the frame so
+      // the reading never runs off the end at the newest delivery
+      const w = lab.getComputedTextLength ? lab.getComputedTextLength() : 0;
+      lab.setAttribute('x', Math.min(Math.max(px - w / 2, 4), Math.max(4, W - 4 - w)));
+      onMove(ti);
+    }
+    const at = ev => {
+      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+      return Math.max(0, Math.min(cyc.length - 1, Math.round(((q.x - L) / (R - L)) * (n - 1))));
+    };
+    let dragging = false;
+    svg.addEventListener('pointerdown', e => { dragging = true; svg.setPointerCapture(e.pointerId); ti = at(e); place(); });
+    svg.addEventListener('pointermove', e => { if (dragging) { ti = at(e); place(); } });
+    svg.addEventListener('pointerup', e => { dragging = false; try { svg.releasePointerCapture(e.pointerId); } catch (x) { /* already released */ } });
+    svg.addEventListener('keydown', e => {
+      const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'Home' ? -cyc.length : e.key === 'End' ? cyc.length : 0;
+      if (!d) return;
+      e.preventDefault();
+      ti = Math.max(0, Math.min(cyc.length - 1, ti + d));
+      place();
+    });
+    return { svg, place, step: d => { ti = Math.max(0, Math.min(cyc.length - 1, ti + d)); place(); },
+             last: () => { ti = cyc.length - 1; place(); }, get: () => ti };
   }
 
   // ---- the pool contracts: candidate locations as the strikes
@@ -191,8 +286,20 @@ window.WXStorm = (() => {
     });
     const order = Object.keys(peak).filter(sid => peak[sid] > 0).sort((a, b) => peak[b] - peak[a]);
     const grid = h('div', { class: 'scards' });
-    order.slice(0, MAX_CARDS).forEach(sid => grid.appendChild(card(doc, sid, storm)));
+    const cards = order.slice(0, MAX_CARDS).map(sid => card(doc, sid, storm));
+    cards.forEach(c => grid.appendChild(c.node));
+    const tl = timeline(cyc, ti => cards.forEach(c => c.setCursor(ti)));
+    const bar = h('div', { class: 'bar sbar' });
+    const prev = h('button', { text: '◀', title: 'the delivery before this one' });
+    const next = h('button', { text: '▶', title: 'the delivery after this one' });
+    const now = h('button', { text: 'Latest', title: 'jump to the most recent delivery' });
+    prev.onclick = () => tl.step(-1); next.onclick = () => tl.step(1); now.onclick = () => tl.last();
+    [prev, next, now].forEach(b => bar.appendChild(b));
+    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', text: 'drag the strip, use the arrows, or press ← and → when it has focus' }));
+    host.appendChild(bar);
+    host.appendChild(tl.svg);
     host.appendChild(grid);
+    tl.place();
     if (order.length > MAX_CARDS) host.appendChild(h('p', { class: 'cap', text: order.length - MAX_CARDS + ' further locations have signalled and are not drawn; the strongest ' + MAX_CARDS + ' are shown.' }));
     const p = pools(storm);
     if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }

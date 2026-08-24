@@ -471,3 +471,38 @@ class StormLedger(unittest.TestCase):
         self.assertEqual(list(e["sites"]), ["BR"])
         self.assertEqual(list(f["sites"]), ["TA"])
         self.assertEqual(f["steps"][0]["kind"], "livecyc")
+
+
+class PriceAtEachDelivery(unittest.TestCase):
+    """The exchange's price is recorded alongside the delivery it arrived with,
+    so scrubbing back compares a ladder with the price that stood at the time."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.st.put("snapshots/market/hurricane.json", json.dumps({"markets": [
+            {"symbol": "LERBR", "name": "Erin — Brownsville", "contracts": [
+                {"strike": 70, "mid": 0.53}, {"strike": 80, "mid": 0.31}, {"strike": 90, "mid": None}]},
+            {"symbol": "LERTA", "name": "Erin — Tampa", "contracts": [{"strike": 70, "mid": 0.12}]},
+            {"symbol": "LFIBR", "name": "Fiona — Brownsville", "contracts": [{"strike": 70, "mid": 0.9}]},
+            {"symbol": "HLF", "name": "Hurricane Landfall", "contracts": [{"strike": 1.0, "mid": 0.1}]},
+        ]}).encode())
+
+    def test_only_this_storm_and_only_priced_rungs(self):
+        got = reask.l_prices(self.st, "Erin", {"BR", "TA"})
+        self.assertEqual(got, {"BR": {"70": 53.0, "80": 31.0}, "TA": {"70": 12.0}})   # 90 has no price, Fiona is not Erin
+
+    def test_restricted_to_the_sites_in_the_delivery(self):
+        self.assertEqual(list(reask.l_prices(self.st, "Erin", {"BR"})), ["BR"])
+
+    def test_no_market_snapshot_is_not_an_error(self):
+        empty = storage.LocalStorage(tempfile.mkdtemp())
+        self.assertEqual(reask.l_prices(empty, "Erin", {"BR"}), {})
+
+    def test_the_step_carries_the_prices_it_was_given(self):
+        lad = {"thresholds": [70, 80], "sites": {"BR": {"name": "Brownsville", "p": [40, 12]}}}
+        step = reask._step(lad, "livecyc", "2026090100", "t", "ts", reask.l_prices(self.st, "Erin", {"BR"}))
+        self.assertEqual(step["prices"], {"BR": {"70": 53.0, "80": 31.0}})
+        reask.append_step(self.st, "Erin", 2026, step, lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual(doc["steps"][0]["prices"]["BR"]["70"], 53.0)

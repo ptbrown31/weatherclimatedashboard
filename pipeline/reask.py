@@ -46,6 +46,7 @@ import urllib.request
 from typing import Callable, Optional
 
 from . import archive as arch
+from . import exchange as ex
 from . import gov_weather as gw
 from .snapshots import SNAP_CACHE, _iso
 from .storage import Storage
@@ -166,7 +167,43 @@ def append_step(store: Storage, name: str, year: int, step: dict, log: Callable)
     return {"steps": len(steps), "sites": len(doc["sites"]), "latest": step["id"], "final": doc.get("final") is not None}
 
 
-def _step(lad: dict, kind: str, sid: str, at, ts: str) -> dict:
+def l_prices(store: Storage, storm: str, sids) -> dict:
+    """{site: {threshold: cents}} — the exchange's Yes price for this storm's
+    per-location gust contracts at this moment, recorded with the delivery it
+    arrived alongside. Without it a reader scrubbing back through the deliveries
+    would see an old ladder against today's price, which is not a comparison."""
+    raw = store.get("snapshots/market/hurricane.json")
+    if not raw:
+        return {}
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        return {}
+    code = ex.storm_code(storm)
+    if not code:
+        return {}
+    pre, out = "L" + code, {}
+    for m in doc.get("markets") or []:
+        sym = str(m.get("symbol") or "")
+        if not sym.startswith(pre) or len(sym) != len(pre) + 2:
+            continue
+        site = sym[len(pre):]
+        if sids and site not in sids:
+            continue
+        row = {}
+        for c in m.get("contracts") or []:
+            try:
+                t = int(float(c.get("strike")))
+            except (TypeError, ValueError):
+                continue
+            if c.get("mid") is not None:
+                row[str(t)] = round(float(c["mid"]) * 100, 1)
+        if row:
+            out[site] = row
+    return out
+
+
+def _step(lad: dict, kind: str, sid: str, at, ts: str, prices: Optional[dict] = None) -> dict:
     """One delivery as the ledger stores it: the probability ladder per site, as
     percentages in the file's own threshold order. Deliberately nothing else.
     The advisory's sustained wind is a one-minute mean and these contracts settle
@@ -174,7 +211,7 @@ def _step(lad: dict, kind: str, sid: str, at, ts: str) -> dict:
     between different measurements, so the ledger does not."""
     sites = {k: v.get("p") or [] for k, v in (lad.get("sites") or {}).items()}
     meta = {k: {"name": v.get("name"), "lat": v.get("lat"), "lon": v.get("lon")} for k, v in (lad.get("sites") or {}).items()}
-    return {"id": sid, "kind": kind, "at": at, "ts": ts,
+    return {"id": sid, "kind": kind, "at": at, "ts": ts, "prices": prices or {},
             "sites": sites, "siteMeta": meta, "thresholds": lad.get("thresholds")}
 
 
@@ -231,7 +268,9 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             lad = parse_ladder_csv(body.decode("utf-8", "replace"))
             entry["livecyc"] = {"forecastTime": ft, "lastModified": latest.get("last_modified"), "fetched": _iso(now),
                                 "cycles": len(fcs), **lad}
-            entry["ledger"] = append_step(store, name, year, _step(lad, "livecyc", _stamp(ft) or ft, ft, _iso(now)), log)
+            entry["ledger"] = append_step(store, name, year,
+                                          _step(lad, "livecyc", _stamp(ft) or ft, ft, _iso(now),
+                                                l_prices(store, name, set((lad.get("sites") or {}).keys()))), log)
             fetched += 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"livecyc {name} {ft}: {type(e).__name__}: {e}")
@@ -260,7 +299,9 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
                 parsed = parse(body.decode("utf-8", "replace"))
                 entry[kind] = {"lastModified": lm, "fetched": _iso(now), **(parsed if kind == "interim" else {"sites": parsed})}
                 if kind == "interim":
-                    entry["ledger"] = append_step(store, name, year, _step(parsed, "interim", "INT", lm, _iso(now)), log)
+                    entry["ledger"] = append_step(store, name, year,
+                                                  _step(parsed, "interim", "INT", lm, _iso(now),
+                                                        l_prices(store, name, set((parsed.get("sites") or {}).keys()))), log)
                 else:
                     entry["ledger"] = append_step(store, name, year,
                                                   {"id": "FINAL", "kind": "final", "at": lm, "ts": _iso(now),
