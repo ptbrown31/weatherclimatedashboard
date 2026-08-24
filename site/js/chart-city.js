@@ -39,6 +39,11 @@ window.WXCity = (() => {
   const size = n => (n ? ' ×' + Math.round(n) : '');
   const isoDate = d => { if (!d) return ''; const [y, m, dd] = d.split('-'); return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m - 1] + ' ' + (+dd) + (y ? ', ' + y : ''); };
 
+  // the exchange's page for one strike, or null when this pass did not list it
+  const strikeUrl = (lad, side, L) => WXM.contractUrl(
+    ((lad && lad.symbols || {})[side === 'h' ? 'high' : 'low'] || {}).productConid,
+    L && (L.conidYes || L.conid));
+
   // one strike of the ladder: the exchange's top of book and the strike's own day so far
   function ladderTip(L, side, lad, c, pinHint) {
     const cmp = side === 'h' ? '>' : '<', unit = c.unit;
@@ -60,8 +65,13 @@ window.WXCity = (() => {
       ['Settles', L.expiration ? isoDate(L.expiration.slice(0, 4) + '-' + L.expiration.slice(4, 6) + '-' + L.expiration.slice(6, 8)) : null],
       ['Quotes as of', lad.asof ? WXC.clockFull(Date.parse(lad.asof), c.tz) + ' · ' + WXC.dateShort(Date.parse(lad.asof), c.tz) : null],
     ];
+    // the link belongs in the box too: it is the one place a reader on a touch
+    // screen can reach it, and it says where the click goes before they take it
+    const url = strikeUrl(lad, side, L);
+    if (url) rows.push(['On the exchange', '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract →</a>']);
     return tip.rows(cmp + L.strike + '°' + unit + ' — ' + (side === 'h' ? 'daily high above' : 'daily low below') + ' ' + L.strike,
-      rows, 'times in station time · Yes and No bids sum to $1; there are no sellers · not fee adjusted' + (pinHint === false ? ' · click to draw this strike’s price line' : ' · click to pin'));
+      rows, 'times in station time · Yes and No bids sum to $1; there are no sellers · not fee adjusted'
+        + (url ? ' · clicking a price opens the contract' : '') + (pinHint === false ? ' · click to draw this strike’s price line' : ' · click to pin'));
   }
 
   const impliedState = m => ({ unavailable: 'quotes unavailable', unlisted: 'no market listed', day: 'quote summary is for another day',
@@ -185,7 +195,15 @@ window.WXCity = (() => {
       lad[m].forEach(L => {
         const key = pfx + ':' + L.strike;
         const one = L.side === 'bid' || L.side === 'ask';
-        const b = h('button', { class: 'sk' + (checked.has(key) ? ' on' : ''), text: cmp + L.strike + '°' + (L.yes != null ? ' ' + L.yes + '¢' + (one ? '*' : '') : '') });
+        const b = h('button', { class: 'sk' + (checked.has(key) ? ' on' : ''), text: cmp + L.strike + '°' });
+        if (L.yes != null) {
+          // the price inside the chip is the contract link; the chip around it
+          // still selects the strike for the chart, which is a different job
+          const url = strikeUrl(lad, pfx, L);
+          const pc = h('span', { class: 'skp' + (url ? ' lnk' : ''), text: ' ' + L.yes + '¢' + (one ? '*' : '') });
+          if (url) WXM.linkTo(pc, url, 'Open ' + (L.label || L.strike) + ' on ForecastEx');
+          b.appendChild(pc);
+        }
         b.onmousemove = e => tip.show(e, ladderTip(L, pfx, lad, c, false));
         b.onmouseleave = () => tip.hide();
         b.style.setProperty('--c', skColor(pfx, L.strike, lad));
@@ -194,7 +212,7 @@ window.WXCity = (() => {
       });
       row.appendChild(div);
     });
-    row.appendChild(h('div', { class: 'cap', text: 'Strike ladder: ' + lad.label + (lad.live ? '; the number is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids; hover for the bids.' : '.') }));
+    row.appendChild(h('div', { class: 'cap', text: 'Strike ladder: ' + lad.label + (lad.live ? '; the number is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids; hover for the bids. Click a price to open that contract on ForecastEx; click the strike to draw it on the chart.' : '.') }));
 
   }
 
@@ -412,7 +430,14 @@ window.WXCity = (() => {
             const gw = L.yes / 100 * S.LW;
             const yb = el('rect', { x: S.LX, y: yy - 5.5, width: Math.max(gw, 1), height: 11, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
             const nb = el('rect', { x: S.LX + gw, y: yy - 5.5, width: Math.max(S.LW - gw, 1), height: 11, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
-            g.appendChild(bind(yb, () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true)); g.appendChild(bind(nb, () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
+            // clicking a price goes to that contract on the exchange; with no
+            // link available the bar keeps its old behaviour of pinning the box
+            const sd = m === 'high' ? 'h' : 'l';
+            const url = strikeUrl(lad, sd, L);
+            [yb, nb].forEach(bar => {
+              g.appendChild(bind(bar, () => ladderTip(L, sd, lad, c), !url));
+              if (url) WXM.linkTo(bar, url, 'Open ' + (L.label || L.strike) + ' on ForecastEx');
+            });
             if (lad.live && L.side !== 'mid') g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'none', stroke: 'var(--panel)', 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
             if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt', 'pointer-events': 'none' }));
             if (S.LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: S.LX + S.LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end', 'pointer-events': 'none' }));

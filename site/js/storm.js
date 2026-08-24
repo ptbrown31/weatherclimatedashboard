@@ -307,12 +307,15 @@ window.WXStorm = (() => {
           h('span', { class: 'lk', text: c.label || String(c.strike) }),
           h('span', { class: 'lb' }, [h('i', { style: 'width:' + (v == null ? 0 : v) + '%' })]),
           h('span', { class: 'lv', text: v == null ? 'no bids' : v + '¢' })]);
+        const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
         bind(row, () => tip.rows((m.name || m.symbol) + ' — ' + esc(c.label || c.strike),
           [['Yes price', v == null ? 'no bids' : v + '¢'],
            ['Yes bid', c.bid == null ? '—' : cents(c.bid) + '¢'],
            ['No bid', c.ask == null ? '—' : (100 - cents(c.ask)) + '¢'],
-           ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')]],
-          'settles on the vendor’s final peak gusts'));
+           ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
+           ['On the exchange', url ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract →</a>' : null]],
+          'settles on the vendor’s final peak gusts' + (url ? ' · click the price to open the contract' : '')));
+        if (url) WXM.linkTo(row.querySelector('.lv'), url, 'Open ' + (c.label || c.strike) + ' on ForecastEx');
         div.appendChild(row);
       });
       if (!(m.contracts || []).length) div.appendChild(h('div', { class: 'cap', text: 'No candidates listed yet.' }));

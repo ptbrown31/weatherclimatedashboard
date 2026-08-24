@@ -163,6 +163,33 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} market on: ladder labelled with the exchange and its as-of time", live_lbl == 1, f"count={live_lbl}")
                 price_paths = page.locator("#chart path[stroke-width='1.8']").count()
                 chk.add(f"{scheme} market on: quote history drawn for the default strikes", price_paths >= 1, f"paths={price_paths}")
+                # ---- contract links: the price goes to that contract on the exchange
+                lnk = page.locator("#skRow .skp.lnk").count()
+                chk.add(f"{scheme} contract link: strike prices are links", lnk >= 4, f"linked={lnk}")
+                chk.add(f"{scheme} contract link: the strike chip still selects the strike, the price does not",
+                        page.locator("#skRow button[role='link']").count() == 0
+                        and page.locator("#skRow button .skp[role='link']").count() >= 4,
+                        f"chips-as-links={page.locator("#skRow button[role='link']").count()}")
+                bars = page.locator("#chart rect[role='link']").count()
+                chk.add(f"{scheme} contract link: the in-chart Yes and No bars are links too", bars >= 2, f"bars={bars}")
+                page.locator("#skRow .skp.lnk").first.hover(force=True)
+                page.wait_for_timeout(200)
+                href = page.locator("#tip a").first.get_attribute("href") if page.locator("#tip a").count() else ""
+                import re as _re
+                m = _re.match(r"^https://www\.interactivebrokers\.com/predictionmarkets/app/#/(\d+)/product-details/"
+                              r"contracts\?exchange=FORECASTX&conid_yes=(\d+)$", href or "")
+                chk.add(f"{scheme} contract link: the url has the exchange's shape, with both ids", bool(m), href[:110])
+                if m:
+                    # the path id is the market's product id and the query id is the
+                    # strike's own Yes contract; they are different numbers
+                    chk.add(f"{scheme} contract link: path id and contract id are not the same number",
+                            m.group(1) != m.group(2), f"{m.group(1)} vs {m.group(2)}")
+                    snap = page.evaluate("() => fetch('data/snapshots/market/KLGA.json').then(r => r.json())")
+                    want = str((snap.get("symbols") or {}).get("high", {}).get("productConid") or "")
+                    chk.add(f"{scheme} contract link: the path id is the snapshot's product id, not the underlying",
+                            m.group(1) == want, f"url={m.group(1)} snapshot={want} underlying={(snap.get('symbols') or {}).get('high', {}).get('conid')}")
+                chk.add(f"{scheme} contract link: the box names where the click goes",
+                        "open this contract" in page.locator("#tip").inner_text(), page.locator("#tip").inner_text()[-70:])
                 chk.add(f"{scheme} market toggles: no script errors", not errs, "; ".join(errs)[:300])
                 # ---- hover layer on the city page: chips, level labels, picker dots and the crosshair
                 def tip_after(locator):

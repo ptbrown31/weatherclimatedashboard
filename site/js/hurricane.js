@@ -306,7 +306,10 @@ window.WXHur = (() => {
     if (html) attach(t, html);
     return t;
   }
-  function ladderPanel(title, rows, sub, mname) {
+  // `prod` is the market's product id on the exchange, which a contract link
+  // needs alongside the contract's own conid; without it the rows are drawn
+  // exactly as before rather than linking somewhere guessed
+  function ladderPanel(title, rows, sub, mname, prod) {
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: title })]);
     if (sub) div.appendChild(h('div', { class: 'cap', style: 'margin:0 0 6px', text: sub }));
     rows.forEach(r => {
@@ -317,7 +320,11 @@ window.WXHur = (() => {
         h('span', { class: 'lb' }, [h('i', { style: 'width:' + (y == null ? 0 : y) + '%' })]),
         h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
       ]);
-      if (r.c) attach(bar, tip.rows(contractTitle({ name: mname }, r.c), quoteRows(r.c), asofFoot()));
+      const url = r.c && WXM.contractUrl(prod, r.c.conidYes || r.c.conid);
+      if (r.c) attach(bar, tip.rows(contractTitle({ name: mname }, r.c),
+        quoteRows(r.c).concat(url ? [['On the exchange', '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract →</a>']] : []),
+        asofFoot() + (url ? ' · click the price to open the contract' : '')));
+      if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + r.label + ' on ForecastEx');
       div.appendChild(bar);
     });
     if (!rows.length) div.appendChild(h('div', { class: 'cap', text: 'Not listed.' }));
@@ -360,7 +367,8 @@ window.WXHur = (() => {
           lad.appendChild(wrap);
         } else {
           lad.appendChild(ladderPanel(cfg.title + ', ' + p.label + ' (' + cfg.sym + ')', p.rows,
-            cfg.step ? 'Yes price of “count above N”' : 'Yes price of “at least N”', mname(cfg.sym)));
+            cfg.step ? 'Yes price of “count above N”' : 'Yes price of “at least N”', mname(cfg.sym),
+            (market(cfg.sym) || {}).productConid));
         }
       });
     });

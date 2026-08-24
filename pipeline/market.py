@@ -61,7 +61,7 @@ def _quote_rows(contracts: Dict[str, Dict[float, dict]], fetch: Callable, deadli
     def one(job):
         day, strike, slot = job
         row = {"strike": strike, "label": slot.get("label"), "expiration": slot.get("expiration"),
-               "conid": slot.get("Y") or slot.get("N")}
+               "conid": slot.get("Y") or slot.get("N"), "conidYes": slot.get("Y"), "conidNo": slot.get("N")}
         if deadline.over(5):
             row.update(ex.yes_quote(None, None)); row["error"] = "deadline"; row["mid"] = None
             return day, row
@@ -217,7 +217,8 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         grouped = ex.group_contracts(mkt, {mk["day"], mk["tomorrow"]})
         rows = _quote_rows(grouped, ex.fetch_quote, deadline)
         st = by_station.setdefault(key, {"markets": {}, "days": {}, "listed": {}, "partial": False})
-        st["markets"][side] = {"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"), "conid": m["conid"]}
+        st["markets"][side] = {"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"),
+                               "conid": m["conid"], "productConid": m.get("productConid")}
         st["listed"][side] = sorted(grouped.keys())
         for day, rs in rows.items():
             st["days"].setdefault(day, {})[side] = rs
@@ -258,6 +259,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
                 contracts.append({"spec": spec, "expiryLabel": meta.get("expiryLabel"), "numeric": meta.get("numeric"), **r})
                 archive_rows.append({"market": m["symbol"], "spec": spec, **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
         groups[kind].append({"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"), "conid": m["conid"],
+                             "productConid": m.get("productConid"),
                              "category": m.get("category"), "seriesKey": ex.CLIMATE_SYMBOLS.get(m["symbol"]),
                              "contracts": contracts})
     log(kind="market", step="quotes", quoted=quoted, failed=failed, seconds=round(time.time() - t0, 1),

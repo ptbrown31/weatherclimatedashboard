@@ -162,8 +162,39 @@ window.WXM = (() => {
   // `noBid` is the No bid in cents (one dollar less the feed's Yes ask).
   const row = r => ({ strike: r.strike, yes: cents(r.mid), bid: cents(r.bid), ask: cents(r.ask), bidSize: r.bidSize, askSize: r.askSize, from: r.from, label: r.label,
                       noBid: r.ask == null ? null : 100 - cents(r.ask), noBidSize: r.askSize,
-                      conid: r.conid, expiration: r.expiration, error: r.error || null,
+                      conid: r.conid, conidYes: r.conidYes, conidNo: r.conidNo, expiration: r.expiration, error: r.error || null,
                       side: r.bid != null && r.ask != null ? 'mid' : (r.bid != null ? 'bid' : (r.ask != null ? 'ask' : null)) });
+
+  // ---- a link to the contract on the exchange
+  //
+  // The exchange's own app addresses a contract with two ids that are easy to
+  // confuse: the product page's id in the path, and the Yes contract's id in
+  // the query. They are adjacent numbers for the same market and they are not
+  // interchangeable, so both come from the snapshot rather than being derived
+  // from one another. A strike whose contracts were not listed in the pass has
+  // no link, and no link is drawn: a guessed id would land on the wrong page.
+  //
+  // The ids change as contracts are relisted for a new day, which is why they
+  // travel with the quote and are never written into the pages.
+  const APP = 'https://www.interactivebrokers.com/predictionmarkets/app/#/';
+  function contractUrl(productConid, yesConid) {
+    if (!live() || !productConid || !yesConid) return null;
+    return APP + encodeURIComponent(productConid) + '/product-details/contracts?exchange=FORECASTX&conid_yes='
+      + encodeURIComponent(yesConid);
+  }
+  // turn a node into that link: opened in a new tab, because a reader following
+  // a contract has not finished with the chart they were reading
+  function linkTo(node, url, title) {
+    if (!node || !url) return node;
+    node.style.cursor = 'pointer';
+    node.setAttribute('role', 'link');
+    node.setAttribute('tabindex', '0');
+    if (title) node.setAttribute('aria-label', title);
+    const go = e => { e.preventDefault(); e.stopPropagation(); window.open(url, '_blank', 'noopener,noreferrer'); };
+    node.addEventListener('click', go);
+    node.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') go(e); });
+    return node;
+  }
 
   // implied high/low for the map: the market-implied median for the
   // station's tomorrow, against the NWS forecast for the same day
@@ -232,6 +263,7 @@ window.WXM = (() => {
     const g = group('climate'); if (!g) return [];
     return (g.markets || []).filter(m => m.seriesKey).map(m => ({
       symbol: m.symbol, title: m.name, name: m.name, seriesKey: m.seriesKey, unit: CLIMATE_UNITS[m.seriesKey] || '', placeholder: false, live: true,
+      productConid: m.productConid,
       asof: g.asof,
       contracts: (m.contracts || []).filter(c => c.mid != null && yearOf(c.spec)).map(c => ({
         year: yearOf(c.spec), threshold: c.strike, label: c.label, expiryLabel: c.expiryLabel || String(yearOf(c.spec)),
@@ -248,5 +280,5 @@ window.WXM = (() => {
   }
 
   return { mode, on, live, load, loadSummary, loadGroup, implied, ladder, pricePath, climateProducts, hurricaneMarkets, label,
-           payout, payoutText, feeCents, get LABEL() { return label(); }, PLACEHOLDER };
+           payout, payoutText, feeCents, contractUrl, linkTo, get LABEL() { return label(); }, PLACEHOLDER };
 })();

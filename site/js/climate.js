@@ -99,8 +99,10 @@ window.WXClimate = (() => {
       const col = priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
       const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' })
                      : el('circle', { cx, cy, r: 8, fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' });
+      const url = WXM.contractUrl(product.productConid, c.conidYes || c.conid);
       const noBid = c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100;
       const book = c.bid != null && c.ask != null ? null : (c.bid != null ? 'Yes bids only; the Yes price shown is the Yes bid' : (c.ask != null ? 'No bids only; the Yes price shown is one dollar less the No bid' : 'no bids'));
+      if (url) WXM.linkTo(m, url, 'Open ' + c.label + ' on ForecastEx');
       const html = () => tip.rows(product.name + ' — ' + c.label, [
         ['Settles', c.expiryLabel], ['Expires', /\d{1,2}, \d{4}/.test(c.expiryLabel || '') ? null : expLabel(c.expiration)],
         ['Yes price', cents(c.yes) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
@@ -108,8 +110,9 @@ window.WXClimate = (() => {
         ['No bid', noBid != null ? cents(noBid) + size(c.askSize) : null],
         ['Buy Yes now at', c.ask != null ? cents(c.ask) + (WXM.payoutText(Math.round(c.ask * 100)) ? ' · pays ' + WXM.payoutText(Math.round(c.ask * 100)) : '') : null],
         ['Bids', c.from === 'no' ? (book ? book + '; ' : '') + 'quoted from the No contract' : book],
-        ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + (key.startsWith('temp') ? c.threshold.toFixed(2) : c.threshold) + ')']],
-        c.label2 || WXM.LABEL);
+        ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + (key.startsWith('temp') ? c.threshold.toFixed(2) : c.threshold) + ')'],
+        ['On the exchange', url ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract →</a>' : null]],
+        (c.label2 || WXM.LABEL) + (url ? ' · click the marker to open the contract' : ''));
       m.onmousemove = e => tip.show(e, html());
       m.onmouseleave = () => tip.hide();
       m.onclick = e => tip.pin(e, html());

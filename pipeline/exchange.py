@@ -110,7 +110,13 @@ def fetch_quote(conid: int) -> dict:
 
 # ---------------------------------------------------------------- the tree
 def markets_by_symbol(tree: dict) -> Dict[str, dict]:
-    """symbol -> {"symbol", "name", "conid", "category"} for every market."""
+    """symbol -> {"symbol", "name", "conid", "productConid", "category"} per market.
+
+    Two ids, and they are not interchangeable. `conid` is the underlying, which
+    is what the contract-list endpoint takes. `productConid` is what the
+    exchange's own web app puts in the path of a product page, so it is the one
+    a link to a contract needs. They are adjacent numbers for the same market
+    and it is easy to assume they are the same; they are not."""
     out: Dict[str, dict] = {}
     cats = (tree or {}).get("categories") or {}
     items = cats.values() if isinstance(cats, dict) else cats
@@ -119,6 +125,7 @@ def markets_by_symbol(tree: dict) -> Dict[str, dict]:
             sym = str(m.get("symbol") or "").upper()
             if sym and m.get("conid"):
                 out.setdefault(sym, {"symbol": sym, "name": m.get("name"), "conid": m["conid"],
+                                     "productConid": m.get("product_conid"),
                                      "category": (cat or {}).get("name")})
     return out
 
@@ -146,7 +153,8 @@ def category_markets(tree: dict, category_name: str) -> List[dict]:
             for m in (cats[k] or {}).get("markets") or []:
                 if m.get("conid"):
                     out.append({"symbol": str(m.get("symbol") or "").upper(), "name": m.get("name"),
-                                "conid": m["conid"], "category": (cats[k] or {}).get("name")})
+                                "conid": m["conid"], "productConid": m.get("product_conid"),
+                                "category": (cats[k] or {}).get("name")})
     return out
 
 
