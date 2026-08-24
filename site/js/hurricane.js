@@ -214,6 +214,140 @@ window.WXHur = (() => {
   }
   const locationById = id => ((GEO && GEO.locations) || []).find(L => L.id === id);
 
+  // ---- the panel a reference location opens on the map
+  //
+  // A hover box vanishes the moment the pointer leaves, which is no use for a
+  // series someone wants to read. Clicking a location the vendor has signalled
+  // on opens this instead: the same delivery-by-delivery ladder the storm
+  // section draws, kept on the page until it is closed. Clicking the same
+  // location again follows it through to the contract, when one is listed —
+  // during a storm's first deliveries the exchange may not have listed the
+  // location's gust ladder yet, and the panel says so rather than linking
+  // nowhere.
+  let openSite = null;
+  function closeSitePanel() {
+    const host = $('#sitePanel'); if (host) host.innerHTML = '';
+    openSite = null;
+  }
+  function openSitePanel(L) {
+    const host = $('#sitePanel'); if (!host) return null;
+    const s = window.WXStorm && WXStorm.siteCard ? WXStorm.siteCard(L.id) : null;
+    host.innerHTML = '';
+    if (!s) {
+      // the ledger for this storm may still be arriving; say so rather than
+      // letting the click do nothing at all
+      openSite = null;
+      const shut = h('button', { class: 'spx', text: 'Close' });
+      shut.onclick = closeSitePanel;
+      host.appendChild(h('div', { class: 'spanel' }, [
+        h('div', { class: 'sph' }, [h('span', { class: 'spt', text: L.name + ' (' + L.id + ')' }), shut]),
+        h('p', { class: 'cap', style: 'margin:0', text: 'No delivery series is loaded for this location yet. It appears once the vendor ledger for the storm has arrived; the live-storm section below carries the same series.' })]));
+      return null;
+    }
+    openSite = L.id;
+    const head = h('div', { class: 'sph' }, [
+      h('span', { class: 'spt', text: L.name + ' (' + L.id + ')' }),
+      h('span', { class: 'cap', style: 'margin:0', text: s.storm + ' ' + s.year + ' · ' + s.deliveries + ' deliver' + (s.deliveries === 1 ? 'y' : 'ies') + ' so far' }),
+    ]);
+    const close = h('button', { class: 'spx', text: 'Close', title: 'close this panel' });
+    close.onclick = closeSitePanel;
+    head.appendChild(close);
+    const panel = h('div', { class: 'spanel' }, [head, s.node]);
+    if (s.url) {
+      const go = h('button', { text: 'Open the wind contract on ForecastEx →' });
+      go.onclick = () => window.open(s.url, '_blank', 'noopener,noreferrer');
+      panel.appendChild(h('div', { class: 'bar', style: 'margin:4px 0 0' }, [go,
+        h('span', { class: 'cap', style: 'margin:0', text: 'or click ' + L.name + ' on the map again' })]));
+    } else {
+      panel.appendChild(h('p', { class: 'cap', style: 'margin:4px 0 0',
+        text: 'No wind contract is listed for this location yet. The exchange lists a location’s gust ladder once it opens one; until then there is nothing to link to and this panel is the whole of it.' }));
+    }
+    panel.appendChild(h('p', { class: 'cap', style: 'margin:4px 0 0', text: s.attribution + '. Probabilities are the vendor’s, shown as published; the horizontal axis counts vendor deliveries, not time.' }));
+    host.appendChild(panel);
+    panel.scrollIntoView({ block: 'nearest' });
+    return s;
+  }
+
+  // ---- zoom and pan on the basin map
+  //
+  // The whole map is drawn in one coordinate space, so zooming is a matter of
+  // moving the viewBox rather than redrawing anything: shapes, dots and their
+  // links keep working untouched at every scale. The view survives a redraw
+  // (quotes refresh every ten minutes) and resets when the basin changes,
+  // because a window over one ocean means nothing over another.
+  const VIEW0 = { x: 0, y: 0, w: 980, h: 600 };
+  let view = Object.assign({}, VIEW0);
+  const MAXZ = 12;                       // beyond this the vector outlines are the limit, not the pixels
+  function applyView() {
+    const svg = $('#basin'); if (!svg) return;
+    svg.setAttribute('viewBox', [view.x, view.y, view.w, view.h].map(n => Math.round(n * 100) / 100).join(' '));
+    const z = VIEW0.w / view.w;
+    const lbl = $('#basinZoomLevel');
+    if (lbl) lbl.textContent = z < 1.02 ? 'whole basin' : Math.round(z * 10) / 10 + '×';
+    svg.classList.toggle('grab', z > 1.02);
+  }
+  function zoomAbout(factor, cx, cy) {
+    const z = VIEW0.w / view.w;
+    const want = Math.min(Math.max(z * factor, 1), MAXZ);
+    if (Math.abs(want - z) < 1e-6) return;
+    const w = VIEW0.w / want, h = VIEW0.h / want;
+    // keep the point under the pointer where it is
+    view.x = cx - (cx - view.x) * (w / view.w);
+    view.y = cy - (cy - view.y) * (h / view.h);
+    view.w = w; view.h = h;
+    clampView(); applyView();
+  }
+  function clampView() {
+    view.x = Math.min(Math.max(view.x, VIEW0.x), VIEW0.x + VIEW0.w - view.w);
+    view.y = Math.min(Math.max(view.y, VIEW0.y), VIEW0.y + VIEW0.h - view.h);
+  }
+  const resetView = () => { view = Object.assign({}, VIEW0); applyView(); };
+  function atPoint(ev) {
+    const svg = $('#basin');
+    const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return [q.x, q.y];
+  }
+  function wireZoom() {
+    const svg = $('#basin'); if (!svg || svg.dataset.zoom) return;
+    svg.dataset.zoom = '1';
+    svg.addEventListener('wheel', ev => {
+      ev.preventDefault();
+      const [cx, cy] = atPoint(ev);
+      zoomAbout(ev.deltaY < 0 ? 1.18 : 1 / 1.18, cx, cy);
+    }, { passive: false });
+    let drag = null, moved = 0;
+    svg.addEventListener('pointerdown', ev => {
+      if (VIEW0.w / view.w <= 1.02) return;            // nothing to pan at full extent
+      drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, id: ev.pointerId };
+      moved = 0; svg.setPointerCapture(ev.pointerId); svg.classList.add('grabbing');
+    });
+    svg.addEventListener('pointermove', ev => {
+      if (!drag) return;
+      const k = view.w / svg.getBoundingClientRect().width;
+      const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy;
+      moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+      view.x = drag.vx - dx * k; view.y = drag.vy - dy * k;
+      clampView(); applyView();
+    });
+    const end = ev => {
+      if (!drag) return;
+      try { svg.releasePointerCapture(drag.id); } catch (e) { /* already released */ }
+      drag = null; svg.classList.remove('grabbing');
+    };
+    svg.addEventListener('pointerup', end);
+    svg.addEventListener('pointercancel', end);
+    // a pan that ends over a contract must not also open that contract
+    svg.addEventListener('click', ev => { if (moved > 4) { ev.stopPropagation(); ev.preventDefault(); moved = 0; } }, true);
+    const bar = $('#basinZoom'); if (!bar || bar.childElementCount) return;
+    const mk = (label, title, fn) => { const b = h('button', { text: label, title }); b.onclick = fn; bar.appendChild(b); };
+    mk('−', 'zoom out', () => zoomAbout(1 / 1.5, view.x + view.w / 2, view.y + view.h / 2));
+    mk('+', 'zoom in', () => zoomAbout(1.5, view.x + view.w / 2, view.y + view.h / 2));
+    mk('Reset', 'back to the whole basin', resetView);
+    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', id: 'basinZoomLevel', text: 'whole basin' }));
+    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', text: '· scroll to zoom, drag to pan' }));
+  }
+
   function draw() {
     const B = BASINS[basin];
     const [b0, la0, b1, la1] = B.box, W = 980, Hh = 600;
@@ -253,6 +387,9 @@ window.WXHur = (() => {
     const counts = drawNhc(svg, X, Y, basin);
     // the reference locations: small dots, scaled by the vendor's P(gust > 80 mph) when the lane is live
     let vendorShown = 0;
+    // the locations that have a delivery series loaded: those are the dots that
+    // open one, which is not the same set as those with a current livecyc row
+    const withSeries = (window.WXStorm && WXStorm.sites) ? WXStorm.sites() : {};
     (GEO && GEO.locations || []).forEach(L => {
       if (L.lon < b0 || L.lon > b1 || L.lat < la0 || L.lat > la1) return;
       const v = vendorSite(L.id);
@@ -261,13 +398,35 @@ window.WXHur = (() => {
       if (any) vendorShown++;
       const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 });
       attach(c, locationTip(L, v));
+      if (any || withSeries[L.id]) {
+        // first click opens the series, a second follows it to the contract
+        c.style.cursor = 'pointer';
+        c.setAttribute('role', 'button');
+        c.setAttribute('tabindex', '0');
+        c.setAttribute('aria-label', L.name + ' — open the storm probability series');
+        const hit = ev => {
+          ev.preventDefault(); ev.stopPropagation();
+          if (openSite === L.id) {
+            const cur = window.WXStorm && WXStorm.siteCard ? WXStorm.siteCard(L.id) : null;
+            if (cur && cur.url) { window.open(cur.url, '_blank', 'noopener,noreferrer'); return; }
+          }
+          openSitePanel(L);
+        };
+        // replaces the pin handler attach() set: the panel is what this click
+        // opens, and a pinned box on top of it is the same information twice
+        c.onclick = hit;
+        c.removeAttribute('data-tip-pin');
+        c.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') hit(ev); });
+      }
       svg.appendChild(c);
     });
+    wireZoom(); applyView();
     $('#modeTitle').textContent = B.name.toUpperCase() + ' · NHC forecast tracks, cones and formation odds' + (lf ? ' · landfall regions shaded by the exchange’s Yes price' : '');
     $('#basinCap').textContent = (counts.storms ? '' : 'No active tropical cyclones in this basin at the last update. ') +
       'Orange dashed regions are NHC seven-day formation odds; cones and tracks draw automatically when a storm is active. ' +
       (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that part of the map shows storms only. ' : '') +
       (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for the Yes and No bids); clicking a shaded region opens that contract on the exchange; unshaded regions have no listed contract or no bids. ' : '') +
+      'Scroll to zoom the map and drag to pan. During a live storm, clicking a red reference location opens its probability series below the map and keeps it there; clicking the same location again opens its wind contract. ' +
       (vendorShown ? 'Red dots scale with the vendor’s probability of a gust above 80 mph at that reference location (' + ((RK && RK.attribution) || 'Powered by Reask') + '). ' : '');
     if (vendorShown) svg.appendChild(txt((RK && RK.attribution) || 'Powered by Reask', { x: W - 10, y: Hh - 10, 'text-anchor': 'end', 'font-size': 12, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl' }));
     const key = $('#basinKey'); key.innerHTML = '';
@@ -693,9 +852,24 @@ window.WXHur = (() => {
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 30));
     if (mk) { const q = WXC.statusEl([mk], 10); q.insertBefore(document.createTextNode('Quotes: '), q.firstChild); st.appendChild(q); }
     if (!H) { $('#basin').innerHTML = ''; $('#basin').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
-    [['b1', 'AL'], ['b2', 'EP']].forEach(([id, b]) => { $('#' + id).onclick = () => { basin = b; document.querySelectorAll('.bar button').forEach(x => x.classList.remove('on')); $('#' + id).classList.add('on'); draw(); }; });
+    // the basin buttons only: the zoom bar is a .bar too and its buttons are not
+    // a selection. Changing ocean resets the view, since a window over one means
+    // nothing over the other.
+    [['b1', 'AL'], ['b2', 'EP']].forEach(([id, b]) => {
+      $('#' + id).onclick = () => {
+        basin = b;
+        ['b1', 'b2'].forEach(x => $('#' + x).classList.remove('on'));
+        $('#' + id).classList.add('on');
+        closeSitePanel(); resetView(); draw();
+      };
+    });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); drawOthers();
-    if (window.WXStorm) { WXStorm.init(tip); WXStorm.draw(RK, MK); }
+    if (window.WXStorm) {
+      WXStorm.init(tip);
+      // the map's dots ask this module for a location's series, so the map is
+      // drawn again once the ledgers have landed and the dots can answer
+      Promise.resolve(WXStorm.draw(RK, MK)).then(() => draw()).catch(() => {});
+    }
   }
   return { init };
 })();

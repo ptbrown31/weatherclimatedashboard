@@ -271,9 +271,10 @@ def run(no_build: bool) -> int:
                             resp = route.fetch()
                             m = json.loads(resp.text())
                             m["markets"] = (m.get("markets") or []) + [
-                                {"symbol": "LERBR", "name": "Erin \u2014 Brownsville peak gust", "contracts": [
+                                {"symbol": "LERBR", "name": "Erin \u2014 Brownsville peak gust", "productConid": 999000001, "contracts": [
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": t, "label": "Above %d" % t,
-                                     "numeric": True, "bid": 0.4, "ask": 0.46, "mid": 0.43} for t in THR]},
+                                     "numeric": True, "bid": 0.4, "ask": 0.46, "mid": 0.43,
+                                     "conid": 999100000 + t, "conidYes": 999100000 + t} for t in THR]},
                                 {"symbol": "LHLERG", "name": "Erin \u2014 highest wind, Gulf Coast", "contracts": [
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": "Brownsville",
                                      "label": "Brownsville", "numeric": False, "bid": 0.4, "ask": 0.46, "mid": 0.43}]}]
@@ -353,6 +354,38 @@ def run(no_build: bool) -> int:
                     t_gap = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} storm ({tag}): the gap box counts the hours and the missing cycles",
                             "missing here" in t_gap and "12 hours" in t_gap and "6 hours" in t_gap, t_gap[:160])
+                    # ---- the map: a signalled location opens its series and keeps it
+                    dot = page.locator("#basin circle[role='button']")
+                    chk.add(f"{scheme} storm ({tag}): the signalled location is clickable on the map",
+                            dot.count() >= 1, f"dots={dot.count()}")
+                    if dot.count():
+                        dot.first.scroll_into_view_if_needed()
+                        dot.first.click(force=True)
+                        page.wait_for_timeout(300)
+                        panel = page.locator("#sitePanel .spanel")
+                        chk.add(f"{scheme} storm ({tag}): clicking opens a panel that stays", panel.count() == 1, f"panels={panel.count()}")
+                        ptxt = panel.inner_text() if panel.count() else ""
+                        chk.add(f"{scheme} storm ({tag}): the panel names the storm and the deliveries",
+                                "Erin" in ptxt and "deliveries" in ptxt, ptxt[:90])
+                        chk.add(f"{scheme} storm ({tag}): the panel carries the delivery series, not a summary",
+                                page.locator("#sitePanel .scardwrap svg path").count() >= 3,
+                                str(page.locator("#sitePanel .scardwrap svg path").count()))
+                        # it survives a pointer moving away, which a hover box would not
+                        page.mouse.move(10, 10); page.wait_for_timeout(250)
+                        chk.add(f"{scheme} storm ({tag}): the panel does not vanish when the pointer leaves",
+                                page.locator("#sitePanel .spanel").count() == 1, "")
+                        chk.add(f"{scheme} storm ({tag}): the panel offers the listed wind contract",
+                                "Open the wind contract" in ptxt, ptxt[-110:])
+                        chk.add(f"{scheme} storm ({tag}): clicking the dot does not also pin a box on top of the panel",
+                                page.locator("#tip").evaluate("e => e.dataset.pinned || ''") == "", "")
+                        with page.expect_popup() as pop:
+                            page.locator("#basin circle[role='button']").first.click(force=True)
+                        p2 = pop.value
+                        chk.add(f"{scheme} storm ({tag}): clicking the same location again goes to the contract",
+                                "conid_yes=" in p2.url and "999000001" in p2.url, p2.url[:110])
+                        p2.close()
+                        page.locator("#sitePanel .spx").first.click(); page.wait_for_timeout(200)
+                        chk.add(f"{scheme} storm ({tag}): the panel closes", page.locator("#sitePanel .spanel").count() == 0, "")
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
                     page.unroute("**/data/snapshots/**")
                 page.goto(f"{srv.url}/hurricane.html")
@@ -402,6 +435,28 @@ def run(no_build: bool) -> int:
                 shaded = page.locator("#basin path[role='link']").count()
                 chk.add(f"{scheme} hurricane link: shaded map regions are clickable", shaded >= 3, f"regions={shaded}")
                 linked_href("#basin path[role='link']", "a shaded map region")
+                # ---- the map zooms and pans
+                vb0 = page.locator("#basin").get_attribute("viewBox")
+                page.get_by_title("zoom in").click(); page.wait_for_timeout(150)
+                vb1 = page.locator("#basin").get_attribute("viewBox")
+                chk.add(f"{scheme} basin zoom: zooming in narrows the view", vb1 != vb0 and float(vb1.split()[2]) < float(vb0.split()[2]),
+                        f"{vb0} -> {vb1}")
+                chk.add(f"{scheme} basin zoom: the level is stated", "×" in page.locator("#basinZoomLevel").inner_text(),
+                        page.locator("#basinZoomLevel").inner_text())
+                box = page.locator("#basin").bounding_box()
+                page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                page.mouse.down()
+                page.mouse.move(box["x"] + box["width"] / 2 - 60, box["y"] + box["height"] / 2, steps=6)
+                page.mouse.up(); page.wait_for_timeout(150)
+                vb2 = page.locator("#basin").get_attribute("viewBox")
+                chk.add(f"{scheme} basin zoom: dragging pans the view", vb2.split()[0] != vb1.split()[0], f"{vb1} -> {vb2}")
+                page.get_by_title("back to the whole basin").click(); page.wait_for_timeout(150)
+                chk.add(f"{scheme} basin zoom: reset returns the whole basin",
+                        page.locator("#basin").get_attribute("viewBox") == vb0, page.locator("#basin").get_attribute("viewBox"))
+                chk.add(f"{scheme} basin zoom: zooming out stops at the whole basin",
+                        (page.get_by_title("zoom out").click() or page.wait_for_timeout(150) or
+                         page.locator("#basin").get_attribute("viewBox")) == vb0,
+                        page.locator("#basin").get_attribute("viewBox"))
                 chk.add(f"{scheme} hurricane link: the caption says the map is clickable",
                         "clicking a shaded region" in page.locator("#basinCap").inner_text(),
                         page.locator("#basinCap").inner_text()[:80])

@@ -170,3 +170,13 @@ td.num.lnk{text-decoration:underline;text-decoration-style:dotted;text-underline
 td.num.lnk:hover{text-decoration-style:solid}
 .tile.lnk:hover{border-color:var(--accent)}
 svg path[role="link"],svg rect[role="link"]{cursor:pointer}
+svg#basin{touch-action:none}
+svg#basin.grab{cursor:grab}
+svg#basin.grabbing{cursor:grabbing}
+#sitePanel:empty{display:none}
+#sitePanel{margin:8px 0 0}
+.spanel{border:1px solid var(--accent);border-radius:10px;background:var(--panel);padding:8px 10px 6px}
+.spanel .sph{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.spanel .spt{font-weight:700;color:var(--navy);font-size:14px}
+.spanel .spx{margin-left:auto}
+.spanel .scardwrap{border:0;padding:0}

@@ -406,5 +406,54 @@ window.WXStorm = (() => {
   }
 
   function init(t) { tip = t; }
-  return { init, draw };
+  // ---- one location's series, for the map to open when a dot is clicked
+  //
+  // The map holds the geography and this module holds the deliveries, so rather
+  // than draw the ladder twice the map asks for the same card the storm section
+  // builds. Returns null when no loaded storm has signalled on that location,
+  // which is the ordinary state outside a live storm.
+  function siteCard(sid) {
+    const keys = Object.keys(ledgers);
+    for (let i = 0; i < keys.length; i++) {
+      const doc = ledgers[keys[i]];
+      if (!doc || !doc.sites || !doc.sites[sid]) continue;
+      const cyc = (doc.steps || []).filter(x => x.kind !== 'final');
+      if (!cyc.length) continue;
+      const seen = cyc.some(x => ((x.sites || {})[sid] || []).some(v => v > 0));
+      if (!seen) continue;
+      const storm = { name: doc.name, year: doc.year };
+      const c = card(doc, sid, storm, gaps(cyc));
+      c.setCursor(cyc.length - 1);
+      return { node: c.node, setCursor: c.setCursor, storm: doc.name, year: doc.year,
+               deliveries: cyc.length, market: lMarket(doc.name, sid),
+               url: (m => WXM.contractUrl(m && m.productConid, firstYes(m)))(lMarket(doc.name, sid)),
+               attribution: (RK && RK.attribution) || 'Powered by Reask' };
+    }
+    return null;
+  }
+  // the lowest rung of a location's gust ladder: the contract a reader lands on
+  // when they follow the location to the exchange
+  function firstYes(m) {
+    if (!m) return null;
+    const cs = (m.contracts || []).slice().sort((a, b) => (a.strike || 0) - (b.strike || 0));
+    const c = cs[0];
+    return c ? (c.conidYes || c.conid) : null;
+  }
+
+  // which locations have a series to show, so the map can mark exactly the dots
+  // that will open one rather than asking per dot
+  function sites() {
+    const out = {};
+    Object.keys(ledgers).forEach(k => {
+      const doc = ledgers[k];
+      if (!doc || !doc.sites) return;
+      const cyc = (doc.steps || []).filter(x => x.kind !== 'final');
+      Object.keys(doc.sites).forEach(sid => {
+        if (cyc.some(x => ((x.sites || {})[sid] || []).some(v => v > 0))) out[sid] = true;
+      });
+    });
+    return out;
+  }
+
+  return { init, draw, siteCard, sites };
 })();
