@@ -50,9 +50,18 @@ from . import gov_weather as gw
 from .snapshots import SNAP_CACHE, _iso
 from .storage import Storage
 
-SCHEMA = 1
+SCHEMA = 2
 KEY = "snapshots/reask.json"
+STORM_KEY = "snapshots/storm/{name}_{year}.json"
 ATTRIBUTION = "Powered by Reask"
+
+# One storm's delivery ledger is written to its own file, because it grows with
+# every delivery and only a reader who opens that storm needs it; the index in
+# reask.json stays small enough for the hurricane page to load every pass.
+# Caps follow the internal desk's: the most recent LiveCyc cycles, and the sites
+# that have actually signalled, so a long-lived storm cannot grow without bound.
+MAX_STEPS = 48
+MAX_SITES = 60
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -118,6 +127,72 @@ def _num(v) -> Optional[float]:
         return None
 
 
+def _sustained_mph(store: Storage, name: str) -> Optional[int]:
+    """The storm's sustained wind from the NHC roster at this moment, in mph, so
+    the ladder can be read against the number the public advisories quote. The
+    contracts settle on peak gusts, which run higher; the two are different
+    measurements and the page says so."""
+    raw = store.get("snapshots/hurricane.json")
+    if not raw:
+        return None
+    try:
+        for st in (json.loads(raw).get("storms") or []):
+            if str(st.get("name", "")).lower() == str(name).lower() and st.get("intensityKt") is not None:
+                return int(round(float(st["intensityKt"]) * 1.15078))
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def append_step(store: Storage, name: str, year: int, step: dict, log: Callable) -> dict:
+    """Append one delivery to a storm's ledger and return its summary.
+
+    The ledger is append-only and keyed by the delivery's own identity (the
+    forecast time for a cycle, the file's last-modified stamp for an interim or
+    final), so re-reading a file the vendor re-issued replaces that delivery
+    rather than adding a duplicate, and a delivery that arrives late still lands
+    in its own place. Nothing here looks forward: a step records only what that
+    delivery said."""
+    key = STORM_KEY.format(name=name, year=year)
+    raw = store.get(key)
+    doc = json.loads(raw) if raw else {"schema": SCHEMA, "name": name, "year": year, "attribution": ATTRIBUTION,
+                                       "thresholds": [], "steps": [], "sites": {}, "final": None}
+    doc["thresholds"] = step.get("thresholds") or doc.get("thresholds") or []
+    steps = [x for x in doc.get("steps") or [] if x.get("id") != step["id"]]
+    steps.append({k: v for k, v in step.items() if k != "thresholds"})
+    steps.sort(key=lambda x: (x.get("kind") == "final", x.get("kind") == "interim", x.get("id") or ""))
+    # keep the most recent cycles, always keeping any interim and the final
+    cycles = [x for x in steps if x.get("kind") == "livecyc"]
+    if len(cycles) > MAX_STEPS:
+        drop = {id(x) for x in cycles[:-MAX_STEPS]}
+        steps = [x for x in steps if id(x) not in drop]
+    doc["steps"] = steps
+    # a site enters the ledger the first time it carries a non-zero probability,
+    # and keeps its place afterwards, so cards do not appear and vanish
+    for sid, meta in (step.get("siteMeta") or {}).items():
+        doc["sites"].setdefault(sid, {**meta, "firstStep": step["id"]})
+    if len(doc["sites"]) > MAX_SITES:
+        peak = {sid: max((max(x.get("sites", {}).get(sid) or [0]) for x in steps), default=0) for sid in doc["sites"]}
+        for sid in sorted(peak, key=lambda k: -peak[k])[MAX_SITES:]:
+            doc["sites"].pop(sid, None)
+    if step.get("kind") == "final":
+        doc["final"] = step.get("final")
+    doc["written"] = step.get("ts")
+    store.put(key, json.dumps(doc, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+    log(kind="reask", step=step["id"], storm=name, sites=len(step.get("sites") or {}), steps=len(steps), bytes=len(json.dumps(doc)))
+    return {"steps": len(steps), "sites": len(doc["sites"]), "latest": step["id"], "final": doc.get("final") is not None}
+
+
+def _step(lad: dict, kind: str, sid: str, at, ts: str, sustained) -> dict:
+    """One delivery as the ledger stores it: the probability ladder per site,
+    as percentages in the file's own threshold order, plus the storm's sustained
+    wind at the moment it arrived."""
+    sites = {k: v.get("p") or [] for k, v in (lad.get("sites") or {}).items()}
+    meta = {k: {"name": v.get("name"), "lat": v.get("lat"), "lon": v.get("lon")} for k, v in (lad.get("sites") or {}).items()}
+    return {"id": sid, "kind": kind, "at": at, "ts": ts, "sustainedMph": sustained,
+            "sites": sites, "siteMeta": meta, "thresholds": lad.get("thresholds")}
+
+
 def _stamp(s: str) -> str:
     """'2026-09-01T06:00:00Z' -> '2026090106' for archive names."""
     digits = re.sub(r"\D", "", s or "")
@@ -171,6 +246,8 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             lad = parse_ladder_csv(body.decode("utf-8", "replace"))
             entry["livecyc"] = {"forecastTime": ft, "lastModified": latest.get("last_modified"), "fetched": _iso(now),
                                 "cycles": len(fcs), **lad}
+            entry["ledger"] = append_step(store, name, year, _step(lad, "livecyc", _stamp(ft) or ft, ft,
+                                                                  _iso(now), _sustained_mph(store, name)), log)
             fetched += 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"livecyc {name} {ft}: {type(e).__name__}: {e}")
@@ -198,6 +275,14 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
                 store.put(akey, gzip.compress(body), "application/gzip")
                 parsed = parse(body.decode("utf-8", "replace"))
                 entry[kind] = {"lastModified": lm, "fetched": _iso(now), **(parsed if kind == "interim" else {"sites": parsed})}
+                if kind == "interim":
+                    entry["ledger"] = append_step(store, name, year, _step(parsed, "interim", "INT", lm, _iso(now),
+                                                                           _sustained_mph(store, name)), log)
+                else:
+                    entry["ledger"] = append_step(store, name, year,
+                                                  {"id": "FINAL", "kind": "final", "at": lm, "ts": _iso(now),
+                                                   "sites": {}, "siteMeta": {}, "thresholds": None,
+                                                   "final": {k: v.get("peakGustMph") for k, v in parsed.items()}}, log)
                 fetched += 1
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{kind} {name}: {type(e).__name__}: {e}")
@@ -217,7 +302,8 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
     asof = max([(s.get("livecyc") or {}).get("forecastTime") or "" for s in keep] + [prev.get("asof") or ""]) or None
     ok = live is not None
     snap = {"schema": SCHEMA, "enabled": True, "attribution": ATTRIBUTION, "asof": asof, "written": _iso(now),
-            "polled": _iso(now) if ok else prev.get("polled"), "year": year, "storms": keep, "fetched": fetched, "errors": errors}
+            "polled": _iso(now) if ok else prev.get("polled"), "year": year, "storms": keep, "fetched": fetched, "errors": errors,
+            "ledgerKey": STORM_KEY}
     store.put(KEY, json.dumps(snap, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     log(kind="reask", enabled=True, storms=len(keep), fetched=fetched, errors=errors)
     return {"enabled": True, "attempted": True, "ok": ok, "storms": len(keep), "fetched": fetched, "errors": errors}

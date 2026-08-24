@@ -405,3 +405,70 @@ class StormWindContracts(unittest.TestCase):
         tampa = next(c for c in m["contracts"] if c["strike"] == "Tampa")
         self.assertEqual((tampa["bid"], tampa["ask"]), (0.2, 0.3))   # and the Yes side is quoted
         tmp.cleanup()
+
+
+class StormLedger(unittest.TestCase):
+    """The per-storm delivery ledger: append-only, forward-only, capped, and
+    written per storm so several can run at once."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.logs = []
+        self.st.put("snapshots/hurricane.json", json.dumps({"storms": [{"name": "Erin", "intensityKt": 90}]}).encode())
+
+    def log(self, **kw):
+        self.logs.append(kw)
+
+    def ladder(self, ps):
+        return {"thresholds": [70, 80, 90], "rows": len(ps),
+                "sites": {k: {"name": k.lower(), "lat": 1.0, "lon": 2.0, "p": v} for k, v in ps.items()}}
+
+    def test_appends_and_keeps_delivery_order(self):
+        for i, ps in enumerate([{"BR": [10, 2, 0]}, {"BR": [30, 9, 1]}, {"BR": [55, 20, 4], "TA": [8, 1, 0]}]):
+            step = reask._step(self.ladder(ps), "livecyc", "202609010%d" % i, "t", "2026-09-01T00:00:00Z", 104)
+            reask.append_step(self.st, "Erin", 2026, step, self.log)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual([x["id"] for x in doc["steps"]], ["2026090100", "2026090101", "2026090102"])
+        self.assertEqual(doc["thresholds"], [70, 80, 90])
+        self.assertEqual(doc["steps"][2]["sites"]["BR"], [55, 20, 4])
+        self.assertEqual(doc["steps"][0]["sustainedMph"], 104)      # the advisory number at that delivery
+        # a site that appears late keeps the delivery it first appeared at
+        self.assertEqual(doc["sites"]["TA"]["firstStep"], "2026090102")
+        self.assertEqual(doc["sites"]["BR"]["firstStep"], "2026090100")
+
+    def test_a_reissued_delivery_replaces_rather_than_duplicates(self):
+        for ps in ([{"BR": [10, 2, 0]}], [{"BR": [44, 9, 1]}]):
+            reask.append_step(self.st, "Erin", 2026, reask._step(self.ladder(ps[0]), "livecyc", "2026090100", "t", "ts", 90), self.log)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual(len(doc["steps"]), 1)
+        self.assertEqual(doc["steps"][0]["sites"]["BR"], [44, 9, 1])
+
+    def test_interim_and_final_sort_last_and_final_carries_the_gusts(self):
+        reask.append_step(self.st, "Erin", 2026, reask._step(self.ladder({"BR": [10, 2, 0]}), "livecyc", "2026090100", "t", "ts", 90), self.log)
+        reask.append_step(self.st, "Erin", 2026, reask._step(self.ladder({"BR": [70, 30, 5]}), "interim", "INT", "t", "ts", 80), self.log)
+        reask.append_step(self.st, "Erin", 2026, {"id": "FINAL", "kind": "final", "at": "t", "ts": "ts", "sites": {},
+                                                 "siteMeta": {}, "thresholds": None, "final": {"BR": 88.4}}, self.log)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual([x["kind"] for x in doc["steps"]], ["livecyc", "interim", "final"])
+        self.assertEqual(doc["final"], {"BR": 88.4})
+        self.assertEqual(doc["thresholds"], [70, 80, 90])          # the final carries none and must not clear them
+
+    def test_cycles_are_capped_but_interim_and_final_are_kept(self):
+        reask.append_step(self.st, "Erin", 2026, reask._step(self.ladder({"BR": [1, 0, 0]}), "interim", "INT", "t", "ts", 60), self.log)
+        for i in range(reask.MAX_STEPS + 6):
+            reask.append_step(self.st, "Erin", 2026, reask._step(self.ladder({"BR": [i, 0, 0]}), "livecyc", "%010d" % i, "t", "ts", 60), self.log)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        cyc = [x for x in doc["steps"] if x["kind"] == "livecyc"]
+        self.assertEqual(len(cyc), reask.MAX_STEPS)
+        self.assertEqual(cyc[-1]["id"], "%010d" % (reask.MAX_STEPS + 5))   # the newest cycles survive
+        self.assertEqual(len([x for x in doc["steps"] if x["kind"] == "interim"]), 1)
+
+    def test_two_storms_keep_separate_ledgers(self):
+        reask.append_step(self.st, "Erin", 2026, reask._step(self.ladder({"BR": [10, 0, 0]}), "livecyc", "A", "t", "ts", 90), self.log)
+        reask.append_step(self.st, "Fiona", 2026, reask._step(self.ladder({"TA": [20, 0, 0]}), "livecyc", "A", "t", "ts", None), self.log)
+        e = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        f = json.loads(self.st.get("snapshots/storm/Fiona_2026.json"))
+        self.assertEqual(list(e["sites"]), ["BR"])
+        self.assertEqual(list(f["sites"]), ["TA"])
+        self.assertIsNone(f["steps"][0]["sustainedMph"])           # not in the NHC roster: recorded as unknown
