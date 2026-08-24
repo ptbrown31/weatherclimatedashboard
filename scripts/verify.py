@@ -168,6 +168,72 @@ def run(no_build: bool) -> int:
                     page.locator(".cwrap").first.locator("rect[fill='var(--accent)']").first.hover(force=True); page.wait_for_timeout(150)
                     t_bar = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} hover: a ladder bar names the count it pays at", "At least" in t_bar and "Yes bid" in t_bar, t_bar[:80])
+                # ---- a live storm, injected at the network layer: no vendor data is kept
+                # in this repository, so the only way to prove these panels is to serve
+                # a synthetic storm to the browser and take it away again
+                THR = [70, 80, 90, 100, 110, 120]
+
+                def _lad(scale):
+                    def q(i):
+                        return max(0, round(min(99, scale * (1 - i / len(THR)) * 100 - i * 4), 1))
+                    return {"BR": [q(i) for i in range(len(THR))]}
+
+                def _ledger(final):
+                    steps = [{"id": "20260901%02d" % (k * 6), "kind": "livecyc", "at": "t", "ts": "t", "sites": _lad(0.2 + 0.1 * k)}
+                             for k in range(6)]
+                    steps.append({"id": "INT", "kind": "interim", "at": "t", "ts": "t", "sites": _lad(0.95)})
+                    return {"schema": 2, "name": "Erin", "year": 2026, "attribution": "Powered by Reask", "thresholds": THR,
+                            "steps": steps, "sites": {"BR": {"name": "Brownsville", "firstStep": "2026090100"}},
+                            "final": {"BR": 96.0} if final else None}
+
+                _index = {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026,
+                          "storms": [{"name": "Erin", "year": 2026}]}
+
+                def _storm_routes(final):
+                    def handler(route):
+                        u = route.request.url
+                        if u.endswith("/reask.json"):
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index))
+                        if "/storm/Erin_2026.json" in u:
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(final)))
+                        if u.endswith("/market/hurricane.json"):
+                            resp = route.fetch()
+                            m = json.loads(resp.text())
+                            m["markets"] = (m.get("markets") or []) + [
+                                {"symbol": "LERBR", "name": "Erin \u2014 Brownsville peak gust", "contracts": [
+                                    {"spec": "2026.9", "expiryLabel": "September 2026", "strike": t, "label": "Above %d" % t,
+                                     "numeric": True, "bid": 0.4, "ask": 0.46, "mid": 0.43} for t in THR]},
+                                {"symbol": "LHLERG", "name": "Erin \u2014 highest wind, Gulf Coast", "contracts": [
+                                    {"spec": "2026.9", "expiryLabel": "September 2026", "strike": "Brownsville",
+                                     "label": "Brownsville", "numeric": False, "bid": 0.4, "ask": 0.46, "mid": 0.43}]}]
+                            return route.fulfill(response=resp, body=json.dumps(m))
+                        return route.continue_()
+                    return handler
+
+                for _final in (False, True):
+                    page.route("**/data/snapshots/**", _storm_routes(_final))
+                    page.goto(f"{srv.url}/hurricane.html")
+                    page.wait_for_timeout(1400)
+                    tag = "settled" if _final else "live"
+                    ncards = page.locator("#liveStorms .scardwrap").count()
+                    chk.add(f"{scheme} storm ({tag}): a card per signalled location", ncards >= 1, f"cards={ncards}")
+                    labels = page.eval_on_selector_all("#liveStorms .scardwrap text", "els => els.map(e => e.textContent)")
+                    chk.add(f"{scheme} storm ({tag}): the settlement column is reserved from the first delivery",
+                            ("settled" if _final else "settles") in labels, str(labels[:6]))
+                    marks = len([t for t in labels if t in ("\u2713", "\u2715")])
+                    chk.add(f"{scheme} storm ({tag}): outcome marks appear only once settled",
+                            (marks > 0) == _final, f"marks={marks} settled={_final}")
+                    pools_n = page.locator("#liveStorms .ladder .lrow").count()
+                    chk.add(f"{scheme} storm ({tag}): the pool contract lists its named candidates", pools_n >= 1, f"rows={pools_n}")
+                    page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_px = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} storm ({tag}): the exchange's price reads against the vendor's probability",
+                            "The exchange" in t_px and "The vendor" in t_px, t_px[:80])
+                    chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
+                    page.unroute("**/data/snapshots/**")
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(900)
                 dots = page.locator("#basin circle").count()
                 chk.add(f"{scheme} hurricane: reference locations drawn", dots >= 100, f"circles={dots}")
                 page.locator("#basin circle").nth(40).hover(force=True); page.wait_for_timeout(120)

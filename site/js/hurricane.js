@@ -653,6 +653,7 @@ window.WXHur = (() => {
     if (!H) { $('#basin').innerHTML = ''; $('#basin').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
     [['b1', 'AL'], ['b2', 'EP']].forEach(([id, b]) => { $('#' + id).onclick = () => { basin = b; document.querySelectorAll('.bar button').forEach(x => x.classList.remove('on')); $('#' + id).classList.add('on'); draw(); }; });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); drawOthers();
+    if (window.WXStorm) { WXStorm.init(tip); WXStorm.draw(RK, MK); }
   }
   return { init };
 })();

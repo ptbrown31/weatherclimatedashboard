@@ -26,7 +26,7 @@ DIST = os.path.join(ROOT, "dist")
 
 SHARED = ["css/site.css", "js/theme.js", "js/common.js", "js/data.js", "js/market.js"]
 STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorecard.html", "climate.html",
-              "js/chart-city.js", "js/map.js", "js/hurricane.js", "js/scorecard.js", "js/climate.js",
+              "js/chart-city.js", "js/map.js", "js/hurricane.js", "js/storm.js", "js/scorecard.js", "js/climate.js",
               "assets/basemap.json", "assets/world.json", "assets/hurricane-geo.json"]
 EMBED = ["embed/index.html", "js/chart-city.js"]
 

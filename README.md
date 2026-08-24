@@ -79,6 +79,7 @@ before the day began, and whether it is an official product value or an extreme 
 | `snapshots/market/hurricane.json`, `climate.json` | 10 min | every contract of the exchange's hurricane category and of the climate products, with quotes |
 | `snapshots/headline.json` | 10 min | the four numbers the landing page opens with: the accuracy standing, the newest scored day's largest single error, the widest disagreement about tomorrow, and one hurricane contract. Built from snapshots already written, so the landing page fetches one small file instead of the scorecard |
 | `snapshots/season.json` | daily | the Atlantic season's formations to date from the ATCF best tracks, and the 1991-2020 cumulative formation calendar from NHC HURDAT2, so the count contracts can be read against the pace of an average season, plus the seasonal forecast total from `season_forecast` when one is configured |
+| `snapshots/storm/{NAME}_{YEAR}.json` | 10 min | one live storm's delivery ledger: the vendor's probability ladder per reference location as each delivery arrived, and the settled gusts once the final file lands. Append-only and keyed by each delivery's identity, capped at the most recent 48 cycles and 60 sites. One file per storm, fetched only when a reader opens that storm |
 | `snapshots/reask.json` | 10 min | the vendor lane: its state when off; per storm the latest LiveCyc ladder and the interim and final settlement files when on |
 | `archive/market/{YYYYMMDD}/{HHMMSS}.json.gz` | 10 min | every quote of the pass, append-only (expires after 400 days on AWS) |
 

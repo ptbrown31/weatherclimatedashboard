@@ -76,7 +76,8 @@ parameters: `station`, `theme`, `market`.
                      scorecard.py, normals.py, climate.py, season.py (the count climatology),
                      basemap.py, storage.py, config.py,
                      run.py (command line), handler.py (the only vendor-specific file)
-    site/            the static frontend; js/market.js is the market seam; embed/ is the iframe target
+    site/            the static frontend; js/market.js is the market seam; js/storm.js is a live storm's
+                     wind contracts, delivery by delivery; embed/ is the iframe target
     site/assets/     small projected geometry the pages load (generated)
     geo/             vendored inputs, not served: public-domain TopoJSON and the exchange's wind reference-location list
     samples/         snapshots for offline local mode (checked in)

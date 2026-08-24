@@ -127,23 +127,6 @@ def _num(v) -> Optional[float]:
         return None
 
 
-def _sustained_mph(store: Storage, name: str) -> Optional[int]:
-    """The storm's sustained wind from the NHC roster at this moment, in mph, so
-    the ladder can be read against the number the public advisories quote. The
-    contracts settle on peak gusts, which run higher; the two are different
-    measurements and the page says so."""
-    raw = store.get("snapshots/hurricane.json")
-    if not raw:
-        return None
-    try:
-        for st in (json.loads(raw).get("storms") or []):
-            if str(st.get("name", "")).lower() == str(name).lower() and st.get("intensityKt") is not None:
-                return int(round(float(st["intensityKt"]) * 1.15078))
-    except (ValueError, TypeError):
-        pass
-    return None
-
-
 def append_step(store: Storage, name: str, year: int, step: dict, log: Callable) -> dict:
     """Append one delivery to a storm's ledger and return its summary.
 
@@ -183,13 +166,15 @@ def append_step(store: Storage, name: str, year: int, step: dict, log: Callable)
     return {"steps": len(steps), "sites": len(doc["sites"]), "latest": step["id"], "final": doc.get("final") is not None}
 
 
-def _step(lad: dict, kind: str, sid: str, at, ts: str, sustained) -> dict:
-    """One delivery as the ledger stores it: the probability ladder per site,
-    as percentages in the file's own threshold order, plus the storm's sustained
-    wind at the moment it arrived."""
+def _step(lad: dict, kind: str, sid: str, at, ts: str) -> dict:
+    """One delivery as the ledger stores it: the probability ladder per site, as
+    percentages in the file's own threshold order. Deliberately nothing else.
+    The advisory's sustained wind is a one-minute mean and these contracts settle
+    on a peak three-second gust; carrying the two together invites a comparison
+    between different measurements, so the ledger does not."""
     sites = {k: v.get("p") or [] for k, v in (lad.get("sites") or {}).items()}
     meta = {k: {"name": v.get("name"), "lat": v.get("lat"), "lon": v.get("lon")} for k, v in (lad.get("sites") or {}).items()}
-    return {"id": sid, "kind": kind, "at": at, "ts": ts, "sustainedMph": sustained,
+    return {"id": sid, "kind": kind, "at": at, "ts": ts,
             "sites": sites, "siteMeta": meta, "thresholds": lad.get("thresholds")}
 
 
@@ -246,8 +231,7 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             lad = parse_ladder_csv(body.decode("utf-8", "replace"))
             entry["livecyc"] = {"forecastTime": ft, "lastModified": latest.get("last_modified"), "fetched": _iso(now),
                                 "cycles": len(fcs), **lad}
-            entry["ledger"] = append_step(store, name, year, _step(lad, "livecyc", _stamp(ft) or ft, ft,
-                                                                  _iso(now), _sustained_mph(store, name)), log)
+            entry["ledger"] = append_step(store, name, year, _step(lad, "livecyc", _stamp(ft) or ft, ft, _iso(now)), log)
             fetched += 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"livecyc {name} {ft}: {type(e).__name__}: {e}")
@@ -276,8 +260,7 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
                 parsed = parse(body.decode("utf-8", "replace"))
                 entry[kind] = {"lastModified": lm, "fetched": _iso(now), **(parsed if kind == "interim" else {"sites": parsed})}
                 if kind == "interim":
-                    entry["ledger"] = append_step(store, name, year, _step(parsed, "interim", "INT", lm, _iso(now),
-                                                                           _sustained_mph(store, name)), log)
+                    entry["ledger"] = append_step(store, name, year, _step(parsed, "interim", "INT", lm, _iso(now)), log)
                 else:
                     entry["ledger"] = append_step(store, name, year,
                                                   {"id": "FINAL", "kind": "final", "at": lm, "ts": _iso(now),

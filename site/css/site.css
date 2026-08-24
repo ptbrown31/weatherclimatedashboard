@@ -146,3 +146,8 @@ button.vbtn.on{background:var(--accent);color:var(--accent-ink);border-color:var
 svg.cpanel{width:100%;height:auto;display:block}
 .tile.link{cursor:pointer}
 .tile.link:hover{border-color:var(--accent)}
+/* hurricane: a live storm's per-location delivery charts */
+.scards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px}
+.scardwrap{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 10px}
+.scardwrap .lt{font-size:12.5px;font-weight:700;color:var(--navy)}
+svg.scard{width:100%;height:auto;display:block}
