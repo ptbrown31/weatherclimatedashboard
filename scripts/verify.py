@@ -24,6 +24,7 @@ screenshots. Exit 1 on any failure.
 """
 from __future__ import annotations
 import argparse
+import datetime as dt
 import json
 import os
 import socket
@@ -178,12 +179,21 @@ def run(no_build: bool) -> int:
                         return max(0, round(min(99, scale * (1 - i / len(THR)) * 100 - i * 4), 1))
                     return {"BR": [q(i) for i in range(len(THR))]}
 
+                # six-hourly cycles with the 18Z one missing, so the gap mark has
+                # something real to find and the even spacings have to stay unmarked
+                BASE = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+                HOURS = [0, 6, 12, 24, 30, 36]
+
                 def _ledger(final):
                     # a distinct recorded price per delivery, so scrubbing back has to
                     # move the square rather than leave today's price under an old ladder
-                    steps = [{"id": "20260901%02d" % (k * 6), "kind": "livecyc", "at": "t", "ts": "t", "sites": _lad(0.2 + 0.1 * k),
-                              "prices": {"BR": {str(t): 10.0 + 5 * k for t in THR}}}
-                             for k in range(6)]
+                    steps = []
+                    for k, hh in enumerate(HOURS):
+                        t0 = BASE + dt.timedelta(hours=hh)
+                        steps.append({"id": t0.strftime("%Y%m%d%H"), "kind": "livecyc",
+                                      "at": t0.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": "t",
+                                      "sites": _lad(0.2 + 0.1 * k),
+                                      "prices": {"BR": {str(t): 10.0 + 5 * k for t in THR}}})
                     steps.append({"id": "INT", "kind": "interim", "at": "t", "ts": "t", "sites": _lad(0.95),
                                   "prices": {"BR": {str(t): 44.0 for t in THR}}})
                     return {"schema": 2, "name": "Erin", "year": 2026, "attribution": "Powered by Reask", "thresholds": THR,
@@ -271,6 +281,21 @@ def run(no_build: bool) -> int:
                     t_now = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} storm ({tag}): the newest delivery carries the current price",
                             "The exchange, now" in t_now, t_now[:120])
+                    # ---- a cycle the vendor never delivered
+                    ngap = page.locator("#liveStorms .scardwrap rect.sgap").count()
+                    ncards2 = page.locator("#liveStorms .scardwrap").count()
+                    chk.add(f"{scheme} storm ({tag}): the missed cycle is marked once per card, and the even spacings are not",
+                            ngap == ncards2, f"marks={ngap} cards={ncards2}")
+                    breaks = page.locator("#liveStorms svg.stimeline g line").count()
+                    chk.add(f"{scheme} storm ({tag}): the timeline carries the same break", breaks == 2, f"lines={breaks}")
+                    head = page.locator("#liveStorms p").first.inner_text()
+                    chk.add(f"{scheme} storm ({tag}): the missing cycle is stated without hovering",
+                            "1 cycle the vendor did not deliver" in head, head[:140])
+                    page.locator("#liveStorms .scardwrap rect.sgap").first.hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_gap = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} storm ({tag}): the gap box counts the hours and the missing cycles",
+                            "missing here" in t_gap and "12 hours" in t_gap and "6 hours" in t_gap, t_gap[:160])
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
                     page.unroute("**/data/snapshots/**")
                 page.goto(f"{srv.url}/hurricane.html")

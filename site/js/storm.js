@@ -49,10 +49,49 @@ window.WXStorm = (() => {
     return c && c.mid != null ? cents(c.mid) : null;
   };
 
+  // ---- deliveries that never arrived
+  //
+  // The horizontal axis counts deliveries, so a cycle the vendor skipped would
+  // close up and read as though no more time passed there than anywhere else.
+  // The cadence is taken as the median spacing between consecutive cycles, which
+  // is what the vendor actually ran rather than an assumption about what it
+  // should run; a spacing longer than one and a half of those is a gap, and the
+  // number of missing cycles is that spacing over the cadence. Only cycles are
+  // compared: an interim settlement arrives on the exchange's schedule, not the
+  // vendor's, so the step onto it is not a gap. With fewer than three cycles
+  // there is no cadence to speak of and nothing is marked.
+  function gaps(cyc) {
+    // the forecast time if it parses, and otherwise the delivery id, which is
+    // always the cycle's own YYYYMMDDHH and is the thing the ledger is keyed on
+    const when = s => {
+      const p = Date.parse(s.at || '');
+      if (isFinite(p)) return p;
+      const m = /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(s.id || ''));
+      return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) : NaN;
+    };
+    const t = cyc.map(s => (s.kind === 'livecyc' ? when(s) : NaN));
+    const d = [];
+    for (let k = 1; k < cyc.length; k++) if (isFinite(t[k]) && isFinite(t[k - 1])) d.push([k, t[k] - t[k - 1]]);
+    if (d.length < 2) return [];
+    const sorted = d.map(x => x[1]).slice().sort((a, b) => a - b);
+    const cad = sorted[Math.floor(sorted.length / 2)];
+    if (!(cad > 0)) return [];
+    return d.filter(x => x[1] > cad * 1.5).map(x => ({
+      after: x[0] - 1, hours: Math.round(x[1] / 36e5),
+      missing: Math.max(1, Math.round(x[1] / cad) - 1), cadence: Math.round(cad / 36e5),
+    }));
+  }
+  // the axis-break glyph: two short slashes, the convention for a stretch left out
+  function slashes(g, cx, cy, h) {
+    [-2.5, 2.5].forEach(o => g.appendChild(el('line', {
+      x1: cx + o - 2.5, x2: cx + o + 2.5, y1: cy + h / 2, y2: cy - h / 2,
+      stroke: 'var(--muted)', 'stroke-width': 1.4, 'pointer-events': 'none' })));
+  }
+
   // ---- one location's card: the ladder through the deliveries.
   // Returns the node and a setCursor, so scrubbing moves a line and a few marks
   // rather than rebuilding every card on every step.
-  function card(doc, sid, storm) {
+  function card(doc, sid, storm, gp) {
     const meta = doc.sites[sid] || {};
     const thr = doc.thresholds || [];
     const cyc = (doc.steps || []).filter(s => s.kind !== 'final');
@@ -85,6 +124,26 @@ window.WXStorm = (() => {
           'delivery ' + (k + 1) + ' of ' + cyc.length + ' so far · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
       });
       svg.appendChild(band);
+    });
+
+    // a missed cycle, marked between the two columns that sit either side of it.
+    // The strip is narrower than the space between them so each delivery keeps
+    // most of its own hover band, and it goes in before the rungs so a price mark
+    // still takes the pointer ahead of it.
+    const wcol = (R - L) / (n - 1);
+    (gp || []).forEach(g => {
+      if (g.after + 1 >= cyc.length) return;
+      const mid = (x(g.after) + x(g.after + 1)) / 2;
+      const strip = el('rect', { class: 'sgap', x: mid - wcol * 0.2, y: T, width: Math.max(wcol * 0.4, 5), height: B - T,
+                                 fill: 'var(--rule)', opacity: .28, 'pointer-events': 'all' });
+      bind(strip, () => tip.rows('A delivery is missing here',
+        [['Between', label(cyc[g.after]) + ' and ' + label(cyc[g.after + 1])],
+         ['Elapsed', g.hours + ' hours'],
+         ['Cycles missing', String(g.missing)],
+         ['Usual cadence', g.cadence + ' hours']],
+        'the axis counts deliveries, so these two columns are further apart in time than the rest'));
+      svg.appendChild(strip);
+      const gl = el('g'); slashes(gl, mid, B, 9); svg.appendChild(gl);
     });
 
     thr.forEach((t, i) => {
@@ -184,7 +243,7 @@ window.WXStorm = (() => {
   // more tick and the cursor stays where the reader left it, or follows the end
   // if that is where it already was. There is no scale to fix in advance and
   // nothing beyond the last tick, because the storm's length is not known.
-  function timeline(cyc, onMove) {
+  function timeline(cyc, gp, onMove) {
     const W = 960, H = 46, L = 16, R = 936;
     const n = Math.max(cyc.length, 2);
     const x = i => L + (i / (n - 1)) * (R - L);
@@ -196,6 +255,10 @@ window.WXStorm = (() => {
       svg.appendChild(interim
         ? el('rect', { x: x(i) - 3.5, y: 16.5, width: 7, height: 7, fill: 'var(--accent)' })
         : el('circle', { cx: x(i), cy: 20, r: 3, fill: 'var(--muted)' }));
+    });
+    (gp || []).forEach(g => {
+      if (g.after + 1 >= cyc.length) return;
+      const gl = el('g'); slashes(gl, (x(g.after) + x(g.after + 1)) / 2, 20, 11); svg.appendChild(gl);
     });
     const cur = el('path', { d: '', fill: 'var(--ink)' });
     const lab = txt('', { x: L, y: 40, class: 'ax', 'font-weight': 700 });
@@ -274,6 +337,11 @@ window.WXStorm = (() => {
     else state.push('interim settlement pending');
     if (doc && doc.final) state.push('final settlement received; the contracts have resolved');
     else state.push('final settlement pending, and its timing is not known in advance');
+    const gp = gaps(cyc);
+    if (gp.length) {
+      const miss = gp.reduce((a, g) => a + g.missing, 0);
+      state.push(miss + ' cycle' + (miss === 1 ? '' : 's') + ' the vendor did not deliver, marked on the charts');
+    }
     host.appendChild(h('p', { class: 'cap', text: state.join(' · ') }));
     if (!doc || !cyc.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
@@ -286,9 +354,9 @@ window.WXStorm = (() => {
     });
     const order = Object.keys(peak).filter(sid => peak[sid] > 0).sort((a, b) => peak[b] - peak[a]);
     const grid = h('div', { class: 'scards' });
-    const cards = order.slice(0, MAX_CARDS).map(sid => card(doc, sid, storm));
+    const cards = order.slice(0, MAX_CARDS).map(sid => card(doc, sid, storm, gp));
     cards.forEach(c => grid.appendChild(c.node));
-    const tl = timeline(cyc, ti => cards.forEach(c => c.setCursor(ti)));
+    const tl = timeline(cyc, gp, ti => cards.forEach(c => c.setCursor(ti)));
     const bar = h('div', { class: 'bar sbar' });
     const prev = h('button', { text: '◀', title: 'the delivery before this one' });
     const next = h('button', { text: '▶', title: 'the delivery after this one' });
