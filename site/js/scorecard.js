@@ -41,7 +41,10 @@ window.WXScore = (() => {
   const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-  let S = null, SUM = null, cur = null, view = 'yhigh', tip = null;
+  // the view is addressable, because the daily letter links one of these four
+  // directly and a link that lands on the wrong panel is worse than no link
+  let S = null, SUM = null, cur = null, tip = null;
+  let view = (VIEWS.find(v => v.key === WXC.param('view')) || VIEWS[0]).key;
 
   const fmt = v => (v == null ? '—' : (Math.round(v * 10) / 10).toFixed(1));
   const pct = v => (v == null ? '—' : Math.round(v * 100) + '%');
@@ -463,15 +466,30 @@ window.WXScore = (() => {
     await WXM.loadSummary();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440));
     S = r.data; SUM = sres.data;
+    const btns = {};
     VIEWS.forEach(v => {
       const b = h('button', { class: 'vbtn' + (v.key === view ? ' on' : ''), text: v.label });
-      b.onclick = () => { view = v.key; document.querySelectorAll('#divControls button').forEach(x => x.classList.remove('on')); b.classList.add('on'); drawFigure(); };
+      b.onclick = () => {
+        view = v.key;
+        Object.values(btns).forEach(x => x.classList.remove('on'));
+        b.classList.add('on');
+        // keep the address bar on the panel being read, so a copied link reopens it
+        const u = new URL(location.href); u.searchParams.set('view', v.key);
+        history.replaceState(null, '', u);
+        drawFigure();
+      };
+      btns[v.key] = b;
       $('#divControls').appendChild(b);
     });
     if (!S || !S.stations) {
       $('#overall').textContent = 'No scorecard available yet.';
       $('#divergence').textContent = '';
-      if (SUM) { view = 'thigh'; document.querySelectorAll('#divControls button').forEach((x, i) => x.classList.toggle('on', i === 2)); drawFigure(); }
+      // with no scored day yet only the forward views have anything to draw
+      if (SUM) {
+        if (view !== 'thigh' && view !== 'tlow') view = 'thigh';
+        Object.entries(btns).forEach(([k, b]) => b.classList.toggle('on', k === view));
+        drawFigure();
+      }
       return;
     }
     $('#since').textContent = 'Scored from ' + S.firstDay + ' (the day the archive started). ' + S.method + '.';

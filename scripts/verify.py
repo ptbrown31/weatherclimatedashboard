@@ -339,6 +339,23 @@ def run(no_build: bool) -> int:
                 for i in range(4):
                     page.locator("#divControls button").nth(i).click(); page.wait_for_timeout(250)
                     titles.append(page.locator("#divTitle").inner_text())
+                # ---- the view is addressable: the daily letter links one of the four
+                # directly, and clicking one has to leave a link that reopens it
+                chk.add(f"{scheme} scorecard: clicking a view puts it in the address bar",
+                        "view=" in page.url, page.url[-40:])
+                for key, want in (("tlow", "Tomorrow"), ("ylow", "Yesterday")):
+                    page.goto(f"{srv.url}/scorecard.html?view={key}")
+                    page.wait_for_timeout(900)
+                    on = page.locator("#divControls button.on").inner_text()
+                    chk.add(f"{scheme} scorecard: ?view={key} opens on that panel",
+                            want in on and "low" in on.lower(), f"{on} / {page.locator('#divTitle').inner_text()[:40]}")
+                page.goto(f"{srv.url}/scorecard.html?view=nonsense")
+                page.wait_for_timeout(900)
+                chk.add(f"{scheme} scorecard: an unknown view falls back rather than blanking",
+                        page.locator("#divControls button.on").count() == 1 and page.locator("#divsvg g").count() >= 20,
+                        page.locator("#divControls button.on").inner_text())
+                page.goto(f"{srv.url}/scorecard.html")
+                page.wait_for_timeout(900)
                 chk.add(f"{scheme} scorecard: all four views render a titled figure", len([t for t in titles if t]) == 4 and page.locator("#divsvg g").count() >= 20, "; ".join(t[:26] for t in titles))
                 page.locator("#divControls button").first.click(); page.wait_for_timeout(250)
                 col = page.locator("#divsvg text", has_text="Consensus error").count()
