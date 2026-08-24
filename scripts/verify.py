@@ -223,7 +223,7 @@ def run(no_build: bool) -> int:
                     page.locator(".cwrap").first.locator("circle").first.hover(force=True); page.wait_for_timeout(150)
                     t_st = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} hover: a formation dot names the storm and the running count", "Reached the threshold" in t_st, t_st[:80])
-                    page.locator(".cwrap").first.locator("rect[fill='var(--accent)']").first.hover(force=True); page.wait_for_timeout(150)
+                    page.locator(".cwrap").first.locator("rect[fill='var(--yes)']").first.hover(force=True); page.wait_for_timeout(150)
                     t_bar = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} hover: a ladder bar names the count it pays at", "At least" in t_bar and "Yes bid" in t_bar, t_bar[:80])
                 # ---- a live storm, injected at the network layer: no vendor data is kept
@@ -362,6 +362,49 @@ def run(no_build: bool) -> int:
                 page.locator("#basin circle").nth(40).hover(force=True); page.wait_for_timeout(120)
                 t_dot = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: reference location names itself and the lane state", "Country" in t_dot and ("probabilities" in t_dot), t_dot[:80])
+                # ---- hurricane contract links, on every surface that shows a price
+                RE = (r"^https://www\.interactivebrokers\.com/predictionmarkets/app/#/(\d+)/product-details/"
+                      r"contracts\?exchange=FORECASTX&conid_yes=(\d+)$")
+                import re as _re
+
+                def linked_href(sel, label):
+                    n = page.locator(sel).count()
+                    if not n:
+                        chk.add(f"{scheme} hurricane link: {label} present", False, f"{sel} count=0")
+                        return None
+                    page.locator(sel).first.scroll_into_view_if_needed()
+                    page.locator(sel).first.hover(force=True)
+                    page.wait_for_timeout(180)
+                    a = page.locator("#tip a")
+                    href = a.first.get_attribute("href") if a.count() else ""
+                    m = _re.match(RE, href or "")
+                    chk.add(f"{scheme} hurricane link: {label} links to a contract", bool(m), (href or "no href")[:100])
+                    if m:
+                        chk.add(f"{scheme} hurricane link: {label} uses two different ids", m.group(1) != m.group(2), f"{m.group(1)}/{m.group(2)}")
+                    return href
+
+                # the market's ladder: Yes green and No red, both linked, like the other ladders
+                ybars = page.locator("#ladders svg.cpanel rect[fill='var(--yes)'][role='link']").count()
+                nbars = page.locator("#ladders svg.cpanel rect[fill='var(--no)'][role='link']").count()
+                chk.add(f"{scheme} market's ladder: Yes and No bars are drawn in equal number",
+                        ybars > 0 and ybars == nbars, f"yes={ybars} no={nbars}")
+                chk.add(f"{scheme} market's ladder: the single-colour bar is gone",
+                        page.locator("#ladders svg.cpanel rect[fill='var(--accent)']").count() == 0,
+                        str(page.locator("#ladders svg.cpanel rect[fill='var(--accent)']").count()))
+                axis = page.locator("#ladders svg.cpanel text", has_text="Yes green, No red").count()
+                chk.add(f"{scheme} market's ladder: the axis says which side is which", axis >= 1, f"labels={axis}")
+                linked_href("#ladders svg.cpanel rect[fill='var(--yes)'][role='link']", "the market's ladder")
+                linked_href("#ladders .lrow .lv[role='link']", "a period ladder row")
+                linked_href("#landfall td.num.lnk", "the landfall table")
+                linked_href("#others td.num.lnk", "the other-contracts table")
+                linked_href("#tiles .tile.lnk", "a headline tile")
+                # the map: a shaded landfall region is a contract
+                shaded = page.locator("#basin path[role='link']").count()
+                chk.add(f"{scheme} hurricane link: shaded map regions are clickable", shaded >= 3, f"regions={shaded}")
+                linked_href("#basin path[role='link']", "a shaded map region")
+                chk.add(f"{scheme} hurricane link: the caption says the map is clickable",
+                        "clicking a shaded region" in page.locator("#basinCap").inner_text(),
+                        page.locator("#basinCap").inner_text()[:80])
                 page.locator("#ladders .lrow").first.hover(force=True); page.wait_for_timeout(120)
                 t_row = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: count ladder row shows the book and settlement", "Yes bid" in t_row and "Settles" in t_row, t_row[:80])

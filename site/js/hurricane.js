@@ -223,9 +223,11 @@ window.WXHur = (() => {
     svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
     const lf = basin === 'AL' ? landfallQuotes() : null;
     const hlf = market('HLF');
-    const poly = (rr, fill, stroke, sw, html) => {
+    const poly = (rr, fill, stroke, sw, html, url, nm) => {
       const p = el('path', { d: rr.map(r => 'M' + r.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join('L') + 'Z').join(' '), fill, stroke, 'stroke-width': sw });
       if (html) attach(p, html);
+      // a shaded region is a contract: clicking the map opens the one it stands for
+      if (url) WXM.linkTo(p, url, 'Open the ' + (nm || 'landfall') + ' contract on ForecastEx');
       svg.appendChild(p);
     };
     // fill and tooltip for a region: shaded by the landfall contract's Yes price where one is listed with bids
@@ -233,18 +235,20 @@ window.WXHur = (() => {
       const c = lf ? lf[label] : null;
       const season = c && c.expiryLabel ? c.expiryLabel : (hlf && hlf.contracts[0] && hlf.contracts[0].expiryLabel) || 'season';
       const rows = c ? [['Landfall contract (' + esc(season) + ')', c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid))]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Yes price' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
-      const html = tip.rows(esc(nm), rows, c ? null : (lf ? 'no landfall contract listed for this region' : null));
-      return [c && c.mid != null ? ramp(c.mid) : 'var(--map-land)', html];
+      const url = c && hlf ? WXM.contractUrl(hlf.productConid, c.conidYes || c.conid) : null;
+      const html = tip.rows(esc(nm), rows.concat(url ? [['On the exchange', exLink(url)]] : []),
+        c ? (url ? 'click to open this contract' : null) : (lf ? 'no landfall contract listed for this region' : null));
+      return [c && c.mid != null ? ramp(c.mid) : 'var(--map-land)', html, url];
     };
     if (GEO) {
       Object.entries(GEO.countries || {}).forEach(([nm, rr]) => {
         const label = Object.keys(lf || {}).find(k => regionKey(k) === nm) || nm;
-        const [f, t] = fillFor(label, nm);
-        poly(rr, f, 'var(--map-line)', .6, t);
+        const [f, t, u] = fillFor(label, nm);
+        poly(rr, f, 'var(--map-line)', .6, t, u, nm);
       });
       (NATION || []).forEach(r => poly([r], 'var(--map-land)', 'var(--map-line)', .6));
-      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { const [f, t] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7, t); });
-      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { const [f, t] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8, t); });
+      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7, t, u, nm); });
+      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8, t, u, nm); });
     }
     const counts = drawNhc(svg, X, Y, basin);
     // the reference locations: small dots, scaled by the vendor's P(gust > 80 mph) when the lane is live
@@ -263,7 +267,7 @@ window.WXHur = (() => {
     $('#basinCap').textContent = (counts.storms ? '' : 'No active tropical cyclones in this basin at the last update. ') +
       'Orange dashed regions are NHC seven-day formation odds; cones and tracks draw automatically when a storm is active. ' +
       (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that part of the map shows storms only. ' : '') +
-      (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for the Yes and No bids); unshaded regions have no listed contract or no bids. ' : '') +
+      (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for the Yes and No bids); clicking a shaded region opens that contract on the exchange; unshaded regions have no listed contract or no bids. ' : '') +
       (vendorShown ? 'Red dots scale with the vendor’s probability of a gust above 80 mph at that reference location (' + ((RK && RK.attribution) || 'Powered by Reask') + '). ' : '');
     if (vendorShown) svg.appendChild(txt((RK && RK.attribution) || 'Powered by Reask', { x: W - 10, y: Hh - 10, 'text-anchor': 'end', 'font-size': 12, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl' }));
     const key = $('#basinKey'); key.innerHTML = '';
@@ -301,14 +305,17 @@ window.WXHur = (() => {
   }
 
   // ---- season tiles and the count ladders
-  function tile(label, value, sub, html) {
+  function tile(label, value, sub, html, url) {
     const t = h('div', { class: 'tile' }, [h('div', { class: 'tv', text: value == null ? '—' : String(value) }), h('div', { class: 'tl', text: label }), sub ? h('div', { class: 'ts', text: sub }) : h('span')]);
     if (html) attach(t, html);
+    if (url) { t.classList.add('lnk'); WXM.linkTo(t, url, 'Open ' + label + ' on ForecastEx'); }
     return t;
   }
   // `prod` is the market's product id on the exchange, which a contract link
   // needs alongside the contract's own conid; without it the rows are drawn
   // exactly as before rather than linking somewhere guessed
+  const exLink = url => '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract →</a>';
+
   function ladderPanel(title, rows, sub, mname, prod) {
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: title })]);
     if (sub) div.appendChild(h('div', { class: 'cap', style: 'margin:0 0 6px', text: sub }));
@@ -322,7 +329,7 @@ window.WXHur = (() => {
       ]);
       const url = r.c && WXM.contractUrl(prod, r.c.conidYes || r.c.conid);
       if (r.c) attach(bar, tip.rows(contractTitle({ name: mname }, r.c),
-        quoteRows(r.c).concat(url ? [['On the exchange', '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract →</a>']] : []),
+        quoteRows(r.c).concat(url ? [['On the exchange', exLink(url)]] : []),
         asofFoot() + (url ? ' · click the price to open the contract' : '')));
       if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + r.label + ' on ForecastEx');
       div.appendChild(bar);
@@ -339,9 +346,12 @@ window.WXHur = (() => {
     tiles.appendChild(tile('hurricanes', s.hurricanes, 'from the ATCF best tracks', seasonTip));
     tiles.appendChild(tile('major hurricanes', s.majors, 'category 3 or stronger', seasonTip));
     const cat4 = market('HCAT4');
-    if (cat4) cat4.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec)).slice(0, 4).forEach(c =>
+    if (cat4) cat4.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec)).slice(0, 4).forEach(c => {
+      const url = WXM.contractUrl(cat4.productConid, c.conidYes || c.conid);
       tiles.appendChild(tile('Cat 4 US landfall ' + c.label.replace(/^By /, 'by '), yes(c) == null ? '—' : yes(c) + '¢', 'Yes price, ' + quoteText(c).replace(/^Yes [^(]*/, '').replace(/[()]/g, ''),
-        tip.rows(contractTitle(cat4, c), quoteRows(c).filter(r => r[0] !== 'Settles').concat([['Expiration', expDate(c.expiration)]]), asofFoot()))));
+        tip.rows(contractTitle(cat4, c), quoteRows(c).filter(r => r[0] !== 'Settles').concat([['Expiration', expDate(c.expiration)]]).concat(url ? [['On the exchange', exLink(url)]] : []),
+          asofFoot() + (url ? ' · click to open this contract' : '')), url));
+    });
     const lad = $('#ladders'); lad.innerHTML = '';
     if (!MK) {
       $('#laddersCap').textContent = WXM.on() ? 'Exchange quotes unavailable.' : 'The market layer is off; no contract prices are shown.';
@@ -536,15 +546,31 @@ window.WXHur = (() => {
       svg.appendChild(el('line', { x1: px(p), x2: px(p), y1: T, y2: B, class: 'grid' }));
       svg.appendChild(txt(p, { x: px(p), y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
     });
-    svg.appendChild(txt('price of Yes (at least N), ¢', { x: (RL + RR) / 2, y: B + 32, 'text-anchor': 'middle', class: 'axl' }));
+    svg.appendChild(txt('Yes green, No red · ¢', { x: (RL + RR) / 2, y: B + 32, 'text-anchor': 'middle', class: 'axl' }));
+    const prod = (market(cfg.sym) || {}).productConid;
     bars.forEach(b => {
       const v = yes(b.c), yy = y(b.n);
-      if (v == null) { svg.appendChild(txt('no bids', { x: px(0) + 4, y: yy + 3.5, class: 'ax' })); return; }
-      const bar = el('rect', { x: px(0), y: yy - 5, width: Math.max(px(v) - px(0), 1), height: 10, fill: 'var(--accent)' });
-      attach(bar, tip.rows(contractTitle({ name: (market(cfg.sym) || {}).name }, b.c),
-        [['At least', String(b.n)]].concat(quoteRows(b.c)), asofFoot()));
-      svg.appendChild(bar);
-      svg.appendChild(txt(v + '¢', { x: px(v) + 4, y: yy + 3.5, class: 'ax', 'font-weight': 700, 'pointer-events': 'none' }));
+      if (v == null) {
+        svg.appendChild(el('rect', { x: px(0), y: yy - 5, width: px(100) - px(0), height: 10, fill: 'transparent',
+                                     stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2', 'pointer-events': 'none' }));
+        svg.appendChild(txt('no bids', { x: (px(0) + px(100)) / 2, y: yy + 3.5, class: 'ax', 'text-anchor': 'middle' }));
+        return;
+      }
+      // the same Yes-green / No-red split the other ladders use: both sides of a
+      // pair that sums to a dollar, rather than one bar and an empty remainder
+      const one = b.c.mid != null && (b.c.bid == null || b.c.ask == null);
+      const gw = px(v) - px(0);
+      const yb = el('rect', { x: px(0), y: yy - 5, width: Math.max(gw, 1), height: 10, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
+      const nb = el('rect', { x: px(0) + gw, y: yy - 5, width: Math.max(px(100) - px(0) - gw, 1), height: 10, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
+      const url = WXM.contractUrl(prod, b.c.conidYes || b.c.conid);
+      const html = tip.rows(contractTitle({ name: (market(cfg.sym) || {}).name }, b.c),
+        [['At least', String(b.n)]].concat(quoteRows(b.c)).concat(url ? [['On the exchange', exLink(url)]] : []),
+        asofFoot() + (url ? ' · click a price to open the contract' : ''));
+      [yb, nb].forEach(bar => { attach(bar, html); if (url) WXM.linkTo(bar, url, 'Open ' + (b.c.label || b.n) + ' on ForecastEx'); svg.appendChild(bar); });
+      if (one) svg.appendChild(el('rect', { x: px(0), y: yy - 5, width: px(100) - px(0), height: 10, fill: 'none',
+                                            stroke: 'var(--panel)', 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
+      if (gw >= 26) svg.appendChild(txt(v + '¢' + (one ? '*' : ''), { x: px(0) + 3, y: yy + 3.5, class: 'ladtxt', 'pointer-events': 'none' }));
+      if (px(100) - px(0) - gw >= 26) svg.appendChild(txt((100 - v) + '¢', { x: px(100) - 3, y: yy + 3.5, class: 'ladtxt', 'text-anchor': 'end', 'pointer-events': 'none' }));
     });
     // where each pace finishes, marked on the ladder and named underneath it, so
     // the labels cannot land on a bar's price
@@ -579,9 +605,13 @@ window.WXHur = (() => {
       const k = regionKey(c.label);
       const drawn = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]);
       const onMap = !drawn ? 'not drawn' : (c.mid == null ? 'outline only (no bids)' : 'shaded');
-      const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) }),
+      const yesCell = h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) });
+      const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), yesCell,
         h('td', { class: 'num', text: c.ask == null ? '—' : (WXM.payout(cents(c.ask)) != null ? WXM.payout(cents(c.ask)) + '×' : '—') }), h('td', { text: onMap })]);
-      attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat([['On the map', onMap]]), asofFoot()));
+      const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
+      attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat([['On the map', onMap]]).concat(url ? [['On the exchange', exLink(url)]] : []),
+        asofFoot() + (url ? ' · click the Yes price to open the contract' : '')));
+      if (url) { yesCell.classList.add('lnk'); WXM.linkTo(yesCell, url, 'Open ' + c.label + ' on ForecastEx'); }
       tb.appendChild(tr);
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
@@ -640,8 +670,12 @@ window.WXHur = (() => {
       const tb = h('table');
       tb.appendChild(h('tr', {}, [h('th', { text: m.name + ' (' + m.symbol + ')' }), h('th', { text: 'Settles' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'No bid' }), h('th', { class: 'num', text: 'Yes price' })]));
       m.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec) || a.strike - b.strike).forEach(c => {
-        const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) })]);
-        attach(tr, tip.rows(contractTitle(m, c), quoteRows(c), asofFoot()));
+        const yesCell = h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) });
+        const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), yesCell]);
+        const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
+        attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat(url ? [['On the exchange', exLink(url)]] : []),
+          asofFoot() + (url ? ' · click the Yes price to open the contract' : '')));
+        if (url) { yesCell.classList.add('lnk'); WXM.linkTo(yesCell, url, 'Open ' + c.label + ' on ForecastEx'); }
         tb.appendChild(tr);
       });
       host.appendChild(h('div', { class: 'card', style: 'padding:0;margin-bottom:10px' }, [tb]));
