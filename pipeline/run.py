@@ -22,7 +22,8 @@ Jobs:
                  already written; no network                       (last in a chain)
     market       quotes, then reask, then headline: one scheduled invocation
     half-hourly  archive, then forecast, then hurricane: one scheduled invocation
-    daily        scorecard, normals, climate, season, headline: one scheduled invocation
+    traffic      yesterday's page views, from the CDN access logs      (once a day)
+    daily        scorecard, normals, climate, season, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
 """
 from __future__ import annotations
@@ -37,7 +38,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -49,6 +50,7 @@ def _register():
     JOBS["quotes"] = market.quotes_pass
     JOBS["reask"] = reask.reask_pass
     JOBS["headline"] = headline.headline_pass
+    JOBS["traffic"] = traffic.traffic_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -76,7 +78,7 @@ def _register():
     # goes last in both chains: after quotes for fresh prices, after the
     # scorecard for the day just scored
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane")
-    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "headline")
+    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "headline", "traffic")
     JOBS["market"] = chain("quotes", "reask", "headline")
     JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")
 

@@ -74,6 +74,7 @@ parameters: `station`, `theme`, `market`.
     pipeline/        gov_weather.py (every government call), exchange.py (every exchange call), archive.py,
                      snapshots.py, market.py (the quote job), reask.py (the vendor lane), hurricane.py,
                      scorecard.py, normals.py, climate.py, season.py (the count climatology),
+                     traffic.py (page views from the CDN access logs),
                      basemap.py, storage.py, config.py,
                      run.py (command line), handler.py (the only vendor-specific file)
     site/            the static frontend; js/market.js is the market seam; js/storm.js is a live storm's
@@ -81,13 +82,13 @@ parameters: `station`, `theme`, `market`.
     site/assets/     small projected geometry the pages load (generated)
     geo/             vendored inputs, not served: public-domain TopoJSON and the exchange's wind reference-location list
     samples/         snapshots for offline local mode (checked in)
-    scripts/         build.py, serve_local.py, verify.py, build_assets.py, scrub.py,
+    scripts/         build.py, serve_local.py, verify.py, build_assets.py, scrub.py, traffic.py (read the counts),
                      seed_archive.py, backfill_obs.py, make_samples.py, package_lambda.py
     ops/aws/         template.yaml (the stack); ops/cloudflare/ the serving alternative
     tests/           unittest, no network
     DEPLOY.md        the runbook for the steps that need the owner's accounts
 
-Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|quotes|reask|market|scorecard|normals|climate|season|half-hourly|daily|all`.
+Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|quotes|reask|market|scorecard|normals|climate|season|traffic|half-hourly|daily|all`.
 Verification: `python3 -m unittest discover -s tests` and `python3 scripts/verify.py` (Playwright).
 
 ## Working style

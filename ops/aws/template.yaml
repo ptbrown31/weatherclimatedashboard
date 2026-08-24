@@ -32,6 +32,10 @@ Parameters:
   LogRetentionDays:
     Type: Number
     Default: 30
+  AccessLogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: How long raw CDN access logs are kept. The daily traffic summary is derived from them and kept indefinitely, so this only bounds re-reading a past day.
   ReaskApiKey:
     Type: String
     Default: ""
@@ -77,6 +81,35 @@ Resources:
             Status: Enabled
             Prefix: data/archive/market/
             ExpirationInDays: 400
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 2
+
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${SiteName}-logs-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # CloudFront's standard access logging writes with an ACL, so this bucket
+      # allows them where the site bucket does not. It is never served: no
+      # CloudFront origin points at it and public access is blocked outright.
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-access-logs
+            Status: Enabled
+            ExpirationInDays: !Ref AccessLogRetentionDays
           - Id: abort-incomplete-uploads
             Status: Enabled
             AbortIncompleteMultipartUpload:
@@ -162,6 +195,12 @@ Resources:
         Comment: !Ref SiteName
         DefaultRootObject: index.html
         HttpVersion: http2and3
+        # request-level logs, so page views can be told apart from the dozen
+        # objects a page pulls. Cookies are not logged because the site sets none.
+        Logging:
+          Bucket: !GetAtt LogBucket.DomainName
+          Prefix: cf/
+          IncludeCookies: false
         PriceClass: PriceClass_100
         Aliases: !If [HasDomain, [!Ref DomainName], !Ref "AWS::NoValue"]
         ViewerCertificate: !If
@@ -233,6 +272,18 @@ Resources:
                 Condition:
                   StringLike:
                     s3:prefix: ["data/*"]
+        - PolicyName: access-logs-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # read only: the traffic job counts these files and never writes
+              # or removes them; the bucket's own lifecycle rule expires them
+              - Effect: Allow
+                Action: [s3:GetObject]
+                Resource: !Sub "${LogBucket.Arn}/cf/*"
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: !GetAtt LogBucket.Arn
 
   PipelineLogs:
     Type: AWS::Logs::LogGroup
@@ -261,6 +312,8 @@ Resources:
           WX_DOMAIN: !Ref DomainName
           WX_REASK_API_KEY: !Ref ReaskApiKey
           WX_REASK_BASE_URL: !Ref ReaskBaseUrl
+          WX_TRAFFIC_LOG_BUCKET: !Ref LogBucket
+          WX_TRAFFIC_LOG_PREFIX: cf
       # placeholder body; DEPLOY.md replaces it with dist/lambda.zip
       Code:
         ZipFile: |
@@ -393,6 +446,8 @@ Resources:
 Outputs:
   BucketName:
     Value: !Ref Bucket
+  LogBucketName:
+    Value: !Ref LogBucket
   DistributionDomain:
     Value: !GetAtt Distribution.DomainName
   DistributionId:

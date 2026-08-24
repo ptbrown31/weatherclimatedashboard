@@ -203,3 +203,32 @@ the parser was built from the documented file shapes without a live storm to tes
 
 `ops/cloudflare/README.md` describes serving the site and snapshots from Cloudflare (R2 + Pages)
 while the pipeline keeps running on Lambda. The application code does not change.
+
+## 8. Traffic counts
+
+The stack creates a second bucket, `<SiteName>-logs-<account>`, and turns on
+CloudFront standard access logging into it under `cf/`. That bucket exists only
+to receive logs: no CloudFront origin points at it, public access is blocked,
+and a lifecycle rule expires objects after `AccessLogRetentionDays` (default
+30). It allows bucket-owner-preferred object ownership because CloudFront's
+standard logging writes with an ACL; the site bucket keeps ACLs disabled.
+
+The `traffic` job runs inside the daily chain, reads the previous UTC day's log
+files, and writes `data/archive/_meta/traffic/<day>.json` plus a rolling
+`summary.json`. Those sit under the archive prefix, which the bucket policy
+denies to CloudFront, so traffic figures are readable from the account and never
+from the public site. The raw logs expire; the summaries do not.
+
+Read them with:
+
+    python3 scripts/traffic.py                    the last two weeks
+    python3 scripts/traffic.py --day 2026-08-23   one day in full
+
+A view is an HTML document request, not a request — a cold page view pulls about
+a dozen objects, so counting requests overstates readership roughly tenfold. A
+visitor is a distinct client address, which undercounts shared networks and
+overcounts phones changing towers.
+
+Set `WX_TRAFFIC_LOG_BUCKET` empty to turn the job off; it then reports that no
+log bucket is configured and exits cleanly, which is the state of a clean
+checkout.
