@@ -64,7 +64,9 @@ window.WXC = (() => {
     const wrap = $('.wrap');
     if (!wrap) return;
     const nav = [['index.html', 'Map'], ['city.html', 'City'], ['scorecard.html', 'Scorecard'],
-                 ['hurricane.html', 'Hurricanes'], ['climate.html', 'Climate'], ['about.html', 'About']];
+                 ['hurricane.html', 'Hurricanes'], ['climate.html', 'Climate'],
+                 ['daily-temperature-markets.html', 'Temp markets'], ['accuracy.html', 'Accuracy'],
+                 ['faq.html', 'FAQ'], ['about.html', 'About']];
     const header = h('header', { class: 'site' }, [
       h('a', { class: 'brand', href: 'index.html', text: cfg.siteTitle || 'Weather tools' }),
       h('nav', {}, nav.map(([href, label]) => h('a', { href, text: label, class: href === active ? 'on' : '' }))),

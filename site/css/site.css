@@ -154,3 +154,9 @@ svg.scard{width:100%;height:auto;display:block}
 svg.stimeline{width:100%;height:auto;display:block;cursor:ew-resize;touch-action:none;margin:2px 0 6px}
 svg.stimeline:focus{outline:2px solid var(--accent);outline-offset:2px}
 .sbar{margin-bottom:2px}
+.prose{max-width:74ch}
+.prose p{font-size:14px;line-height:1.65;margin:0 0 12px}
+.prose h2{margin:22px 0 8px}
+.prose h3{font-size:14px;margin:20px 0 6px;color:var(--navy)}
+.prose ul{margin:0 0 12px;padding-left:20px}
+.prose li{font-size:14px;line-height:1.6;margin:0 0 6px}

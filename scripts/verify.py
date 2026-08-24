@@ -106,7 +106,9 @@ def run(no_build: bool) -> int:
                 # ---- standalone pages
                 pages = [("index.html", "#map path", "map geometry"), ("city.html?station=KLAX", "#chart path", "city series"),
                          ("hurricane.html", "#basin path", "basin geography"), ("scorecard.html", "#overall table", "scorecard table"),
-                         ("climate.html", "#panels svg path", "climate series"), ("about.html", "footer.site", "footer")]
+                         ("climate.html", "#panels svg path", "climate series"), ("about.html", "footer.site", "footer"),
+                         ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", ".prose p", "the accuracy argument"),
+                         ("daily-temperature-markets.html", ".prose h2", "the article sections")]
                 for path, sel, what in pages:
                     page.goto(f"{srv.url}/{path}")
                     page.wait_for_timeout(900)
@@ -116,6 +118,34 @@ def run(no_build: bool) -> int:
                         status = page.locator(".status").first.inner_text() if page.locator(".status").count() else ""
                         chk.add(f"{scheme} standalone {path}: status strip present", "Data as of" in status or "No data" in status, status[:80])
                     page.screenshot(path=os.path.join(OUT, f"{scheme}-{path.split('?')[0]}.png"), full_page=True)
+                # ---- the offloaded newsletter content: the pages the daily letter links
+                page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(500)
+                faq_t = page.locator(".prose").inner_text()
+                chk.add(f"{scheme} faq: carries the four questions and both link lists",
+                        faq_t.count("?") >= 4 and "Further reading" in faq_t and "Climate contracts" in faq_t,
+                        f"chars={len(faq_t)}")
+                chk.add(f"{scheme} faq: the eleven tools survive with their links",
+                        page.locator(".prose li a").count() >= 11, str(page.locator(".prose li a").count()))
+                chk.add(f"{scheme} faq: says plainly which sources this site itself draws",
+                        "This site draws a narrower set" in page.locator(".sub").inner_text(),
+                        page.locator(".sub").inner_text()[:70])
+                page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(500)
+                acc_t = page.locator(".prose").inner_text()
+                chk.add(f"{scheme} accuracy: the electricity section is not published",
+                        "electricity" not in acc_t.lower() and "wholesale" not in acc_t.lower(), acc_t[-90:])
+                chk.add(f"{scheme} accuracy: the mechanism argument is intact",
+                        "sit downstream of them" in acc_t and "deterring those who are inaccurate" in acc_t, f"chars={len(acc_t)}")
+                page.goto(f"{srv.url}/daily-temperature-markets.html"); page.wait_for_timeout(500)
+                art_t = page.locator(".prose").inner_text()
+                chk.add(f"{scheme} article: the settlement convention is stated exactly",
+                        "strictly above" in art_t and "strictly below" in art_t and "resolves No" in art_t, "")
+                chk.add(f"{scheme} article: no handoff placeholder survived",
+                        "SITE-LINK" not in art_t and "{" not in art_t, art_t[:60])
+                chk.add(f"{scheme} article: no internal review note published",
+                        "DRAFT UPDATE" not in art_t and "for Patrick" not in art_t, "")
+                nav_n = page.locator("header.site nav a").count()
+                chk.add(f"{scheme} nav: nine tabs, with the new pages reachable", nav_n == 9, f"tabs={nav_n}")
+                chk.add(f"{scheme} nav: the current page is marked", page.locator("header.site nav a.on").count() == 1, "")
                 chk.add(f"{scheme} standalone: no script errors", not errs, "; ".join(errs)[:300])
                 # ---- market overlay: on by config on the standalone site; off reserves no space
                 page.goto(f"{srv.url}/city.html?station=KLGA&market=off")
