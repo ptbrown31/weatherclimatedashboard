@@ -78,19 +78,6 @@
   "onConus": true
  },
  {
-  "station": "KCOS",
-  "city": "Colorado Springs",
-  "lat": 38.8058,
-  "lon": -104.7008,
-  "tz": "America/Denver",
-  "unit": "F",
-  "px": 342.3,
-  "py": 286.3,
-  "wx": 200.8,
-  "wy": 136.5,
-  "onConus": true
- },
- {
   "station": "KDCA",
   "city": "Washington DC",
   "lat": 38.8483,

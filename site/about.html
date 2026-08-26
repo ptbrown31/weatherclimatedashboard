@@ -21,18 +21,7 @@ forecast, so they show what each source said and when, and nothing is smoothed i
 than it is.</p>
 
 <h2>Sources</h2>
-<table>
-<tr><th>Data</th><th>Source</th><th>Notes</th></tr>
-<tr><td>Observed temperature</td><td>aviationweather.gov METAR</td><td>Hourly reports plus SPECIs. The contracts settle on METAR observations, so this feed is the matching one; api.weather.gov also serves the five-minute ASOS stream, and a daily maximum over five-minute data lands at or above one over hourly METARs.</td></tr>
-<tr><td>NWS forecast</td><td>api.weather.gov gridpoint hourly and day/night products</td><td>The official National Weather Service forecast. The day/night product carries the official high and low.</td></tr>
-<tr><td>NBM guidance</td><td>National Blend of Models text bulletins, NOAA Open Data</td><td>NOAA&rsquo;s calibrated multi-model blend; forecasters start from it when editing the grids, so it is related to the NWS forecast, not independent.</td></tr>
-<tr><td>LAMP guidance</td><td>NOMADS text bulletins</td><td>Observation-updated hourly guidance, 25 hours out. The best same-day trace; it cannot see tomorrow.</td></tr>
-<tr><td>GFS MOS</td><td>NOMADS MAV text bulletins</td><td>A single-model statistical product with no forecaster editing; the cleanest independent comparison on the scorecard.</td></tr>
-<tr><td>Hurricanes</td><td>NHC CurrentStorms.json, NOAA GIS service, NHC wind speed probabilities (PWSAT), ATCF best tracks</td><td>Roster, geometry, five-day wind probabilities at coastal locations, and season counts.</td></tr>
-<tr><td>Basemaps</td><td>US Census Bureau boundaries; Natural Earth countries</td><td>Public domain.</td></tr>
-<tr><td>Contract prices</td><td>ForecastEx public market-data endpoints</td><td>The best bids for the daily temperature, hurricane and climate contracts, read every 10 minutes. On this exchange there are no sellers: every order is a bid to buy Yes or a bid to buy No, and the two sides of a contract sum to one dollar. Pages show the Yes bid and the No bid in cents, and a Yes price midway between the Yes bid and one dollar less the No bid; nothing is fee adjusted (the exchange charges $0.01 per contract to each side at execution). The &ldquo;implied&rdquo; temperature is the strike where the Yes price crosses 50&cent;, interpolated between strikes.</td></tr>
-<tr><td>Live-storm wind probabilities</td><td>Reask (vendor), when enabled</td><td>Probability that the peak gust exceeds each threshold at the 163 reference locations the exchange&rsquo;s wind contracts settle at, shown as published with the vendor&rsquo;s mark. Off unless the site operator has enabled it with their own credential; the hurricane page says which.</td></tr>
-</table>
+<p>Every feed behind these pages, with what it is and why it was chosen, is listed on the <a href="faq.html#sources">FAQ page</a>.</p>
 
 <h2>Methods</h2>
 <p>Every forecast cycle is archived as published, because no public endpoint returns an earlier

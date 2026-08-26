@@ -25,7 +25,6 @@ CITIES = [
     ("KBNA", "Nashville",        36.1189,  -86.6892, "America/Chicago",     "F"),
     ("KBOS", "Boston",           42.3606,  -71.0106, "America/New_York",    "F"),
     ("KCLT", "Charlotte",        35.2083,  -80.9614, "America/New_York",    "F"),
-    ("KCOS", "Colorado Springs", 38.8058, -104.7008, "America/Denver",      "F"),
     ("KDCA", "Washington DC",    38.8483,  -77.0342, "America/New_York",    "F"),
     ("KDFW", "Dallas",           32.8974,  -97.0220, "America/Chicago",     "F"),
     ("KDTW", "Detroit",          42.2314,  -83.3308, "America/New_York",    "F"),

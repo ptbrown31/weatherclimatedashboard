@@ -144,9 +144,72 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} article: no internal review note published",
                         "DRAFT UPDATE" not in art_t and "for Patrick" not in art_t, "")
                 nav_n = page.locator("header.site nav a").count()
-                chk.add(f"{scheme} nav: nine tabs, with the new pages reachable", nav_n == 9, f"tabs={nav_n}")
+                labels = page.eval_on_selector_all("header.site nav a", "els => els.map(e => e.textContent)")
+                chk.add(f"{scheme} nav: eight tabs", nav_n == 8, f"tabs={nav_n} {labels}")
+                chk.add(f"{scheme} nav: the map tab is named for what it is",
+                        "Prediction Market National Weather Map" in labels, str(labels[:2]))
+                chk.add(f"{scheme} nav: no city tab; cities are reached from the map",
+                        not any(l.strip() == "City" for l in labels), str(labels))
+                chk.add(f"{scheme} nav: the temperature article is named for trading",
+                        "Trading temp markets" in labels, str(labels))
                 chk.add(f"{scheme} nav: the current page is marked", page.locator("header.site nav a.on").count() == 1, "")
+                # the city page has no tab of its own, so the map tab stands in for it
+                page.goto(f"{srv.url}/city.html?station=KLAX"); page.wait_for_timeout(600)
+                chk.add(f"{scheme} nav: a city page still marks the map tab",
+                        page.locator("header.site nav a.on").count() == 1
+                        and "Weather Map" in page.locator("header.site nav a.on").inner_text(),
+                        page.locator("header.site nav a.on").inner_text()[:40])
+                page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(400)
+                faq_txt = page.locator(".prose").inner_text()
+                chk.add(f"{scheme} sources: the feed table moved to the FAQ",
+                        page.locator("#sources").count() == 1 and "aviationweather.gov METAR" in faq_txt,
+                        f"anchor={page.locator('#sources').count()}")
+                page.goto(f"{srv.url}/about.html"); page.wait_for_timeout(400)
+                about_txt = page.locator(".wrap").inner_text()
+                chk.add(f"{scheme} sources: About points at its new home and no longer carries the table",
+                        "aviationweather.gov METAR" not in about_txt
+                        and page.locator("a[href='faq.html#sources']").count() == 1,
+                        about_txt[:70])
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
+                chk.add(f"{scheme} roster: Colorado Springs is off the board",
+                        "KCOS" not in page.content(), "")
                 chk.add(f"{scheme} standalone: no script errors", not errs, "; ".join(errs)[:300])
+                # ---- the map opens on the board that is trading
+                #
+                # Before 5 pm Eastern the current day's contracts are the live
+                # ones; after it, the day-ahead board is. The browser's clock
+                # decides, so the check sets it to each side of the line.
+                for tz, hour, want in (("America/New_York", "09", "Today"), ("America/New_York", "19", "Tomorrow")):
+                    ctx2 = browser.new_context(color_scheme=scheme, viewport={"width": 1200, "height": 900},
+                                               timezone_id=tz)
+                    pg2 = ctx2.new_page()
+                    pg2.add_init_script(
+                        "(() => { const R = Date; const F = new R(R.UTC(2026, 7, 26, %d, 30, 0));"
+                        " const off = F.getTime() - R.now();"
+                        " window.Date = class extends R { constructor(...a) { super(...(a.length ? a : [R.now() + off])); }"
+                        " static now() { return R.now() + off; } }; })();"
+                        % (int(hour) + 4))          # 09/19 Eastern in UTC during daylight time
+                    pg2.goto(f"{srv.url}/index.html")
+                    pg2.wait_for_timeout(1200)
+                    on = pg2.locator(".bar button.on").first.inner_text() if pg2.locator(".bar button.on").count() else ""
+                    title = pg2.locator("#modeTitle").inner_text()
+                    chk.add(f"{scheme} map default at {hour}:30 ET: opens on {want.lower()}'s highs",
+                            want.lower() in on.lower() and "HIGH" in title.upper(), f"button={on} title={title[:44]}")
+                    chk.add(f"{scheme} map default at {hour}:30 ET: the other day is one click away",
+                            pg2.locator(".bar button").count() >= 4, str(pg2.locator(".bar button").count()))
+                    ctx2.close()
+                # switching to today keeps it a market view, not observed-vs-issued
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
+                page.locator("#m1").click(); page.wait_for_timeout(400)
+                t_today = page.locator("#modeTitle").inner_text()
+                chk.add(f"{scheme} map today view: ForecastEx against the NWS forecast, not observed vs issued",
+                        "ForecastEx implied median" in t_today and "observed" not in t_today.lower(), t_today[:80])
+                dots_today = page.locator("#map circle").count()
+                chk.add(f"{scheme} map today view: dots are drawn", dots_today > 0, f"circles={dots_today}")
+                page.locator("#m2").click(); page.wait_for_timeout(400)
+                chk.add(f"{scheme} map tomorrow view: still available and shaded",
+                        "TOMORROW" in page.locator("#modeTitle").inner_text().upper(), page.locator("#modeTitle").inner_text()[:60])
+
                 # ---- market overlay: on by config on the standalone site; off reserves no space
                 page.goto(f"{srv.url}/city.html?station=KLGA&market=off")
                 page.wait_for_timeout(900)
@@ -534,9 +597,15 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} hover: map dot shows tomorrow's forecasts and today so far", "tomorrow" in t_md and "Observed" in t_md, t_md[:80])
                 wdots = page.locator("#mapW g.dot").count()
                 chk.add(f"{scheme} map: the international stations sit on a world canvas below", wdots >= 10, f"dots={wdots}")
+                # the reference field is interpolated for tomorrow only, so the
+                # shading exists on the day-ahead views and nowhere else
+                page.locator("#m2").click(); page.wait_for_timeout(400)
                 page.locator("#map rect[data-i]").nth(600).hover(force=True); page.wait_for_timeout(120)
                 t_cell = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: shading cell names the derived field value", "NWS forecast field" in t_cell, t_cell[:80])
+                page.locator("#m1").click(); page.wait_for_timeout(300)
+                chk.add(f"{scheme} map: the current-day view carries no shading, and says so with none",
+                        page.locator("#map rect[data-i]").count() == 0, str(page.locator("#map rect[data-i]").count()))
                 # the headline cards are written by the pipeline; absent snapshot must simply draw none
                 cards = page.locator("#cards .tile").count()
                 chk.add(f"{scheme} map: headline cards render, or none when the snapshot is absent", cards == 0 or cards >= 2, f"cards={cards}")

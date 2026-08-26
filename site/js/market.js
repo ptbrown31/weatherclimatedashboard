@@ -64,8 +64,8 @@ window.WXM = (() => {
   const lgs = (x, k = 0.62) => 1 / (1 + Math.exp(-k * x));
   const seedOf = (sid, day) => { let s = 0; for (const ch of sid + (day || '')) s = (s * 31 + ch.charCodeAt(0)) % 100003; return s; };
 
-  function impliedPlaceholder(city) {
-    const seed = seedOf(city.station, city.markers && city.markers.tomorrow);
+  function impliedPlaceholder(city, when) {
+    const seed = seedOf(city.station, city.markers && (when === 'today' ? city.markers.day : city.markers.tomorrow));
     const out = { impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: PLACEHOLDER };
     if (city.nwsHighTomorrow != null) {
       out.impliedHigh = Math.round((city.nwsHighTomorrow + ((seed % 13) - 6) * 0.9) * 10) / 10;
@@ -202,22 +202,38 @@ window.WXM = (() => {
   // loaded), 'unlisted' (the station has no market today), 'day' (the summary
   // is for another day), 'tomorrow-unlisted' (tomorrow's contracts not listed
   // yet), 'no-bids' (listed, fewer than two strikes with bids), 'ok'
-  function implied(city) {
+  // `when` is 'tomorrow' (the default, and the only day the reference field
+  // covers) or 'today'. The day-ahead board is what trades for most of the
+  // session, but the current day's board is the live one until it settles, so
+  // both are addressable rather than only the one.
+  function implied(city, when) {
+    const today = when === 'today';
     if (!on()) return null;
-    if (!live()) return impliedPlaceholder(city);
+    if (!live()) return impliedPlaceholder(city, when);
     const sm = S.summary && S.summary.data;
     if (!sm) return { state: 'unavailable', impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: 'quotes unavailable' };
     const r = (sm.cities || []).find(c => c.station === city.station);
     if (!r || !r.listed) return { state: 'unlisted', impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: 'no market listed' };
-    if (!city.markers || r.tomorrow !== city.markers.tomorrow) return { state: 'day', impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: 'quote summary is for another day' };
-    const listedTomorrow = (r.quotedHighTomorrow || 0) + (r.quotedLowTomorrow || 0) > 0 || r.impliedHighTomorrow != null || r.impliedLowTomorrow != null || r.impliedHighTomorrowEdge || r.impliedLowTomorrowEdge;
-    const out = { state: listedTomorrow ? 'ok' : 'tomorrow-unlisted', impliedHigh: r.impliedHighTomorrow, impliedLow: r.impliedLowTomorrow, divHigh: null, divLow: null,
-                  edgeHigh: r.impliedHighTomorrowEdge, edgeLow: r.impliedLowTomorrowEdge, asof: r.asof,
-                  quotedHigh: r.quotedHighTomorrow, quotedLow: r.quotedLowTomorrow,
+    const wantDay = today ? (city.markers && city.markers.day) : (city.markers && city.markers.tomorrow);
+    const gotDay = today ? r.day : r.tomorrow;
+    if (!city.markers || gotDay !== wantDay) return { state: 'day', impliedHigh: null, impliedLow: null, divHigh: null, divLow: null, label: 'quote summary is for another day' };
+    // the snapshot spells these implied{High,Low}{Today,Tomorrow} and
+    // implied{High,Low}{Today,Tomorrow}Edge, so the day sits in the middle
+    const sfx = today ? 'Today' : 'Tomorrow';
+    const g = k => r[k + sfx];
+    const ge = hl => r['implied' + hl + sfx + 'Edge'];
+    const listed = (g('quotedHigh') || 0) + (g('quotedLow') || 0) > 0 || g('impliedHigh') != null || g('impliedLow') != null
+                   || ge('High') || ge('Low');
+    const out = { state: listed ? 'ok' : (today ? 'today-unlisted' : 'tomorrow-unlisted'),
+                  impliedHigh: g('impliedHigh'), impliedLow: g('impliedLow'), divHigh: null, divLow: null,
+                  edgeHigh: ge('High'), edgeLow: ge('Low'), asof: r.asof,
+                  quotedHigh: g('quotedHigh'), quotedLow: g('quotedLow'), when: today ? 'today' : 'tomorrow',
                   label: 'ForecastEx implied median, ' + asofText(S.summary) };
     if (out.state === 'ok' && out.impliedHigh == null && !out.edgeHigh && out.impliedLow == null && !out.edgeLow) out.state = 'no-bids';
-    if (out.impliedHigh != null && city.nwsHighTomorrow != null) out.divHigh = Math.round((out.impliedHigh - city.nwsHighTomorrow) * 10) / 10;
-    if (out.impliedLow != null && city.nwsLowTomorrow != null) out.divLow = Math.round((out.impliedLow - city.nwsLowTomorrow) * 10) / 10;
+    const refH = today ? city.nwsHighToday : city.nwsHighTomorrow;
+    const refL = today ? city.nwsLowToday : city.nwsLowTomorrow;
+    if (out.impliedHigh != null && refH != null) out.divHigh = Math.round((out.impliedHigh - refH) * 10) / 10;
+    if (out.impliedLow != null && refL != null) out.divLow = Math.round((out.impliedLow - refL) * 10) / 10;
     return out;
   }
 

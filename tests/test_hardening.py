@@ -75,9 +75,12 @@ class BulletinCycles(unittest.TestCase):
             gw.bulletin_cycles("nope")
 
     def test_expected_coverage(self):
-        self.assertEqual(archive.expected_coverage("nbh"), 29)
-        self.assertEqual(archive.expected_coverage("lamp"), 26)
-        self.assertEqual(archive.expected_coverage("mav"), 26)
+        # hardcoded on purpose: these are the counts a healthy pass must reach,
+        # so a roster change has to be a deliberate edit here rather than a
+        # silent drop in coverage
+        self.assertEqual(archive.expected_coverage("nbh"), 28)
+        self.assertEqual(archive.expected_coverage("lamp"), 25)
+        self.assertEqual(archive.expected_coverage("mav"), 25)
 
     def test_block_ok(self):
         good = (" KLAX   NBM V5.0 NBH GUIDANCE    8/21/2026  2200 UTC\n"

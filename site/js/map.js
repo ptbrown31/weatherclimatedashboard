@@ -10,7 +10,7 @@
 window.WXMap = (() => {
   const { el, txt, h, $, deg } = WXC;
   const RAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
-  let summary = null, field = null, base = null, world = null, head = null, mode = 'hi', tip = null;
+  let summary = null, field = null, base = null, world = null, head = null, mode = null, tip = null;
   const TOOL = { nws: 'National Weather Service', nbm: 'Blend of Models', lamp: 'Aviation guidance (LAMP)',
                  mav: 'GFS MOS', fx: 'ForecastEx' };
   const ord = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
@@ -81,17 +81,39 @@ window.WXMap = (() => {
     return 'rgb(' + A.map((av, k) => Math.round(av + (B[k] - av) * f)).join(',') + ')';
   }
 
+  // The reference field is interpolated for tomorrow only, so the current day's
+  // views carry no background shading; the dots are the whole signal there.
   const MODES = {
-    hi:  { title: c => "TOMORROW'S HIGHS · shaded by the National Weather Service forecast for " + tmw(), fld: 2,
-           val: c => c.nwsHighTomorrow, div: c => WXM.on() ? (WXM.implied(c) || {}).divHigh : null },
-    lo:  { title: c => "TOMORROW'S LOWS · shaded by the National Weather Service forecast for " + tmw(), fld: 3,
-           val: c => c.nwsLowTomorrow, div: c => WXM.on() ? (WXM.implied(c) || {}).divLow : null },
-    obs: { title: c => "TODAY · observed high so far against the NWS high issued for the day", fld: null,
-           val: c => c.obsHighSoFar,
+    hiT: { title: () => "TODAY'S HIGHS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null,
+           val: c => c.nwsHighToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divHigh : null },
+    loT: { title: () => "TODAY'S LOWS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null,
+           val: c => c.nwsLowToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divLow : null },
+    hi:  { title: () => "TOMORROW'S HIGHS · shaded by the National Weather Service forecast for " + tmw(), fld: 2,
+           val: c => c.nwsHighTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divHigh : null },
+    lo:  { title: () => "TOMORROW'S LOWS · shaded by the National Weather Service forecast for " + tmw(), fld: 3,
+           val: c => c.nwsLowTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divLow : null },
+    obs: { title: () => "TODAY · observed high so far against the NWS high issued for the day", fld: null,
+           val: c => c.obsHighSoFar, when: 'today',
            div: c => { const ref = c.nwsIssuedHigh != null ? c.nwsIssuedHigh : c.nwsHighToday;
                        return (c.obsHighSoFar != null && ref != null) ? Math.round((c.obsHighSoFar - ref) * 10) / 10 : null; } },
   };
   const tmw = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.tomorrow : ''; };
+  const tdy = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.day : ''; };
+
+  // Which board is the one being traded. The day-ahead contracts list around
+  // midday Eastern and the current day's settle that evening, so before 5 pm ET
+  // the live board is today's and after it the day-ahead board is the one worth
+  // opening on. The other is always one click away.
+  const FLIP_HOUR_ET = 17;
+  function defaultMode() {
+    let hr;
+    try {
+      hr = +new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false })
+        .format(new Date());
+    } catch (e) { hr = new Date().getHours(); }
+    if (hr === 24) hr = 0;
+    return hr < FLIP_HOUR_ET ? 'hiT' : 'hi';
+  }
 
   // ---- tooltips. Dates on the snapshot are the station's local calendar
   //      dates as 'YYYY-MM-DD' strings, so they are printed by hand here;
@@ -146,7 +168,7 @@ window.WXMap = (() => {
   function cellTip(i) {
     const cell = field.cells[i], M = MODES[mode];
     if (!cell || M.fld == null) return '';
-    return tip.rows('NWS forecast field (derived)', [[mode === 'lo' ? 'Tomorrow’s low' : 'Tomorrow’s high', deg(cell[M.fld])]], FIELD_FOOT);
+    return tip.rows('NWS forecast field (derived)', [[M.fld === 3 ? 'Tomorrow’s low' : 'Tomorrow’s high', deg(cell[M.fld])]], FIELD_FOOT);
   }
   const cellIndex = e => { const i = e.target && e.target.getAttribute && e.target.getAttribute('data-i'); return i == null ? null : +i; };
 
@@ -258,8 +280,12 @@ window.WXMap = (() => {
     await WXM.loadSummary();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r['summary.json'], r['field.json']], 10));
     if (!summary || !base) { $('#map').innerHTML = ''; $('#map').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
-    [['m1', 'hi'], ['m2', 'lo'], ['m3', 'obs']].forEach(([id, m]) => {
-      $('#' + id).onclick = () => { mode = m; document.querySelectorAll('.bar button').forEach(b => b.classList.remove('on')); $('#' + id).classList.add('on'); draw(); };
+    const BTN = [['m1', 'hiT'], ['m2', 'hi'], ['m3', 'loT'], ['m4', 'lo'], ['m5', 'obs']];
+    if (!mode) mode = defaultMode();
+    BTN.forEach(([id, m]) => {
+      const b = $('#' + id); if (!b) return;
+      b.classList.toggle('on', m === mode);
+      b.onclick = () => { mode = m; BTN.forEach(([i]) => { const x = $('#' + i); if (x) x.classList.remove('on'); }); b.classList.add('on'); draw(); };
     });
     draw();
     // international stations and Honolulu are not on this canvas; list them

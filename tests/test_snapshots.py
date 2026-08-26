@@ -151,7 +151,7 @@ class FieldAndRoster(unittest.TestCase):
     def test_assets_exist_and_field_is_deterministic(self):
         from pipeline import basemap
         roster = basemap.load_roster()
-        self.assertEqual(len(roster), 38)
+        self.assertEqual(len(roster), 37)      # the 37 contract stations; Colorado Springs left the board
         klax = next(c for c in roster if c["station"] == "KLAX")
         self.assertTrue(0 < klax["px"] < 200 and 300 < klax["py"] < 600)   # left, lower half of the canvas
         grid = basemap.load_field_grid()

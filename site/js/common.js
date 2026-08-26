@@ -63,13 +63,16 @@ window.WXC = (() => {
     if (cfg.target === 'embed') return;
     const wrap = $('.wrap');
     if (!wrap) return;
-    const nav = [['index.html', 'Map'], ['city.html', 'City'], ['scorecard.html', 'Scorecard'],
+    // No city tab: a city is reached by its dot on the map, which is where a
+    // reader is already looking when they want one.
+    const nav = [['index.html', 'Prediction Market National Weather Map'], ['scorecard.html', 'Scorecard'],
                  ['hurricane.html', 'Hurricanes'], ['climate.html', 'Climate'],
-                 ['daily-temperature-markets.html', 'Temp markets'], ['accuracy.html', 'Accuracy'],
+                 ['daily-temperature-markets.html', 'Trading temp markets'], ['accuracy.html', 'Accuracy'],
                  ['faq.html', 'FAQ'], ['about.html', 'About']];
     const header = h('header', { class: 'site' }, [
       h('a', { class: 'brand', href: 'index.html', text: cfg.siteTitle || 'Weather tools' }),
-      h('nav', {}, nav.map(([href, label]) => h('a', { href, text: label, class: href === active ? 'on' : '' }))),
+      h('nav', {}, nav.map(([href, label]) => h('a', { href, text: label,
+        class: (href === active || (href === 'index.html' && active === 'city.html')) ? 'on' : '' }))),
     ]);
     wrap.insertBefore(header, wrap.firstChild);
     const footer = h('footer', { class: 'site' }, [
