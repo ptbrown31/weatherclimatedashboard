@@ -91,7 +91,7 @@ window.WXPanels = (() => {
     }
     await WXM.loadGroup('climate');   // the panel reads WXM for links and price labels
 
-    let drawn = 0, laddered = 0, unlisted = 0;
+    let drawn = 0, laddered = 0, unlisted = 0, pending = 0, evented = 0;
     const notes = [];
     for (const light of products) {
       const name = light.name || light.id;
@@ -119,12 +119,20 @@ window.WXPanels = (() => {
         drawn++;
         continue;
       }
-      // no series: the ladder, with a heading so the product is still named
+      // No series: the ladder, with a heading so the product is still named.
+      // Why there is no series matters and the two reasons are different. A
+      // milestone contract has nothing to plot and never will. A product that
+      // does have a series behind it, but whose series has not been published,
+      // is a gap in this site rather than a fact about the contract, and saying
+      // "resolves on an event" there would simply be untrue.
+      const why = key
+        ? 'The series behind this contract has not been published yet, so its strikes are listed in the meantime.'
+        : (opts.ladderNote || 'This contract resolves on an event, not on a published series, so its strikes are '
+                              + 'listed rather than plotted.');
+      if (key) pending++; else evented++;
       const div = h('div', { class: 'panel' }, [
         h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: prod.name || name }),
-        h('div', { class: 'psub cap', style: 'margin:2px 2px 6px',
-                   text: opts.ladderNote || 'This contract resolves on an event, not on a published series, so its '
-                         + 'strikes are listed rather than plotted.' }),
+        h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: why }),
       ]);
       host.appendChild(div);
       WXCat.ladder(div, Object.assign({}, prod, { name: prod.name || name }), priceMap(qRes.data), qRes.data);
@@ -138,8 +146,9 @@ window.WXPanels = (() => {
             ? 'Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price; click one to open it on IBKR. '
             : 'Markers are placeholders, not market values. ') : '')
         + drawn + ' of these are drawn against their published series, '
-        + laddered + ' resolve on an event and are listed as ladders, and '
-        + unlisted + ' are not currently listed. '
+        + evented + ' resolve on an event and are listed as ladders, '
+        + (pending ? pending + ' are waiting on a series this site has not published yet, ' : '')
+        + 'and ' + unlisted + ' are not currently listed. '
         + notes.join(' ');
     }
   }
