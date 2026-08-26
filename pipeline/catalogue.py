@@ -36,6 +36,8 @@ INDEX_KEY = "snapshots/catalogue/index.json"
 CAT_KEY = "snapshots/catalogue/{slug}.json"
 PRODUCT_KEY = "snapshots/catalogue/product/{pid}.json"
 CACHE = "public, max-age=1800, stale-while-revalidate=86400, stale-if-error=2592000"
+# same reasoning as the series index: this one decides what a category lists
+INDEX_CACHE = "public, max-age=120, stale-while-revalidate=86400, stale-if-error=2592000"
 MAX_CONTRACTS = 400          # a ladder longer than this is a listing error, not a ladder
 
 
@@ -143,7 +145,7 @@ def catalogue_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) 
     index = {"schema": SCHEMA, "asof": now, "l1": reg.get("l1") or [],
              "categories": [dict(c, listed=sum(1 for r in (by_cat.get(c["l2"]) or []) if r.get("state") == "listed"))
                             for c in cats]}
-    store.put(INDEX_KEY, json.dumps(index, separators=(",", ":")).encode(), "application/json", CACHE)
+    store.put(INDEX_KEY, json.dumps(index, separators=(",", ":")).encode(), "application/json", INDEX_CACHE)
 
     arch.LAST_STATUS = {"job": "catalogue", "errors": len(errors), "alarms": []}
     print(json.dumps({"kind": "catalogue", "products": len(products), "listed": found, "unlisted": unlisted,

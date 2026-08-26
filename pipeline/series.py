@@ -47,6 +47,10 @@ SCHEMA = 1
 KEY = "snapshots/series/{key}.json"
 INDEX = "snapshots/series/index.json"
 CACHE = "public, max-age=3600, stale-while-revalidate=86400, stale-if-error=2592000"
+# The index decides whether a contract page draws a chart at all, so a new series
+# is invisible until it expires. An hour of that is too long for a file this
+# small; the series themselves change once a day and keep the longer life.
+INDEX_CACHE = "public, max-age=120, stale-while-revalidate=86400, stale-if-error=2592000"
 
 CAAG = ("https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/city/time-series/"
         "{station}/{param}/1/0/{y0}-{y1}.json")
@@ -381,7 +385,7 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
     idx = {"schema": SCHEMA, "asof": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
            "series": [{"key": k, "points": n} for k, n in sorted(written.items())],
            "products": products, "productNotes": PRODUCT_NOTES, "record": list(RECORD_SERIES)}
-    store.put(INDEX, json.dumps(idx, separators=(",", ":")).encode(), "application/json", CACHE)
+    store.put(INDEX, json.dumps(idx, separators=(",", ":")).encode(), "application/json", INDEX_CACHE)
 
     arch.LAST_STATUS = {"job": "series", "errors": len(errors), "alarms": []}
     print(json.dumps({"kind": "series", "written": written, "errors": errors[:6],
