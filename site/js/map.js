@@ -84,20 +84,53 @@ window.WXMap = (() => {
   // The reference field is interpolated for tomorrow only, so the current day's
   // views carry no background shading; the dots are the whole signal there.
   const MODES = {
-    hiT: { title: () => "TODAY'S HIGHS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null,
+    hiT: { title: () => "TODAY'S HIGHS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null, centred: true,
            val: c => c.nwsHighToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divHigh : null },
-    loT: { title: () => "TODAY'S LOWS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null,
+    loT: { title: () => "TODAY'S LOWS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null, centred: true,
            val: c => c.nwsLowToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divLow : null },
-    hi:  { title: () => "TOMORROW'S HIGHS · shaded by the National Weather Service forecast for " + tmw(), fld: 2,
+    hi:  { title: () => "TOMORROW'S HIGHS · shaded by the National Weather Service forecast for " + tmw(), fld: 2, centred: true,
            val: c => c.nwsHighTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divHigh : null },
-    lo:  { title: () => "TOMORROW'S LOWS · shaded by the National Weather Service forecast for " + tmw(), fld: 3,
+    lo:  { title: () => "TOMORROW'S LOWS · shaded by the National Weather Service forecast for " + tmw(), fld: 3, centred: true,
            val: c => c.nwsLowTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divLow : null },
-    obs: { title: () => "TODAY · observed high so far against the NWS high issued for the day", fld: null,
+    // observed against issued is not a market gap and carries no standing
+    // offset, so it keeps the plain sign
+    obs: { title: () => "TODAY · observed high so far against the NWS high issued for the day", fld: null, centred: false,
            val: c => c.obsHighSoFar, when: 'today',
            div: c => { const ref = c.nwsIssuedHigh != null ? c.nwsIssuedHigh : c.nwsHighToday;
                        return (c.obsHighSoFar != null && ref != null) ? Math.round((c.obsHighSoFar - ref) * 10) / 10 : null; } },
   };
   const tmw = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.tomorrow : ''; };
+
+  // ---- the typical gap
+  //
+  // The market has sat below the NWS forecast on highs on every day measured so
+  // far, so colouring by the raw sign paints the whole board one colour and says
+  // the same thing every morning. What a reader actually wants is which cities
+  // disagree UNUSUALLY, so the dots are centred on the median gap across the
+  // board for the view being shown, and colour is the sign of the deviation from
+  // it. The raw gap is never hidden: it is in the label's tooltip and named in
+  // the caption.
+  //
+  // The median is taken across stations within the view rather than from a
+  // per-station history, because it is available on the first day and needs no
+  // accumulation. It answers "unusual relative to how the board is priced right
+  // now", which is the question. Below five stations there is no useful median,
+  // so the centring switches off and the caption says so.
+  const MIN_FOR_BASE = 5;
+  let gapBase = 0, gapN = 0;
+  function median(v) {
+    if (!v.length) return 0;
+    const a = v.slice().sort((x, y) => x - y), i = a.length >> 1;
+    return a.length % 2 ? a[i] : (a[i - 1] + a[i]) / 2;
+  }
+  function computeBase(M) {
+    if (!M.centred) { gapBase = 0; gapN = 0; return; }
+    const v = (summary.cities || []).map(c => M.div(c)).filter(x => x != null);
+    gapN = v.length;
+    gapBase = v.length >= MIN_FOR_BASE ? Math.round(median(v) * 10) / 10 : 0;
+  }
+  // what the colour and size encode: the gap less the board's typical gap
+  const dev = v => (v == null ? null : Math.round((v - gapBase) * 10) / 10);
   const tdy = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.day : ''; };
 
   // Which board is the one being traded. The day-ahead contracts list around
@@ -160,8 +193,22 @@ window.WXMap = (() => {
       ['Observed high / low so far', (c.obsHighSoFar == null && c.obsLowSoFar == null) ? '—' : dg(c.obsHighSoFar) + ' / ' + dg(c.obsLowSoFar) + obsTag],
       ['Latest METAR', latest],
     ];
+    // what this dot's colour and size are actually encoding, with the raw gap
+    // beside it so the centring never hides the underlying number
+    const M = MODES[mode];
+    const raw = M.div(c);
+    const centred = M.centred && gapN >= MIN_FOR_BASE && raw != null;
+    const sgn = x => (x > 0 ? '+' : '') + x.toFixed(1) + '°';
+    const enc = centred ? [
+      ['<b>On this map</b>', (M.when === 'today' ? 'today' : 'tomorrow') + '’s ' + (mode === 'lo' || mode === 'loT' ? 'lows' : 'highs')],
+      ['Gap to NWS', sgn(raw)],
+      ['The board’s typical gap', sgn(gapBase) + ' (median of ' + gapN + ')'],
+      ['This station, against that', sgn(raw - gapBase) + (Math.abs(raw - gapBase) < 0.5 ? ' — about typical' : (raw > gapBase ? ' — warmer than typical' : ' — cooler than typical'))],
+    ] : [];
     return tip.rows(c.city + ' (' + c.station + ') — tomorrow ' + isoDate(mk.tomorrow), tomorrow) +
-      tip.rows('<span class="tk" style="display:block;margin-top:5px">Today · ' + isoDate(mk.day) + '</span>', today, 'click → city chart');
+      tip.rows('<span class="tk" style="display:block;margin-top:5px">Today · ' + isoDate(mk.day) + '</span>', today) +
+      (enc.length ? tip.rows('<span class="tk" style="display:block;margin-top:5px">What the dot shows</span>', enc, 'click → city chart')
+                  : tip.rows('', [], 'click → city chart'));
   }
 
   // one cell of the shading: the interpolated NWS level under the pointer
@@ -192,11 +239,23 @@ window.WXMap = (() => {
     svg.appendChild(el('path', { d: base.statePaths, class: 'state2' }));
     $('#modeTitle').textContent = M.title();
 
+    computeBase(M);
     plot(svg, summary.cities.filter(c => c.onConus), M, c => c.px, c => c.py, [2, 2, 958, 598], false);
     const legend = $('#legend');
     legend.innerHTML = '';
     if (mode === 'obs') legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Running above the NWS high issued for the day</span><span><i style="border-color:var(--cool)"></i>Running below</span><span>Radius scales with the gap · number is the observed high so far</span>';
-    else if (WXM.on()) { const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder'; legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Tomorrow’s contracts not listed yet, no bids, or the median sits beyond the ladder' : 'No value') + '</span><span>Pale shading is the NWS forecast level (derived)</span>'; }
+    else if (WXM.on()) {
+      const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder';
+      const centred = M.centred && gapN >= MIN_FOR_BASE;
+      const sgn = gapBase > 0 ? '+' : '';
+      legend.innerHTML = centred
+        ? '<span><i style="border-color:var(--warm)"></i>Warmer than the board’s typical gap</span>'
+          + '<span><i style="border-color:var(--cool)"></i>Cooler than it</span>'
+          + '<span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Not listed yet, no bids, or the median sits beyond the ladder' : 'No value') + '</span>'
+          + '<span>Typical gap today: ' + sgn + gapBase.toFixed(1) + '° across ' + gapN + ' stations (' + w + ' minus NWS). '
+          + 'Colour and size are each station’s distance from that, not from zero — hover for the raw gap.</span>'
+        : '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Not listed yet, no bids, or the median sits beyond the ladder' : 'No value') + '</span><span>Too few stations priced to centre on a typical gap, so this is the raw gap.</span>';
+    }
     else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
     drawWorld();
   }
@@ -210,16 +269,19 @@ window.WXMap = (() => {
     const placed = [];
     const hit = b => b[0] < bounds[0] || b[1] < bounds[1] || b[2] > bounds[2] || b[3] > bounds[3]
       || placed.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
-    const rows = cities.slice().sort((a, b) => { const av = M.div(a), bv = M.div(b); return (bv == null ? -1 : Math.abs(bv)) - (av == null ? -1 : Math.abs(av)); });
+    const rows = cities.slice().sort((a, b) => { const av = dev(M.div(a)), bv = dev(M.div(b)); return (bv == null ? -1 : Math.abs(bv)) - (av == null ? -1 : Math.abs(av)); });
     rows.forEach(c => {
-      const v = M.div(c), av = M.val(c), X = fx(c), Y = fy(c);
+      const v = dev(M.div(c)), av = M.val(c), X = fx(c), Y = fy(c);
       const g = el('g', { class: 'dot' });
       let r;
       if (v == null) {
         r = av == null ? 4.5 : 7;
         g.appendChild(el('circle', { cx: X, cy: Y, r, fill: av == null ? 'var(--line)' : 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': 1.2 }));
       } else {
-        r = 5.5 + 8.5 * Math.min(Math.abs(v), 5) / 5;
+        // deviations from the typical gap are a degree or two, not five, so the
+        // radius runs to full scale over a narrower range than the raw gap did
+        const FULL = M.centred && gapN >= MIN_FOR_BASE ? 3 : 5;
+        r = 5.5 + 8.5 * Math.min(Math.abs(v), FULL) / FULL;
         g.appendChild(el('circle', { cx: X, cy: Y, r: r + 3.5, fill: 'var(--panel)', 'fill-opacity': .95 }));
         g.appendChild(el('circle', { cx: X, cy: Y, r, fill: v > 0 ? 'var(--warm)' : (v < 0 ? 'var(--cool)' : 'var(--muted)'), 'fill-opacity': .97, stroke: 'var(--ink)', 'stroke-width': .6 }));
       }
@@ -230,9 +292,9 @@ window.WXMap = (() => {
       svg.appendChild(g);
     });
     rows.forEach(c => {
-      const v = M.div(c), av = M.val(c), X = fx(c), Y = fy(c);
+      const v = dev(M.div(c)), av = M.val(c), X = fx(c), Y = fy(c);
       if (av == null && v == null) return;
-      const big = v != null && Math.abs(v) >= 1.5;
+      const big = v != null && Math.abs(v) >= (M.centred && gapN >= MIN_FOR_BASE ? 1 : 1.5);
       // the international stations settle in Celsius, so their labels carry the unit
       const s = c.station.slice(1) + (av != null ? ' ' + av.toFixed(0) + '°' + (withUnit ? (c.unit || '') : '') : '')
         + (big ? ' (' + (v > 0 ? '+' : '') + v.toFixed(0) + ')' : '');

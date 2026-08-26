@@ -198,6 +198,37 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} map default at {hour}:30 ET: the other day is one click away",
                             pg2.locator(".bar button").count() >= 4, str(pg2.locator(".bar button").count()))
                     ctx2.close()
+                # ---- the dots are centred on the board's typical gap
+                #
+                # The market sits below the NWS forecast on highs nearly every
+                # day, so a raw-sign colouring paints the board one colour and
+                # tells a reader nothing. Centred, both colours must appear.
+                # the today board is the one populated through the morning: the
+                # day-ahead contracts list around midday Eastern, so before then
+                # the tomorrow views legitimately have nothing to centre on
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1000)
+                page.locator("#m1").click(); page.wait_for_timeout(500)
+                warm = page.locator("#map circle[fill='var(--warm)']").count()
+                cool = page.locator("#map circle[fill='var(--cool)']").count()
+                chk.add(f"{scheme} map colour: centring splits the board instead of painting it one colour",
+                        warm > 0 and cool > 0, f"warm={warm} cool={cool}")
+                leg = page.locator("#legend").inner_text()
+                chk.add(f"{scheme} map colour: the legend states the typical gap it centred on",
+                        "typical gap today" in leg.lower() and "°" in leg, leg[:110])
+                chk.add(f"{scheme} map colour: the legend says colour is distance from typical, not from zero",
+                        "not from zero" in leg, leg[-90:])
+                page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
+                t_enc = page.locator("#tip").inner_text()
+                for want in ("Gap to NWS", "The board", "against that"):
+                    chk.add(f"{scheme} map colour: the box shows '{want}'", want in t_enc, t_enc[-140:])
+                chk.add(f"{scheme} map colour: the raw gap is still shown, not replaced",
+                        "Gap to NWS" in t_enc and ("typical" in t_enc), t_enc[-140:])
+                # observed-versus-issued is not a market gap and keeps the plain sign
+                page.locator("#m5").click(); page.wait_for_timeout(500)
+                leg5 = page.locator("#legend").inner_text()
+                chk.add(f"{scheme} map colour: the observed view is not centred",
+                        "typical gap" not in leg5.lower() and "Running above" in leg5, leg5[:90])
+
                 # switching to today keeps it a market view, not observed-vs-issued
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
                 page.locator("#m1").click(); page.wait_for_timeout(400)

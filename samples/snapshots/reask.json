@@ -1,1 +1,1 @@
-{"schema":1,"enabled":false,"reason":"no credential configured","written":"2026-08-23T11:30:21Z","asof":null,"attribution":"Powered by Reask","storms":[]}
+{"schema":2,"enabled":true,"attribution":"Powered by Reask","asof":null,"written":"2026-08-26T11:04:01Z","polled":"2026-08-26T11:04:01Z","year":2026,"storms":[],"fetched":0,"errors":[],"ledgerKey":"snapshots/storm/{name}_{year}.json"}
