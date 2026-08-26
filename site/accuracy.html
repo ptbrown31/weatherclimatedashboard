@@ -15,6 +15,20 @@
 <div class="prose">
 <p>The standings published daily measure overall forecast accuracy across ForecastEx and eleven public forecast tools, averaged over a rolling 7-day window with a matched sample across every system.</p>
 <p>This constitutes <a href="https://www.interactivebrokers.com/campus/traders-insight/ibkr-climate-energy/prediction-markets-might-already-be-the-best-source-for-todays-weather-forecast/">ongoing evidence</a> that weather prediction markets like ForecastEx may be the most accurate short-range weather forecasts available, and the difference becomes greater as lead time decreases.</p>
+</div>
+
+<div class="secttl" style="margin-top:24px">THE MEASUREMENT</div>
+<p class="cap" style="margin-top:0">Pooled across every city and every hour of the day: how far each system's
+forecast of the daily high sat from the temperature the station actually recorded, against how long before the
+end of the day it was made. Hover a point for the two errors and the number of city-days behind it.</p>
+<div class="card"><svg id="accChart" viewBox="0 0 960 430"></svg></div>
+<div class="key" id="accKey"></div>
+<p class="cap" id="accCap"></p>
+
+<div class="prose" style="margin-top:26px">
+<p>Both systems are scored the same way, on the same days, against the same recorded high. The gap is small a
+day and a half out, where neither system knows much the other does not, and widens as the day fills in: the
+market can price an afternoon that is already half observed, and it does.</p>
 <p>Daily weather forecasting is one of the most mature, established, and scientifically principled fields of science and industry. It is not an exaggeration to describe conventional weather forecasting systems as the frontier of applied physics, statistics, and computer science, resting on decades, if not centuries, of scientific inquiry.</p>
 <p>As such, conventional weather forecasts should hardly represent a target ripe for a novel forecasting system to improve upon. Despite the formidable challenge, ForecastEx prediction markets seem to be doing just that, not just echoing public forecasts but aggregating dispersed information in a way that improves upon sophisticated established systems.</p>
 <p>This is possible because prediction markets are not substitutes for standard forecasts but rather sit downstream of them. They incorporate conventional forecast information as one input and convert it into refined probabilities through direct financial rewards for being accurate and direct financial penalties for being inaccurate. This creates a dual effect of attracting accurate individuals and systems into the market while deterring those who are inaccurate. People or systems that consistently make poor forecasts are heavily motivated to either improve or leave the market.</p>
@@ -24,6 +38,7 @@
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
-<script>WXC.chrome('accuracy.html');</script>
+<script src="js/accuracy.js"></script>
+<script>WXC.chrome('accuracy.html'); WXAccuracy.init();</script>
 </body>
 </html>

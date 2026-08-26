@@ -27,6 +27,7 @@ CATEGORY_PAGE = {
     "daily-temperatures": "index.html",
     "tropical-cyclones": "hurricane.html",
     "climate-change": "climate.html",
+    "agriculture": "agriculture.html",
 }
 ORDER_L1 = ["Climate & Weather", "Energy"]
 ORDER_L2 = {

@@ -42,7 +42,12 @@ window.WXClimate = (() => {
     return Math.abs(ser[lo][0] - yr) <= Math.abs(ser[hi][0] - yr) ? lo : hi;
   }
 
-  function panel(host, key, title, unit, ser, product, offsetC, source) {
+  function panel(host, key, title, unit, ser, product, offsetC, source, opts) {
+    opts = opts || {};
+    // presentation choices the climate page derives from its own series keys;
+    // another page passes them in
+    const fmtThr = opts.fmtThreshold || (v => (key.startsWith('temp') ? v.toFixed(2) : String(v)));
+    const thrSuffix = opts.thresholdSuffix != null ? opts.thresholdSuffix : (key.startsWith('temp') ? '°C' : '');
     const div = h('div', { class: 'panel' });
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
     div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: unit + (product ? ' · markers: ' + WXM.LABEL : '') }));
@@ -53,7 +58,7 @@ window.WXClimate = (() => {
     const cs = product ? product.contracts : [];
     const unitShort = unit.split(/[ ,]/)[0];
     const W = 960, L = 56, R = 910, T = 16, B = 296;
-    const x0 = X0[key] != null ? X0[key] : Math.min(...cs.map(c => c.year)) - 4;
+    const x0 = opts.x0 != null ? opts.x0 : (X0[key] != null ? X0[key] : Math.min(...cs.map(c => c.year)) - 4);
     const x1 = Math.max(...cs.map(c => c.year), new Date().getUTCFullYear() + 5) + 3;
     const pts = ser.filter(q => q[0] >= x0);
     const vals = pts.map(q => q[1]).concat(cs.map(c => c.threshold));
@@ -73,7 +78,7 @@ window.WXClimate = (() => {
       const at = cs.filter(c => c.threshold === v);
       const seen = {}; const rows = [];
       at.forEach(c => { if (seen[c.expiryLabel]) return; seen[c.expiryLabel] = 1; rows.push([c.expiryLabel, cents(c.yes)]); });
-      return tip.rows('threshold ' + (key.startsWith('temp') ? v.toFixed(2) : v) + ' ' + unit, [['Listed for', rows.length + (rows.length === 1 ? ' expiration' : ' expirations')], ...rows.map(r => [r[0], 'Yes ' + r[1]])],
+      return tip.rows('threshold ' + fmtThr(v) + ' ' + unit, [['Listed for', rows.length + (rows.length === 1 ? ' expiration' : ' expirations')], ...rows.map(r => [r[0], 'Yes ' + r[1]])],
         'series now ' + fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - v) + ' vs threshold)');
     };
     let lastLabY = 1e9;
@@ -84,21 +89,29 @@ window.WXClimate = (() => {
       svg.appendChild(hit);
       if (Math.abs(Y(v) - lastLabY) < 11) return;
       lastLabY = Y(v);
-      const lab = txt(key.startsWith('temp') ? v.toFixed(2) + '°C' : v, { x: R + 4, y: Y(v) + 3.5, class: 'ax', 'data-tip': '1' });
+      const lab = txt(fmtThr(v) + thrSuffix, { x: R + 4, y: Y(v) + 3.5, class: 'ax', 'data-tip': '1' });
       lab.onmousemove = e => tip.show(e, thrTip(v)); lab.onmouseleave = () => tip.hide();
       svg.appendChild(lab);
     });
     const yt = 5, step = (hi - lo + 2 * pad) / yt;
     for (let i = 0; i <= yt; i++) { const v = lo - pad + i * step; svg.appendChild(txt(v >= 100 ? v.toFixed(0) : v.toFixed(2), { x: L - 8, y: Y(v) + 3.5, 'text-anchor': 'end', class: 'ax' })); }
-    if (pts.length) svg.appendChild(el('path', { d: pts.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--obs)', 'stroke-width': key === 'tempMonthly' ? 1 : 1.8 }));
+    if (pts.length) svg.appendChild(el('path', { d: pts.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--obs)', 'stroke-width': opts.lineWidth || (key === 'tempMonthly' ? 1 : 1.8) }));
     let dragHint = null;
     if (pts.length > 4) { dragHint = txt('← drag across the history to project a linear trend', { x: L + 8, y: T + 14, 'font-size': 11, fill: 'var(--accent)', 'font-weight': 600 }); svg.appendChild(dragHint); }
 
-    const mono = key === 'tempMonthly';
+    const mono = opts.marker ? opts.marker === 'triangle' : key === 'tempMonthly';
+    // a ladder of a dozen strikes in one year needs smaller markers than the two
+    // or three a climate threshold set carries. Sizing is opt-in rather than
+    // automatic: this page's panels were laid out at the fixed radius and are
+    // left at it.
+    const gaps = thr.slice(1).map((v, i) => Math.abs(Y(v) - Y(thr[i]))).filter(g => g > 0.01);
+    const rad = opts.markerRadius === 'auto'
+      ? Math.max(3, Math.min(8, gaps.length ? Math.min(...gaps) * 0.62 : 8))
+      : (opts.markerRadius || 8);
     cs.forEach(c => {
       const col = priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
       const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' })
-                     : el('circle', { cx, cy, r: 8, fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' });
+                     : el('circle', { cx, cy, r: rad, fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' });
       const url = WXM.contractUrl(product.productConid, c.conidYes || c.conid);
       const noBid = c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100;
       const book = c.bid != null && c.ask != null ? null : (c.bid != null ? 'Yes bids only; the Yes price shown is the Yes bid' : (c.ask != null ? 'No bids only; the Yes price shown is one dollar less the No bid' : 'no bids'));
@@ -110,7 +123,7 @@ window.WXClimate = (() => {
         ['No bid', noBid != null ? cents(noBid) + size(c.askSize) : null],
         ['Buy Yes now at', c.ask != null ? cents(c.ask) + (WXM.payoutText(Math.round(c.ask * 100)) ? ' · pays ' + WXM.payoutText(Math.round(c.ask * 100)) : '') : null],
         ['Bids', c.from === 'no' ? (book ? book + '; ' : '') + 'quoted from the No contract' : book],
-        ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + (key.startsWith('temp') ? c.threshold.toFixed(2) : c.threshold) + ')'],
+        ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],
         ['On the exchange', url ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>' : null]],
         (c.label2 || WXM.LABEL) + (url ? ' · click the marker to open the contract' : ''));
       m.onmousemove = e => tip.show(e, html());
@@ -139,7 +152,7 @@ window.WXClimate = (() => {
       dot.setAttribute('cx', X(q[0])); dot.setAttribute('cy', Y(q[1]));
       const d10 = tenYear(q);
       // the sea-level series is a ten-day sample, not monthly: say "Date" and keep the decimal year
-      const when = Number.isInteger(q[0]) ? ['Year', yearLabel(q[0])] : key === 'seaLevel' ? ['Date', yearLabel(q[0]) + ' (' + q[0].toFixed(3) + ')'] : ['Month', yearLabel(q[0])];
+      const when = opts.xLabel ? [opts.xLabel, yearLabel(q[0])] : Number.isInteger(q[0]) ? ['Year', yearLabel(q[0])] : key === 'seaLevel' ? ['Date', yearLabel(q[0]) + ' (' + q[0].toFixed(3) + ')'] : ['Month', yearLabel(q[0])];
       tip.show(e, tip.rows(title, [when, ['Value', fv(q[1]) + ' ' + unitShort],
         ['Change over 10 years', d10 == null ? null : sgn(d10) + ' ' + unitShort], ['Latest', latestText]], source));
     });
@@ -171,7 +184,7 @@ window.WXClimate = (() => {
         fitG.appendChild(el('line', { x1: X(b), y1: Y(f(b)), x2: X(x1), y2: Y(f(x1)), stroke: 'var(--accent)', 'stroke-width': 1.8, 'stroke-dasharray': '6 4', opacity: .85 }));
         const cross = thr.map(v => { const yr2 = (v - icpt) / slope; return (yr2 > b && yr2 < 2100 && slope !== 0) ? Math.round(yr2) : null; });
         note.style.display = 'inline-block';
-        note.textContent = 'fit ' + Math.round(a) + '–' + Math.round(b) + ': ' + (slope * 10).toFixed(3) + ' per decade' + thr.map((v, i) => cross[i] ? (' · crosses ' + v + ' in ' + cross[i]) : '').join('');
+        note.textContent = 'fit ' + Math.round(a) + '–' + Math.round(b) + ': ' + (slope * 10).toFixed(3) + ' per decade' + thr.map((v, i) => cross[i] ? (' · crosses ' + fmtThr(v) + thrSuffix + ' in ' + cross[i]) : '').join('');
       });
       svg.addEventListener('dblclick', () => { if (selRect) { selRect.remove(); selRect = null; } if (fitG) { fitG.remove(); fitG = null; } note.style.display = 'none'; });
     }
@@ -194,5 +207,5 @@ window.WXClimate = (() => {
     const notes = Object.entries(D.notes || {}).map(([k, v]) => k + ': ' + v).join('; ');
     $('#foot').textContent = 'Series: NCEI Climate at a Glance global land+ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? (WXM.live() ? ' Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price.' : ' Markers are placeholders, not market values.') : '');
   }
-  return { init };
+  return { init, panel, priceColor };
 })();

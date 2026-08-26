@@ -106,7 +106,8 @@ def run(no_build: bool) -> int:
                 # ---- standalone pages
                 pages = [("index.html", "#map path", "map geometry"), ("city.html?station=KLAX", "#chart path", "city series"),
                          ("hurricane.html", "#basin path", "basin geography"), ("scorecard.html", "#overall table", "scorecard table"),
-                         ("climate.html", "#panels svg path", "climate series"), ("about.html", "footer.site", "footer"),
+                         ("climate.html", "#panels svg path", "climate series"),
+                         ("agriculture.html", "#panels svg path", "crop yield series"), ("about.html", "footer.site", "footer"),
                          ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", ".prose p", "the accuracy argument"),
                          ("daily-temperature-markets.html", ".prose h2", "the article sections")]
                 for path, sel, what in pages:
@@ -130,11 +131,18 @@ def run(no_build: bool) -> int:
                         "This site draws a narrower set" in page.locator(".sub").inner_text(),
                         page.locator(".sub").inner_text()[:70])
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(500)
-                acc_t = page.locator(".prose").inner_text()
+                acc_t = "\n".join(page.locator(".prose").all_inner_texts())
                 chk.add(f"{scheme} accuracy: the electricity section is not published",
                         "electricity" not in acc_t.lower() and "wholesale" not in acc_t.lower(), acc_t[-90:])
                 chk.add(f"{scheme} accuracy: the mechanism argument is intact",
                         "sit downstream of them" in acc_t and "deterring those who are inaccurate" in acc_t, f"chars={len(acc_t)}")
+                chk.add(f"{scheme} accuracy: the lead-time curve is drawn",
+                        page.locator("#accChart path").count() >= 2
+                        and page.locator("#accChart circle").count() >= 20,
+                        f"paths={page.locator('#accChart path').count()} pts={page.locator('#accChart circle').count()}")
+                acc_cap = page.locator("#accCap").inner_text()
+                chk.add(f"{scheme} accuracy: the curve says what stands behind it",
+                        "city-days" in acc_cap and "scored on the same days" in acc_cap, acc_cap[:90])
                 page.goto(f"{srv.url}/daily-temperature-markets.html"); page.wait_for_timeout(500)
                 art_t = page.locator(".prose").inner_text()
                 chk.add(f"{scheme} article: the settlement convention is stated exactly",
@@ -817,6 +825,25 @@ def run(no_build: bool) -> int:
                 page.mouse.move(pb["x"] + pb["width"] * 0.5, pb["y"] + pb["height"] * 0.5); page.wait_for_timeout(120)
                 t_ser = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: climate series point shows year, value and source", "Value" in t_ser and "Latest" in t_ser, t_ser[:80])
+                # ---- agriculture: the same panel, one per crop, in sequence on
+                # the tab itself rather than behind a listing link
+                page.goto(f"{srv.url}/agriculture.html")
+                page.wait_for_timeout(900)
+                ag_panels = page.locator("#panels .panel").count()
+                chk.add(f"{scheme} agriculture: a panel per crop, drawn on the page",
+                        ag_panels >= 3, f"panels={ag_panels}")
+                ag_mk = page.locator("#panels svg circle[data-tip]").count()
+                ag_lk = page.locator("#panels svg circle[role='link']").count()
+                chk.add(f"{scheme} agriculture: every strike marker opens its contract",
+                        ag_mk >= 50 and ag_lk == ag_mk, f"markers={ag_mk} linked={ag_lk}")
+                chk.add(f"{scheme} agriculture: the trend tool is offered",
+                        page.locator("#panels text", has_text="drag across the history").count() >= 3,
+                        str(page.locator("#panels text", has_text="drag across the history").count()))
+                # the yes/no bars belong to the daily boards; these panels are the
+                # climate idiom and must not grow them
+                chk.add(f"{scheme} agriculture: no yes/no ladder bars on these panels",
+                        page.locator("#panels rect.yes, #panels rect.no").count() == 0,
+                        str(page.locator("#panels rect.yes, #panels rect.no").count()))
                 # ---- scorecard hover: overall, station and day cells
                 page.goto(f"{srv.url}/scorecard.html")
                 page.wait_for_timeout(900)
