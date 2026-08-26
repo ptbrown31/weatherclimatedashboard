@@ -120,6 +120,11 @@ window.WXScore = (() => {
     const outside = actual != null && (actual < lo || actual > hi);
     return {
       sid, city, vals, meta, actual, consensus, lo, hi,
+      // a scored day is measured against what happened; a day still ahead has
+      // nothing to measure against, so it is measured against the forecasts'
+      // own middle
+      centre: actual != null ? actual : consensus,
+      centreName: actual != null ? 'observed' : 'consensus median',
       spread: Math.round((hi - lo) * 10) / 10,
       err: actual == null ? null : Math.round((consensus - actual) * 10) / 10,
       missing: SERIES.filter(s => vals[s.k] == null).map(s => s.k),
@@ -133,7 +138,7 @@ window.WXScore = (() => {
     const m = r.meta[s.k] || {};
     const rowsOut = [
       ['Forecast ' + v.side, degs(r.vals[s.k])],
-      ['From the consensus', off(r.vals[s.k] - r.consensus)],
+      ['From the ' + r.centreName, off(r.vals[s.k] - r.centre)],
       ['Consensus median', degs(r.consensus)],
     ];
     if (r.actual != null) rowsOut.push(['Error against the day', signed(r.vals[s.k] - r.actual) + '°']);
@@ -159,7 +164,7 @@ window.WXScore = (() => {
   }
   function rowTip(r, v) {
     const rowsOut = SERIES.filter(s => r.vals[s.k] != null).map(s =>
-      ['<span class="sw" style="background:' + s.col + '"></span>' + s.name, degs(r.vals[s.k]) + '  (' + off(r.vals[s.k] - r.consensus) + ')']);
+      ['<span class="sw" style="background:' + s.col + '"></span>' + s.name, degs(r.vals[s.k]) + '  (' + off(r.vals[s.k] - r.centre) + ')']);
     rowsOut.push(['Consensus median', degs(r.consensus)]);
     rowsOut.push(['Spread', r.spread + '°']);
     if (r.actual != null) {
@@ -199,8 +204,9 @@ window.WXScore = (() => {
     // a symmetric axis: the widest excursion on either side, rounded out to an even degree
     let dom = 2;
     R.forEach(r => {
-      SERIES.forEach(s => { if (r.vals[s.k] != null) dom = Math.max(dom, Math.abs(r.vals[s.k] - r.consensus)); });
-      if (r.actual != null) dom = Math.max(dom, Math.abs(r.actual - r.consensus));
+      SERIES.forEach(s => { if (r.vals[s.k] != null) dom = Math.max(dom, Math.abs(r.vals[s.k] - r.centre)); });
+      if (r.actual != null) dom = Math.max(dom, Math.abs(r.actual - r.centre));
+      dom = Math.max(dom, Math.abs(r.consensus - r.centre));
     });
     dom = Math.ceil(dom / 2) * 2;
     const mid = (L + Rt) / 2, x = t => mid + (t / dom) * (Rt - L) / 2;
@@ -211,8 +217,9 @@ window.WXScore = (() => {
       svg.appendChild(txt((t > 0 ? '+' : '') + t + '°', { x: x(t), y: T + R.length * ROW + 20, 'text-anchor': 'middle', class: 'ax' }));
     }
     svg.appendChild(el('line', { x1: mid, x2: mid, y1: T - 26, y2: T + R.length * ROW, stroke: 'var(--rule)', 'stroke-width': 1.2 }));
-    svg.appendChild(txt('consensus median', { x: mid, y: T - 32, 'text-anchor': 'middle', class: 'axl' }));
-    svg.appendChild(txt('Degrees from the station’s consensus median (°F)', { x: mid, y: T + R.length * ROW + 42, 'text-anchor': 'middle', class: 'axl' }));
+    const cname = v.when === 'past' ? 'observed' : 'consensus median';
+    svg.appendChild(txt(cname, { x: mid, y: T - 32, 'text-anchor': 'middle', class: 'axl' }));
+    svg.appendChild(txt('Degrees from the station’s ' + cname + ' (°F)', { x: mid, y: T + R.length * ROW + 42, 'text-anchor': 'middle', class: 'axl' }));
     svg.appendChild(txt(v.when === 'past' ? 'Consensus error' : 'Spread', { x: 900, y: T - 32, 'text-anchor': 'end', class: 'axl', 'font-weight': 700 }));
 
     R.forEach((r, i) => {
@@ -224,7 +231,7 @@ window.WXScore = (() => {
       g.appendChild(hit);
       if (i % 2) g.appendChild(el('rect', { x: 8, y: y - ROW / 2, width: W - 16, height: ROW, fill: 'var(--shade)', opacity: .5, 'pointer-events': 'none' }));
       // the band the forecasts span
-      g.appendChild(el('rect', { x: x(r.lo - r.consensus), y: y - 8, width: Math.max(x(r.hi - r.consensus) - x(r.lo - r.consensus), 1.5), height: 16,
+      g.appendChild(el('rect', { x: x(r.lo - r.centre), y: y - 8, width: Math.max(x(r.hi - r.centre) - x(r.lo - r.centre), 1.5), height: 16,
         fill: 'var(--rule)', 'fill-opacity': .34, 'pointer-events': 'none' }));
       // the station, red when the day escaped every forecast
       g.appendChild(bind(txt(r.city, { x: 196, y: y + 4, 'text-anchor': 'end', class: 'ax', 'font-size': 12.5,
@@ -232,7 +239,7 @@ window.WXScore = (() => {
       // the dots, stacked vertically only where they would overlap
       const placed = [];
       SERIES.filter(s => r.vals[s.k] != null)
-        .map(s => ({ s, px: x(r.vals[s.k] - r.consensus) }))
+        .map(s => ({ s, px: x(r.vals[s.k] - r.centre) }))
         .sort((a, b) => a.px - b.px)
         .forEach(d => {
           let lvl = 0;
@@ -244,7 +251,7 @@ window.WXScore = (() => {
         });
       // what actually happened
       if (r.actual != null) {
-        const ax = x(r.actual - r.consensus), s = r.outside ? 8 : 6.5;
+        const ax = x(r.actual - r.centre), s = r.outside ? 8 : 6.5;
         const dpath = 'M' + ax + ' ' + (y - s) + 'L' + (ax + s) + ' ' + y + 'L' + ax + ' ' + (y + s) + 'L' + (ax - s) + ' ' + y + 'Z';
         if (r.outside) g.appendChild(el('path', { d: dpath, fill: 'none', stroke: 'var(--warm)', 'stroke-width': 4, 'pointer-events': 'none' }));
         g.appendChild(bind(el('path', { d: dpath, fill: 'var(--obs)', stroke: 'var(--panel)', 'stroke-width': 1 }), () => actualTip(r, v), true));
@@ -483,7 +490,10 @@ window.WXScore = (() => {
     const r = await WXD.get('scorecard.json', 1440);
     const sres = await WXD.get('summary.json');
     await WXM.loadSummary();
-    const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440));
+    // on the daily temperatures page the map owns the status strip, so the
+    // scorecard writes into its own when there is one and stays quiet otherwise
+    const st = $('#scoreStatus') || $('#pageStatus');
+    if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440)); }
     S = r.data; SUM = sres.data;
     const btns = {};
     VIEWS.forEach(v => {

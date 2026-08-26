@@ -273,9 +273,15 @@ def run(no_build: bool) -> int:
                         "aviationweather.gov METAR" not in about_txt
                         and page.locator("a[href='faq.html#sources']").count() == 1,
                         about_txt[:70])
-                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1800)
+                chk.add(f"{scheme} scorecard: it is on the daily temperatures page",
+                        page.locator("#divsvg g").count() > 10 and page.locator("#standings table tr").count() > 2,
+                        f"rows={page.locator('#divsvg g').count()}")
+                chk.add(f"{scheme} scorecard: the map keeps its own status strip",
+                        page.locator("#pageStatus .status").count() >= 1, "")
                 chk.add(f"{scheme} roster: Colorado Springs is off the board",
-                        "KCOS" not in page.content(), "")
+                        "KCOS" not in page.locator("#map").inner_html()
+                        and "KCOS" not in page.locator("#mapW").inner_html(), "")
                 chk.add(f"{scheme} standalone: no script errors", not errs, "; ".join(errs)[:300])
                 # ---- the map opens on the board that is trading
                 #
@@ -339,8 +345,8 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} map: the four views sit in a today/tomorrow grid",
                         cols == ["Today", "Tomorrow"] and per == [2, 2], f"{cols} {per}")
                 chk.add(f"{scheme} map: the opening paragraph is the one asked for",
-                        "with a bias removed from the National Weather Service" in page.locator("p.sub").inner_text(),
-                        page.locator("p.sub").inner_text()[:80])
+                        "with a bias removed from the National Weather Service" in page.locator("p.sub").first.inner_text(),
+                        page.locator("p.sub").first.inner_text()[:80])
                 chk.add(f"{scheme} map: it links to the trading article",
                         page.locator("p.cap a[href='daily-temperature-markets.html']").count() == 1, "")
                 chk.add(f"{scheme} map: the legend no longer repeats the colour key below it",
@@ -750,6 +756,17 @@ def run(no_build: bool) -> int:
                 page.wait_for_timeout(900)
                 # the standings must compare tools over the same station-days, not
                 # over whatever each archive lane happens to have collected
+                # scored days are measured against what happened; days still ahead
+                # have nothing to measure against and keep the consensus centre
+                page.locator("#divControls button").first.click(); page.wait_for_timeout(500)
+                ax = page.eval_on_selector_all("#divsvg text.axl", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} scorecard: a scored view is centred on the observed",
+                        any(x == "observed" for x in ax), str(ax[:2]))
+                page.locator("#divControls button").nth(2).click(); page.wait_for_timeout(500)
+                ax2 = page.eval_on_selector_all("#divsvg text.axl", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} scorecard: a day still ahead keeps the consensus centre",
+                        any(x == "consensus median" for x in ax2), str(ax2[:2]))
+                page.locator("#divControls button").first.click(); page.wait_for_timeout(400)
                 ns = page.eval_on_selector_all("#standings table tr td:nth-child(6)", "e=>e.map(x=>x.textContent)")
                 real = [x for x in ns if x and x != "\u2014"]
                 chk.add(f"{scheme} standings: every tool is ranked on the same sample",
@@ -762,7 +779,8 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} scorecard: divergence figure draws a row per station", fig_rows >= 20, f"rows={fig_rows}")
                 page.locator("#divsvg circle").first.hover(force=True); page.wait_for_timeout(120)
                 t_dot = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hover: figure dot shows the forecast and its gap from consensus", "Consensus median" in t_dot and "From the consensus" in t_dot, t_dot[:80])
+                chk.add(f"{scheme} hover: figure dot shows the forecast and its gap from the centre",
+                        "Consensus median" in t_dot and ("From the observed" in t_dot or "From the consensus" in t_dot), t_dot[:80])
                 titles = []
                 for i in range(4):
                     page.locator("#divControls button").nth(i).click(); page.wait_for_timeout(250)

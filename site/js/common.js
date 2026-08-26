@@ -69,7 +69,9 @@ window.WXC = (() => {
     // pages sit to the right of the first row, lighter, because they are not
     // contracts. No city tab: a city is reached by its dot on the map, which is
     // where a reader is already looking when they want one.
-    const REF = [['scorecard.html', 'Scorecard'], ['daily-temperature-markets.html', 'Trading temp markets'],
+    // the scorecard lives on the daily temperatures page now; scorecard.html
+    // still answers, because the daily letter links its four views directly
+    const REF = [['daily-temperature-markets.html', 'Trading temp markets'],
                  ['accuracy.html', 'Accuracy'], ['faq.html', 'FAQ'], ['about.html', 'About']];
     const nav = cfg.nav || { l1: [], categories: [] };
     const cats = nav.categories || [];
@@ -84,7 +86,8 @@ window.WXC = (() => {
     const mine = cats.find(c => c.slug === here)
       || (byProduct ? cats.find(c => c.slug === byProduct) : null)
       || cats.find(c => !paramOf(c) && pageOf(c) === active)
-      || (active === 'city.html' ? cats.find(c => pageOf(c) === 'index.html') : null);
+      || (['city.html', 'scorecard.html'].indexOf(active) >= 0
+          ? cats.find(c => pageOf(c) === 'index.html') : null);
     // a branch page names its branch directly and belongs to no one category
     const bySection = q.get('s');
     const branch = mine ? mine.l1
