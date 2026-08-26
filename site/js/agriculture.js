@@ -7,12 +7,12 @@
    question about where the trend lands. A reader who has learned to drag across
    the history on one page should not have to learn a second idiom here.
 
-   The window starts two decades back rather than at the start of the record. The
-   record reaches to 1961, but a yield series that far back is a different
-   agricultural era, and drawn in full it compresses the years the contracts
-   actually cover into the last few pixels and flattens the vertical scale the
-   thresholds are separated on. Twenty years is enough to fit a trend against and
-   leaves the ladders legible. */
+   The window is deliberately short. The record reaches to 1961, but the vertical
+   scale is set by whatever is drawn, so every extra decade of low early yields
+   squeezes the strikes — which sit within a few percent of each other — into a
+   thinner and thinner band. Starting in 2015 gives the ladders a little over
+   half the height on all three crops, against a third if the window opened in
+   2005. The cost is that a trend can only be fitted across the years shown. */
 window.WXAg = (() => {
   const { h, $ } = WXC;
 
@@ -21,8 +21,8 @@ window.WXAg = (() => {
   const PRICE = id => 'catalogue/price/' + id + '.json';
   const SERIES = k => 'series/' + k + '.json';
   const SERIES_INDEX = 'series/index.json';
-  // enough history to fit a trend against, without burying the thresholds
-  const X0 = 2005;
+  // enough history to read a trend from, without flattening the ladders
+  const X0 = 2015;
 
   // catalogue terms and catalogue prices arrive as two files and are joined the
   // way the contract pages join them, on the expiration and the strike

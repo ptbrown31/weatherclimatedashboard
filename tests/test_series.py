@@ -74,3 +74,59 @@ class CitySeries(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _psd_zip(rows):
+    """A PSD bulk download: a zip holding one csv of country rows."""
+    import csv as _csv
+    import io
+    import zipfile
+    # a crop name carries a comma ("Rice, Milled"), so this has to be quoted the
+    # way the real download is
+    sio = io.StringIO()
+    w = _csv.writer(sio)
+    w.writerow(["Commodity_Description", "Country_Name", "Market_Year",
+                "Attribute_Description", "Value"])
+    for r in rows:
+        w.writerow(list(r))
+    body = sio.getvalue()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("psd_grains_pulses.csv", body)
+    return buf.getvalue()
+
+
+class CropYieldBasis(unittest.TestCase):
+    """Rice is reported milled against paddy area, so the obvious ratio is wrong.
+
+    The department publishes Rough Production beside the milled figure, and its
+    own Yield attribute is that over area harvested. Dividing the milled figure
+    instead gives about two thirds of the published yield, which put the whole
+    series a third below the strikes listed against it. Corn carries no rough
+    figure and must be unaffected.
+    """
+
+    def test_rice_uses_the_rough_basis_and_corn_is_unchanged(self):
+        rows = [
+            ("Rice, Milled", "A", 2024, "Area Harvested", 100.0),
+            ("Rice, Milled", "A", 2024, "Production", 300.0),
+            ("Rice, Milled", "A", 2024, "Rough Production", 450.0),
+            ("Corn", "A", 2024, "Area Harvested", 100.0),
+            ("Corn", "A", 2024, "Production", 600.0),
+        ]
+        out = series.crop_yields(fetch=lambda url: _psd_zip(rows))
+        rice = dict(out["crop-rice"]["points"])
+        corn = dict(out["crop-corn"]["points"])
+        # rough 450 over area 100, not milled 300 over 100
+        self.assertEqual(rice["2025"], 4.5)
+        self.assertEqual(corn["2025"], 6.0)
+
+    def test_the_series_is_keyed_by_the_contract_year_not_the_database_year(self):
+        """The terms put the reference year at the second year of the marketing
+        year while the database lists the first, so a 2024 market year is the
+        2025 contract. Confirmed against the market: corn's 2026 contract prices
+        a cliff between 6.16 and 6.21, which is the database's 2025 value."""
+        rows = [("Corn", "A", 2024, "Area Harvested", 100.0),
+                ("Corn", "A", 2024, "Production", 600.0)]
+        out = series.crop_yields(fetch=lambda url: _psd_zip(rows))
+        self.assertEqual([p[0] for p in out["crop-corn"]["points"]], ["2025"])

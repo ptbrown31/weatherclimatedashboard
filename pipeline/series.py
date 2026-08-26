@@ -190,6 +190,14 @@ def crop_yields(fetch: Optional[Callable] = None) -> Dict[str, dict]:
     derives it. Production is in thousands of tonnes and area in thousands of
     hectares, so the ratio is already tonnes per hectare.
 
+    Which production, though, is the part that bites. Rice is reported milled,
+    while the area harvested is paddy, so milled over area is a yield in neither
+    basis: it came out around two thirds of the published figure and put the
+    series a third below the strikes listed against it. The department reports
+    Rough Production alongside, and its own Yield attribute is that over the same
+    area, so where a crop carries a rough figure that is the one to divide. For
+    corn and wheat the two are the same number.
+
     And the years differ by one. The terms say the reference year in the event
     question is the SECOND year of the marketing year while the year listed in
     the database is the first, so a contract for 2026 settles on the database's
@@ -208,18 +216,18 @@ def crop_yields(fetch: Optional[Callable] = None) -> Dict[str, dict]:
     for r in csv.DictReader(io.StringIO(z.read(name).decode("utf-8-sig", "replace"))):
         crop = (r.get("Commodity_Description") or "").strip()
         att = (r.get("Attribute_Description") or "").strip()
-        if att not in ("Production", "Area Harvested"):
+        if att not in ("Production", "Rough Production", "Area Harvested"):
             continue
         try:
             my, v = int(r.get("Market_Year")), float(r.get("Value"))
         except (TypeError, ValueError):
             continue
-        slot = agg.setdefault(crop, {}).setdefault(my, {"prod": 0.0, "area": 0.0})
-        slot["prod" if att == "Production" else "area"] += v
+        slot = agg.setdefault(crop, {}).setdefault(my, {"prod": 0.0, "rough": 0.0, "area": 0.0})
+        slot[{"Production": "prod", "Rough Production": "rough"}.get(att, "area")] += v
     out = {}
     for pid, (key, crop) in CROPS.items():
         by = agg.get(crop) or {}
-        pts = [[str(my + 1), round(d["prod"] / d["area"], 3)]
+        pts = [[str(my + 1), round((d["rough"] or d["prod"]) / d["area"], 3)]
                for my, d in sorted(by.items()) if d["area"] > 0]
         if pts:
             out[key] = {"points": pts, "products": [pid], "crop": crop,

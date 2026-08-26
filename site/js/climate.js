@@ -71,7 +71,10 @@ window.WXClimate = (() => {
     const last = ser[ser.length - 1];
     const latestText = fv(last[1]) + ' ' + unitShort + ' (' + yearLabel(last[0]) + ')';
 
-    for (let yr = Math.ceil(x0 / 10) * 10; yr <= x1; yr += 10) {
+    // a decade tick is right for a century of history and leaves a short window
+    // with two labels on it
+    const xStep = (x1 - x0) <= 25 ? 5 : 10;
+    for (let yr = Math.ceil(x0 / xStep) * xStep; yr <= x1; yr += xStep) {
       svg.appendChild(el('line', { x1: X(yr), x2: X(yr), y1: T, y2: B, class: 'grid' }));
       svg.appendChild(txt(yr, { x: X(yr), y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
     }
