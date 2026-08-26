@@ -21,6 +21,8 @@ window.WXCat = (() => {
   let tip = null;
 
   const CAT = c => 'catalogue/' + c + '.json';
+  const SERIES = k => 'series/' + k + '.json';
+  const SERIES_INDEX = 'series/index.json';
   const PROD = id => 'catalogue/product/' + id + '.json';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const nav = () => (window.WX && WX.nav) || { l1: [], categories: [] };
@@ -139,6 +141,26 @@ window.WXCat = (() => {
       $('#cBody').appendChild(h('p', { class: 'cap', text: STATE_NOTE[p.state] || 'This contract is not currently listed.' }));
       return;
     }
+    // the underlying, where one of the series lanes covers this product
+    try {
+      const idx = (await WXD.get(SERIES_INDEX, 1440)).data;
+      const key = idx && (idx.products || {})[p.id];
+      if (key) {
+        const sr = (await WXD.get(SERIES(key), 1440)).data;
+        if (sr && (sr.points || []).length) {
+          const c = chart(sr, p.contracts || []);
+          if (c) {
+            $('#cBody').appendChild(h('div', { class: 'secttl', text: 'WHAT IT SETTLES ON' }));
+            $('#cBody').appendChild(h('div', { class: 'card' }, [c]));
+            const bits = [sr.title, sr.units ? 'in ' + sr.units : null, 'from ' + sr.source].filter(Boolean);
+            $('#cBody').appendChild(h('p', { class: 'cap', text: bits.join(' · ') + '. ' + (sr.note || '')
+              + (sr.expected && sr.title && sr.title.indexOf(sr.expected.split(',')[0]) < 0
+                 ? ' The station drawn is ' + sr.expected + '.' : '') }));
+          }
+        }
+      }
+    } catch (e) { /* no series lane for this product; the ladder still stands */ }
+
     const url = WXM.contractUrl(p.productConid, ((p.contracts || [])[0] || {}).conidYes);
     if (url) {
       const go = h('button', { text: 'Open on ForecastEx →' });
@@ -164,6 +186,82 @@ window.WXCat = (() => {
     });
     $('#cBody').appendChild(h('p', { class: 'cap', text: 'Strikes and settlement dates are read from the exchange once a day; '
       + 'prices are not shown on this page. This site does not publish a fair value for any contract.' }));
+  }
+
+  // ---- the underlying, with the contract's strikes on it
+  //
+  // The same shape the climate page uses: the measured series, and the strikes
+  // marked where they settle, coloured by nothing at all — this page publishes
+  // no price and no fair value. A strike is a horizontal reach at its own
+  // level from the last observation to its expiry, so a reader can see how far
+  // the number has to travel and by when.
+  function chart(sr, contracts) {
+    const pts = (sr.points || []).slice(-180);
+    if (pts.length < 6) return null;
+    const W = 960, H = 300, L = 54, R = 782, T = 18, B = 246;
+    const px = k => String(k).length === 6 ? Date.UTC(+String(k).slice(0, 4), +String(k).slice(4, 6) - 1, 15)
+                                           : Date.UTC(+String(k).slice(0, 4), +String(k).slice(4, 6) - 1, +String(k).slice(6, 8));
+    const ts = pts.map(p => px(p[0])), vs = pts.map(p => p[1]);
+    // strikes share the value axis, so the axis has to hold them too
+    const sv = (contracts || []).filter(c => c.numeric).map(c => c.strike);
+    let lo = Math.min(...vs, ...(sv.length ? sv : [Infinity]));
+    let hi = Math.max(...vs, ...(sv.length ? sv : [-Infinity]));
+    if (!(hi > lo)) { hi = lo + 1; }
+    const pad = (hi - lo) * 0.08;
+    lo -= pad; hi += pad;
+    const t0 = ts[0];
+    const expTs = (contracts || []).map(c => expMs(c.expiration)).filter(Boolean);
+    const t1 = Math.max(ts[ts.length - 1], ...(expTs.length ? expTs : [ts[ts.length - 1]]));
+    const x = t => L + ((t - t0) / Math.max(t1 - t0, 1)) * (R - L);
+    const y = v => B - ((v - lo) / (hi - lo)) * (B - T);
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'serieschart' });
+    // value axis
+    for (let i = 0; i <= 4; i++) {
+      const v = lo + (hi - lo) * i / 4;
+      svg.appendChild(el('line', { x1: L, x2: R, y1: y(v), y2: y(v), class: 'grid' }));
+      svg.appendChild(txt(Math.round(v * 10) / 10, { x: L - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
+    }
+    // the observed series
+    svg.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(px(p[0])).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(''),
+                                 fill: 'none', stroke: 'var(--obs)', 'stroke-width': 1.8, 'pointer-events': 'none' }));
+    // where the record ends, because everything to the right of it is a strike
+    const lastT = ts[ts.length - 1], lastV = vs[vs.length - 1];
+    svg.appendChild(el('line', { x1: x(lastT), x2: x(lastT), y1: T, y2: B, stroke: 'var(--muted)', 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+    svg.appendChild(txt('latest ' + lastV, { x: x(lastT) + 4, y: T + 10, class: 'ax' }));
+    // the strikes
+    (contracts || []).filter(c => c.numeric).forEach(c => {
+      const e = expMs(c.expiration); if (!e) return;
+      const yy = y(c.strike);
+      const line = el('line', { x1: x(lastT), x2: x(e), y1: yy, y2: yy, stroke: 'var(--accent)', 'stroke-width': 1.2, opacity: .55 });
+      const dot = el('circle', { cx: x(e), cy: yy, r: 3.4, fill: 'var(--accent)', 'pointer-events': 'all' });
+      const gap = Math.round((c.strike - lastV) * 100) / 100;
+      bind(dot, () => tip.rows(c.label || String(c.strike), [
+        ['Strike', String(c.strike) + ' ' + (sr.units || '')],
+        ['Latest observation', lastV + ' ' + (sr.units || '')],
+        ['Distance', (gap > 0 ? '+' : '') + gap],
+        ['Settles', expDate(c.expiration)],
+      ], 'the strike is where the contract pays; this page shows no price'));
+      svg.appendChild(line); svg.appendChild(dot);
+    });
+    // time axis: a label a year, and only where the last one has cleared, so a
+    // long series thins its labels instead of stacking them on top of each other
+    let lastYear = null, lastX = -1e9;
+    pts.forEach(p => {
+      const yr = String(p[0]).slice(0, 4);
+      if (yr === lastYear) return;
+      const xx = x(px(p[0]));
+      if (xx - lastX < 46) { lastYear = yr; return; }
+      lastYear = yr; lastX = xx;
+      svg.appendChild(txt(yr, { x: xx, y: B + 15, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    return svg;
+  }
+  const expMs = e => (!e || String(e).length < 8) ? null
+    : Date.UTC(+String(e).slice(0, 4), +String(e).slice(4, 6) - 1, +String(e).slice(6, 8));
+  function bind(node, html) {
+    node.addEventListener('mousemove', e => { e.stopPropagation(); tip.show(e, html()); });
+    node.addEventListener('mouseleave', () => tip.hide());
+    return node;
   }
 
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];

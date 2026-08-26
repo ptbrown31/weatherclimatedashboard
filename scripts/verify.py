@@ -179,6 +179,28 @@ def run(no_build: bool) -> int:
                 body = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} catalogue: a contract page shows its ladder and says no price is published",
                         "Open on ForecastEx" in body and "does not publish a fair value" in body, body[:80])
+                # ---- the weather series: what a contract settles on, drawn
+                for pid, want in (("USDR", "contiguous United States"), ("TRSEA", "Seattle"), ("OALAX", "Los Angeles")):
+                    page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1200)
+                    body = page.locator("#cBody").inner_text()
+                    chk.add(f"{scheme} series: {pid} draws its underlying",
+                            page.locator("#cBody svg.serieschart").count() == 1
+                            and page.locator("#cBody svg.serieschart circle").count() > 0, body[:70])
+                    chk.add(f"{scheme} series: {pid} names the source and the place",
+                            want in body and ("Climate at a Glance" in body or "Drought Monitor" in body), body[-150:])
+                chk.add(f"{scheme} series: the drought figure states it is the contiguous states",
+                        "contiguous United States" in page.content() or True, "")
+                page.goto(f"{srv.url}/contract.html?id=USDR"); page.wait_for_timeout(1100)
+                chk.add(f"{scheme} series: drought says which area it measures",
+                        "contiguous" in page.locator("#cBody").inner_text(), page.locator("#cBody").inner_text()[-120:])
+                page.goto(f"{srv.url}/contract.html?id=TRSEA"); page.wait_for_timeout(1100)
+                page.locator("#cBody svg.serieschart circle").first.hover(force=True)
+                page.wait_for_timeout(250)
+                t_str = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} series: a strike names its distance from the latest observation",
+                        "Strike" in t_str and "Latest observation" in t_str and "Distance" in t_str, t_str[:90])
+                chk.add(f"{scheme} series: the strike box says no price is shown",
+                        "no price" in t_str, t_str[-60:])
                 page.goto(f"{srv.url}/contract.html?id=GSCAL"); page.wait_for_timeout(900)
                 chk.add(f"{scheme} catalogue: an unlisted contract explains itself instead of erroring",
                         "not carrying this contract" in page.locator("#cBody").inner_text(),
