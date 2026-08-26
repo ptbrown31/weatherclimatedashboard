@@ -199,6 +199,30 @@ Every figure that shows the vendor's data carries its mark (the hurricane page d
 itself). The first real storm delivery should be checked against `data/archive/reask/` by hand:
 the parser was built from the documented file shapes without a live storm to test on.
 
+## 11. The energy series (needs a free EIA key)
+
+The energy contracts settle on series the Energy Information Administration publishes, and its API
+wants a key. It is free and per-person, from eia.gov/opendata. Without one the energy lane writes
+nothing, says so in the daily pass, and the two energy pages fall back to listing strikes; nothing
+else is affected.
+
+Put it in `ops/aws/deploy.env` (gitignored, and the same file the vendor lane's key lives in):
+
+    EIA_API_KEY=...
+
+then deploy the stack and run the series job once so the pages have data before the next daily pass:
+
+    ops/aws/deploy.sh stack
+    aws lambda invoke --function-name <stack>-pipeline --cli-binary-format raw-in-base64-out \
+      --payload '{"job":"series"}' --cli-read-timeout 900 /dev/stdout
+
+The key reaches the pipeline as `WX_EIA_API_KEY`, a NoEcho stack parameter. It is never written to
+the repository, and `scripts/scrub.py` refuses a commit that puts it in `config/site.json`.
+
+Every mapping from a contract to a series was checked against the strikes the exchange has listed
+rather than inferred from the contract's name. `pipeline/energy.py` records which readings are
+easy to get wrong and why.
+
 ## 11. The accuracy curve (run from the machine that captures it)
 
 The accuracy page draws forecast error against lead time for the National Weather Service

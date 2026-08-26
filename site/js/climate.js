@@ -50,6 +50,10 @@ window.WXClimate = (() => {
     // presentation choices the climate page derives from its own series keys;
     // another page passes them in
     const fmtThr = opts.fmtThreshold || (v => (key.startsWith('temp') ? v.toFixed(2) : String(v)));
+    // values here span a fraction of a percent to millions; the default rule
+    // suits the climate series and another page passes its own
+    const fmtV = opts.fmt || fv;
+    const fmtAx = opts.fmtAxis || (v => (v >= 100 ? v.toFixed(0) : v.toFixed(2)));
     const thrSuffix = opts.thresholdSuffix != null ? opts.thresholdSuffix : (key.startsWith('temp') ? '°C' : '');
     const div = h('div', { class: 'panel' });
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
@@ -62,14 +66,25 @@ window.WXClimate = (() => {
     const unitShort = unit.split(/[ ,]/)[0];
     const W = 960, L = 56, R = 910, T = 16, B = 296;
     const x0 = opts.x0 != null ? opts.x0 : (X0[key] != null ? X0[key] : Math.min(...cs.map(c => c.year)) - 4);
-    const x1 = Math.max(...cs.map(c => c.year), new Date().getUTCFullYear() + 5) + 3;
+    // The climate ladders run to the 2040s, so the axis is given room to the
+    // right regardless of what is listed today. A category whose contracts
+    // settle within a year or two would spend half its width on empty years, so
+    // it can ask for an axis that ends just past the last thing drawn.
+    const lastX = Math.max(...cs.map(c => c.year), (ser.length ? ser[ser.length - 1][0] : 0));
+    const x1 = opts.tightRight ? lastX + Math.max(0.5, (lastX - x0) * 0.04)
+                               : Math.max(...cs.map(c => c.year), new Date().getUTCFullYear() + 5) + 3;
     const pts = ser.filter(q => q[0] >= x0);
     const vals = pts.map(q => q[1]).concat(cs.map(c => c.threshold));
     if (!vals.length) { svg.appendChild(txt('No data available.', { x: L, y: T + 16, class: 'axl' })); return; }
-    const lo = Math.min(...vals), hi = Math.max(...vals), pad = (hi - lo) * 0.08 || 1;
-    const X = v => L + (v - x0) / (x1 - x0) * (R - L), Y = v => B - (v - (lo - pad)) / ((hi + pad) - (lo - pad)) * (B - T);
+    let lo = Math.min(...vals);
+    const hi = Math.max(...vals), pad = (hi - lo) * 0.08 || 1;
+    // a quantity that cannot go below zero should not be given a negative axis:
+    // generation, consumption and production all bottom out at nothing
+    const floorAtZero = opts.clampZero && lo >= 0 && lo - pad < 0;
+    const yLo = floorAtZero ? 0 : lo - pad, yHi = hi + pad;
+    const X = v => L + (v - x0) / (x1 - x0) * (R - L), Y = v => B - (v - yLo) / (yHi - yLo) * (B - T);
     const last = ser[ser.length - 1];
-    const latestText = fv(last[1]) + ' ' + unitShort + ' (' + yearLabel(last[0]) + ')';
+    const latestText = fmtV(last[1]) + ' ' + unitShort + ' (' + yearLabel(last[0]) + ')';
 
     // a decade tick is right for a century of history and leaves a short window
     // with two labels on it
@@ -85,7 +100,7 @@ window.WXClimate = (() => {
       const seen = {}; const rows = [];
       at.forEach(c => { if (seen[c.expiryLabel]) return; seen[c.expiryLabel] = 1; rows.push([c.expiryLabel, cents(c.yes)]); });
       return tip.rows('threshold ' + fmtThr(v) + ' ' + unit, [['Listed for', rows.length + (rows.length === 1 ? ' expiration' : ' expirations')], ...rows.map(r => [r[0], 'Yes ' + r[1]])],
-        'series now ' + fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - v) + ' vs threshold)');
+        'series now ' + fmtV(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - v) + ' vs threshold)');
     };
     let lastLabY = 1e9;
     thr.slice().reverse().forEach(v => {
@@ -99,8 +114,8 @@ window.WXClimate = (() => {
       lab.onmousemove = e => tip.show(e, thrTip(v)); lab.onmouseleave = () => tip.hide();
       svg.appendChild(lab);
     });
-    const yt = 5, step = (hi - lo + 2 * pad) / yt;
-    for (let i = 0; i <= yt; i++) { const v = lo - pad + i * step; svg.appendChild(txt(v >= 100 ? v.toFixed(0) : v.toFixed(2), { x: L - 8, y: Y(v) + 3.5, 'text-anchor': 'end', class: 'ax' })); }
+    const yt = 5, step = (yHi - yLo) / yt;
+    for (let i = 0; i <= yt; i++) { const v = yLo + i * step; svg.appendChild(txt(fmtAx(v), { x: L - 8, y: Y(v) + 3.5, 'text-anchor': 'end', class: 'ax' })); }
     if (pts.length) svg.appendChild(el('path', { d: pts.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--obs)', 'stroke-width': opts.lineWidth || (key === 'tempMonthly' ? 1 : 1.8) }));
     let dragHint = null;
     if (pts.length > 4) { dragHint = txt('← drag across the history to project a linear trend', { x: L + 8, y: T + 14, 'font-size': 11, fill: 'var(--accent)', 'font-weight': 600 }); svg.appendChild(dragHint); }
@@ -129,7 +144,7 @@ window.WXClimate = (() => {
         ['No bid', noBid != null ? cents(noBid) + size(c.askSize) : null],
         ['Buy Yes now at', c.ask != null ? cents(c.ask) + (WXM.payoutText(Math.round(c.ask * 100)) ? ' · pays ' + WXM.payoutText(Math.round(c.ask * 100)) : '') : null],
         ['Bids', c.from === 'no' ? (book ? book + '; ' : '') + 'quoted from the No contract' : book],
-        ['Series now', fv(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],
+        ['Series now', fmtV(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],
         ['On the exchange', url ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>' : null]],
         (c.label2 || WXM.LABEL) + (url ? ' · click the marker to open the contract' : ''));
       m.onmousemove = e => tip.show(e, html());
@@ -159,7 +174,7 @@ window.WXClimate = (() => {
       const d10 = tenYear(q);
       // the sea-level series is a ten-day sample, not monthly: say "Date" and keep the decimal year
       const when = opts.xLabel ? [opts.xLabel, yearLabel(q[0])] : Number.isInteger(q[0]) ? ['Year', yearLabel(q[0])] : key === 'seaLevel' ? ['Date', yearLabel(q[0]) + ' (' + q[0].toFixed(3) + ')'] : ['Month', yearLabel(q[0])];
-      tip.show(e, tip.rows(title, [when, ['Value', fv(q[1]) + ' ' + unitShort],
+      tip.show(e, tip.rows(title, [when, ['Value', fmtV(q[1]) + ' ' + unitShort],
         ['Change over 10 years', d10 == null ? null : sgn(d10) + ' ' + unitShort], ['Latest', latestText]], source));
     });
     svg.addEventListener('mouseleave', () => { clearDot(); tip.hide(); drag = null; });

@@ -28,6 +28,8 @@ CATEGORY_PAGE = {
     "tropical-cyclones": "hurricane.html",
     "climate-change": "climate.html",
     "agriculture": "agriculture.html",
+    "fossil-fuels": "fossil-fuels.html",
+    "electricity-renewables": "electricity-renewables.html",
 }
 ORDER_L1 = ["Climate & Weather", "Energy"]
 ORDER_L2 = {

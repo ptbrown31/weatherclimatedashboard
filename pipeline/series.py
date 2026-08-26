@@ -40,6 +40,7 @@ import time
 from typing import Callable, Dict, List, Optional
 
 from . import archive as arch
+from . import energy as en
 from . import gov_weather as gw
 from .storage import Storage
 
@@ -384,6 +385,17 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
         except Exception as e:  # noqa: BLE001
             errors.append(f"USDR: {type(e).__name__}: {e}")
 
+    # ---- the energy series, which need a key and are skipped without one
+    if not deadline.over(40):
+        if not en.api_key(cfg):
+            errors.append("energy: no EIA key configured, so the energy series were not fetched")
+        else:
+            try:
+                for key, doc in en.energy_series(cfg, fetch).items():
+                    put(key, doc)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"energy: {type(e).__name__}: {e}")
+
     products = {pid: k for pid, (k, _, _) in PRODUCTS.items()}
     for key, spec in WIDE.items():
         for pid in spec["products"]:
@@ -393,6 +405,7 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
     for pid, (key, _) in CROPS.items():
         products[pid] = key
     products["USDR"] = "drought-us"
+    products.update(en.product_keys())
     # only advertise a series that this pass actually wrote or that already
     # exists, so a page never fetches a key that is not there
     products = {pid: k for pid, k in products.items() if k in written or store.get(KEY.format(key=k))}

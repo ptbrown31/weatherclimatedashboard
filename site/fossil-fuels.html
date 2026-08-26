@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agriculture</title>
+<title>Fossil fuels</title>
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -11,12 +11,11 @@
 </head>
 <body>
 <div class="wrap">
-<h1>Agriculture</h1>
-<p class="sub">World crop yields as the Department of Agriculture publishes them, with the listed thresholds
-drawn at the year each contract settles. Drag across a chart&rsquo;s history to fit a straight line and project it
-forward with the year it would cross each threshold; different windows give different projections. Double-click
-to clear. Hover the series for the value at a point and its ten-year change, or a marker for the contract&rsquo;s
-quote; click a marker to open that contract on IBKR.</p>
+<h1>Fossil fuels</h1>
+<p class="sub">Coal, natural gas and oil as the Energy Information Administration publishes them, with the listed
+strikes drawn at the month or year each contract settles. Drag across a chart&rsquo;s history to fit a straight line
+and project it forward; double-click to clear. Hover the series for the value at a point, or a marker for the
+contract&rsquo;s quote; click a marker to open that contract on IBKR.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div id="panels"></div>
 <p class="cap" id="foot"></p>
@@ -27,7 +26,7 @@ quote; click a marker to open that contract on IBKR.</p>
 <script src="js/climate.js"></script>
 <script src="js/catalogue.js"></script>
 <script src="js/panels.js"></script>
-<script src="js/agriculture.js"></script>
-<script>WXC.chrome('agriculture.html'); WXAg.init();</script>
+<script src="js/energy.js"></script>
+<script>WXC.chrome('fossil-fuels.html'); WXEnergy.init('fossil-fuels');</script>
 </body>
 </html>

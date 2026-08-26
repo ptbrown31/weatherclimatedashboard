@@ -130,3 +130,48 @@ class CropYieldBasis(unittest.TestCase):
                 ("Corn", "A", 2024, "Production", 600.0)]
         out = series.crop_yields(fetch=lambda url: _psd_zip(rows))
         self.assertEqual([p[0] for p in out["crop-corn"]["points"]], ["2025"])
+
+
+class EnergyLane(unittest.TestCase):
+    """The energy series need a key, and several of the readings are ambiguous.
+
+    Without a key the lane writes nothing and the rest of the daily pass carries
+    on: that is a state to report, not a failure. The mappings themselves were
+    checked against the strikes the exchange lists, and the two that are easiest
+    to get wrong are pinned here.
+    """
+
+    def test_no_key_is_an_empty_result_not_an_error(self):
+        from pipeline import energy
+        import os
+        old = os.environ.pop("WX_EIA_API_KEY", None)
+        try:
+            self.assertEqual(energy.energy_series({}), {})
+            self.assertEqual(energy.api_key({}), "")
+        finally:
+            if old is not None:
+                os.environ["WX_EIA_API_KEY"] = old
+
+    def test_gas_is_dry_production_and_oil_is_per_day(self):
+        """Marketed gas production runs about a tenth above dry and falls outside
+        every listed ladder; the month's oil total is thirty times the daily
+        rate the strikes are set on."""
+        from pipeline import energy
+        self.assertEqual(energy.SPECS["NGP"][2]["params"]["facets[series][]"], "N9070US2")
+        self.assertEqual(energy.SPECS["OP"][2]["params"]["facets[series][]"], "MCRFPUS2")
+
+    def test_a_month_lands_at_its_middle_on_the_year_axis(self):
+        """Monthly and annual series share one axis, so a month has to be placed
+        inside its year rather than at its start."""
+        from pipeline import energy
+        self.assertEqual(energy._x("2025"), 2025.0)
+        self.assertAlmostEqual(energy._x("2026-01"), 2026 + 0.5 / 12, places=3)
+        self.assertAlmostEqual(energy._x("2026-12"), 2026 + 11.5 / 12, places=3)
+        self.assertTrue(2026.0 < energy._x("2026-08-24") < 2027.0)
+        self.assertIsNone(energy._x("not a period"))
+
+    def test_every_mapped_product_has_its_own_series_key(self):
+        from pipeline import energy
+        keys = list(energy.product_keys().values())
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual(len(keys), len(energy.SPECS) + len(energy.SHARES))

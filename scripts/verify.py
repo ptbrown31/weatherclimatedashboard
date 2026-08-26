@@ -107,7 +107,9 @@ def run(no_build: bool) -> int:
                 pages = [("index.html", "#map path", "map geometry"), ("city.html?station=KLAX", "#chart path", "city series"),
                          ("hurricane.html", "#basin path", "basin geography"), ("scorecard.html", "#overall table", "scorecard table"),
                          ("climate.html", "#panels svg path", "climate series"),
-                         ("agriculture.html", "#panels svg path", "crop yield series"), ("about.html", "footer.site", "footer"),
+                         ("agriculture.html", "#panels svg path", "crop yield series"),
+                         ("fossil-fuels.html", "#panels svg path", "fossil fuel series"),
+                         ("electricity-renewables.html", "#panels svg path", "electricity series"), ("about.html", "footer.site", "footer"),
                          ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", ".prose p", "the accuracy argument"),
                          ("daily-temperature-markets.html", ".prose h2", "the article sections")]
                 for path, sel, what in pages:
@@ -216,13 +218,13 @@ def run(no_build: bool) -> int:
                 page.goto(f"{srv.url}/section.html?s=energy"); page.wait_for_timeout(800)
                 chk.add(f"{scheme} catalogue: a branch page lists its categories",
                         page.locator("#cats a.catcard").count() == 2, str(page.locator("#cats a.catcard").count()))
-                page.goto(f"{srv.url}/category.html?c=fossil-fuels"); page.wait_for_timeout(900)
+                page.goto(f"{srv.url}/category.html?c=weather"); page.wait_for_timeout(900)
                 rows = page.locator("#list table tr").count()
                 dim = page.locator("#list tr.dim").count()
                 chk.add(f"{scheme} catalogue: the category lists every product in the family",
-                        rows == 16 and dim == 3, f"rows={rows} not-listed={dim}")
+                        rows == 34 and dim == 23, f"rows={rows} not-listed={dim}")
                 chk.add(f"{scheme} catalogue: unlisted products say so rather than vanishing",
-                        page.locator("#list .pill.off").count() == 3, str(page.locator("#list .pill.off").count()))
+                        page.locator("#list .pill.off").count() == 23, str(page.locator("#list .pill.off").count()))
                 page.goto(f"{srv.url}/contract.html?id=OP"); page.wait_for_timeout(900)
                 body = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} catalogue: a contract page shows its ladder and says no price is published",
@@ -880,6 +882,39 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} agriculture: the trend fit projects each settling year",
                         "per decade" in ag_note and "crosses" not in ag_note
                         and ag_note.count(" · ") <= 8, ag_note[:110])
+
+                # ---- energy: the same panels, plus the two fallbacks. A contract
+                # that resolves on an event has nothing to plot and gets the
+                # Yes/No ladder; one the exchange is not listing gets a line
+                # saying so rather than being left off the page.
+                page.goto(f"{srv.url}/fossil-fuels.html"); page.wait_for_timeout(1200)
+                ff = page.locator("#panels .panel").count()
+                ff_mk = page.locator("#panels svg circle[data-tip]").count()
+                ff_lk = page.locator("#panels svg circle[role='link']").count()
+                chk.add(f"{scheme} fossil fuels: a panel per product", ff >= 12, f"panels={ff}")
+                chk.add(f"{scheme} fossil fuels: every strike marker opens its contract",
+                        ff_mk >= 100 and ff_lk == ff_mk, f"markers={ff_mk} linked={ff_lk}")
+                # production and consumption cannot go negative and must not be
+                # given an axis that says they can
+                ffax = page.eval_on_selector_all(
+                    "#panels .panel:first-child text",
+                    "e=>e.map(x=>x.textContent).filter(t=>/^-/.test(t))")
+                chk.add(f"{scheme} fossil fuels: no negative axis on a quantity", not ffax, str(ffax[:3]))
+
+                page.goto(f"{srv.url}/electricity-renewables.html"); page.wait_for_timeout(1200)
+                er = page.locator("#panels .panel").count()
+                er_svg = page.locator("#panels svg").count()
+                er_lad = page.locator("#panels .lrow").count()
+                chk.add(f"{scheme} electricity: charts and event ladders side by side",
+                        er >= 20 and er_svg >= 12 and er_lad >= 5,
+                        f"panels={er} charts={er_svg} ladder rows={er_lad}")
+                chk.add(f"{scheme} electricity: an unlisted product still says so",
+                        page.locator("#panels .panel", has_text="Not currently listed").count() >= 1,
+                        str(page.locator("#panels .panel", has_text="Not currently listed").count()))
+                # the ladder keeps the exchange's buy-only language
+                foot_e = page.locator("#foot").inner_text()
+                chk.add(f"{scheme} electricity: the page says what it drew and what it could not",
+                        "resolve on an event" in foot_e and "not currently listed" in foot_e, foot_e[-110:])
                 # ---- scorecard hover: overall, station and day cells
                 page.goto(f"{srv.url}/scorecard.html")
                 page.wait_for_timeout(900)

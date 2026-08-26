@@ -36,6 +36,14 @@ Parameters:
     Type: Number
     Default: 30
     Description: How long raw CDN access logs are kept. The daily traffic summary is derived from them and kept indefinitely, so this only bounds re-reading a past day.
+  EiaApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Credential for the Energy Information Administration, which the energy series need. Free and
+      per-person, from eia.gov/opendata. Leave empty to keep the energy lane off; the rest of the
+      daily pass is unaffected. Never written to the repository.
   ReaskApiKey:
     Type: String
     Default: ""
@@ -311,6 +319,7 @@ Resources:
           WX_USER_AGENT: !Ref UserAgent
           WX_DOMAIN: !Ref DomainName
           WX_REASK_API_KEY: !Ref ReaskApiKey
+          WX_EIA_API_KEY: !Ref EiaApiKey
           WX_REASK_BASE_URL: !Ref ReaskBaseUrl
           WX_TRAFFIC_LOG_BUCKET: !Ref LogBucket
           WX_TRAFFIC_LOG_PREFIX: cf

@@ -64,8 +64,10 @@ phase_stack() {
   local vendor_params=()
   [ -n "${REASK_BASE_URL:-}" ] && vendor_params+=("ReaskBaseUrl=$REASK_BASE_URL")
   [ -n "${REASK_API_KEY:-}" ] && vendor_params+=("ReaskApiKey=$REASK_API_KEY")
+  # the energy series need an EIA key; same treatment, never echoed
+  [ -n "${EIA_API_KEY:-}" ] && vendor_params+=("EiaApiKey=$EIA_API_KEY")
   say "deploying stack $STACK in $REGION (this takes 5-15 minutes: CloudFront is slow to create)"
-  [ ${#vendor_params[@]} -eq 2 ] && say "vendor lane parameters: set (values not shown)"
+  [ ${#vendor_params[@]} -ge 2 ] && say "optional credentials passed through: ${#vendor_params[@]} (values not shown)"
   aws cloudformation deploy \
     --stack-name "$STACK" \
     --template-file "$HERE/template.yaml" \

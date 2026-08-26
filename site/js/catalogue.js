@@ -199,11 +199,18 @@ window.WXCat = (() => {
     // the ladder, in the same Yes-green No-red language the temperature and
     // hurricane boards use. A plain list of strikes is the fallback, not the
     // default: it appears only when the exchange has quoted nothing at all.
+    ladder($('#cBody'), p, priced, pr);
+  }
+
+  // The ladder, in the same Yes-green No-red language the temperature and
+  // hurricane boards use. Extracted so a category page can draw it for a
+  // product that has no series behind it — a milestone contract has nothing to
+  // plot against time, and a list of strikes is the last resort, not the first.
+  function ladder(host, p, priced, pr) {
     // a product the rotation has not reached yet is not a product without bids,
     // and must not be drawn as one
     const unquoted = !pr || !(pr.rows || []).length;
     const anyBids = ((pr && pr.rows) || []).some(r => r.mid != null);
-
     const byExp = {};
     (p.contracts || []).forEach(c => { (byExp[c.expiryLabel || c.spec || '—'] = byExp[c.expiryLabel || c.spec || '—'] || []).push(c); });
     Object.keys(byExp).forEach(k => {
@@ -232,9 +239,9 @@ window.WXCat = (() => {
         if (u) WXM.linkTo(bar.querySelector('.lv'), u, 'Open ' + (c.label || c.strike) + ' on IBKR');
         div.appendChild(bar);
       });
-      $('#cBody').appendChild(div);
+      host.appendChild(div);
     });
-    $('#cBody').appendChild(h('p', { class: 'cap', text: 'Strikes and settlement dates are read from the exchange once a day and '
+    host.appendChild(h('p', { class: 'cap', text: 'Strikes and settlement dates are read from the exchange once a day and '
       + 'prices every half hour. Yes green, No red; the two sides of a contract sum to a dollar and there are no sellers. '
       + (unquoted ? 'This contract has not come round on the price rotation yet, so no prices are shown for it; '
                     + 'that is not the same as it having no bids. '
@@ -418,5 +425,5 @@ window.WXCat = (() => {
     if (kind === 'category') return category();
     return contract();
   }
-  return { init };
+  return { ladder, init };
 })();

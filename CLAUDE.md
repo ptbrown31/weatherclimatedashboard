@@ -74,6 +74,7 @@ parameters: `station`, `theme`, `market`.
     pipeline/        gov_weather.py (every government call), exchange.py (every exchange call), archive.py,
                      snapshots.py, market.py (the quote job), reask.py (the vendor lane), hurricane.py,
                      scorecard.py, normals.py, climate.py, season.py (the count climatology),
+                     energy.py (the EIA series behind the energy contracts, needs a key),
                      traffic.py (page views from the CDN access logs),
                      basemap.py, storage.py, config.py,
                      run.py (command line), handler.py (the only vendor-specific file)
