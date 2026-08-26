@@ -164,6 +164,26 @@ def run(no_build: bool) -> int:
                     page.goto(url); page.wait_for_timeout(800)
                     got = page.eval_on_selector_all("header.site nav a.on", "els => els.map(e => e.textContent)")
                     chk.add(f"{scheme} nav: {url.split('/')[-1][:34]} knows its branch", got == want, f"{got} want {want}")
+                # ---- the full view: both contract days at once
+                page.goto(f"{srv.url}/city.html?station=KPHX&market=on"); page.wait_for_timeout(1800)
+                heads0 = page.eval_on_selector_all("#chart text.axl",
+                    "e=>e.map(x=>x.textContent).filter(t=>/Today ·|Tomorrow ·/.test(t))")
+                chk.add(f"{scheme} city full: one ladder before the toggle", heads0 == [], str(heads0))
+                page.locator("#fullBtn").click(); page.wait_for_timeout(1200)
+                heads1 = page.eval_on_selector_all("#chart text.axl",
+                    "e=>e.map(x=>x.textContent).filter(t=>/Today ·|Tomorrow ·/.test(t))")
+                chk.add(f"{scheme} city full: both contract days are headed", len(heads1) == 2
+                        and heads1[0].startswith("Today") and heads1[1].startswith("Tomorrow"), str(heads1))
+                nm = page.eval_on_selector_all("#chart text.lvlnm", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} city full: the forecast names shorten so they clear the strikes",
+                        bool(nm) and all(len(x) <= 12 for x in nm), str(nm[:3]))
+                errs_now = len(errs)
+                page.locator("#fullBtn").click(); page.wait_for_timeout(900)
+                heads2 = page.eval_on_selector_all("#chart text.axl",
+                    "e=>e.map(x=>x.textContent).filter(t=>/Today ·|Tomorrow ·/.test(t))")
+                chk.add(f"{scheme} city full: toggling back restores the single ladder",
+                        heads2 == [] and len(errs) == errs_now, str(heads2))
+
                 # ---- the station's own record, drawn on its page
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
                 lines = page.locator("#cityScore path").count()

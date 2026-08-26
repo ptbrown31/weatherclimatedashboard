@@ -20,7 +20,7 @@ window.WXCity = (() => {
   const HP = ['#c0392b', '#e6550d', '#d6604d', '#b5651d', '#e07b6b'];
   const LP = ['#2b7bba', '#3690c0', '#4393c3', '#5f8fd6', '#2a9d8f'];
 
-  let cur = null, checked = new Set(), showYday = false, HV = null, tip = null;
+  let cur = null, checked = new Set(), showYday = false, full = false, HV = null, tip = null;
   let summary = null, snaps = {}, svgId = 'chart', onSelect = null;
   const DESC = { nws: 'the official National Weather Service forecast', nbm: 'National Blend of Models guidance',
                  lamp: 'LAMP, observation-updated same-day guidance', mav: 'GFS MOS, a single-model statistical forecast' };
@@ -92,7 +92,15 @@ window.WXCity = (() => {
     return tip.rows(c.city + ' (' + c.station + ') — tomorrow ' + isoDate(mk.tomorrow), rows, 'click → this station’s chart');
   }
 
-  function layout(market) {
+  // The full view carries both contract days at once: the trace runs to the end
+  // of tomorrow and a second ladder sits beside the first, so the day being
+  // traded now and the day-ahead board can be read against the same axis and
+  // the same forecast. It is the wider layout, not a different chart.
+  function layout(market, full) {
+    if (market && full) {
+      return { W: 960, H: 655, L: 52, R: 548, T: 36, B: 346, PH0: 404, PH1: 494, PL0: 526, PL1: 616,
+               GV: 552, GL0: 578, GL1: 594, GN: 598, LX: 726, LW: 96, LX2: 848, LW2: 96, full: true };
+    }
     return market
       ? { W: 960, H: 655, L: 52, R: 610, T: 36, B: 346, PH0: 404, PH1: 494, PL0: 526, PL1: 616,
           GV: 614, GL0: 646, GL1: 668, GN: 672, LX: 790, LW: 130 }
@@ -224,7 +232,7 @@ window.WXCity = (() => {
     const fc = (snaps.fc && snaps.fc.data) || null;
     const ob = (snaps.ob && snaps.ob.data) || null;
     const market = WXM.on();
-    const S = layout(market);
+    const S = layout(market, full);
     const svg = $('#' + svgId);
     svg.setAttribute('viewBox', `0 0 ${S.W} ${S.H}`);
     svg.innerHTML = '';
@@ -232,7 +240,11 @@ window.WXCity = (() => {
     const tz = c.tz, unit = c.unit;
     const M = (fc && fc.markers) || c.markers;
     if (!M) { g.appendChild(txt('No data available for this station.', { x: S.L + 8, y: S.T + 16, class: 'axl' })); return; }
-    const w0 = P(M.winStart), d0 = P(M.dayStart), d1 = P(M.dayEnd);
+    const w0 = P(M.winStart), d0 = P(M.dayStart);
+    // the full view runs to the end of the day-ahead contract day, which is one
+    // more local day past the end of this one
+    const d1 = P(M.dayEnd) + (S.full ? 24 * 3600 * 1000 : 0);
+    const dEnd1 = P(M.dayEnd);
     const val = r => (unit === 'F' ? r.tempF : (r.tempC != null ? r.tempC : (r.tempF - 32) * 5 / 9));
     const rows = a => (a || []).map(r => ({ t: P(r.t), v: val(r) }));
     const inWin = a => a.filter(p => p.t >= w0 && p.t <= d1);
@@ -352,7 +364,15 @@ window.WXCity = (() => {
     srt.forEach((L, i) => {
       g.appendChild(bind(txt(L.v.toFixed(unit === 'F' ? 0 : 1), { x: S.GV, y: y(L.v) + 3.5, class: 'lvlval', fill: L.col }), () => levelTip(L), true));
       g.appendChild(el('line', { x1: S.GL0, x2: S.GL1, y1: y(L.v), y2: labY[i], stroke: L.col, 'stroke-width': .7, opacity: .5 }));
-      g.appendChild(bind(txt(L.nm, { x: S.GN, y: labY[i] + 3.5, class: 'lvlnm', fill: L.col }), () => levelTip(L), true));
+      // the full view gives its width to two ladders, so the names shorten to
+      // the initials the key below already spells out rather than running into
+      // the strike labels
+      const SHORT = { 'Weather Service': 'NWS', 'Blend of Models': 'NBM', 'GFS MOS': 'MOS', 'LAMP': 'LAMP' };
+      const nm = S.full
+        ? (Object.keys(SHORT).reduce((a, k) => (String(L.nm).indexOf(k) === 0 ? SHORT[k] : a), null)
+           || String(L.nm).split(' ')[0]) + (String(L.nm).indexOf('issued') >= 0 ? ' (iss)' : '')
+        : L.nm;
+      g.appendChild(bind(txt(nm, { x: S.GN, y: labY[i] + 3.5, class: 'lvlnm', fill: L.col }), () => levelTip(L), true));
     });
     if (levels.length) g.appendChild(el('line', { x1: S.R, x2: S.R, y1: S.T, y2: S.B, stroke: 'var(--rule)', 'stroke-width': .9 }));
     const nmeta = snaps.nm && snaps.nm.data;
@@ -421,36 +441,53 @@ window.WXCity = (() => {
 
     // ---- the market layer: ladders on the shared axis, price panels below
     const priceSer = [];
-    if (market && lad) {
-      g.appendChild(txt('Strike ladders (' + lad.label + ')', { x: 946, y: S.T - 8, 'text-anchor': 'end', class: 'axl' }));
+    // one ladder, wherever it is put. The full view calls this twice, for the
+    // day being traded and the day-ahead board, so both read against the same
+    // temperature axis and the same forecast trace.
+    function drawLadder(LD, LX, LW, heading, labels) {
+      if (!LD) return;
+      const lxp = p => LX + (p / 100) * LW;
+      g.appendChild(txt(heading, { x: LX + LW / 2, y: S.T - 8, 'text-anchor': 'middle', class: 'axl' }));
       [['high', '>'], ['low', '<']].forEach(([m, cmp]) => {
-        lad[m].forEach(L => {
+        LD[m].forEach(L => {
           const yy = y(L.strike);
-          if (L.yes == null) {                     // listed, no bids on either side
-            g.appendChild(bind(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'transparent', stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2' }), () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
-            g.appendChild(txt('no bids', { x: S.LX + S.LW / 2, y: yy + 3.2, class: 'ax', 'text-anchor': 'middle', 'pointer-events': 'none' }));
+          if (L.yes == null) {
+            g.appendChild(bind(el('rect', { x: LX, y: yy - 5.5, width: LW, height: 11, fill: 'transparent', stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2' }), () => ladderTip(L, m === 'high' ? 'h' : 'l', LD, c), true));
+            g.appendChild(txt('no bids', { x: LX + LW / 2, y: yy + 3.2, class: 'ax', 'text-anchor': 'middle', 'pointer-events': 'none' }));
           } else {
-            const gw = L.yes / 100 * S.LW;
-            const yb = el('rect', { x: S.LX, y: yy - 5.5, width: Math.max(gw, 1), height: 11, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
-            const nb = el('rect', { x: S.LX + gw, y: yy - 5.5, width: Math.max(S.LW - gw, 1), height: 11, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
-            // clicking a price goes to that contract on the exchange; with no
-            // link available the bar keeps its old behaviour of pinning the box
+            const gw = L.yes / 100 * LW;
+            const yb = el('rect', { x: LX, y: yy - 5.5, width: Math.max(gw, 1), height: 11, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
+            const nb = el('rect', { x: LX + gw, y: yy - 5.5, width: Math.max(LW - gw, 1), height: 11, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
             const sd = m === 'high' ? 'h' : 'l';
-            const url = strikeUrl(lad, sd, L);
+            const url = strikeUrl(LD, sd, L);
             [yb, nb].forEach(bar => {
-              g.appendChild(bind(bar, () => ladderTip(L, sd, lad, c), !url));
+              g.appendChild(bind(bar, () => ladderTip(L, sd, LD, c), !url));
               if (url) WXM.linkTo(bar, url, 'Open ' + (L.label || L.strike) + ' on IBKR');
             });
-            if (lad.live && L.side !== 'mid') g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'none', stroke: 'var(--panel)', 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
-            if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt', 'pointer-events': 'none' }));
-            if (S.LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: S.LX + S.LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end', 'pointer-events': 'none' }));
+            if (LD.live && L.side !== 'mid') g.appendChild(el('rect', { x: LX, y: yy - 5.5, width: LW, height: 11, fill: 'none', stroke: 'var(--panel)', 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
+            if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: LX + 3, y: yy + 3.2, class: 'ladtxt', 'pointer-events': 'none' }));
+            if (LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: LX + LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end', 'pointer-events': 'none' }));
           }
-          g.appendChild(bind(txt(cmp + L.strike + '°', { x: S.LX + S.LW + 5, y: yy + 3.5, class: 'ax', fill: m === 'high' ? 'var(--warm)' : 'var(--cool)' }), () => ladderTip(L, m === 'high' ? 'h' : 'l', lad, c), true));
+          if (labels !== false) {
+            const at = S.full ? { x: LX - 5, 'text-anchor': 'end' } : { x: LX + LW + 5 };
+            g.appendChild(bind(txt(cmp + L.strike + '°', Object.assign({ y: yy + 3.5, class: 'ax',
+              fill: m === 'high' ? 'var(--warm)' : 'var(--cool)' }, at)),
+              () => ladderTip(L, m === 'high' ? 'h' : 'l', LD, c), true));
+          }
         });
       });
-      if (lad.live && !lad.listed) g.appendChild(txt('no contracts listed for this day', { x: S.LX + S.LW / 2, y: (S.T + S.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
-      [0, 50, 100].forEach(p => g.appendChild(txt(p + (p === 100 ? '¢' : ''), { x: lx(p), y: S.B + 15, 'text-anchor': 'middle', class: 'ax' })));
-      g.appendChild(txt('Yes green, No red' + (lad.live ? ' · dotted: bids on one side only' : ' · placeholders'), { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
+      if (LD.live && !LD.listed) g.appendChild(txt('not listed yet', { x: LX + LW / 2, y: (S.T + S.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
+      [0, 50, 100].forEach(p => g.appendChild(txt(p + (p === 100 ? '¢' : ''), { x: lxp(p), y: S.B + 15, 'text-anchor': 'middle', class: 'ax' })));
+    }
+
+    if (market && lad) {
+      drawLadder(lad, S.LX, S.LW, S.full ? 'Today · ' + isoDate(lad.day).replace(/, \d{4}$/, '') : 'Strike ladders (' + lad.label + ')');
+      if (S.full) {
+        const lad2 = WXM.ladder(c, levelsFor(c), 'tomorrow');
+        drawLadder(lad2, S.LX2, S.LW2, lad2 ? 'Tomorrow · ' + isoDate(lad2.day).replace(/, \d{4}$/, '') : 'Tomorrow', false);
+      }
+      g.appendChild(txt('Yes green, No red' + (lad.live ? ' · dotted: bids on one side only' : ' · placeholders'),
+                        { x: S.LX + S.LW / 2, y: S.B + 30, 'text-anchor': 'middle', class: 'ax' }));
       const obsRows = (ob && ob.rows) || [];
       const fseries = [AI.nws && AI.nws.rows, AI.nbm && AI.nbm.rows, fc && fc.nws && fc.nws.hourly, fc && fc.nbm && fc.nbm.hourly];
       const how = lad.live ? 'ForecastEx Yes price, midway between the Yes bid and one dollar less the No bid, sampled every 10 minutes' : 'placeholder';
@@ -539,6 +576,7 @@ window.WXCity = (() => {
     const svg = $('#' + svgId);
     hover(svg);
     const yb = $('#ydayBtn'); if (yb) yb.onclick = e => { showYday = !showYday; e.target.classList.toggle('on'); draw(); };
+    const fb = $('#fullBtn'); if (fb) fb.onclick = e => { full = !full; e.target.classList.toggle('on'); draw(); };
     if (!summary.cities.length) { svg.innerHTML = ''; svg.appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
     await select(summary.cities.some(c => c.station === want) ? want : summary.cities[0].station, false);
   }

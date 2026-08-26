@@ -240,14 +240,20 @@ window.WXM = (() => {
   // the day's ladders for the city page: high side P(high > K), low side
   // P(low < K), on one shared temperature axis; yes is the Yes price in cents
   // (null where the contract has no bids), bid and noBid the best bids
-  function ladder(city, levels) {
+  // `when` picks the contract day: the one being traded now, or the day-ahead
+  // board. Both are in the same snapshot; only the key differs.
+  function ladder(city, levels, when) {
     if (!on()) return null;
     if (!live()) return ladderPlaceholder(city, levels);
     const d = snapOf(city.station); if (!d) return null;
-    const day = city.markers ? city.markers.day : d.markers && d.markers.day;
+    const mk = city.markers || (d.markers || {});
+    const day = when === 'tomorrow' ? mk.tomorrow : mk.day;
+    if (!day) return null;
     const L = (d.days || {})[day] || {};
     const im = (d.implied || {})[day] || {};
-    return { label: 'ForecastEx quotes, ' + asofText(S.snap), live: true, asof: d.asof, day, stale: S.snap.stale, source: S.snap.source,
+    return { label: 'ForecastEx quotes, ' + asofText(S.snap), live: true, asof: d.asof, day,
+             when: when === 'tomorrow' ? 'tomorrow' : 'today',
+             stale: S.snap.stale, source: S.snap.source,
              listed: !!(L.high || L.low), symbols: d.symbols,
              high: (L.high || []).map(row), low: (L.low || []).map(row),
              impliedHigh: im.high || null, impliedLow: im.low || null };
