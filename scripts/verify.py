@@ -290,6 +290,12 @@ def run(no_build: bool) -> int:
                 cols = page.eval_on_selector_all("#cBody svg.serieschart circle", "e=>e.map(x=>x.getAttribute('fill'))")
                 chk.add(f"{scheme} crops: the strikes are coloured by price, not one colour",
                         len(set(cols)) > 5, f"{len(set(cols))} distinct of {len(cols)}")
+                chk.add(f"{scheme} crops: the listed contracts get their own grid, not the time axis",
+                        any(t == "listed contracts" for t in page.eval_on_selector_all(
+                            "#cBody svg.serieschart text", "e=>e.map(x=>x.textContent)")), "")
+                rs = page.eval_on_selector_all("#cBody svg.serieschart circle", "e=>e.map(x=>+x.getAttribute('r'))")
+                chk.add(f"{scheme} crops: markers are sized so a dense ladder stays legible",
+                        bool(rs) and max(rs) <= 7 and min(rs) >= 2, str(sorted(set(rs))[:4]))
                 chk.add(f"{scheme} crops: the colour key is drawn",
                         any("Yes price" in t for t in page.eval_on_selector_all("#cBody svg.serieschart text", "e=>e.map(x=>x.textContent)")), "")
                 body = page.locator("#cBody").inner_text()
