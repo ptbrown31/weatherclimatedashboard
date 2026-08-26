@@ -108,6 +108,7 @@ def run(no_build: bool) -> int:
                          ("hurricane.html", "#basin path", "basin geography"), ("scorecard.html", "#overall table", "scorecard table"),
                          ("climate.html", "#panels svg path", "climate series"),
                          ("agriculture.html", "#panels svg path", "crop yield series"),
+                         ("weather.html", "#panels svg path", "weather series"),
                          ("fossil-fuels.html", "#panels svg path", "fossil fuel series"),
                          ("electricity-renewables.html", "#panels svg path", "electricity series"), ("about.html", "footer.site", "footer"),
                          ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", ".prose p", "the accuracy argument"),
@@ -218,13 +219,13 @@ def run(no_build: bool) -> int:
                 page.goto(f"{srv.url}/section.html?s=energy"); page.wait_for_timeout(800)
                 chk.add(f"{scheme} catalogue: a branch page lists its categories",
                         page.locator("#cats a.catcard").count() == 2, str(page.locator("#cats a.catcard").count()))
-                page.goto(f"{srv.url}/category.html?c=weather"); page.wait_for_timeout(900)
-                rows = page.locator("#list table tr").count()
-                dim = page.locator("#list tr.dim").count()
-                chk.add(f"{scheme} catalogue: the category lists every product in the family",
-                        rows == 34 and dim == 23, f"rows={rows} not-listed={dim}")
+                page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
+                fam = page.locator("#panels .panel").count()
+                off = page.locator("#panels .panel", has_text="Not currently listed").count()
+                chk.add(f"{scheme} catalogue: the category shows every product in the family",
+                        fam == 33 and off == 23, f"panels={fam} not-listed={off}")
                 chk.add(f"{scheme} catalogue: unlisted products say so rather than vanishing",
-                        page.locator("#list .pill.off").count() == 23, str(page.locator("#list .pill.off").count()))
+                        off == 23, str(off))
                 page.goto(f"{srv.url}/contract.html?id=OP"); page.wait_for_timeout(900)
                 body = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} catalogue: a contract page shows its ladder and says no price is published",
@@ -850,10 +851,10 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} agriculture: the old listing link lands on the page",
                         page.url.endswith("/agriculture.html")
                         and page.locator("#panels .panel").count() >= 3, page.url[-40:])
-                page.goto(f"{srv.url}/category.html?c=weather"); page.wait_for_timeout(700)
-                chk.add(f"{scheme} category: one without its own page still lists",
-                        page.url.endswith("c=weather") and page.locator("#list table tr").count() > 5,
-                        f"{page.url[-24:]} rows={page.locator('#list table tr').count()}")
+                page.goto(f"{srv.url}/category.html?c=not-a-category"); page.wait_for_timeout(700)
+                chk.add(f"{scheme} category: an unknown slug says so rather than breaking",
+                        "Unknown" in page.locator("#catTitle").inner_text(),
+                        page.locator("#catTitle").inner_text()[:40])
                 page.goto(f"{srv.url}/agriculture.html"); page.wait_for_timeout(900)
                 ag_panels = page.locator("#panels .panel").count()
                 chk.add(f"{scheme} agriculture: a panel per crop, drawn on the page",
@@ -887,6 +888,22 @@ def run(no_build: bool) -> int:
                 # that resolves on an event has nothing to plot and gets the
                 # Yes/No ladder; one the exchange is not listing gets a line
                 # saying so rather than being left off the page.
+                # ---- weather: monthly series, so the strikes sit inside a year
+                # and the record is carried forward by calendar month to reach them
+                page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
+                w_panels = page.locator("#panels .panel").count()
+                w_charts = page.locator("#panels svg").count()
+                w_proj = page.locator("#panels path[stroke-dasharray='5 4']").count()
+                chk.add(f"{scheme} weather: every product on the page, not behind a link",
+                        w_panels >= 30 and w_charts >= 8, f"panels={w_panels} charts={w_charts}")
+                chk.add(f"{scheme} weather: the record is carried forward to reach the strikes",
+                        w_proj >= 5, f"projections={w_proj}")
+                # a monthly contract must be named by its month, never by a bare year
+                w_tips = page.eval_on_selector_all(
+                    "#panels svg circle[data-tip]", "e=>e.map(x=>x.getAttribute('aria-label')||'')")
+                chk.add(f"{scheme} weather: strikes are drawn, and linked to their contract",
+                        len(w_tips) >= 20 and all(t for t in w_tips), f"markers={len(w_tips)}")
+
                 page.goto(f"{srv.url}/fossil-fuels.html"); page.wait_for_timeout(1200)
                 ff = page.locator("#panels .panel").count()
                 ff_mk = page.locator("#panels svg circle[data-tip]").count()

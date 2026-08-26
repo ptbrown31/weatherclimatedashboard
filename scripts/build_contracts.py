@@ -28,6 +28,7 @@ CATEGORY_PAGE = {
     "tropical-cyclones": "hurricane.html",
     "climate-change": "climate.html",
     "agriculture": "agriculture.html",
+    "weather": "weather.html",
     "fossil-fuels": "fossil-fuels.html",
     "electricity-renewables": "electricity-renewables.html",
 }

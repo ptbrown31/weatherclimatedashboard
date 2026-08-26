@@ -117,6 +117,48 @@ window.WXClimate = (() => {
     const yt = 5, step = (yHi - yLo) / yt;
     for (let i = 0; i <= yt; i++) { const v = yLo + i * step; svg.appendChild(txt(fmtAx(v), { x: L - 8, y: Y(v) + 3.5, 'text-anchor': 'end', class: 'ax' })); }
     if (pts.length) svg.appendChild(el('path', { d: pts.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--obs)', 'stroke-width': opts.lineWidth || (key === 'tempMonthly' ? 1 : 1.8) }));
+    // ---- the seasonal projection
+    //
+    // A monthly series that stops in June cannot be read against a strike for
+    // next January without some idea of what January looks like, and for rain
+    // or an average temperature the honest first answer is: what January has
+    // usually been. So each calendar month is averaged and carried forward,
+    // dashed, to reach the listed expirations.
+    //
+    // Two averages are computed and they can disagree. The recent decade is the
+    // one drawn, because a series with any trend in it is dragged by its oldest
+    // years; the full record is on the hover so the difference is visible rather
+    // than buried in a choice made here. This is a climatology, not a forecast:
+    // it carries no weather information about the month in question.
+    let proj = [];
+    if (opts.project && pts.length > 24) {
+      const mOf = q => Math.max(0, Math.min(11, Math.round((q - Math.floor(q)) * 12 - 0.5)));
+      const monthly = ser.filter(q => !Number.isInteger(q[0]));
+      if (monthly.length > 24) {
+        const lastX = monthly[monthly.length - 1][0];
+        const byM = {}, byMRecent = {};
+        monthly.forEach(q => {
+          const m = mOf(q[0]);
+          (byM[m] = byM[m] || []).push(q[1]);
+          if (q[0] >= lastX - 10) (byMRecent[m] = byMRecent[m] || []).push(q[1]);
+        });
+        const mean = a => (a && a.length ? a.reduce((s2, v) => s2 + v, 0) / a.length : null);
+        const endX = Math.max(...cs.map(c => c.year), lastX);
+        for (let x = lastX + 1 / 12; x <= endX + 1e-6; x += 1 / 12) {
+          const m = mOf(x), v = mean(byMRecent[m]) != null ? mean(byMRecent[m]) : mean(byM[m]);
+          if (v == null) continue;
+          proj.push({ x: Math.round(x * 10000) / 10000, v, m, full: mean(byM[m]), recent: mean(byMRecent[m]),
+                      n: (byM[m] || []).length, nRecent: (byMRecent[m] || []).length });
+        }
+        if (proj.length) {
+          const d2 = 'M' + X(lastX).toFixed(1) + ',' + Y(monthly[monthly.length - 1][1]).toFixed(1)
+                   + proj.map(q => 'L' + X(q.x).toFixed(1) + ',' + Y(q.v).toFixed(1)).join('');
+          svg.appendChild(el('path', { d: d2, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.6,
+                                       'stroke-dasharray': '5 4', opacity: .9, 'pointer-events': 'none' }));
+        }
+      }
+    }
+
     let dragHint = null;
     if (pts.length > 4) { dragHint = txt('← drag across the history to project a linear trend', { x: L + 8, y: T + 14, 'font-size': 11, fill: 'var(--accent)', 'font-weight': 600 }); svg.appendChild(dragHint); }
 
@@ -168,6 +210,25 @@ window.WXClimate = (() => {
       if (drag != null || !pts.length || (e.target.closest && e.target.closest('[data-tip]'))) { clearDot(); if (drag != null) tip.hide(); return; }
       const p = toPt(e);
       if (p.x < L - 4 || p.x > R + 4 || p.y < T - 4 || p.y > B + 4) { clearDot(); tip.hide(); return; }
+      const cur = x0 + (p.x - L) / (R - L) * (x1 - x0);
+      // past the end of the record the line is the projection, and it has to say
+      // so plainly: it is what this month has usually been, not a forecast
+      if (proj.length && cur > proj[0].x - 1 / 24) {
+        let k = 0;
+        proj.forEach((r, i) => { if (Math.abs(r.x - cur) < Math.abs(proj[k].x - cur)) k = i; });
+        const r = proj[k];
+        if (!dot) { dot = el('circle', { r: 4.5, fill: 'var(--accent)', stroke: 'var(--panel)', 'stroke-width': 1.5, 'pointer-events': 'none' }); svg.appendChild(dot); }
+        dot.setAttribute('cx', X(r.x)); dot.setAttribute('cy', Y(r.v));
+        tip.show(e, tip.rows(title + ' — projection', [
+          ['Month', MON[r.m] + ' ' + Math.floor(r.x)],
+          ['Usual for this month', fmtV(r.v) + ' ' + unitShort],
+          ['Last 10 ' + MON[r.m] + 's', r.recent == null ? null : fmtV(r.recent) + ' ' + unitShort + ' (' + r.nRecent + ')'],
+          ['Whole record', r.full == null ? null : fmtV(r.full) + ' ' + unitShort + ' (' + r.n + ')'],
+          ['Latest observed', latestText]],
+          'the average this calendar month has been, carried forward. Not a forecast: it carries no information '
+          + 'about the weather in that month.'));
+        return;
+      }
       const q = pts[nearest(pts, x0 + (p.x - L) / (R - L) * (x1 - x0))];
       if (!dot) { dot = el('circle', { r: 4.5, fill: 'var(--accent)', stroke: 'var(--panel)', 'stroke-width': 1.5, 'pointer-events': 'none' }); svg.appendChild(dot); }
       dot.setAttribute('cx', X(q[0])); dot.setAttribute('cy', Y(q[1]));
@@ -211,8 +272,14 @@ window.WXClimate = (() => {
         // the trend projects for each year contracts actually settle in, which
         // is the number to hold against that year's column of strikes.
         if (opts.trendNote === 'byYear') {
-          const yrs = [...new Set(cs.map(c => c.year))].sort((u, v) => u - v).filter(v => v > b);
-          note.textContent = head + yrs.map(v => ' · ' + v + ': ' + fmtThr(f(v)) + thrSuffix).join('');
+          const seen = {}, per = [];
+          cs.forEach(c => {
+            const lab = c.expiryLabel || String(c.year);
+            if (seen[lab] || !(c.year > b)) return;
+            seen[lab] = 1; per.push([c.year, lab]);
+          });
+          per.sort((u, v) => u[0] - v[0]);
+          note.textContent = head + per.map(([x, lab]) => ' · ' + lab + ': ' + fmtThr(f(x)) + thrSuffix).join('');
         } else {
           const cross = thr.map(v => { const yr2 = (v - icpt) / slope; return (yr2 > b && yr2 < 2100 && slope !== 0) ? Math.round(yr2) : null; });
           note.textContent = head + thr.map((v, i) => cross[i] ? (' · crosses ' + fmtThr(v) + thrSuffix + ' in ' + cross[i]) : '').join('');

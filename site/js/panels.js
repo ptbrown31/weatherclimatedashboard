@@ -53,6 +53,32 @@ window.WXPanels = (() => {
     return null;
   }
 
+  /* A series period as a number on the year axis.
+
+     The lanes write what their source gives them: a crop year is "1961", a
+     month of rain is "199002", a drought reading is "20000104", and the energy
+     lane already writes decimal years. All four have to land on one axis, and a
+     month has to sit inside its year rather than at its start — parsing
+     "199002" as a number gives a hundred and ninety-nine thousand, which is how
+     an entire page came out blank. */
+  function xOfPeriod(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const s = String(v == null ? '' : v).replace(/-/g, '');
+    if (/^\d{4}$/.test(s)) return +s;
+    if (/^\d{6}$/.test(s)) {
+      const y = +s.slice(0, 4), m = +s.slice(4, 6);
+      return m >= 1 && m <= 12 ? y + (m - 0.5) / 12 : null;
+    }
+    if (/^\d{8}$/.test(s)) {
+      const y = +s.slice(0, 4), m = +s.slice(4, 6), d = +s.slice(6, 8);
+      if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31)) return null;
+      const day = (Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 1)) / 86400000;
+      return Math.round((y + (day + 0.5) / 366) * 10000) / 10000;
+    }
+    const f = parseFloat(s);
+    return isFinite(f) ? f : null;
+  }
+
   // catalogue terms and catalogue prices are two files, joined on expiry and strike
   function contracts(prod, price) {
     const priced = {};
@@ -110,7 +136,7 @@ window.WXPanels = (() => {
       const sr = sRes && sRes.data;
 
       if (sr && (sr.points || []).length) {
-        const ser = sr.points.map(q => [parseFloat(q[0]), q[1]]).filter(q => isFinite(q[0]) && q[1] != null);
+        const ser = sr.points.map(q => [xOfPeriod(q[0]), q[1]]).filter(q => q[0] != null && q[1] != null);
         const cs = contracts(prod, qRes.data);
         const product = { name: prod.name || name, productConid: prod.productConid, contracts: cs };
         WXClimate.panel(host, key, sr.title || product.name, sr.units || '', ser, product, 0,
@@ -152,5 +178,5 @@ window.WXPanels = (() => {
         + notes.join(' ');
     }
   }
-  return { init, xOf };
+  return { init, xOf, xOfPeriod };
 })();

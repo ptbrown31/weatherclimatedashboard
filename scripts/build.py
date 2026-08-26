@@ -32,6 +32,7 @@ STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorec
               "js/chart-city.js", "js/city-score.js", "js/map.js", "js/hurricane.js", "js/storm.js", "js/scorecard.js", "js/climate.js", "js/accuracy.js",
               "agriculture.html", "js/agriculture.js", "js/panels.js",
               "fossil-fuels.html", "electricity-renewables.html", "js/energy.js",
+              "weather.html", "js/weather.js",
               "assets/basemap.json", "assets/world.json", "assets/hurricane-geo.json"]
 EMBED = ["embed/index.html", "js/chart-city.js"]
 

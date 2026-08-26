@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather</title>
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+<style>.panel{margin:0 0 26px}svg.ts{width:100%;height:auto;display:block}</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Weather</h1>
+<p class="sub">Rain, monthly average temperature and drought as NOAA publishes them, with the listed strikes
+drawn at the month each contract settles. Past the end of each record a dashed line carries that calendar
+month&rsquo;s usual value forward, which is a climatology and not a forecast. Drag across a chart&rsquo;s history to fit a
+straight line; double-click to clear. Hover the series for the value at a point, or a marker for the
+contract&rsquo;s quote; click a marker to open that contract on IBKR.</p>
+<div class="bar"><span id="pageStatus"></span></div>
+<div id="panels"></div>
+<p class="cap" id="foot"></p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/market.js"></script>
+<script src="js/climate.js"></script>
+<script src="js/catalogue.js"></script>
+<script src="js/panels.js"></script>
+<script src="js/weather.js"></script>
+<script>WXC.chrome('weather.html'); WXWeather.init();</script>
+</body>
+</html>
