@@ -146,9 +146,15 @@ def config_slots() -> list:
     except (OSError, ValueError):
         return []
     hits = []
-    for field in ("api_key", "base_url"):
-        if ((cfg.get("reask") or {}).get(field) or "").strip():
-            hits.append(f"config/site.json: reask.{field} is filled in; it must stay empty (set WX_REASK_* in the environment)")
+    # every credential slot the config surface carries. A value pasted into any
+    # of these for a local run is a credential heading for the repository.
+    SLOTS = (("reask", ("api_key", "base_url"), "WX_REASK_*"),
+             ("eia", ("api_key",), "WX_EIA_API_KEY"))
+    for section, fields, env in SLOTS:
+        for field in fields:
+            if ((cfg.get(section) or {}).get(field) or "").strip():
+                hits.append(f"config/site.json: {section}.{field} is filled in; it must stay empty "
+                            f"(set {env} in the environment)")
     return hits
 
 

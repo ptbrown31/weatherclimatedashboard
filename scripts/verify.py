@@ -179,6 +179,23 @@ def run(no_build: bool) -> int:
                 body = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} catalogue: a contract page shows its ladder and says no price is published",
                         "Open on ForecastEx" in body and "does not publish a fair value" in body, body[:80])
+                # ---- ladders, not tables: the Yes-green No-red language everywhere
+                page.goto(f"{srv.url}/contract.html?id=GCYCO"); page.wait_for_timeout(1500)
+                chk.add(f"{scheme} ladder: a priced contract draws bars, not a table of strikes",
+                        page.locator("#cBody .lrow").count() > 10 and page.locator("#cBody table").count() == 0,
+                        f"rows={page.locator('#cBody .lrow').count()} tables={page.locator('#cBody table').count()}")
+                priced = page.eval_on_selector_all("#cBody .lrow .lv", "e=>e.filter(x=>/¢/.test(x.textContent)).length")
+                chk.add(f"{scheme} ladder: the bars carry the exchange's prices", priced > 10, f"priced={priced}")
+                page.locator("#cBody .lrow").first.hover(force=True); page.wait_for_timeout(250)
+                t_l = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} ladder: the box uses buy-only language",
+                        "Yes bid" in t_l and "No bid" in t_l and "Buy Yes now at" in t_l and "no sellers" in t_l, t_l[:90])
+                # a product the rotation has not reached is not a product without bids
+                page.goto(f"{srv.url}/contract.html?id=EMUSX"); page.wait_for_timeout(1500)
+                un = page.locator("#cBody").inner_text()
+                chk.add(f"{scheme} ladder: an unquoted contract says so instead of claiming no bids",
+                        "not come round on the price rotation" in un and "no bids" not in un.replace("having no bids", ""),
+                        un[-140:])
                 # ---- the weather series: what a contract settles on, drawn
                 for pid, want in (("USDR", "contiguous United States"), ("TRSEA", "Seattle"), ("OALAX", "Los Angeles")):
                     page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1200)

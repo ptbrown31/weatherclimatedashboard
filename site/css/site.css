@@ -202,3 +202,4 @@ tr.dim td{color:var(--muted)}
 .pill.bad{color:var(--no);border-color:var(--no)}
 code{font-size:12px;background:var(--bg);padding:1px 5px;border-radius:4px}
 svg.serieschart{width:100%;height:auto;display:block}
+.lrow .lv.dim{color:var(--muted)}

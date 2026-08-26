@@ -58,5 +58,8 @@
   "traffic": {
     "log_bucket": "",
     "log_prefix": "cf"
+  },
+  "eia": {
+    "api_key": ""
   }
 }

@@ -18,6 +18,7 @@ Environment overrides (highest precedence):
     WX_DOMAIN              the site's domain
     WX_REASK_API_KEY       the vendor lane's credential; never in site.json, never in the repo
     WX_REASK_BASE_URL      the vendor lane's API base (https); set with the key, never in the repo
+    WX_EIA_API_KEY         EIA's free API key for the energy series; never in site.json, never in the repo
     WX_TRAFFIC_LOG_BUCKET  bucket the CDN writes access logs to; empty turns the traffic job off
     WX_TRAFFIC_LOG_PREFIX  key prefix inside that bucket
 """
@@ -38,6 +39,7 @@ _ENV = {
     ("user_agent",): "WX_USER_AGENT",
     ("domain",): "WX_DOMAIN",
     ("reask", "api_key"): "WX_REASK_API_KEY",
+    ("eia", "api_key"): "WX_EIA_API_KEY",
     ("traffic", "log_bucket"): "WX_TRAFFIC_LOG_BUCKET",
     ("traffic", "log_prefix"): "WX_TRAFFIC_LOG_PREFIX",
     ("reask", "base_url"): "WX_REASK_BASE_URL",

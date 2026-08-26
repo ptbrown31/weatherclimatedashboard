@@ -25,6 +25,7 @@ Jobs:
     traffic      yesterday's page views, from the CDN access logs      (once a day)
     catalogue    what the exchange lists for every product in the registry (once a day)
     series       the underlying series the monthly weather contracts settle on (once a day)
+    catquotes    prices for the catalogue's monthly and annual contracts   (every 30 min)
     daily        scorecard, normals, climate, season, catalogue, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
 """
@@ -40,7 +41,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -55,6 +56,7 @@ def _register():
     JOBS["traffic"] = traffic.traffic_pass
     JOBS["catalogue"] = catalogue.catalogue_pass
     JOBS["series"] = series.series_pass
+    JOBS["catquotes"] = catquotes.catquotes_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -81,7 +83,7 @@ def _register():
     # headline reads snapshots the steps before it have just written, so it
     # goes last in both chains: after quotes for fresh prices, after the
     # scorecard for the day just scored
-    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane")
+    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes")
     JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "catalogue", "series", "headline", "traffic")
     JOBS["market"] = chain("quotes", "reask", "headline")
     JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")

@@ -21,6 +21,7 @@ window.WXCat = (() => {
   let tip = null;
 
   const CAT = c => 'catalogue/' + c + '.json';
+  const PRICE = id => 'catalogue/price/' + id + '.json';
   const SERIES = k => 'series/' + k + '.json';
   const SERIES_INDEX = 'series/index.json';
   const PROD = id => 'catalogue/product/' + id + '.json';
@@ -177,25 +178,55 @@ window.WXCat = (() => {
       go.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
       $('#cBody').appendChild(h('div', { class: 'bar', style: 'margin:0 0 10px' }, [go]));
     }
-    // the ladder, grouped by the period each strike settles in
+    // the ladder, in the same Yes-green No-red language the temperature and
+    // hurricane boards use. A plain list of strikes is the fallback, not the
+    // default: it appears only when the exchange has quoted nothing at all.
+    // a product the rotation has not reached yet is not a product without bids,
+    // and must not be drawn as one
+    let pr = null;
+    try { pr = (await WXD.get(PRICE(p.id), 30)).data; } catch (e) { /* not quoted yet */ }
+    const unquoted = !pr || !(pr.rows || []).length;
+    const priced = {};
+    ((pr && pr.rows) || []).forEach(r => { priced[String(r.spec || '') + '|' + String(r.strike)] = r; });
+    const anyBids = ((pr && pr.rows) || []).some(r => r.mid != null);
+
     const byExp = {};
     (p.contracts || []).forEach(c => { (byExp[c.expiryLabel || c.spec || '—'] = byExp[c.expiryLabel || c.spec || '—'] || []).push(c); });
     Object.keys(byExp).forEach(k => {
       const rows = byExp[k];
-      const tb = h('table');
-      tb.appendChild(h('tr', {}, [h('th', { text: k }), h('th', { class: 'num', text: 'Strike' }), h('th', { text: 'Settles' })]));
+      const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: k })]);
       rows.forEach(c => {
+        const q = priced[String(c.spec || '') + '|' + String(c.strike)];
+        const yes = q && q.mid != null ? Math.round(q.mid * 100) : null;
+        const one = q && q.mid != null && (q.bid == null || q.ask == null);
         const u = WXM.contractUrl(p.productConid, c.conidYes);
-        const lab = h('td', {}, [u ? h('a', { href: u, text: c.label || String(c.strike), target: '_blank', rel: 'noopener noreferrer' })
-                                   : h('span', { text: c.label || String(c.strike) })]);
-        tb.appendChild(h('tr', {}, [lab,
-          h('td', { class: 'num', text: c.numeric ? String(c.strike) : '—' }),
-          h('td', { text: expDate(c.expiration) })]));
+        const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
+          h('span', { class: 'lk', text: c.label || String(c.strike) }),
+          h('span', { class: 'lb' }, [h('i', { style: 'width:' + (yes == null ? 0 : yes) + '%' })]),
+          h('span', { class: 'lv' + (unquoted ? ' dim' : ''), text: unquoted ? '—' : (yes == null ? 'no bids' : yes + '¢' + (one ? '*' : '')) }),
+        ]);
+        const noBid = q && q.ask != null ? 100 - Math.round(q.ask * 100) : null;
+        bind(bar, () => tip.rows((p.name || p.id) + ' — ' + (c.label || c.strike), [
+          ['Yes price', yes == null ? 'no bids' : yes + '¢'],
+          ['Yes bid', q && q.bid != null ? Math.round(q.bid * 100) + '¢' : '—'],
+          ['No bid', noBid == null ? '—' : noBid + '¢'],
+          ['Buy Yes now at', q && q.ask != null ? Math.round(q.ask * 100) + '¢' : null],
+          ['Settles', expDate(c.expiration)],
+          ['On the exchange', u ? '<a href="' + u + '" target="_blank" rel="noopener noreferrer">open this contract →</a>' : null],
+        ], 'Yes and No bids sum to $1; there are no sellers · not fee adjusted'
+           + (pr && pr.asof ? ' · quoted ' + pr.asof.slice(11, 16) + 'Z' : '')));
+        if (u) WXM.linkTo(bar.querySelector('.lv'), u, 'Open ' + (c.label || c.strike) + ' on ForecastEx');
+        div.appendChild(bar);
       });
-      $('#cBody').appendChild(h('div', { class: 'card', style: 'padding:0;margin-bottom:10px' }, [tb]));
+      $('#cBody').appendChild(div);
     });
-    $('#cBody').appendChild(h('p', { class: 'cap', text: 'Strikes and settlement dates are read from the exchange once a day; '
-      + 'prices are not shown on this page. This site does not publish a fair value for any contract.' }));
+    $('#cBody').appendChild(h('p', { class: 'cap', text: 'Strikes and settlement dates are read from the exchange once a day and '
+      + 'prices every half hour. Yes green, No red; the two sides of a contract sum to a dollar and there are no sellers. '
+      + (unquoted ? 'This contract has not come round on the price rotation yet, so no prices are shown for it; '
+                    + 'that is not the same as it having no bids. '
+                  : (anyBids ? '' : 'Nothing in this ladder has a bid on either side at the moment. '))
+      + (pr && pr.dropped ? pr.dropped + ' further strikes were not quoted on the last pass. ' : '')
+      + 'This site does not publish a fair value for any contract.' }));
   }
 
   // ---- the underlying, with the contract's strikes on it
