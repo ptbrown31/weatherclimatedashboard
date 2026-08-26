@@ -95,6 +95,7 @@ window.WXAg = (() => {
                         xLabel: 'Year',
                         // a dozen strikes to a year: size the dots to their spacing
                         markerRadius: 'auto',
+                        trendNote: 'byYear',
                       });
       if (sr.note) notes.push((sr.title || product.name) + ': ' + sr.note);
       drawn++;

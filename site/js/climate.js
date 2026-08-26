@@ -44,6 +44,9 @@ window.WXClimate = (() => {
 
   function panel(host, key, title, unit, ser, product, offsetC, source, opts) {
     opts = opts || {};
+    // the panel is drawn by this page and by any other that reuses it, so it
+    // owns its tooltip rather than depending on this page's init having run
+    tip = tip || WXC.tooltip();
     // presentation choices the climate page derives from its own series keys;
     // another page passes them in
     const fmtThr = opts.fmtThreshold || (v => (key.startsWith('temp') ? v.toFixed(2) : String(v)));
@@ -182,9 +185,20 @@ window.WXClimate = (() => {
         const f = v => slope * v + icpt;
         fitG.appendChild(el('line', { x1: X(a), y1: Y(f(a)), x2: X(b), y2: Y(f(b)), stroke: 'var(--accent)', 'stroke-width': 2.4 }));
         fitG.appendChild(el('line', { x1: X(b), y1: Y(f(b)), x2: X(x1), y2: Y(f(x1)), stroke: 'var(--accent)', 'stroke-width': 1.8, 'stroke-dasharray': '6 4', opacity: .85 }));
-        const cross = thr.map(v => { const yr2 = (v - icpt) / slope; return (yr2 > b && yr2 < 2100 && slope !== 0) ? Math.round(yr2) : null; });
         note.style.display = 'inline-block';
-        note.textContent = 'fit ' + Math.round(a) + '–' + Math.round(b) + ': ' + (slope * 10).toFixed(3) + ' per decade' + thr.map((v, i) => cross[i] ? (' · crosses ' + fmtThr(v) + thrSuffix + ' in ' + cross[i]) : '').join('');
+        const head = 'fit ' + Math.round(a) + '–' + Math.round(b) + ': ' + (slope * 10).toFixed(3) + ' per decade';
+        // A handful of thresholds read best as the year the trend crosses each.
+        // A ladder of thirty does not — that note runs to a paragraph and says
+        // the same thing thirty times. There the useful form is inverted: what
+        // the trend projects for each year contracts actually settle in, which
+        // is the number to hold against that year's column of strikes.
+        if (opts.trendNote === 'byYear') {
+          const yrs = [...new Set(cs.map(c => c.year))].sort((u, v) => u - v).filter(v => v > b);
+          note.textContent = head + yrs.map(v => ' · ' + v + ': ' + fmtThr(f(v)) + thrSuffix).join('');
+        } else {
+          const cross = thr.map(v => { const yr2 = (v - icpt) / slope; return (yr2 > b && yr2 < 2100 && slope !== 0) ? Math.round(yr2) : null; });
+          note.textContent = head + thr.map((v, i) => cross[i] ? (' · crosses ' + fmtThr(v) + thrSuffix + ' in ' + cross[i]) : '').join('');
+        }
       });
       svg.addEventListener('dblclick', () => { if (selRect) { selRect.remove(); selRect = null; } if (fitG) { fitG.remove(); fitG = null; } note.style.display = 'none'; });
     }

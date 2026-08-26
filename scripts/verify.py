@@ -825,6 +825,19 @@ def run(no_build: bool) -> int:
                 page.mouse.move(pb["x"] + pb["width"] * 0.5, pb["y"] + pb["height"] * 0.5); page.wait_for_timeout(120)
                 t_ser = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: climate series point shows year, value and source", "Value" in t_ser and "Latest" in t_ser, t_ser[:80])
+                # the trend tool: a few thresholds read as the year the trend
+                # crosses each of them
+                def _drag(box, x0f, x1f):
+                    y = box["y"] + box["height"] * 0.55
+                    page.mouse.move(box["x"] + box["width"] * x0f, y)
+                    page.mouse.down()
+                    page.mouse.move(box["x"] + box["width"] * x1f, y, steps=8)
+                    page.mouse.up()
+                    page.wait_for_timeout(200)
+                _drag(pb, 0.18, 0.55)
+                t_note = page.locator("#panels .panel .note").first.inner_text()
+                chk.add(f"{scheme} climate: the trend fit reports crossings",
+                        "per decade" in t_note and "crosses" in t_note, t_note[:90])
                 # ---- agriculture: the same panel, one per crop, in sequence on
                 # the tab itself rather than behind a listing link
                 page.goto(f"{srv.url}/agriculture.html")
@@ -836,6 +849,10 @@ def run(no_build: bool) -> int:
                 ag_lk = page.locator("#panels svg circle[role='link']").count()
                 chk.add(f"{scheme} agriculture: every strike marker opens its contract",
                         ag_mk >= 50 and ag_lk == ag_mk, f"markers={ag_mk} linked={ag_lk}")
+                page.locator("#panels svg circle[data-tip]").first.hover(force=True); page.wait_for_timeout(150)
+                ag_tip = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} agriculture: a marker hover shows settlement and the book",
+                        "Settles" in ag_tip and "Yes" in ag_tip, ag_tip[:80])
                 chk.add(f"{scheme} agriculture: the trend tool is offered",
                         page.locator("#panels text", has_text="drag across the history").count() >= 3,
                         str(page.locator("#panels text", has_text="drag across the history").count()))
@@ -844,6 +861,14 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} agriculture: no yes/no ladder bars on these panels",
                         page.locator("#panels rect.yes, #panels rect.no").count() == 0,
                         str(page.locator("#panels rect.yes, #panels rect.no").count()))
+                # thirty strikes would make a crossing list unreadable, so a
+                # ladder reports what the trend projects for each settling year
+                agb = page.locator("#panels svg").first.bounding_box()
+                _drag(agb, 0.18, 0.55)
+                ag_note = page.locator("#panels .panel .note").first.inner_text()
+                chk.add(f"{scheme} agriculture: the trend fit projects each settling year",
+                        "per decade" in ag_note and "crosses" not in ag_note
+                        and ag_note.count(" · ") <= 8, ag_note[:110])
                 # ---- scorecard hover: overall, station and day cells
                 page.goto(f"{srv.url}/scorecard.html")
                 page.wait_for_timeout(900)
