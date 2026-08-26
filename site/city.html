@@ -38,13 +38,21 @@ this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high
 the day where only observations exist otherwise. Night shading marks the hours outside the contract day&rsquo;s
 daylight. Non-US stations show what US government feeds carry: observations everywhere, NBM guidance for
 Canada, no forecast elsewhere. Times are the station&rsquo;s local time.</p>
+
+<div class="secttl" style="margin-top:24px">THE LAST WEEK AT THIS STATION</div>
+<p class="cap" style="margin-top:0">What each tool said the day's high and low would be, against what the station
+actually recorded. Highs and lows share one axis; observations are black. Hover a point for the numbers.</p>
+<div class="card"><svg id="cityScore" viewBox="0 0 960 380"></svg></div>
+<div class="key" id="cityScoreKey"></div>
+<p class="cap" id="cityScoreCap"></p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
 <script src="js/chart-city.js"></script>
+<script src="js/city-score.js"></script>
 <script>
-WXC.chrome('city.html');
+WXC.chrome('city.html'); WXCityScore.init(WXC.param('station') || 'KLAX');
 Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
              fetch('assets/world.json').then(r => r.json()).catch(() => null)])
   .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null }));

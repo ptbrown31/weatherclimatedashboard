@@ -164,6 +164,26 @@ def run(no_build: bool) -> int:
                     page.goto(url); page.wait_for_timeout(800)
                     got = page.eval_on_selector_all("header.site nav a.on", "els => els.map(e => e.textContent)")
                     chk.add(f"{scheme} nav: {url.split('/')[-1][:34]} knows its branch", got == want, f"{got} want {want}")
+                # ---- the station's own record, drawn on its page
+                page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
+                lines = page.locator("#cityScore path").count()
+                black = page.eval_on_selector_all("#cityScore path",
+                                                  "e=>e.filter(x=>x.getAttribute('stroke')==='var(--ink)').length")
+                chk.add(f"{scheme} city record: a line per tool, for highs and lows", lines >= 8, f"paths={lines}")
+                chk.add(f"{scheme} city record: the observation is drawn in black, high and low", black == 2, f"black={black}")
+                thick = page.eval_on_selector_all("#cityScore path",
+                    "e=>e.filter(x=>x.getAttribute('stroke')==='var(--ink)').map(x=>x.getAttribute('stroke-width'))")
+                chk.add(f"{scheme} city record: the observation is weighted above the forecasts",
+                        bool(thick) and all(float(w) > 2 for w in thick), str(thick))
+                bands = page.locator("#cityScore rect[fill='transparent']").count()
+                chk.add(f"{scheme} city record: one hover band per day", 1 <= bands <= 7, f"bands={bands}")
+                if bands:
+                    page.locator("#cityScore rect[fill='transparent']").nth(min(3, bands - 1)).hover(force=True)
+                    page.wait_for_timeout(250)
+                    t_cs = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} city record: the box gives each tool's value and its error",
+                            "Observed high / low" in t_cs and "National Weather Service" in t_cs, t_cs[:80])
+
                 # ---- the catalogue pages
                 page.goto(f"{srv.url}/section.html?s=energy"); page.wait_for_timeout(800)
                 chk.add(f"{scheme} catalogue: a branch page lists its categories",

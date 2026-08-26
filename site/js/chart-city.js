@@ -145,6 +145,9 @@ window.WXCity = (() => {
     cur = sid; checked = new Set();
     if (push !== false) { const u = new URL(location.href); u.searchParams.set('station', sid); history.replaceState(null, '', u); }
     if (onSelect) onSelect(sid);
+    // the station's own record, below the chart; it loads on its own so a slow
+    // scorecard never holds up the chart the page is for
+    if (window.WXCityScore) WXCityScore.draw(sid).catch(() => {});
     const c0 = city();
     const keys = [`forecast/${sid}.json`, `obs/${sid}.json`].concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`] : []);
     const r = await WXD.getAll(keys);
