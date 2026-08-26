@@ -46,10 +46,16 @@ from .storage import Storage
 SCHEMA = 1
 KEY = "snapshots/series/{key}.json"
 INDEX = "snapshots/series/index.json"
-CACHE = "public, max-age=3600, stale-while-revalidate=86400, stale-if-error=2592000"
+# These are written once a day, so the number that matters is not how often they
+# change but how long a correction takes to reach a reader. At an hour, a fix to
+# a series stayed invisible in browsers that already held it for the rest of that
+# hour, with the corrected file sitting at the origin the whole time and no
+# invalidation able to help. Five minutes of revalidation costs a conditional
+# request the edge answers, and stale-while-revalidate means no reader waits on
+# it. The long stale-if-error still covers an outage.
+CACHE = "public, max-age=300, stale-while-revalidate=86400, stale-if-error=2592000"
 # The index decides whether a contract page draws a chart at all, so a new series
-# is invisible until it expires. An hour of that is too long for a file this
-# small; the series themselves change once a day and keep the longer life.
+# is invisible until it expires, and it is smaller still.
 INDEX_CACHE = "public, max-age=120, stale-while-revalidate=86400, stale-if-error=2592000"
 
 CAAG = ("https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/city/time-series/"
