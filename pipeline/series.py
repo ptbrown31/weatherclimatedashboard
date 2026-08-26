@@ -168,6 +168,60 @@ WIDE = {
                     "note": "Fahrenheit, and an average rather than an anomaly."},
 }
 GML_CO2 = "https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.csv"
+PSD_ZIP = "https://apps.fas.usda.gov/psdonline/downloads/psd_grains_pulses_csv.zip"
+# product -> the commodity as USDA names it. The two-letter code in the product
+# id is the exchange's, not the department's.
+CROPS = {"GCYCO": ("crop-corn", "Corn"), "GCYWH": ("crop-wheat", "Wheat"),
+         "GCYRM": ("crop-rice", "Rice, Milled")}
+
+
+def crop_yields(fetch: Optional[Callable] = None) -> Dict[str, dict]:
+    """World average yield per crop, in metric tons per hectare, by the year the
+    contract names.
+
+    Two things here are easy to get wrong and both change the answer.
+
+    The bulk file carries no World row, only countries, so the world yield is
+    world production over world area harvested, which is how the department
+    derives it. Production is in thousands of tonnes and area in thousands of
+    hectares, so the ratio is already tonnes per hectare.
+
+    And the years differ by one. The terms say the reference year in the event
+    question is the SECOND year of the marketing year while the year listed in
+    the database is the first, so a contract for 2026 settles on the database's
+    2025. The series is keyed by the contract's year, because that is what the
+    strikes are labelled with and a chart that mixed the two would put every
+    strike a year out of place.
+    """
+    import io
+    import zipfile
+    raw = fetch(PSD_ZIP) if fetch else gw._fetch(PSD_ZIP, timeout=180)
+    z = zipfile.ZipFile(io.BytesIO(raw))
+    name = next((n for n in z.namelist() if n.endswith(".csv")), None)
+    if not name:
+        raise ValueError("no csv in the PSD download")
+    agg: Dict[str, Dict[int, Dict[str, float]]] = {}
+    for r in csv.DictReader(io.StringIO(z.read(name).decode("utf-8-sig", "replace"))):
+        crop = (r.get("Commodity_Description") or "").strip()
+        att = (r.get("Attribute_Description") or "").strip()
+        if att not in ("Production", "Area Harvested"):
+            continue
+        try:
+            my, v = int(r.get("Market_Year")), float(r.get("Value"))
+        except (TypeError, ValueError):
+            continue
+        slot = agg.setdefault(crop, {}).setdefault(my, {"prod": 0.0, "area": 0.0})
+        slot["prod" if att == "Production" else "area"] += v
+    out = {}
+    for pid, (key, crop) in CROPS.items():
+        by = agg.get(crop) or {}
+        pts = [[str(my + 1), round(d["prod"] / d["area"], 3)]
+               for my, d in sorted(by.items()) if d["area"] > 0]
+        if pts:
+            out[key] = {"points": pts, "products": [pid], "crop": crop,
+                        "title": "World average " + crop.lower() + " yield",
+                        "units": "metric tons per hectare"}
+    return out
 
 # Things a reader arriving from the daily letter needs in order to recognise a
 # contract, or would otherwise have to infer. Kept as plain facts: no
@@ -284,6 +338,22 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
         except Exception as e:  # noqa: BLE001
             errors.append(f"co2: {type(e).__name__}: {e}")
 
+    # ---- world crop yields
+    if not deadline.over(25):
+        try:
+            for key, doc in crop_yields(fetch).items():
+                put(key, {"key": key, "products": doc["products"], "title": doc["title"], "units": doc["units"],
+                          "points": doc["points"],
+                          "source": "USDA Foreign Agricultural Service, Production Supply and Distribution",
+                          "note": "World production over world area harvested, which is how the department derives "
+                                  "the world yield; the bulk file carries countries only. Years are the contract's: "
+                                  "the marketing year the database labels 2025 is the 2026 contract, because the "
+                                  "event question names the second year of the marketing year. A contract resolves "
+                                  "on the first report after the marketing year ends, and surpassing a threshold "
+                                  "means strictly greater than it."})
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"crops: {type(e).__name__}: {e}")
+
     # ---- drought
     if not deadline.over(20):
         try:
@@ -302,6 +372,8 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
             products[pid] = key
     for pid in ("MACD", "ACD"):
         products[pid] = "co2-monthly"
+    for pid, (key, _) in CROPS.items():
+        products[pid] = key
     products["USDR"] = "drought-us"
     # only advertise a series that this pass actually wrote or that already
     # exists, so a page never fetches a key that is not there

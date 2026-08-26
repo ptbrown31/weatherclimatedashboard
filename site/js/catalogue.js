@@ -142,6 +142,13 @@ window.WXCat = (() => {
       $('#cBody').appendChild(h('p', { class: 'cap', text: STATE_NOTE[p.state] || 'This contract is not currently listed.' }));
       return;
     }
+    // prices first: the chart colours its strikes by them, and the ladder below
+    // uses the same set
+    let pr = null;
+    try { pr = (await WXD.get(PRICE(p.id), 30)).data; } catch (e) { /* not quoted yet */ }
+    const priced = {};
+    ((pr && pr.rows) || []).forEach(r => { priced[String(r.spec || '') + '|' + String(r.strike)] = r; });
+
     // the underlying, where one of the series lanes covers this product
     try {
       const idx = (await WXD.get(SERIES_INDEX, 1440)).data;
@@ -149,7 +156,7 @@ window.WXCat = (() => {
       if (key) {
         const sr = (await WXD.get(SERIES(key), 1440)).data;
         if (sr && (sr.points || []).length) {
-          const c = chart(sr, p.contracts || []);
+          const c = chart(sr, p.contracts || [], priced);
           if (c) {
             $('#cBody').appendChild(h('div', { class: 'secttl', text: 'WHAT IT SETTLES ON' }));
             $('#cBody').appendChild(h('div', { class: 'card' }, [c]));
@@ -183,11 +190,7 @@ window.WXCat = (() => {
     // default: it appears only when the exchange has quoted nothing at all.
     // a product the rotation has not reached yet is not a product without bids,
     // and must not be drawn as one
-    let pr = null;
-    try { pr = (await WXD.get(PRICE(p.id), 30)).data; } catch (e) { /* not quoted yet */ }
     const unquoted = !pr || !(pr.rows || []).length;
-    const priced = {};
-    ((pr && pr.rows) || []).forEach(r => { priced[String(r.spec || '') + '|' + String(r.strike)] = r; });
     const anyBids = ((pr && pr.rows) || []).some(r => r.mid != null);
 
     const byExp = {};
@@ -236,7 +239,19 @@ window.WXCat = (() => {
   // no price and no fair value. A strike is a horizontal reach at its own
   // level from the last observation to its expiry, so a reader can see how far
   // the number has to travel and by when.
-  function chart(sr, contracts) {
+  // the same ramp the climate page uses, so a strike coloured by its price
+  // reads the same wherever it appears on the site
+  const RAMP = ['#8b0000', '#d62728', '#ff7f0e', '#ffd700', '#adff2f', '#3ddc84', '#40e0d0', '#4fc3f7', '#1f77b4', '#00008b'];
+  function priceColor(p) {
+    if (p == null) return 'var(--line)';
+    const t = Math.max(0, Math.min(1, p)) * (RAMP.length - 1), i = Math.floor(t), f = t - i;
+    if (f < 1e-6 || i >= RAMP.length - 1) return RAMP[Math.min(i, RAMP.length - 1)];
+    const hx = x => [1, 3, 5].map(k => parseInt(x.slice(k, k + 2), 16));
+    const A = hx(RAMP[i]), B = hx(RAMP[i + 1]);
+    return 'rgb(' + A.map((a, k) => Math.round(a + (B[k] - a) * f)).join(',') + ')';
+  }
+
+  function chart(sr, contracts, priced) {
     const pts = (sr.points || []).slice(-180);
     if (pts.length < 6) return null;
     const W = 960, H = 300, L = 54, R = 782, T = 18, B = 246;
@@ -279,17 +294,29 @@ window.WXCat = (() => {
     (contracts || []).filter(c => c.numeric).forEach(c => {
       const e = expMs(c.expiration); if (!e) return;
       const yy = y(c.strike);
-      const line = el('line', { x1: x(lastT), x2: x(e), y1: yy, y2: yy, stroke: 'var(--accent)', 'stroke-width': 1.2, opacity: .55 });
-      const dot = el('circle', { cx: x(e), cy: yy, r: 3.4, fill: 'var(--accent)', 'pointer-events': 'all' });
+      const q = (priced || {})[String(c.spec || '') + '|' + String(c.strike)];
+      const yes = q && q.mid != null ? q.mid : null;
+      const col = priceColor(yes);
+      const line = el('line', { x1: x(lastT), x2: x(e), y1: yy, y2: yy, stroke: col, 'stroke-width': 1.2, opacity: .45 });
+      const dot = el('circle', { cx: x(e), cy: yy, r: 4, fill: col, stroke: 'var(--ink)', 'stroke-width': .7, 'pointer-events': 'all' });
       const gap = Math.round((c.strike - lastV) * 100) / 100;
       bind(dot, () => tip.rows(c.label || String(c.strike), [
+        ['Yes price', yes == null ? 'no bids' : Math.round(yes * 100) + '¢'],
         ['Strike', String(c.strike) + ' ' + (sr.units || '')],
         ['Latest observation', lastV + ' ' + (sr.units || '')],
         ['Distance', (gap > 0 ? '+' : '') + gap],
         ['Settles', expDate(c.expiration)],
-      ], 'the strike is where the contract pays; this page shows no price'));
+      ], 'the strike is where the contract pays; colour is the exchange\u2019s Yes price'));
       svg.appendChild(line); svg.appendChild(dot);
     });
+    // the colour key, so the ramp is not left to be inferred
+    let kx = L;
+    [[0, '0¢'], [0.25, '25¢'], [0.5, '50¢'], [0.75, '75¢'], [1, '100¢']].forEach(([v, lab]) => {
+      svg.appendChild(el('rect', { x: kx, y: B + 26, width: 13, height: 9, fill: priceColor(v), stroke: 'var(--ink)', 'stroke-width': .5 }));
+      svg.appendChild(txt(lab, { x: kx + 16, y: B + 34, class: 'ax' }));
+      kx += 46;
+    });
+    svg.appendChild(txt('strike colour is the Yes price', { x: kx + 6, y: B + 34, class: 'ax' }));
     // time axis: a label a year, and only where the last one has cleared, so a
     // long series thins its labels instead of stacking them on top of each other
     let lastYear = null, lastX = -1e9;

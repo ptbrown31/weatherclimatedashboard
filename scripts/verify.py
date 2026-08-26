@@ -216,8 +216,8 @@ def run(no_build: bool) -> int:
                 t_str = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} series: a strike names its distance from the latest observation",
                         "Strike" in t_str and "Latest observation" in t_str and "Distance" in t_str, t_str[:90])
-                chk.add(f"{scheme} series: the strike box says no price is shown",
-                        "no price" in t_str, t_str[-60:])
+                chk.add(f"{scheme} series: the strike box carries the exchange's price, not a fair value",
+                        "Yes price" in t_str and "fair value" not in t_str, t_str[-70:])
                 # ---- climate change: the unit that governs is not cosmetic, so the
                 # page has to say which one and which baseline
                 for pid, want in (("GT", "Celsius"), ("UST", "Fahrenheit"), ("MACD", "parts per million")):
@@ -257,6 +257,26 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} climate: a threshold contract is not described as a record contract",
                         "ranks warmest" not in page.locator("#cBody").inner_text(),
                         page.locator("#cBody").inner_text()[-120:])
+                # ---- agriculture, drawn like the climate series
+                for pid in ("GCYCO", "GCYWH", "GCYRM"):
+                    page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1400)
+                    chk.add(f"{scheme} crops: {pid} draws its yield history",
+                            page.locator("#cBody svg.serieschart").count() == 1
+                            and page.locator("#cBody svg.serieschart circle").count() > 10,
+                            str(page.locator("#cBody svg.serieschart circle").count()))
+                    chk.add(f"{scheme} crops: {pid} has no table of strikes",
+                            page.locator("#cBody table").count() == 0, "")
+                page.goto(f"{srv.url}/contract.html?id=GCYCO"); page.wait_for_timeout(1600)
+                cols = page.eval_on_selector_all("#cBody svg.serieschart circle", "e=>e.map(x=>x.getAttribute('fill'))")
+                chk.add(f"{scheme} crops: the strikes are coloured by price, not one colour",
+                        len(set(cols)) > 5, f"{len(set(cols))} distinct of {len(cols)}")
+                chk.add(f"{scheme} crops: the colour key is drawn",
+                        any("Yes price" in t for t in page.eval_on_selector_all("#cBody svg.serieschart text", "e=>e.map(x=>x.textContent)")), "")
+                body = page.locator("#cBody").inner_text()
+                chk.add(f"{scheme} crops: the year offset in the terms is stated",
+                        "second year of the marketing year" in body, body[-160:])
+                chk.add(f"{scheme} crops: surpassing is stated as strictly greater",
+                        "strictly greater" in body, body[-120:])
                 page.goto(f"{srv.url}/contract.html?id=GSCAL"); page.wait_for_timeout(900)
                 chk.add(f"{scheme} catalogue: an unlisted contract explains itself instead of erroring",
                         "not carrying this contract" in page.locator("#cBody").inner_text(),
