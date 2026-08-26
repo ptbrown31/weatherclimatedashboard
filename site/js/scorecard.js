@@ -304,17 +304,30 @@ window.WXScore = (() => {
   // alongside the forecasts here, because the question the table answers is
   // which of them has been closest, and that is arithmetic on published numbers.
   const WINDOW = 7;
+  // The standings are a matched sample: only station-days where every tool has
+  // a value count, and each side is matched on its own.
+  //
+  // Without that the table compares tools over different days. Each archive
+  // lane started on a different date — the NWS and Blend lanes from the
+  // beginning, GFS MOS nine days later, LAMP ten, the exchange twelve — so
+  // pooling every error each tool happens to have scored the NWS over twelve
+  // days and LAMP over three and then ranked them against each other. Nothing
+  // was wrong with any single number; they were answers to different questions.
   function standings() {
-    if (!S || !S.stations) return { rows: [], days: 0, from: null, to: null };
+    if (!S || !S.stations) return { rows: [], days: 0, from: null, to: null, dropped: 0 };
     const acc = {}, seen = {};
     SERIES.forEach(x => { acc[x.k] = { high: [], low: [] }; });
+    let dropped = 0;
     Object.values(S.stations).forEach(st => {
       (st.days || []).slice(0, WINDOW).forEach(d => {
+        const okHigh = SERIES.every(x => (d[x.k] || {}).errHigh != null);
+        const okLow = SERIES.every(x => (d[x.k] || {}).errLow != null);
+        if (!okHigh && !okLow) { dropped++; return; }
         seen[d.date] = 1;
         SERIES.forEach(x => {
           const f = d[x.k]; if (!f) return;
-          if (f.errHigh != null) acc[x.k].high.push(f.errHigh);
-          if (f.errLow != null) acc[x.k].low.push(f.errLow);
+          if (okHigh && f.errHigh != null) acc[x.k].high.push(f.errHigh);
+          if (okLow && f.errLow != null) acc[x.k].low.push(f.errLow);
         });
       });
     });
@@ -326,7 +339,7 @@ window.WXScore = (() => {
       .filter(r => r.high || r.low)
       .sort((a, b) => (a.high ? a.high.mae : 99) - (b.high ? b.high.mae : 99));
     const dates = Object.keys(seen).sort();
-    return { rows: rowsOut, days: dates.length, from: dates[0], to: dates[dates.length - 1] };
+    return { rows: rowsOut, days: dates.length, from: dates[0], to: dates[dates.length - 1], dropped: dropped };
   }
   function drawStandings() {
     const host = $('#standings'); if (!host) return;
@@ -356,6 +369,12 @@ window.WXScore = (() => {
         r.s.k === 'fx' ? 'the exchange’s implied median, scored the same way as a forecast' : (S.sources || {})[r.s.k]);
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [t]));
+    const n = st.rows[0] && st.rows[0].high ? st.rows[0].high.n : 0;
+    host.appendChild(h('p', { class: 'cap', text: 'Matched sample: only station-days where every tool has a value are '
+      + 'counted, so n is the same for all of them — ' + n + ' station-days across ' + st.days + ' day'
+      + (st.days === 1 ? '' : 's') + '. Each archive lane started on a different date, so pooling every error a tool '
+      + 'happens to have would score some tools over far more days than others and then rank them against each other. '
+      + 'The window grows by a day every day.' }));
     const lead = st.rows[0];
     // the sources are not archived equally deeply, so the ranking is not
     // like-for-like and the caption has to say so rather than let n speak alone

@@ -68,7 +68,7 @@ window.WXCity = (() => {
     // the link belongs in the box too: it is the one place a reader on a touch
     // screen can reach it, and it says where the click goes before they take it
     const url = strikeUrl(lad, side, L);
-    if (url) rows.push(['On the exchange', '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract →</a>']);
+    if (url) rows.push(['On the exchange', '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>']);
     return tip.rows(cmp + L.strike + '°' + unit + ' — ' + (side === 'h' ? 'daily high above' : 'daily low below') + ' ' + L.strike,
       rows, 'times in station time · Yes and No bids sum to $1; there are no sellers · not fee adjusted'
         + (url ? ' · clicking a price opens the contract' : '') + (pinHint === false ? ' · click to draw this strike’s price line' : ' · click to pin'));
@@ -201,7 +201,7 @@ window.WXCity = (() => {
           // still selects the strike for the chart, which is a different job
           const url = strikeUrl(lad, pfx, L);
           const pc = h('span', { class: 'skp' + (url ? ' lnk' : ''), text: ' ' + L.yes + '¢' + (one ? '*' : '') });
-          if (url) WXM.linkTo(pc, url, 'Open ' + (L.label || L.strike) + ' on ForecastEx');
+          if (url) WXM.linkTo(pc, url, 'Open ' + (L.label || L.strike) + ' on IBKR');
           b.appendChild(pc);
         }
         b.onmousemove = e => tip.show(e, ladderTip(L, pfx, lad, c, false));
@@ -436,7 +436,7 @@ window.WXCity = (() => {
             const url = strikeUrl(lad, sd, L);
             [yb, nb].forEach(bar => {
               g.appendChild(bind(bar, () => ladderTip(L, sd, lad, c), !url));
-              if (url) WXM.linkTo(bar, url, 'Open ' + (L.label || L.strike) + ' on ForecastEx');
+              if (url) WXM.linkTo(bar, url, 'Open ' + (L.label || L.strike) + ' on IBKR');
             });
             if (lad.live && L.side !== 'mid') g.appendChild(el('rect', { x: S.LX, y: yy - 5.5, width: S.LW, height: 11, fill: 'none', stroke: 'var(--panel)', 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
             if (gw >= 26) g.appendChild(txt(L.yes + '¢', { x: S.LX + 3, y: yy + 3.2, class: 'ladtxt', 'pointer-events': 'none' }));

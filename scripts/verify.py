@@ -178,7 +178,7 @@ def run(no_build: bool) -> int:
                 page.goto(f"{srv.url}/contract.html?id=OP"); page.wait_for_timeout(900)
                 body = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} catalogue: a contract page shows its ladder and says no price is published",
-                        "Open on ForecastEx" in body and "does not publish a fair value" in body, body[:80])
+                        "Open on IBKR" in body and "does not publish a fair value" in body, body[:80])
                 # ---- ladders, not tables: the Yes-green No-red language everywhere
                 page.goto(f"{srv.url}/contract.html?id=GCYCO"); page.wait_for_timeout(1500)
                 chk.add(f"{scheme} ladder: a priced contract draws bars, not a table of strikes",
@@ -436,9 +436,14 @@ def run(no_build: bool) -> int:
                 page.wait_for_timeout(900)
                 tiles = page.locator("#tiles .tile").count()
                 ladders = page.locator("#ladders .ladder").count()
-                lf_rows = page.locator("#landfall table tr").count()
+                lf_rows = page.locator("#landfall .lrow").count()
                 vendor = page.locator("#vendor").inner_text()
                 chk.add(f"{scheme} hurricane: tiles, count ladders and the landfall board", tiles >= 3 and ladders >= 2 and lf_rows >= 2, f"tiles={tiles} ladders={ladders} landfall rows={lf_rows}")
+                chk.add(f"{scheme} landfall: drawn as a Yes/No ladder, not a table",
+                        page.locator("#landfall table").count() == 0 and lf_rows >= 5, f"rows={lf_rows}")
+                chk.add(f"{scheme} landfall: named as major hurricane landfall",
+                        "Major hurricane landfall" in page.locator("#landfall .lt").inner_text(),
+                        page.locator("#landfall .lt").inner_text()[:60])
                 chk.add(f"{scheme} hurricane: vendor lane reports its state", "Not enabled" in vendor or "Lane on" in vendor or "LiveCyc" in vendor, vendor[:80])
                 # ---- the season-count panels: cumulative beside the ladder
                 panels = page.locator(".cwrap").count()
@@ -652,9 +657,19 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} market's ladder: the axis says which side is which", axis >= 1, f"labels={axis}")
                 linked_href("#ladders svg.cpanel rect[fill='var(--yes)'][role='link']", "the market's ladder")
                 linked_href("#ladders .lrow .lv[role='link']", "a period ladder row")
-                linked_href("#landfall td.num.lnk", "the landfall table")
-                linked_href("#others td.num.lnk", "the other-contracts table")
-                linked_href("#tiles .tile.lnk", "a headline tile")
+                linked_href("#landfall .lrow .lv[role='link']", "the landfall table")
+                # the tornado contracts moved to Weather, so this section is often
+                # empty on the cyclone page; when it is, it must say so
+                if page.locator("#others td.num.lnk").count():
+                    linked_href("#others td.num.lnk", "the other-contracts table")
+                else:
+                    chk.add(f"{scheme} hurricane link: an empty other-contracts section explains itself",
+                            "Nothing beyond the count and landfall" in page.locator("#others").inner_text(),
+                            page.locator("#others").inner_text()[:80])
+                chk.add(f"{scheme} hurricane: the tornado contracts are not on the cyclone page",
+                        "SWTUS" not in page.locator("#others").inner_text(),
+                        page.locator("#others").inner_text()[:70])
+                linked_href("#cat4 .lrow .lv[role='link']", "the category 4 board")
                 # the map: a shaded landfall region is a contract
                 shaded = page.locator("#basin path[role='link']").count()
                 chk.add(f"{scheme} hurricane link: shaded map regions are clickable", shaded >= 3, f"regions={shaded}")
@@ -708,6 +723,15 @@ def run(no_build: bool) -> int:
                 # ---- scorecard hover: overall, station and day cells
                 page.goto(f"{srv.url}/scorecard.html")
                 page.wait_for_timeout(900)
+                # the standings must compare tools over the same station-days, not
+                # over whatever each archive lane happens to have collected
+                ns = page.eval_on_selector_all("#standings table tr td:nth-child(6)", "e=>e.map(x=>x.textContent)")
+                real = [x for x in ns if x and x != "\u2014"]
+                chk.add(f"{scheme} standings: every tool is ranked on the same sample",
+                        len(real) >= 3 and len(set(real)) == 1, str(ns))
+                chk.add(f"{scheme} standings: the page says the sample is matched",
+                        "Matched sample" in page.locator("#standings").inner_text(),
+                        page.locator("#standings").inner_text()[:70])
                 # ---- the divergence figure: four views, ranking column and hover
                 fig_rows = page.locator("#divsvg g").count()
                 chk.add(f"{scheme} scorecard: divergence figure draws a row per station", fig_rows >= 20, f"rows={fig_rows}")

@@ -174,7 +174,7 @@ window.WXCat = (() => {
 
     const url = WXM.contractUrl(p.productConid, ((p.contracts || [])[0] || {}).conidYes);
     if (url) {
-      const go = h('button', { text: 'Open on ForecastEx →' });
+      const go = h('button', { text: 'Open on IBKR →' });
       go.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
       $('#cBody').appendChild(h('div', { class: 'bar', style: 'margin:0 0 10px' }, [go]));
     }
@@ -212,10 +212,10 @@ window.WXCat = (() => {
           ['No bid', noBid == null ? '—' : noBid + '¢'],
           ['Buy Yes now at', q && q.ask != null ? Math.round(q.ask * 100) + '¢' : null],
           ['Settles', expDate(c.expiration)],
-          ['On the exchange', u ? '<a href="' + u + '" target="_blank" rel="noopener noreferrer">open this contract →</a>' : null],
+          ['On the exchange', u ? '<a href="' + u + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>' : null],
         ], 'Yes and No bids sum to $1; there are no sellers · not fee adjusted'
            + (pr && pr.asof ? ' · quoted ' + pr.asof.slice(11, 16) + 'Z' : '')));
-        if (u) WXM.linkTo(bar.querySelector('.lv'), u, 'Open ' + (c.label || c.strike) + ' on ForecastEx');
+        if (u) WXM.linkTo(bar.querySelector('.lv'), u, 'Open ' + (c.label || c.strike) + ' on IBKR');
         div.appendChild(bar);
       });
       $('#cBody').appendChild(div);
