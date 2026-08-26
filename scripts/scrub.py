@@ -24,6 +24,7 @@ mode are decompressed and scanned too. Skipped files are listed.
 from __future__ import annotations
 import gzip
 import json
+import re
 import os
 import subprocess
 import sys
@@ -87,6 +88,32 @@ def _text_of(path: str):
         return (head + fh.read()).decode("utf-8", "replace")
 
 
+_PORT = re.compile(r"^:\d{2,5}$")
+
+
+def _real(needle: str, line: str) -> bool:
+    """Whether a needle's appearance is the thing it guards against.
+
+    Only bare-port needles like ':10000' get this treatment, and only because a
+    port is also what a JSON number looks like after its key: `"strike":10000`
+    is a contract strike, not an internal host. A port in a hostname is preceded
+    by the end of that host, so the needle counts when the character before it
+    could end one and not when it is a quote, a comma or a brace. Every other
+    needle matches as written; this must never become a way to explain a real
+    leak away."""
+    if not _PORT.match(needle):
+        return True
+    at = 0
+    while True:
+        at = line.find(needle, at)
+        if at < 0:
+            return False
+        before = line[at - 1] if at else ""
+        if before and (before.isalnum() or before in ".-]_"):
+            return True
+        at += 1
+
+
 def scan(paths: list, all_needles: list) -> tuple:
     hits, skipped = [], []
     self_path = os.path.abspath(__file__)
@@ -103,7 +130,7 @@ def scan(paths: list, all_needles: list) -> tuple:
             continue
         for i, ln in enumerate(text.splitlines(), 1):
             for n in all_needles:
-                if n in ln:
+                if n in ln and _real(n, ln):
                     hits.append(f"{os.path.relpath(path, ROOT)}:{i}: {n!r} in: {ln.strip()[:100]}")
     return hits, skipped
 

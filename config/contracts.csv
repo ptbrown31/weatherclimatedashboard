@@ -1,0 +1,214 @@
+product_id,is_active,name,new_l1,new_l2,category_l1,category_l2,category_l3
+AEUSA,TRUE,Average Electricity Price for All Sectors,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+AEUSC,FALSE,Average Electricity Price for the Commercial Sector,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+AEUSI,FALSE,Average Electricity Price for the Industrial Sector,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+AEUSR,FALSE,Average Electricity  Price for the Residential Sector,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+AEUST,FALSE,Average Electricity Price for the Transportation Sector,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+CMCAC,TRUE,Total Consumption of Coal in California,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,California
+CMCAN,TRUE,Total Consumption of Natural Gas in California,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,California
+CMUSC,TRUE,Total Consumption of Coal in the US,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+CMUSN,TRUE,Total Consumption of Natural Gas in the US,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+ELGPC,TRUE,US Coal Electricity Generation as a Percentage of Total Generation,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+ELGPH,TRUE,US Conventional Hydroelectric Electricity Generation as a Percentage of Total Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+ELGPN,TRUE,US Natural Gas Electricity Generation as a Percentage of Total Generation,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+ELGPP,TRUE,US Petroleum Electricity Generation as a Percentage of Total Generation,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+ELGPR,TRUE,US Nuclear Energy Electricity Generation as a Percentage of Total Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+ELGPS,TRUE,US Solar Energy Electricity Generation as a Percentage of Total Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+ELGPW,TRUE,US Wind Electricity Generation as a Percentage of Total Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+EMCAC,TRUE,California Coal Electricity Generation,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,California
+EMCAR,TRUE,California Nuclear Energy Electricity Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,California
+EMCAX,TRUE,California Renewable Energy Electricity Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,California
+EMUSA,TRUE,US Total Electricity Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+EMUSC,TRUE,US Coal Electricity Generation,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+EMUSR,TRUE,US Nuclear Energy Electricity Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+EMUSX,TRUE,US Renewable Energy Electricity Generation,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+GSCAL,TRUE,Gas Prices in California,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,California
+GSNYK,TRUE,Gas Prices in New York,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,New York
+GSTXS,TRUE,Gas Prices in Texas,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,Texas
+NGP,TRUE,US Natural Gas Production,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+OP,TRUE,US Oil Production,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+RECAC,TRUE,California Commercial Electricity Generation Sales Revenue,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+RENYA,TRUE,All New York Electricity Generation Sales Revenue,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+RENYC,TRUE,New York Commercial Electricity Generation Sales Revenue,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+RETXC,TRUE,Texas Commercial Electricity Generation Sales Revenue,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+REUSA,TRUE,All US Electricity Generation Sales Revenue,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+REUSC,TRUE,US Commercial Electricity Generation Sales Revenue,Energy,Electricity & Renewables,Economic Indicators,Oil & Energy,United States
+USGP,TRUE,US Gasoline Prices,Energy,Fossil Fuels,Economic Indicators,Oil & Energy,United States
+GCYCO,TRUE,Global Crop Yield of Corn,Climate & Weather,Agriculture,Environmental,Agriculture,Global
+GCYRM,TRUE,Global Crop Yield Rice,Climate & Weather,Agriculture,Environmental,Agriculture,Global
+GCYWH,TRUE,Global Crop Yield of Wheat,Climate & Weather,Agriculture,Environmental,Agriculture,Global
+ACD,TRUE,Atmospheric Carbon Dioxide,Climate & Weather,Climate Change,Environmental,Climate Change,Global
+AMOCW,TRUE,AMOC Weakening,Climate & Weather,Climate Change,Environmental,Climate Change,Global
+GCE,TRUE,Global Carbon Dioxide Emissions,Climate & Weather,Climate Change,Environmental,Climate Change,Global
+GSL,TRUE,Global Sea Level,Climate & Weather,Climate Change,Environmental,Climate Change,Global
+MACD,TRUE,Monthly Atmospheric Carbon Dioxide,Climate & Weather,Climate Change,Environmental,Climate Change,Global
+USCE,TRUE,United States Carbon Dioxide Emissions,Climate & Weather,Climate Change,Environmental,Climate Change,United States
+USDR,TRUE,United States Drought,Climate & Weather,Weather,Environmental,Climate Change,United States
+HCAB,TRUE,Hurricane Count Atlantic Basin,Climate & Weather,Tropical Cyclones,Environmental,Major Weather Events,Global
+HCAT4,TRUE,Category 4 Hurricane in the US,Climate & Weather,Tropical Cyclones,Environmental,Major Weather Events,United States
+HLF,TRUE,Hurricane Landfall,Climate & Weather,Tropical Cyclones,Environmental,Major Weather Events,Global
+HLFRE,FALSE,Hurricane Landfall Count,Climate & Weather,Tropical Cyclones,Environmental,Major Weather Events,Global
+MHCMA,TRUE,Atlantic Major Hurricanes,Climate & Weather,Tropical Cyclones,Environmental,Major Weather Events,Global
+SWHUS,FALSE,Severe Hailstorm events in the United States,Climate & Weather,Weather,Environmental,Major Weather Events,United States
+SWTUS,TRUE,US Monthly Tornados,Climate & Weather,Weather,Environmental,Major Weather Events,United States
+SWWUS,FALSE,Severe Windstorm events in the United States,Climate & Weather,Weather,Environmental,Major Weather Events,United States
+TROPA,TRUE,Atlantic Tropical Storms,Climate & Weather,Tropical Cyclones,Environmental,Major Weather Events,Global
+DHATL,FALSE,Atlanta Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Atlanta
+DHAUS,FALSE,Austin Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Austin
+DHBNA,FALSE,Nashville Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Nashville
+DHBOS,FALSE,Boston Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Boston
+DHCLT,FALSE,Charlotte Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Charlotte
+DHDCA,FALSE,"Washington, D.C. Daily Temperature High",Climate & Weather,Daily Temperatures,Environmental,Temperatures,"Washington, D.C."
+DHDEN,FALSE,Denver Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Denver
+DHDFW,FALSE,Dallas Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Dallas
+DHDTW,FALSE,Detroit Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Detroit
+DHHOU,FALSE,Houston Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Houston
+DHJAX,FALSE,Jacksonville Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Jacksonville
+DHLAS,FALSE,Las Vegas Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Las Vegas
+DHLAX,FALSE,LA Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Los Angeles
+DHMDW,FALSE,Chicago Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Chicago
+DHMIA,FALSE,Miami Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Miami
+DHMSP,FALSE,Minneapolis-St. Paul Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Minneapolis-St. Paul
+DHNYC,FALSE,NYC Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,New York City
+DHOKC,FALSE,Oklahoma City Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Oklahoma City
+DHPHL,FALSE,Philadelphia Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Philadelphia
+DHPHX,FALSE,Phoenix Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Phoenix
+DHSAT,FALSE,San Antonio Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Antonio
+DHSEA,FALSE,Seattle Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Seattle
+DHSFO,FALSE,San Francisco Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Francisco
+DHTOR,FALSE,Toronto Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Toronto
+DHYUL,FALSE,Montreal Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Montreal
+DHYVR,FALSE,Vancouver Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Vancouver
+DLATL,FALSE,Atlanta Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Atlanta
+DLAUS,FALSE,Austin Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Austin
+DLBNA,FALSE,Nashville Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Nashville
+DLBOS,FALSE,Boston Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Boston
+DLCLT,FALSE,Charlotte Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Charlotte
+DLDCA,FALSE,"Washington, D.C. Daily Temperature Low",Climate & Weather,Daily Temperatures,Environmental,Temperatures,"Washington, D.C."
+DLDEN,FALSE,Denver Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Denver
+DLDFW,FALSE,Dallas Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Dallas
+DLHOU,FALSE,Houston Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Houston
+DLJAX,FALSE,Jacksonville Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Jacksonville
+DLLAS,FALSE,Las Vegas Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Las Vegas
+DLLAX,FALSE,Los Angeles Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Los Angeles
+DLMDW,FALSE,Chicago Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Chicago
+DLMIA,FALSE,Miami Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Miami
+DLNYC,FALSE,NYC Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,New York City
+DLOKC,FALSE,Oklahoma City Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Oklahoma City
+DLPHL,FALSE,Philadelphia Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Philadelphia
+DLPHX,FALSE,Phoenix Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Phoenix
+DLSAT,FALSE,San Antonio Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Antonio
+DLSEA,FALSE,Seattle Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Seattle
+DLSFO,FALSE,San Francisco Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Francisco
+GT,TRUE,Global Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,Global
+GTM,TRUE,Monthly Average Global Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,Global
+GTTA,TRUE,Annual Global Temperature Threshold,Climate & Weather,Climate Change,Environmental,Temperatures,Global
+GTTM,TRUE,Monthly Global Temperature Threshold,Climate & Weather,Climate Change,Environmental,Temperatures,Global
+HSCNE,FALSE,Total Population-Weighted Cooling Degree Days in New England,Climate & Weather,Climate Change,Environmental,Temperatures,New England
+HSCUS,FALSE,Total Population-Weighted Cooling Degree Days in the US,Climate & Weather,Climate Change,Environmental,Temperatures,United States
+HWHNE,FALSE,Total Population-Weighted Heating Degree Days in New England,Climate & Weather,Climate Change,Environmental,Temperatures,New England
+HWHUS,FALSE,Total Population-Weighted Heating Degree Days in the US,Climate & Weather,Climate Change,Environmental,Temperatures,United States
+MRT,TRUE,Monthly Record Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,Global
+OADFW,FALSE,Dallas Average Monthly Temperature,Climate & Weather,Weather,Environmental,Temperatures,Dallas
+OAHOU,FALSE,Houston Average Monthly Temperature,Climate & Weather,Weather,Environmental,Temperatures,Houston
+OALAX,TRUE,Los Angeles Average Monthly Temperature,Climate & Weather,Weather,Environmental,Temperatures,Los Angeles
+OAMDW,TRUE,Chicago Average Monthly Temperature,Climate & Weather,Weather,Environmental,Temperatures,Chicago
+OAMIA,FALSE,Miami Average Monthly Temperature,Climate & Weather,Weather,Environmental,Temperatures,Miami
+OANYC,TRUE,NYC Average Monthly Temperature,Climate & Weather,Weather,Environmental,Temperatures,New York City
+RT,TRUE,Record Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,Global
+SHDDF,TRUE,Frankfurt Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Frankfurt
+SHEMD,FALSE,Madrid  Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Madrid
+SHFPO,TRUE,Paris Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Paris
+SHJTT,TRUE,Tokyo Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Tokyo
+SHMAA,FALSE,Abu Dhabi Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Abu Dhabi
+SHMBD,FALSE,Dubai Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Dubai
+SHMDB,FALSE,Dubai Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Dubai
+SHSSS,TRUE,Singapore Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Singapore
+SHSSY,TRUE,Sydney Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Sydney
+SHYHC,TRUE,Vancouver Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Vancouver
+SHYUL,TRUE,Montreal Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Montreal
+SHYYZ,TRUE,Toronto Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Toronto
+UHATL,TRUE,Atlanta Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Atlanta
+UHAUS,TRUE,Austin Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Austin
+UHBKF,TRUE,Denver Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Denver
+UHBNA,TRUE,Nashville Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Nashville
+UHBOS,TRUE,Boston Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Boston
+UHCLT,TRUE,Charlotte Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Charlotte
+UHCOS,FALSE,Colorado Springs Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Colorado Springs
+UHDCA,TRUE,Washington DC Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Washington DC
+UHDFW,TRUE,Dallas Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Dallas
+UHDTW,TRUE,Detroit Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Detroit
+UHHNL,FALSE,Honolulu Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Honolulu
+UHHOU,TRUE,Houston Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Houston
+UHJAX,TRUE,Jacksonville Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Jacksonville
+UHLAS,TRUE,Las Vegas Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Las Vegas
+UHLAX,TRUE,Los Angeles Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Los Angeles
+UHLGA,TRUE,New York City Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,New York City
+UHMAA,FALSE,Abu Dhabi Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Abu Dhabi
+UHMDW,TRUE,Chicago Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Chicago
+UHMIA,TRUE,Miami Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Miami
+UHMSP,TRUE,Minneapolis-Saint Paul Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Minneapolis-Saint Paul
+UHMSY,TRUE,New Orleans Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,New Orleans
+UHOKC,TRUE,Oklahoma City Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Oklahoma City
+UHPHL,TRUE,Philadelphia Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Philadelphia
+UHPHX,TRUE,Phoenix Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Phoenix
+UHSAT,TRUE,San Antonio Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Antonio
+UHSEA,TRUE,Seattle Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Seattle
+UHSFO,TRUE,San Francisco Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Francisco
+UHSSS,FALSE,Singapore Daily Temperature High,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Singapore
+ULATL,TRUE,Atlanta Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Atlanta
+ULAUS,TRUE,Austin Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Austin
+ULBKF,TRUE,Denver Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Denver
+ULBNA,TRUE,Nashville Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Nashville
+ULBOS,TRUE,Boston Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Boston
+ULCLT,TRUE,Charlotte Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Charlotte
+ULDCA,TRUE,Washington DC Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Washington DC
+ULDFW,TRUE,Dallas Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Dallas
+ULDTW,TRUE,Detroit Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Detroit
+ULHOU,TRUE,Houston Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Houston
+ULJAX,TRUE,Jacksonville Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Jacksonville
+ULLAS,TRUE,Las Vegas Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Las Vegas
+ULLAX,TRUE,Los Angeles Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Los Angeles
+ULLGA,TRUE,New York City Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,New York City
+ULMDW,TRUE,Chicago Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Chicago
+ULMIA,TRUE,Miami Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Miami
+ULMSP,TRUE,Minneapolis-Saint Paul Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Minneapolis-Saint Paul
+ULMSY,TRUE,New Orleans Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,New Orleans
+ULOKC,TRUE,Oklahoma City Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Oklahoma City
+ULPHL,TRUE,Philadelphia Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Philadelphia
+ULPHX,TRUE,Phoenix Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Phoenix
+ULSAT,TRUE,San Antonio Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Antonio
+ULSEA,TRUE,Seattle Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,Seattle
+ULSFO,TRUE,San Francisco Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Francisco
+UST,TRUE,US Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,United States
+USTM,TRUE,Monthly Average United States Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,United States
+AWBOS,FALSE,Boston Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,Boston
+AWDFW,FALSE,Dallas Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,Dallas
+AWMDW,FALSE,Chicago Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,Chicago
+AWSFO,FALSE,San Francisco Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,San Francisco
+HOAUS,FALSE,Hail in Austin,Climate & Weather,Weather,Environmental,Weather,Austin
+HODFW,FALSE,Hail in Dallas,Climate & Weather,Weather,Environmental,Weather,Dallas
+HOOKC,FALSE,Hail in Oklahoma City,Climate & Weather,Weather,Environmental,Weather,Oklahoma City
+HOSAT,FALSE,Hail in San Antonio,Climate & Weather,Weather,Environmental,Weather,San Antonio
+MGBOS,FALSE,Boston Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Boston
+MGDFW,FALSE,Dallas Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Dallas
+MGMDW,FALSE,Chicago Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Chicago
+MGMIA,FALSE,Miami Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Miami
+MGSFO,FALSE,San Francisco Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,San Francisco
+TAAUS,FALSE,Austin Thunderstorm Activity,Climate & Weather,Weather,Environmental,Weather,Austin
+TADFW,FALSE,Dallas Thunderstorm Activity,Climate & Weather,Weather,Environmental,Weather,Dallas
+TAOKC,FALSE,Oklahoma City Thunderstorm Activity,Climate & Weather,Weather,Environmental,Weather,Oklahoma City
+TASAT,FALSE,San Antonio Thunderstorm Activity,Climate & Weather,Weather,Environmental,Weather,San Antonio
+TRHOU,TRUE,Houston Monthly Rain,Climate & Weather,Weather,Environmental,Weather,Houston
+TRMDW,TRUE,Chicago Monthly Rain,Climate & Weather,Weather,Environmental,Weather,Chicago
+TRMIA,TRUE,Miami Monthly Rain,Climate & Weather,Weather,Environmental,Weather,Miami
+TRNYC,TRUE,NYC Monthly Rain,Climate & Weather,Weather,Environmental,Weather,New York City
+TRSEA,TRUE,Seattle Monthly Rain,Climate & Weather,Weather,Environmental,Weather,Seattle
+WRNYC,FALSE,Rain in NYC,Climate & Weather,Weather,Environmental,Weather,New York City
+CFSFP,TRUE,CFS First Plasma,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,Global
+FUSCF,TRUE,CFS Infuse Awards,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,United States
+FUSGF,TRUE,General Fusion Infuse Awards,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,United States
+FUSHE,TRUE,Helion Energy Infuse Awards,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,United States
+GFBKE,FALSE,General Fusion Breakeven,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,Global
+HELPP,TRUE,Helion Energy Plant Operation,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,United States
+HELIO,FALSE,Helion Energy Capture,Energy,Electricity & Renewables,Financial Markets,Corporate Performance,Global

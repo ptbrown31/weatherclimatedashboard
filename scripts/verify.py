@@ -143,22 +143,47 @@ def run(no_build: bool) -> int:
                         "SITE-LINK" not in art_t and "{" not in art_t, art_t[:60])
                 chk.add(f"{scheme} article: no internal review note published",
                         "DRAFT UPDATE" not in art_t and "for Patrick" not in art_t, "")
-                nav_n = page.locator("header.site nav a").count()
-                labels = page.eval_on_selector_all("header.site nav a", "els => els.map(e => e.textContent)")
-                chk.add(f"{scheme} nav: eight tabs", nav_n == 8, f"tabs={nav_n} {labels}")
-                chk.add(f"{scheme} nav: the map tab is named for what it is",
-                        "Prediction Market National Weather Map" in labels, str(labels[:2]))
-                chk.add(f"{scheme} nav: no city tab; cities are reached from the map",
-                        not any(l.strip() == "City" for l in labels), str(labels))
-                chk.add(f"{scheme} nav: the temperature article is named for trading",
-                        "Trading temp markets" in labels, str(labels))
-                chk.add(f"{scheme} nav: the current page is marked", page.locator("header.site nav a.on").count() == 1, "")
-                # the city page has no tab of its own, so the map tab stands in for it
-                page.goto(f"{srv.url}/city.html?station=KLAX"); page.wait_for_timeout(600)
-                chk.add(f"{scheme} nav: a city page still marks the map tab",
-                        page.locator("header.site nav a.on").count() == 1
-                        and "Weather Map" in page.locator("header.site nav a.on").inner_text(),
-                        page.locator("header.site nav a.on").inner_text()[:40])
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(800)
+                l1 = page.eval_on_selector_all("header.site nav.l1 > a", "els => els.map(e => e.textContent)")
+                l2 = page.eval_on_selector_all("header.site nav.l2 a", "els => els.map(e => e.textContent)")
+                refs = page.eval_on_selector_all("header.site .refnav a", "els => els.map(e => e.textContent)")
+                chk.add(f"{scheme} nav: two branches on the first row", l1 == ["Climate & Weather", "Energy"], str(l1))
+                chk.add(f"{scheme} nav: the second row carries that branch's categories",
+                        l2[:2] == ["Daily Temperatures", "Tropical Cyclones"] and len(l2) == 5, str(l2))
+                chk.add(f"{scheme} nav: reference pages sit apart from the hierarchy",
+                        "Trading temp markets" in refs and "FAQ" in refs and "City" not in refs, str(refs))
+                on = page.eval_on_selector_all("header.site nav a.on", "els => els.map(e => e.textContent)")
+                chk.add(f"{scheme} nav: the map marks its branch and its category",
+                        on == ["Climate & Weather", "Daily Temperatures"], str(on))
+                # a page reached by a query parameter still has to know where it lives
+                for url, want in ((f"{srv.url}/section.html?s=energy", ["Energy"]),
+                                  (f"{srv.url}/category.html?c=fossil-fuels", ["Energy", "Fossil Fuels"]),
+                                  (f"{srv.url}/contract.html?id=OP", ["Energy", "Fossil Fuels"]),
+                                  (f"{srv.url}/hurricane.html", ["Climate & Weather", "Tropical Cyclones"]),
+                                  (f"{srv.url}/city.html?station=KLAX", ["Climate & Weather", "Daily Temperatures"])):
+                    page.goto(url); page.wait_for_timeout(800)
+                    got = page.eval_on_selector_all("header.site nav a.on", "els => els.map(e => e.textContent)")
+                    chk.add(f"{scheme} nav: {url.split('/')[-1][:34]} knows its branch", got == want, f"{got} want {want}")
+                # ---- the catalogue pages
+                page.goto(f"{srv.url}/section.html?s=energy"); page.wait_for_timeout(800)
+                chk.add(f"{scheme} catalogue: a branch page lists its categories",
+                        page.locator("#cats a.catcard").count() == 2, str(page.locator("#cats a.catcard").count()))
+                page.goto(f"{srv.url}/category.html?c=fossil-fuels"); page.wait_for_timeout(900)
+                rows = page.locator("#list table tr").count()
+                dim = page.locator("#list tr.dim").count()
+                chk.add(f"{scheme} catalogue: the category lists every product in the family",
+                        rows == 16 and dim == 3, f"rows={rows} not-listed={dim}")
+                chk.add(f"{scheme} catalogue: unlisted products say so rather than vanishing",
+                        page.locator("#list .pill.off").count() == 3, str(page.locator("#list .pill.off").count()))
+                page.goto(f"{srv.url}/contract.html?id=OP"); page.wait_for_timeout(900)
+                body = page.locator("#cBody").inner_text()
+                chk.add(f"{scheme} catalogue: a contract page shows its ladder and says no price is published",
+                        "Open on ForecastEx" in body and "does not publish a fair value" in body, body[:80])
+                page.goto(f"{srv.url}/contract.html?id=GSCAL"); page.wait_for_timeout(900)
+                chk.add(f"{scheme} catalogue: an unlisted contract explains itself instead of erroring",
+                        "not carrying this contract" in page.locator("#cBody").inner_text(),
+                        page.locator("#cBody").inner_text()[:90])
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
                 page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(400)
                 faq_txt = page.locator(".prose").inner_text()
                 chk.add(f"{scheme} sources: the feed table moved to the FAQ",

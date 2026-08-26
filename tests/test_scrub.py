@@ -37,3 +37,39 @@ class ScrubTrackedFiles(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PortNeedlesAreHostAware(unittest.TestCase):
+    """A bare-port needle is also what a JSON number looks like after its key.
+    It must still catch a real internal host and must not fire on contract data
+    — a strike of 10000 is a strike.
+
+    The needles are assembled from parts rather than written out, because this
+    file is itself scanned and a literal one here would be a hit."""
+
+    P1 = ":" + "10000"
+    P2 = ":" + "8443"
+
+    def test_a_real_host_and_port_is_caught(self):
+        for line in ("https://box.example.net" + self.P1 + "/", "box.example.net" + self.P1,
+                     "host-1" + self.P2 + "/path", "10.0.0.4" + self.P1):
+            self.assertTrue(scrub._real(self.P1, line) or scrub._real(self.P2, line), line)
+
+    def test_a_json_number_is_not_a_port(self):
+        for line in ('{"strike"' + self.P1 + ',"label":"Above 10000"}', '{"a":1,"b"' + self.P1 + '}'):
+            self.assertFalse(scrub._real(self.P1, line), line)
+
+    def test_every_other_needle_still_matches_as_written(self):
+        # any needle that is not a bare port is returned as a hit unconditionally
+        for n in ("some-internal-name", "-----" + "BEGIN " + "PRIVATE KEY" + "-----", "aws_" + "secret_key"):
+            self.assertTrue(scrub._real(n, "prefix " + n + " suffix"), n)
+        self.assertTrue(scrub._real(":x99", "not:x99"))          # not a port shape, so matched plainly
+
+    def test_the_catalogue_samples_are_clean(self):
+        # the data that first tripped this: a contract with a 10000 strike
+        import glob
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        files = glob.glob(os.path.join(root, "samples", "snapshots", "catalogue", "product", "*.json"))
+        self.assertTrue(files, "no catalogue samples to check")
+        hits, _ = scrub.scan(files, [self.P1, self.P2])
+        self.assertEqual(hits, [])

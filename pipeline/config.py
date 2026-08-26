@@ -56,6 +56,14 @@ def load(path: str | None = None) -> dict:
         for k in keys[:-1]:
             node = node.setdefault(k, {})
         node[keys[-1]] = val
+    # the product registry travels beside site.json rather than inside it: it is
+    # generated from the vendored CSV and is long enough that hand-editing
+    # site.json around it would be a nuisance
+    reg = os.path.join(os.path.dirname(os.path.abspath(path)), "contracts.json")
+    if os.path.exists(reg):
+        with open(reg, encoding="utf-8") as fh:
+            cfg["contracts"] = json.load(fh)
+
     # A relative local root is relative to the repo, not the working directory,
     # so `python -m pipeline.run` behaves the same from any cwd.
     st = cfg.setdefault("storage", {})

@@ -63,16 +63,47 @@ window.WXC = (() => {
     if (cfg.target === 'embed') return;
     const wrap = $('.wrap');
     if (!wrap) return;
-    // No city tab: a city is reached by its dot on the map, which is where a
-    // reader is already looking when they want one.
-    const nav = [['index.html', 'Prediction Market National Weather Map'], ['scorecard.html', 'Scorecard'],
-                 ['hurricane.html', 'Hurricanes'], ['climate.html', 'Climate'],
-                 ['daily-temperature-markets.html', 'Trading temp markets'], ['accuracy.html', 'Accuracy'],
-                 ['faq.html', 'FAQ'], ['about.html', 'About']];
+    // Two rows. The first is the two branches the contracts divide into; the
+    // second is the categories of whichever branch you are in, and it stays
+    // visible so a reader can move sideways without going back up. Reference
+    // pages sit to the right of the first row, lighter, because they are not
+    // contracts. No city tab: a city is reached by its dot on the map, which is
+    // where a reader is already looking when they want one.
+    const REF = [['scorecard.html', 'Scorecard'], ['daily-temperature-markets.html', 'Trading temp markets'],
+                 ['accuracy.html', 'Accuracy'], ['faq.html', 'FAQ'], ['about.html', 'About']];
+    const nav = cfg.nav || { l1: [], categories: [] };
+    const cats = nav.categories || [];
+    const pageOf = c => (c.page || '').split('?')[0];
+    const paramOf = c => { const q = (c.page || '').split('?')[1]; return q ? new URLSearchParams(q).get('c') : null; };
+    const q = new URLSearchParams(location.search);
+    const here = q.get('c');
+    // which category this page belongs to: by ?c= on the shared category page,
+    // by the product's own id on a contract page, or by the page's file name,
+    // with the city chart counted as the map's
+    const byProduct = (nav.product || {})[(q.get('id') || '').toUpperCase()];
+    const mine = cats.find(c => c.slug === here)
+      || (byProduct ? cats.find(c => c.slug === byProduct) : null)
+      || cats.find(c => !paramOf(c) && pageOf(c) === active)
+      || (active === 'city.html' ? cats.find(c => pageOf(c) === 'index.html') : null);
+    // a branch page names its branch directly and belongs to no one category
+    const bySection = q.get('s');
+    const branch = mine ? mine.l1
+      : (bySection ? ((nav.l1.find(x => x.slug === bySection) || {}).name || '') : '')
+        || ((nav.l1[0] || {}).name || '');
+
+    const row1 = h('nav', { class: 'l1' }, (nav.l1 || []).map(b =>
+      h('a', { href: 'section.html?s=' + b.slug, text: b.name, class: b.name === branch ? 'on' : '' })));
+    if (REF.length) {
+      const ref = h('span', { class: 'refnav' }, REF.map(([href, label]) =>
+        h('a', { href, text: label, class: href === active ? 'on' : '' })));
+      row1.appendChild(ref);
+    }
+    const inBranch = cats.filter(c => c.l1 === branch);
+    const row2 = h('nav', { class: 'l2' }, inBranch.map(c =>
+      h('a', { href: c.page, text: c.l2, class: (mine && c.slug === mine.slug) ? 'on' : '' })));
     const header = h('header', { class: 'site' }, [
       h('a', { class: 'brand', href: 'index.html', text: cfg.siteTitle || 'Weather tools' }),
-      h('nav', {}, nav.map(([href, label]) => h('a', { href, text: label,
-        class: (href === active || (href === 'index.html' && active === 'city.html')) ? 'on' : '' }))),
+      row1, inBranch.length ? row2 : h('span'),
     ]);
     wrap.insertBefore(header, wrap.firstChild);
     const footer = h('footer', { class: 'site' }, [
