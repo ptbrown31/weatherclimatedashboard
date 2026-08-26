@@ -199,6 +199,25 @@ Every figure that shows the vendor's data carries its mark (the hurricane page d
 itself). The first real storm delivery should be checked against `data/archive/reask/` by hand:
 the parser was built from the documented file shapes without a live storm to test on.
 
+## 11. The accuracy curve (run from the machine that captures it)
+
+The accuracy page draws forecast error against lead time for the National Weather Service
+station forecast and the price-implied high. That comparison is captured hourly by a separate
+system into a SQLite file on the owner's machine. The Lambda has no route to that file, and the
+site's own archive only reaches back to the day it started, which is a fraction of the record,
+so the curve is published from the machine that holds it:
+
+    WX_STORAGE_BACKEND=s3 \
+    WX_STORAGE_BUCKET=<bucket> WX_STORAGE_REGION=<region> WX_STORAGE_PREFIX=data \
+    python3 scripts/export_accuracy.py
+
+`--dry-run` prints the curve and writes nothing. `--db` points at another capture file.
+
+It reads, reduces to a few hundred numbers, and writes one snapshot; it never uploads a row of
+the underlying data. Re-run it whenever the curve should catch up — the page states the window
+it covers, so a stale file is visible rather than silent. Nothing else depends on it, and the
+page says the measurement has not been published yet if the file is missing.
+
 ## Cloudflare alternative
 
 `ops/cloudflare/README.md` describes serving the site and snapshots from Cloudflare (R2 + Pages)
