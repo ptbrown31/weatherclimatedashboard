@@ -295,9 +295,12 @@ def run(no_build: bool) -> int:
                     pg2.goto(f"{srv.url}/index.html")
                     pg2.wait_for_timeout(1200)
                     on = pg2.locator(".bar button.on").first.inner_text() if pg2.locator(".bar button.on").count() else ""
+                    col = pg2.eval_on_selector_all(".modegrid .mgcol",
+                                                   "e=>e.filter(c=>c.querySelector('button.on')).map(c=>c.querySelector('.mgh').textContent)")
                     title = pg2.locator("#modeTitle").inner_text()
                     chk.add(f"{scheme} map default at {hour}:30 ET: opens on {want.lower()}'s highs",
-                            want.lower() in on.lower() and "HIGH" in title.upper(), f"button={on} title={title[:44]}")
+                            col == [want] and on == "Highs" and want.upper() in title.upper(),
+                            f"column={col} button={on} title={title[:40]}")
                     chk.add(f"{scheme} map default at {hour}:30 ET: the other day is one click away",
                             pg2.locator(".bar button").count() >= 4, str(pg2.locator(".bar button").count()))
                     ctx2.close()
@@ -327,17 +330,41 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} map colour: the raw gap is still shown, not replaced",
                         "Gap to NWS" in t_enc and ("typical" in t_enc), t_enc[-140:])
                 # observed-versus-issued is not a market gap and keeps the plain sign
-                page.locator("#m5").click(); page.wait_for_timeout(500)
-                leg5 = page.locator("#legend").inner_text()
-                chk.add(f"{scheme} map colour: the observed view is not centred",
-                        "typical gap" not in leg5.lower() and "Running above" in leg5, leg5[:90])
+                chk.add(f"{scheme} map: the observed-versus-issued view is gone",
+                        page.locator("#m5").count() == 0, "")
+                chk.add(f"{scheme} map: no headline boxes above the board",
+                        page.locator("#cards .tile").count() == 0, "")
+                cols = page.eval_on_selector_all(".modegrid .mgh", "e=>e.map(x=>x.textContent)")
+                per = page.eval_on_selector_all(".modegrid .mgcol", "e=>e.map(c=>c.querySelectorAll('button').length)")
+                chk.add(f"{scheme} map: the four views sit in a today/tomorrow grid",
+                        cols == ["Today", "Tomorrow"] and per == [2, 2], f"{cols} {per}")
+                chk.add(f"{scheme} map: the opening paragraph is the one asked for",
+                        "with a bias removed from the National Weather Service" in page.locator("p.sub").inner_text(),
+                        page.locator("p.sub").inner_text()[:80])
+                chk.add(f"{scheme} map: it links to the trading article",
+                        page.locator("p.cap a[href='daily-temperature-markets.html']").count() == 1, "")
+                chk.add(f"{scheme} map: the legend no longer repeats the colour key below it",
+                        "Warmer than the board" not in page.locator("#legend").inner_text(),
+                        page.locator("#legend").inner_text()[:80])
+                # every view shades now, not only the day-ahead ones
+                for bid in ("m1", "m2", "m3", "m4"):
+                    page.locator("#" + bid).click(); page.wait_for_timeout(400)
+                    chk.add(f"{scheme} map: {bid} draws the forecast field",
+                            page.locator("#map rect[data-i]").count() > 1500,
+                            str(page.locator("#map rect[data-i]").count()))
+                page.locator("#m1").click(); page.wait_for_timeout(400)
+                wl = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} map: the international stations are named on the world canvas",
+                        len(wl) >= 12 and any("Tokyo" in x for x in wl), str(wl[:3]))
+                chk.add(f"{scheme} map: the list under the world canvas is gone",
+                        page.locator("#intl").count() == 0, "")
 
                 # switching to today keeps it a market view, not observed-vs-issued
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
                 page.locator("#m1").click(); page.wait_for_timeout(400)
                 t_today = page.locator("#modeTitle").inner_text()
-                chk.add(f"{scheme} map today view: ForecastEx against the NWS forecast, not observed vs issued",
-                        "ForecastEx implied median" in t_today and "observed" not in t_today.lower(), t_today[:80])
+                chk.add(f"{scheme} map today view: the current day, against the NWS forecast rather than what was issued",
+                        "TODAY" in t_today.upper() and "observed" not in t_today.lower(), t_today[:80])
                 dots_today = page.locator("#map circle").count()
                 chk.add(f"{scheme} map today view: dots are drawn", dots_today > 0, f"circles={dots_today}")
                 page.locator("#m2").click(); page.wait_for_timeout(400)
@@ -738,8 +765,8 @@ def run(no_build: bool) -> int:
                 t_cell = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: shading cell names the derived field value", "NWS forecast field" in t_cell, t_cell[:80])
                 page.locator("#m1").click(); page.wait_for_timeout(300)
-                chk.add(f"{scheme} map: the current-day view carries no shading, and says so with none",
-                        page.locator("#map rect[data-i]").count() == 0, str(page.locator("#map rect[data-i]").count()))
+                chk.add(f"{scheme} map: the current-day view is shaded too, not only the day ahead",
+                        page.locator("#map rect[data-i]").count() > 1500, str(page.locator("#map rect[data-i]").count()))
                 # the headline cards are written by the pipeline; absent snapshot must simply draw none
                 cards = page.locator("#cards .tile").count()
                 chk.add(f"{scheme} map: headline cards render, or none when the snapshot is absent", cards == 0 or cards >= 2, f"cards={cards}")

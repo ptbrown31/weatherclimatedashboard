@@ -534,18 +534,37 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
     if skipped:
         log(kind="forecast", warning=f"deadline: {skipped} stations not rebuilt")
 
-    # ---- the shading field for the national map, from tomorrow's NWS highs and lows
-    pts, for_dates = [], {}
-    for c in roster:
-        f = summary_fc.get(c["station"], {})
-        n = f.get("nws") or {}
-        pts.append({**c, "hi": n.get("highTomorrow"), "lo": n.get("lowTomorrow")})
-        if f.get("tomorrow"):
-            for_dates[c["station"]] = f["tomorrow"]
+    # ---- the shading field for the national map, from the NWS highs and lows.
+    # Both days are interpolated, not only the day ahead: the current-day views
+    # are the ones open through the trading session and were carrying no
+    # shading at all.
     if written:
-        field = basemap.idw_field(grid, pts, "hi", "lo")
-        field.update({"schema": SCHEMA, "asof": _iso(now), "for": "tomorrow", "forDates": for_dates,
-                      "note": "derived: inverse-distance interpolation of the listed stations' NWS forecasts, not the NDFD grid"})
+        field = None
+        for when, hi_key, lo_key, date_key in (("tomorrow", "highTomorrow", "lowTomorrow", "tomorrow"),
+                                               ("today", "highToday", "lowToday", "day")):
+            pts, for_dates = [], {}
+            for c in roster:
+                f = summary_fc.get(c["station"], {})
+                n = f.get("nws") or {}
+                pts.append({**c, "hi": n.get(hi_key), "lo": n.get(lo_key)})
+                if f.get(date_key):
+                    for_dates[c["station"]] = f[date_key]
+            one = basemap.idw_field(grid, pts, "hi", "lo")
+            if field is None:
+                # the grid geometry is shared; only the two value columns differ
+                field = {"schema": SCHEMA, "asof": _iso(now), "step": one["step"], "domain": one["domain"],
+                         "stations": one.get("stations"), "for": "both", "cells": one["cells"],
+                         "forDates": for_dates,
+                         "note": "derived: inverse-distance interpolation of the listed stations' NWS forecasts, "
+                                 "not the NDFD grid"}
+            else:
+                # append today's high and low to each cell, so one file carries
+                # both days and a page picks the pair it needs
+                for i, cell in enumerate(field["cells"]):
+                    src = one["cells"][i]
+                    cell.append(src[2])
+                    cell.append(src[3])
+                field["forDatesToday"] = for_dates
         store.put("snapshots/field.json", json.dumps(field, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     log(kind="forecast-snapshots", written=written, keptPrevious=kept, skipped=skipped)
     return {"forecast": summary_fc, "written": written, "kept": kept, "skipped": skipped}

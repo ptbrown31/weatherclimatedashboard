@@ -11,18 +11,19 @@
 <body>
 <div class="wrap">
 <h1>US daily temperature stations</h1>
-<p class="sub">The four numbers the day turns on, then every station that daily temperature contracts settle on. Each dot
-shows where the exchange&rsquo;s market-implied median sits against the National Weather Service forecast for the
-same day. The page opens on whichever board is trading: the current day&rsquo;s until 5 pm Eastern, the day-ahead
-board after that, with the other always one click away. The pale shading is the NWS forecast field, which is
-interpolated for tomorrow only, so the current-day views carry none. Click a city for its chart.</p>
-<div class="tiles" id="cards"></div>
-<div class="bar">
-  <button id="m1">Today&rsquo;s highs</button>
-  <button id="m2">Tomorrow&rsquo;s highs</button>
-  <button id="m3">Today&rsquo;s lows</button>
-  <button id="m4">Tomorrow&rsquo;s lows</button>
-  <button id="m5">Today: observed vs issued</button>
+<p class="sub">Each dot shows where the exchange&rsquo;s market-implied median sits against the National Weather
+Service forecast for the same day with a bias removed from the National Weather Service.</p>
+<p class="cap" style="margin:0 0 10px"><a href="daily-temperature-markets.html">How these contracts work and how they
+settle &rarr;</a></p>
+<div class="bar modegrid">
+  <div class="mgcol"><span class="mgh">Today</span>
+    <button id="m1">Highs</button>
+    <button id="m3">Lows</button>
+  </div>
+  <div class="mgcol"><span class="mgh">Tomorrow</span>
+    <button id="m2">Highs</button>
+    <button id="m4">Lows</button>
+  </div>
   <span id="pageStatus"></span>
 </div>
 <div id="modeTitle"></div>
@@ -33,7 +34,7 @@ interpolated for tomorrow only, so the current-day views carry none. Click a cit
 <p class="cap">These stations settle in Celsius, so their labels carry the unit. They take the same encoding as the
 map above; a grey dot means the view has no value for that station, because US government feeds carry
 observations everywhere but forecasts only for the United States and, through the Blend of Models, Canada.
-<span id="intl"></span></p>
+Each station is named on the map with its observed reading so far; click one for its chart.</p>
 <div class="how">
 <div><h3>THE DOTS</h3><p>One dot per station. Colour is the sign of the market-implied median minus the NWS
 forecast for the same day and size is the gap; grey means no listed contracts or no bids yet. The market has

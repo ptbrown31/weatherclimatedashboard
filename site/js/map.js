@@ -10,7 +10,7 @@
 window.WXMap = (() => {
   const { el, txt, h, $, deg } = WXC;
   const RAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
-  let summary = null, field = null, base = null, world = null, head = null, mode = null, tip = null;
+  let summary = null, field = null, base = null, world = null, mode = null, tip = null;
   const TOOL = { nws: 'National Weather Service', nbm: 'Blend of Models', lamp: 'Aviation guidance (LAMP)',
                  mav: 'GFS MOS', fx: 'ForecastEx' };
   const ord = n => n + (n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th');
@@ -19,56 +19,6 @@ window.WXMap = (() => {
   // landing page stays light. Each is a fact with its own provenance, not a
   // summary of the site: the accuracy standing, yesterday's largest single
   // miss, the widest disagreement about tomorrow, and one hurricane contract.
-  function drawCards() {
-    const host = $('#cards'); if (!host) return;
-    host.innerHTML = '';
-    if (!head) return;
-    const card = (value, label, sub, tipHtml, href) => {
-      const d = h('div', { class: 'tile' + (href ? ' link' : '') }, [
-        h('div', { class: 'tv', text: value }), h('div', { class: 'tl', text: label }),
-        sub ? h('div', { class: 'ts', text: sub }) : h('span')]);
-      if (tipHtml) { d.onmousemove = e => tip.show(e, tipHtml); d.onmouseleave = () => tip.hide(); }
-      if (href) d.onclick = () => { location.href = href; };
-      host.appendChild(d);
-    };
-    const a = head.accuracy;
-    if (a && (a.rank || []).length) {
-      // the exchange's own standing when it is scored, otherwise whoever leads
-      const i = Math.max(0, a.rank.findIndex(r => r.src === 'fx'));
-      const r = a.rank[i];
-      card(deg(r.mae) + 'F', TOOL[r.src] + ' ranks ' + ord(i + 1) + ' of ' + a.rank.length,
-        'Average error on daily highs, last ' + a.days + ' scored days',
-        tip.rows('Accuracy over the last ' + a.days + ' scored days',
-          a.rank.map((x, k) => [ord(k + 1) + ' ' + TOOL[x.src], deg(x.mae) + 'F  (n ' + x.n + ')']),
-          'mean absolute error on the daily high, pooled across every station. n differs by source, because the archive holds fewer cycles for some of them · click → the scorecard'),
-        'scorecard.html');
-    }
-    const e = head.largestError;
-    if (e) card(deg(Math.abs(e.error)) + 'F', 'Largest error, ' + e.city + ' ' + e.side,
-      'Settled ' + deg(e.observed) + ' against ' + deg(e.forecast) + ' from ' + TOOL[e.source],
-      tip.rows(e.city + ' (' + e.station + ') — the day’s largest miss',
-        [['Day', e.date], ['Observed ' + e.side, deg(e.observed)], [TOOL[e.source] + ' forecast', deg(e.forecast)],
-         ['Error', (e.error > 0 ? '+' : '') + (Math.round(e.error * 10) / 10) + '°' + (e.error > 0 ? ', too warm' : ', too cold')]],
-        'the single largest error on the newest scored day · click → that station’s chart'),
-      'city.html?station=' + e.station);
-    const w = head.widestSpread;
-    if (w) card(deg(w.spread) + 'F', 'Widest disagreement, ' + w.city + ' ' + w.side,
-      'Tomorrow: ' + deg(w.low) + ' to ' + deg(w.high) + ' across ' + w.sources.length + ' sources',
-      tip.rows(w.city + ' (' + w.station + ') — the widest spread for ' + w.day,
-        [['Coldest forecast', deg(w.low)], ['Warmest forecast', deg(w.high)], ['Spread', deg(w.spread)],
-         ['Sources', w.sources.map(k => TOOL[k] || k).join(', ')]],
-        'click → the scorecard’s tomorrow view'),
-      'scorecard.html');
-    const hu = head.hurricane;
-    if (hu && hu.yes != null) {
-      const c = Math.round(hu.yes * 100), pay = WXM.payout ? WXM.payout(Math.round((hu.ask != null ? hu.ask : hu.yes) * 100)) : null;
-      card(c + '%', 'At least one major Atlantic hurricane', hu.expiryLabel + (pay ? ' · a Yes pays ' + pay + '×' : ''),
-        tip.rows('The exchange on ' + hu.expiryLabel, [['Contract', hu.label], ['Yes price', c + '¢'],
-          ['Buy Yes now at', hu.ask != null ? Math.round(hu.ask * 100) + '¢' : null],
-          ['Pays', pay ? pay + '× net of fees' : null]], 'click → the hurricane page'),
-        'hurricane.html');
-    }
-  }
 
 
 
@@ -84,20 +34,14 @@ window.WXMap = (() => {
   // The reference field is interpolated for tomorrow only, so the current day's
   // views carry no background shading; the dots are the whole signal there.
   const MODES = {
-    hiT: { title: () => "TODAY'S HIGHS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null, centred: true,
+    hiT: { title: () => "TODAY'S HIGHS · shaded by the National Weather Service forecast for " + tdy(), fld: 4, centred: true,
            val: c => c.nwsHighToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divHigh : null },
-    loT: { title: () => "TODAY'S LOWS · ForecastEx implied median against the NWS forecast for " + tdy(), fld: null, centred: true,
+    loT: { title: () => "TODAY'S LOWS · shaded by the National Weather Service forecast for " + tdy(), fld: 5, centred: true,
            val: c => c.nwsLowToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divLow : null },
     hi:  { title: () => "TOMORROW'S HIGHS · shaded by the National Weather Service forecast for " + tmw(), fld: 2, centred: true,
            val: c => c.nwsHighTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divHigh : null },
     lo:  { title: () => "TOMORROW'S LOWS · shaded by the National Weather Service forecast for " + tmw(), fld: 3, centred: true,
            val: c => c.nwsLowTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divLow : null },
-    // observed against issued is not a market gap and carries no standing
-    // offset, so it keeps the plain sign
-    obs: { title: () => "TODAY · observed high so far against the NWS high issued for the day", fld: null, centred: false,
-           val: c => c.obsHighSoFar, when: 'today',
-           div: c => { const ref = c.nwsIssuedHigh != null ? c.nwsIssuedHigh : c.nwsHighToday;
-                       return (c.obsHighSoFar != null && ref != null) ? Math.round((c.obsHighSoFar - ref) * 10) / 10 : null; } },
   };
   const tmw = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.tomorrow : ''; };
 
@@ -214,8 +158,9 @@ window.WXMap = (() => {
   // one cell of the shading: the interpolated NWS level under the pointer
   function cellTip(i) {
     const cell = field.cells[i], M = MODES[mode];
-    if (!cell || M.fld == null) return '';
-    return tip.rows('NWS forecast field (derived)', [[M.fld === 3 ? 'Tomorrow’s low' : 'Tomorrow’s high', deg(cell[M.fld])]], FIELD_FOOT);
+    if (!cell || M.fld == null || cell.length <= M.fld) return '';
+    const NAME = { 2: 'Tomorrow’s high', 3: 'Tomorrow’s low', 4: 'Today’s high', 5: 'Today’s low' };
+    return tip.rows('NWS forecast field (derived)', [[NAME[M.fld] || 'Forecast', deg(cell[M.fld])]], FIELD_FOOT);
   }
   const cellIndex = e => { const i = e.target && e.target.getAttribute && e.target.getAttribute('data-i'); return i == null ? null : +i; };
 
@@ -224,7 +169,11 @@ window.WXMap = (() => {
     const M = MODES[mode];
     const defs = el('defs'), cp = el('clipPath', { id: 'us' });
     cp.appendChild(el('path', { d: base.statePaths })); defs.appendChild(cp); svg.appendChild(defs);
-    if (M.fld != null && field && field.cells) {
+    // a field written before both days existed carries four columns; draw no
+    // shading rather than reading past the end of a cell
+    const haveField = M.fld != null && field && field.cells && field.cells.length
+      && (field.cells[0] || []).length > M.fld;
+    if (haveField) {
       const fg = el('g', { 'clip-path': 'url(#us)', 'data-tip-pin': '' });
       field.cells.forEach((cell, i) => fg.appendChild(el('rect', { x: cell[0] - 1, y: cell[1] - 1, width: field.step + 2, height: field.step + 2, fill: fieldColor(cell[M.fld]), 'data-i': i })));
       // one listener for the whole field, keyed by the cell index on the target
@@ -243,18 +192,17 @@ window.WXMap = (() => {
     plot(svg, summary.cities.filter(c => c.onConus), M, c => c.px, c => c.py, [2, 2, 958, 598], false);
     const legend = $('#legend');
     legend.innerHTML = '';
-    if (mode === 'obs') legend.innerHTML = '<span><i style="border-color:var(--warm)"></i>Running above the NWS high issued for the day</span><span><i style="border-color:var(--cool)"></i>Running below</span><span>Radius scales with the gap · number is the observed high so far</span>';
-    else if (WXM.on()) {
+    if (WXM.on()) {
       const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder';
       const centred = M.centred && gapN >= MIN_FOR_BASE;
       const sgn = gapBase > 0 ? '+' : '';
+      // the colour key itself lives in the panel below the map; repeating it here
+      // said the same thing twice, so this line carries only what that panel
+      // cannot know: the gap the dots are centred on today
       legend.innerHTML = centred
-        ? '<span><i style="border-color:var(--warm)"></i>Warmer than the board’s typical gap</span>'
-          + '<span><i style="border-color:var(--cool)"></i>Cooler than it</span>'
-          + '<span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Not listed yet, no bids, or the median sits beyond the ladder' : 'No value') + '</span>'
-          + '<span>Typical gap today: ' + sgn + gapBase.toFixed(1) + '° across ' + gapN + ' stations (' + w + ' minus NWS). '
+        ? '<span>Typical gap today: ' + sgn + gapBase.toFixed(1) + '° across ' + gapN + ' stations (' + w + ' minus NWS). '
           + 'Colour and size are each station’s distance from that, not from zero — hover for the raw gap.</span>'
-        : '<span><i style="border-color:var(--warm)"></i>Implied above the NWS forecast (' + w + ')</span><span><i style="border-color:var(--cool)"></i>Implied below (' + w + ')</span><span><i style="border-color:var(--line)"></i>' + (WXM.live() ? 'Not listed yet, no bids, or the median sits beyond the ladder' : 'No value') + '</span><span>Too few stations priced to centre on a typical gap, so this is the raw gap.</span>';
+        : '<span>Too few stations priced to centre on a typical gap, so the dots show the raw gap against the NWS forecast.</span>';
     }
     else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
     drawWorld();
@@ -265,7 +213,8 @@ window.WXMap = (() => {
   // grey where the mode has no value for them, since US government feeds carry
   // observations everywhere but forecasts only for the US and, through NBM, Canada.
   const CANDS = [[9, 3], [9, -12], [-9, 3], [-9, -12], [9, 15], [9, -25], [-9, 15], [-9, -25], [0, 24], [0, -33], [18, 3], [-18, 3], [18, 15], [-18, 15], [18, -12], [-18, -12]];
-  function plot(svg, cities, M, fx, fy, bounds, withUnit) {
+  function plot(svg, cities, M, fx, fy, bounds, withUnit, opts) {
+    opts = opts || {};
     const placed = [];
     const hit = b => b[0] < bounds[0] || b[1] < bounds[1] || b[2] > bounds[2] || b[3] > bounds[3]
       || placed.some(q => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
@@ -293,11 +242,19 @@ window.WXMap = (() => {
     });
     rows.forEach(c => {
       const v = dev(M.div(c)), av = M.val(c), X = fx(c), Y = fy(c);
-      if (av == null && v == null) return;
+      // a station with its own label is named whatever the view holds for it:
+      // US government forecasts stop at the border, so abroad there is no
+      // forecast value and the station would otherwise go unnamed
+      if (!opts.label && av == null && v == null) return;
       const big = v != null && Math.abs(v) >= (M.centred && gapN >= MIN_FOR_BASE ? 1 : 1.5);
       // the international stations settle in Celsius, so their labels carry the unit
-      const s = c.station.slice(1) + (av != null ? ' ' + av.toFixed(0) + '°' + (withUnit ? (c.unit || '') : '') : '')
-        + (big ? ' (' + (v > 0 ? '+' : '') + v.toFixed(0) + ')' : '');
+      // the world canvas names its cities, because a three-letter code abroad
+      // is not something a reader can be expected to know, and it carries the
+      // observed reading since US government forecasts stop at the border
+      const s = opts.label
+        ? opts.label(c)
+        : c.station.slice(1) + (av != null ? ' ' + av.toFixed(0) + '°' + (withUnit ? (c.unit || '') : '') : '')
+          + (big ? ' (' + (v > 0 ? '+' : '') + v.toFixed(0) + ')' : '');
       for (const [dx, dy] of CANDS) {
         const t = txt(s, { x: X + dx, y: Y + dy + 4, class: 'lbl', 'text-anchor': dx < 0 ? 'end' : (dx > 0 ? 'start' : 'middle'),
           'font-size': big ? 10.5 : 8.5, 'font-weight': 700, fill: big ? 'var(--navy)' : 'var(--ink)' });
@@ -315,20 +272,10 @@ window.WXMap = (() => {
     svg.innerHTML = '';
     svg.appendChild(el('rect', { x: 0, y: 0, width: 960, height: 480, fill: 'var(--map-sea)' }));
     svg.appendChild(el('path', { d: world.worldPaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': .8 }));
-    plot(svg, summary.cities.filter(c => !c.onConus), MODES[mode], c => c.wx, c => c.wy, [2, 62, 958, 378], true);
+    plot(svg, summary.cities.filter(c => !c.onConus), MODES[mode], c => c.wx, c => c.wy, [2, 62, 958, 378], true,
+         { label: c => c.city + (c.obsHighSoFar != null ? ' ' + c.obsHighSoFar.toFixed(0) + '°' + (c.unit || '') : '') });
   }
 
-  // title text for the off-canvas list: these stations report in their own
-  // unit (Celsius outside the US), so the unit letter is spelled out
-  function intlTitle(c) {
-    const u = v => (v == null ? '—' : deg(v) + (c.unit || ''));
-    const m = WXM.on() ? WXM.implied(c) : null;
-    const parts = [c.city + ' (' + c.station + ')', 'observed so far ' + u(c.obsHighSoFar) + ' / ' + u(c.obsLowSoFar)];
-    if (c.nwsHighTomorrow != null || c.nwsLowTomorrow != null) parts.push('NWS tomorrow ' + u(c.nwsHighTomorrow) + ' / ' + u(c.nwsLowTomorrow));
-    else if (c.nbmHighTomorrow != null || c.nbmLowTomorrow != null) parts.push('NBM tomorrow ' + u(c.nbmHighTomorrow) + ' / ' + u(c.nbmLowTomorrow));
-    if (m && (m.impliedHigh != null || m.impliedLow != null)) parts.push('implied ' + u(m.impliedHigh) + ' / ' + u(m.impliedLow) + (WXM.live() ? '' : ' (placeholder)'));
-    return parts.join(' · ');
-  }
 
   async function init() {
     tip = WXC.tooltip();
@@ -337,12 +284,10 @@ window.WXMap = (() => {
       fetch('assets/basemap.json').then(x => x.json()).catch(() => null),
       fetch('assets/world.json').then(x => x.json()).catch(() => null)]);
     summary = r['summary.json'].data; field = r['field.json'].data; base = bm; world = wd;
-    head = (await WXD.get('headline.json', 10)).data;
-    drawCards();
     await WXM.loadSummary();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r['summary.json'], r['field.json']], 10));
     if (!summary || !base) { $('#map').innerHTML = ''; $('#map').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
-    const BTN = [['m1', 'hiT'], ['m2', 'hi'], ['m3', 'loT'], ['m4', 'lo'], ['m5', 'obs']];
+    const BTN = [['m1', 'hiT'], ['m2', 'hi'], ['m3', 'loT'], ['m4', 'lo']];
     if (!mode) mode = defaultMode();
     BTN.forEach(([id, m]) => {
       const b = $('#' + id); if (!b) return;
@@ -351,8 +296,8 @@ window.WXMap = (() => {
     });
     draw();
     // international stations and Honolulu are not on this canvas; list them
-    const intl = summary.cities.filter(c => !c.onConus);
-    const ul = $('#intl'); if (ul) { ul.innerHTML = ''; intl.forEach(c => ul.appendChild(h('a', { href: 'city.html?station=' + c.station, text: c.city + ' ' + (c.obsHighSoFar != null ? deg(c.obsHighSoFar) : ''), style: 'margin-right:14px', title: intlTitle(c) }))); }
+    // the international stations are labelled on the world canvas itself, so
+    // there is no list under it any more
   }
   return { init };
 })();

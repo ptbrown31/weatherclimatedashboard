@@ -203,3 +203,7 @@ tr.dim td{color:var(--muted)}
 code{font-size:12px;background:var(--bg);padding:1px 5px;border-radius:4px}
 svg.serieschart{width:100%;height:auto;display:block}
 .lrow .lv.dim{color:var(--muted)}
+.bar.modegrid{align-items:flex-start;gap:22px}
+.modegrid .mgcol{display:flex;flex-direction:column;gap:5px;align-items:stretch}
+.modegrid .mgh{font-size:12px;font-weight:700;color:var(--navy);letter-spacing:.04em;text-transform:uppercase}
+.modegrid .mgcol button{min-width:104px;text-align:left}
