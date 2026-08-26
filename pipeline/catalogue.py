@@ -75,9 +75,12 @@ def catalogue_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) 
     products = reg.get("products") or []
     cats = reg.get("categories") or []
     if not products:
-        print(json.dumps({"kind": "catalogue", "written": False, "reason": "no contract registry"}))
-        arch.LAST_STATUS = {"job": "catalogue", "errors": 0, "alarms": []}
-        return 0
+        # a missing registry is a packaging fault, not an empty day: reporting
+        # success here made a job that wrote nothing look like a clean pass
+        print(json.dumps({"kind": "catalogue", "written": False, "reason": "no contract registry",
+                          "hint": "config/contracts.json is not on the path; check the deployment package"}))
+        arch.LAST_STATUS = {"job": "catalogue", "errors": 1, "alarms": ["catalogue: no contract registry"]}
+        return 1
 
     deadline = arch.Deadline(arch.remaining_budget(cfg))
     errors: List[str] = []

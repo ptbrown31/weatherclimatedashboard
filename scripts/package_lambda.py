@@ -1,7 +1,8 @@
 """
 package_lambda.py — zip the pipeline for AWS Lambda.
 
-The zip holds pipeline/, config/ (site.json, cities.json, field_grid.json)
+The zip holds pipeline/, config/ (site.json, cities.json, field_grid.json,
+contracts.json)
 and geo/rapid_amoc_annual.json, laid out as in the repo so the code finds
 its config the same way it does locally. boto3 is in the Lambda runtime.
 The only optional extra is the `tzdata` package: the IANA zone database
@@ -20,7 +21,8 @@ import tempfile
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-INCLUDE = ["pipeline", "config/site.json", "config/cities.json", "config/field_grid.json", "geo/rapid_amoc_annual.json"]
+INCLUDE = ["pipeline", "config/site.json", "config/cities.json", "config/field_grid.json",
+           "config/contracts.json", "geo/rapid_amoc_annual.json"]
 
 
 def main(argv=None) -> int:
