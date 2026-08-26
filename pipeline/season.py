@@ -40,6 +40,7 @@ Writes snapshots/season.json.
 from __future__ import annotations
 import datetime as dt
 import json
+import os
 import re
 import time
 from typing import Optional
@@ -290,6 +291,21 @@ def load_climatology(store: Storage, source: str, today: dt.date) -> Optional[di
     return cached.get("climatology")
 
 
+CAT4_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "cat4_climatology.json")
+
+
+def cat4_climatology() -> Optional[dict]:
+    """The continental-US category 4 landfall climatology, built by
+    scripts/build_cat4.py because the test for "continental" needs the state
+    geometry, which the deployment package does not carry. Absent is not an
+    error; the panel that draws it simply does not."""
+    try:
+        with open(CAT4_PATH, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
 def season_pass(cfg: dict, store: Storage) -> int:
     gw.set_user_agent(cfg.get("user_agent", ""))
     now = dt.datetime.now(dt.timezone.utc)
@@ -350,6 +366,7 @@ def season_pass(cfg: dict, store: Storage) -> int:
             # the season list is only as fresh as the last good ATCF pass
             "asof": _iso(now) if season_ok else prev.get("asof", _iso(now)),
             "written": _iso(now), "year": year, "climatology": clim, "season": season,
+            "cat4": cat4_climatology(),
             "forecast": {"named": fc.get("named"), "hurricanes": fc.get("hurricanes"),
                          "majors": fc.get("majors"), "source": fc.get("source", ""),
                          "label": fc.get("label", "")}}

@@ -534,11 +534,121 @@ window.WXHur = (() => {
       if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + c.label + ' on IBKR');
       div.appendChild(bar);
     });
+    const chart = cat4Chart(m);
+    if (chart) { host.appendChild(h('div', { class: 'card' }, [chart])); }
     host.appendChild(div);
     host.appendChild(h('p', { class: 'cap', text: 'A Yes pays if a hurricane makes landfall in the United States at exactly '
       + 'Category 4 on or before the date named. The exchange\u2019s terms are explicit that a higher or lower category does not '
       + 'qualify, so a Category 5 landfall does not resolve this contract Yes. Each date is cumulative: it asks whether at least '
       + 'one qualifying landfall has happened by then.' }));
+  }
+
+  // ---- how much of the season's chance is still ahead
+  //
+  // The contract asks whether at least one qualifying landfall has happened by
+  // a date, so the curve is the share of past seasons whose FIRST such landfall
+  // had happened by that date, conditioned on none having happened yet this
+  // year. That conditioning is what makes it comparable with a price today: the
+  // probability that is left, not the probability the season started with.
+  //
+  // The second curve scales the same climatology by what the hurricane-count
+  // market implies about this season against an average one. It is the market's
+  // own view of the season's activity applied to the landfall rate, not a
+  // forecast of this site's.
+  function cat4Chart(m) {
+    const cl = SZN && SZN.cat4;
+    if (!cl || !(cl.cumulative || []).length) return null;
+    const cum = {};
+    cl.cumulative.forEach(([k, v]) => { cum[k] = v; });
+    const now = new Date();
+    const mmdd = d => String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+    const today = mmdd(now);
+    const F0 = cum[today];
+    if (F0 == null || F0 >= 1) return null;
+    // the season's remaining window: today to the end of November
+    const days = cl.cumulative.filter(([k]) => k >= today && k <= '11-30');
+    if (days.length < 10) return null;
+    const cond = f => (f - F0) / (1 - F0);
+    // the count market's view of this season against an average one
+    const hc = market('HCAB');
+    const clim = ((SZN.climatology || {}).totals || {}).hurricanes;
+    let factor = null;
+    if (hc && clim) {
+      const im = impliedCount(hc);
+      if (im != null) factor = Math.max(0.2, Math.min(im / clim, 3));
+    }
+
+    const W = 960, Hh = 300, L = 52, R = 900, T = 20, B = 234;
+    const yr = String((H.season || {}).year || now.getUTCFullYear());
+    const here = (m.contracts || []).filter(c => String(c.expiration || '').slice(0, 4) === yr && c.mid != null);
+    const ymax = Math.max(0.06, cond(cum['11-30']) * (factor && factor > 1 ? factor : 1) * 1.25,
+                          ...here.map(c => c.mid * 1.15));
+    const x = i => L + (i / (days.length - 1)) * (R - L);
+    const y = p => B - (p / ymax) * (B - T);
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'cpanel' });
+    [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+      const v = ymax * f;
+      svg.appendChild(el('line', { x1: L, x2: R, y1: y(v), y2: y(v), class: 'grid' }));
+      svg.appendChild(txt(Math.round(v * 100) + '%', { x: L - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
+    });
+    const line = (scale, col, dash) => {
+      const d = days.map(([, f], i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ','
+        + y(Math.min(1 - Math.pow(1 - cond(f), scale), ymax)).toFixed(1)).join('');
+      svg.appendChild(el('path', Object.assign({ d, fill: 'none', stroke: col, 'stroke-width': 2,
+                                                 'pointer-events': 'none' }, dash ? { 'stroke-dasharray': dash } : {})));
+    };
+    line(1, 'var(--cool)', null);
+    if (factor) line(factor, 'var(--warm)', '5 4');
+    // today, where the whole remaining chance still sits
+    svg.appendChild(el('line', { x1: L, x2: L, y1: T, y2: B, stroke: 'var(--muted)', 'stroke-dasharray': '4 3' }));
+    svg.appendChild(txt('today', { x: L + 4, y: T + 10, class: 'ax' }));
+    // month ticks
+    let lastM = null;
+    days.forEach(([k], i) => {
+      if (k.slice(0, 2) === lastM) return;
+      lastM = k.slice(0, 2);
+      svg.appendChild(txt(MONTHS[+k.slice(0, 2) - 1].slice(0, 3), { x: x(i), y: B + 15, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    // the listed contracts, at their own dates
+    // only this season's dates belong on this season's remaining-window curve;
+    // a contract for next year is a different question and stays in the ladder
+    const thisYear = String((H.season || {}).year || now.getUTCFullYear());
+    (m.contracts || []).forEach(c => {
+      const e = String(c.expiration || '');
+      if (e.length < 8 || e.slice(0, 4) !== thisYear) return;
+      const k = e.slice(4, 6) + '-' + e.slice(6, 8);
+      const i = days.findIndex(([d]) => d >= k);
+      if (i < 0 || c.mid == null) return;
+      const dot = el('circle', { cx: x(i), cy: y(Math.min(c.mid, ymax)), r: 4.5, fill: 'var(--accent)', 'pointer-events': 'all' });
+      const f = cond(cum[k] != null ? cum[k] : cum['11-30']);
+      attach(dot, tip.rows(c.label || 'contract', [
+        ['Yes price', Math.round(c.mid * 100) + '¢'],
+        ['Climatology, from today', (f * 100).toFixed(1) + '%'],
+        [factor ? 'Scaled by the count market' : null, factor ? ((1 - Math.pow(1 - f, factor)) * 100).toFixed(1) + '%' : null],
+        ['Difference to climatology', ((c.mid - f) * 100 > 0 ? '+' : '') + ((c.mid - f) * 100).toFixed(1) + ' points'],
+      ], 'the climatology is the share of past seasons whose first qualifying landfall fell in this window'));
+      svg.appendChild(dot);
+    });
+    const key = [['var(--cool)', 'climatology, ' + cl.window[0] + '-' + cl.window[1]]];
+    if (factor) key.push(['var(--warm)', 'scaled by the count market (×' + factor.toFixed(2) + ')']);
+    key.push(['var(--accent)', 'the listed contracts']);
+    let kx = L;
+    key.forEach(([col, lab]) => {
+      svg.appendChild(el('line', { x1: kx, x2: kx + 14, y1: B + 34, y2: B + 34, stroke: col, 'stroke-width': 2 }));
+      svg.appendChild(txt(lab, { x: kx + 18, y: B + 37.5, class: 'ax', fill: col }));
+      kx += 30 + lab.length * 5.6;
+    });
+    return svg;
+  }
+  // where the count ladder crosses fifty cents, which is the market's median
+  function impliedCount(m) {
+    const rows = (m.contracts || []).filter(c => c.mid != null && c.numeric !== false)
+      .map(c => [Number(c.strike), c.mid]).sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < rows.length; i++) {
+      const [k0, p0] = rows[i - 1], [k1, p1] = rows[i];
+      if (p0 >= 0.5 && p1 < 0.5 && p0 !== p1) return k0 + (p0 - 0.5) / (p0 - p1) * (k1 - k0);
+    }
+    return null;
   }
 
   function drawSeason() {

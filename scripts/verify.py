@@ -634,11 +634,19 @@ def run(no_build: bool) -> int:
                     if not n:
                         chk.add(f"{scheme} hurricane link: {label} present", False, f"{sel} count=0")
                         return None
-                    page.locator(sel).first.scroll_into_view_if_needed()
-                    page.locator(sel).first.hover(force=True)
-                    page.wait_for_timeout(180)
-                    a = page.locator("#tip a")
-                    href = a.first.get_attribute("href") if a.count() else ""
+                    # a map region can be several polygons and the first may be a
+                    # sliver a forced hover lands outside of, so try a few before
+                    # calling it a missing link
+                    href = ""
+                    for i in range(min(n, 5)):
+                        page.locator(sel).nth(i).scroll_into_view_if_needed()
+                        page.locator(sel).nth(i).hover(force=True)
+                        page.wait_for_timeout(180)
+                        a = page.locator("#tip a")
+                        if a.count():
+                            href = a.first.get_attribute("href") or ""
+                            if href:
+                                break
                     m = _re.match(RE, href or "")
                     chk.add(f"{scheme} hurricane link: {label} links to a contract", bool(m), (href or "no href")[:100])
                     if m:
@@ -670,6 +678,23 @@ def run(no_build: bool) -> int:
                         "SWTUS" not in page.locator("#others").inner_text(),
                         page.locator("#others").inner_text()[:70])
                 linked_href("#cat4 .lrow .lv[role='link']", "the category 4 board")
+                # the remaining-season curve, and what it must not claim
+                chk.add(f"{scheme} cat4: the remaining-season curve is drawn",
+                        page.locator("#cat4 svg.cpanel").count() == 1
+                        and page.locator("#cat4 svg.cpanel path").count() >= 2,
+                        str(page.locator("#cat4 svg.cpanel path").count()))
+                c4 = page.locator("#cat4").inner_text()
+                chk.add(f"{scheme} cat4: the page says a higher category does not qualify",
+                        "higher or lower category does not qualify" in c4, c4[-120:])
+                keys = page.eval_on_selector_all("#cat4 svg.cpanel text", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} cat4: both curves are named, with the climatology window",
+                        any("climatology, 19" in k for k in keys) and any("count market" in k for k in keys),
+                        str([k for k in keys if "clim" in k or "count" in k]))
+                if page.locator("#cat4 svg.cpanel circle").count():
+                    page.locator("#cat4 svg.cpanel circle").first.hover(force=True); page.wait_for_timeout(250)
+                    t_c4 = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} cat4: a contract is compared against climatology, not a fair value",
+                            "Climatology, from today" in t_c4 and "Difference to climatology" in t_c4, t_c4[:80])
                 # the map: a shaded landfall region is a contract
                 shaded = page.locator("#basin path[role='link']").count()
                 chk.add(f"{scheme} hurricane link: shaded map regions are clickable", shaded >= 3, f"regions={shaded}")

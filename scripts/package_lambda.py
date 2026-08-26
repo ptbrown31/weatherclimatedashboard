@@ -22,7 +22,8 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INCLUDE = ["pipeline", "config/site.json", "config/cities.json", "config/field_grid.json",
-           "config/contracts.json", "geo/rapid_amoc_annual.json"]
+           "config/contracts.json", "config/cat4_climatology.json",
+           "geo/rapid_amoc_annual.json"]
 
 
 def main(argv=None) -> int:
