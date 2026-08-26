@@ -12,6 +12,7 @@ Nothing in site/ is vendor-specific; the deploy step copies dist/ to the host.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -74,6 +75,47 @@ def copy(rel: str, dst_root: str, flatten_embed: bool = False) -> bool:
     return True
 
 
+def stamp_assets(out: str) -> int:
+    """Point every page at its scripts and stylesheet by content.
+
+    The pages are served with a short max-age and the code with a long one, so
+    a returning visitor gets today's HTML running last hour's JavaScript, and a
+    CDN invalidation cannot help: the stale copy is in their browser. Appending
+    a content hash to each reference means a changed file is a changed URL, so
+    the short-lived page carries the new code with it, while a file that did not
+    change keeps its cached copy and its long max-age.
+
+    Only what the pages reference by a plain relative path is stamped. Anything
+    fetched at runtime is a snapshot, and those carry their own freshness.
+    """
+    digests = {}
+    for base, _, names in os.walk(out):
+        for n in names:
+            if not (n.endswith(".js") or n.endswith(".css")):
+                continue
+            full = os.path.join(base, n)
+            rel = os.path.relpath(full, out).replace(os.sep, "/")
+            with open(full, "rb") as fh:
+                digests[rel] = hashlib.sha256(fh.read()).hexdigest()[:8]
+    n_rewritten = 0
+    for base, _, names in os.walk(out):
+        for n in names:
+            if not n.endswith(".html"):
+                continue
+            full = os.path.join(base, n)
+            with open(full) as fh:
+                html = fh.read()
+            before = html
+            for rel, dig in digests.items():
+                for attr in ('src="', 'href="'):
+                    html = html.replace(attr + rel + '"', attr + rel + "?v=" + dig + '"')
+            if html != before:
+                with open(full, "w") as fh:
+                    fh.write(html)
+                n_rewritten += 1
+    return n_rewritten
+
+
 def build(target: str, cfg: dict, data_mode: str) -> dict:
     out = os.path.join(DIST, target)
     if os.path.isdir(out):
@@ -84,6 +126,7 @@ def build(target: str, cfg: dict, data_mode: str) -> dict:
     data_base = cfg.get("data_base_url", "/data") if data_mode == "deploy" else "data"
     with open(os.path.join(out, "config.js"), "w") as fh:
         fh.write(config_js(cfg, target, data_base))
+    stamped = stamp_assets(out)
     bundled = 0
     if data_mode != "deploy":
         src = os.path.join(ROOT, "data" if data_mode == "live" else "samples", "snapshots")
@@ -91,7 +134,7 @@ def build(target: str, cfg: dict, data_mode: str) -> dict:
             shutil.copytree(src, os.path.join(out, "data", "snapshots"))
             bundled = sum(len(f) for _, _, f in os.walk(src))
     return {"target": target, "files": len(files) - len(missing), "missing": missing, "snapshots": bundled,
-            "dataBaseUrl": data_base}
+            "dataBaseUrl": data_base, "stamped": stamped}
 
 
 def main(argv=None) -> int:

@@ -135,13 +135,18 @@ phase_seed() {
 # Browser caching for the site files. The snapshots under data/ carry their own
 # header from the pipeline (pipeline/snapshots.py) and are never touched here.
 #
-# Filenames are not content-hashed, so every max-age below is also the longest a
-# browser can keep serving code from before a deploy reaches it. The entry points
-# stay short so a deploy goes live promptly; code gets an hour, which covers a
-# reading session without stranding anyone on old JavaScript for long; the
-# projected geometry gets a day, because it only changes when the roster or the
-# basemap does. stale-while-revalidate lets the browser paint from cache and
-# refresh behind the render.
+# scripts/build.py stamps every script and stylesheet reference with a hash of
+# that file's contents, so a changed file is a changed URL. A deploy therefore
+# reaches a returning visitor as fast as the entry points expire, not as slowly
+# as the code does, and a file that did not change keeps the copy already in
+# their browser. Before that stamping existed, a page an hour old could go on
+# running last hour's JavaScript and no CDN invalidation could shorten it: the
+# stale copy was in the browser, not at the edge.
+#
+# So the entry points stay short, code gets an hour, and the projected geometry
+# gets a day because it only changes when the roster or the basemap does.
+# stale-while-revalidate lets the browser paint from cache and refresh behind
+# the render.
 CC_ENTRY="public, max-age=60, stale-while-revalidate=300"
 CC_CODE="public, max-age=3600, stale-while-revalidate=86400"
 CC_ASSET="public, max-age=86400, stale-while-revalidate=604800"

@@ -200,3 +200,49 @@ class DeadlineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AssetStamping(unittest.TestCase):
+    """A returning visitor must not run last hour's JavaScript.
+
+    Pages carry a short max-age and code a long one, so an unstamped reference
+    means a change is invisible until the browser's own copy expires, which no
+    CDN invalidation can shorten. The stamp makes a changed file a changed URL.
+    """
+
+    def _tree(self, js_body: str) -> str:
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "js"))
+        os.makedirs(os.path.join(d, "css"))
+        with open(os.path.join(d, "js", "app.js"), "w") as fh:
+            fh.write(js_body)
+        with open(os.path.join(d, "css", "site.css"), "w") as fh:
+            fh.write("body{color:red}")
+        with open(os.path.join(d, "page.html"), "w") as fh:
+            fh.write('<link rel="stylesheet" href="css/site.css">'
+                     '<script src="js/app.js"></script>'
+                     '<a href="other.html">x</a>')
+        return d
+
+    def test_references_are_stamped_and_track_content(self):
+        import scripts.build as build
+        a = self._tree("var x = 1;")
+        self.assertEqual(build.stamp_assets(a), 1)
+        with open(os.path.join(a, "page.html")) as fh:
+            html_a = fh.read()
+        self.assertRegex(html_a, r'src="js/app\.js\?v=[0-9a-f]{8}"')
+        self.assertRegex(html_a, r'href="css/site\.css\?v=[0-9a-f]{8}"')
+        # a page link is not an asset and must be left alone
+        self.assertIn('href="other.html"', html_a)
+
+        # same bytes, same URL: an unchanged file keeps its cached copy
+        b = self._tree("var x = 1;")
+        build.stamp_assets(b)
+        with open(os.path.join(b, "page.html")) as fh:
+            self.assertEqual(fh.read(), html_a)
+
+        # changed bytes, changed URL
+        c = self._tree("var x = 2;")
+        build.stamp_assets(c)
+        with open(os.path.join(c, "page.html")) as fh:
+            self.assertNotEqual(fh.read(), html_a)
