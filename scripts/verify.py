@@ -201,6 +201,45 @@ def run(no_build: bool) -> int:
                         "Strike" in t_str and "Latest observation" in t_str and "Distance" in t_str, t_str[:90])
                 chk.add(f"{scheme} series: the strike box says no price is shown",
                         "no price" in t_str, t_str[-60:])
+                # ---- climate change: the unit that governs is not cosmetic, so the
+                # page has to say which one and which baseline
+                for pid, want in (("GT", "Celsius"), ("UST", "Fahrenheit"), ("MACD", "parts per million")):
+                    page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1200)
+                    body = page.locator("#cBody").inner_text()
+                    chk.add(f"{scheme} climate: {pid} draws its underlying",
+                            page.locator("#cBody svg.serieschart").count() == 1, body[:60])
+                    chk.add(f"{scheme} climate: {pid} names the unit that resolves it",
+                            want in body, body[-140:])
+                page.goto(f"{srv.url}/contract.html?id=GT"); page.wait_for_timeout(1100)
+                gt = page.locator("#cBody").inner_text()
+                chk.add(f"{scheme} climate: the global contract names the twentieth-century baseline",
+                        "twentieth-century" in gt, gt[-130:])
+                page.goto(f"{srv.url}/contract.html?id=UST"); page.wait_for_timeout(1100)
+                ust = page.locator("#cBody").inner_text()
+                chk.add(f"{scheme} climate: the US contract says it is an average, not an anomaly",
+                        "rather than an anomaly" in ust and "not comparable with the global" in ust, ust[-150:])
+                page.goto(f"{srv.url}/contract.html?id=RT"); page.wait_for_timeout(1100)
+                rt = page.locator("#cBody").inner_text()
+                chk.add(f"{scheme} climate: the record contract says it is a rank, not a level",
+                        "ranks warmest" in rt, rt[-130:])
+                # the published campus article states the mark to beat and the El Nino
+                # framing; the site must agree with both without repeating any of its
+                # probabilities
+                chk.add(f"{scheme} climate: the record page names the mark to beat, from the data",
+                        "1.26" in rt and "2024" in rt, rt[-160:])
+                chk.add(f"{scheme} climate: the record page names what drives the swings",
+                        "El Nino" in rt or "El Ni\u00f1o" in rt, rt[-160:])
+                chk.add(f"{scheme} climate: no probability or fair value is published anywhere on it",
+                        "%" not in rt.replace("100%", ""), rt[-120:])
+                for pid in ("GTTA", "GTTM"):
+                    page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1100)
+                    body = page.locator("#cBody").inner_text()
+                    chk.add(f"{scheme} climate: {pid} is identified as a Paris Agreement contract",
+                            "Paris Agreement" in body, body[-130:])
+                page.goto(f"{srv.url}/contract.html?id=GT"); page.wait_for_timeout(1100)
+                chk.add(f"{scheme} climate: a threshold contract is not described as a record contract",
+                        "ranks warmest" not in page.locator("#cBody").inner_text(),
+                        page.locator("#cBody").inner_text()[-120:])
                 page.goto(f"{srv.url}/contract.html?id=GSCAL"); page.wait_for_timeout(900)
                 chk.add(f"{scheme} catalogue: an unlisted contract explains itself instead of erroring",
                         "not carrying this contract" in page.locator("#cBody").inner_text(),

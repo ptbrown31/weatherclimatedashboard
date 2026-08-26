@@ -50,6 +50,12 @@ CACHE = "public, max-age=3600, stale-while-revalidate=86400, stale-if-error=2592
 
 CAAG = ("https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/city/time-series/"
         "{station}/{param}/1/0/{y0}-{y1}.json")
+# the national and global panels of the same service; the scale and month in the
+# path pick annual (12/12) or every month (1/0)
+CAAG_NAT = ("https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/national/time-series/"
+            "110/tavg/{scale}/{month}/1895-{y1}.json")
+CAAG_GLOBE = ("https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/global/time-series/"
+              "globe/land_ocean/{scale}/{month}/1850-{y1}.json")
 USDM = ("https://usdmdataservices.unl.edu/api/USStatistics/GetDroughtSeverityStatisticsByAreaPercent"
         "?aoi=us&startdate={start}&enddate={end}&statisticsType=1")
 FIRST_YEAR = 1990
@@ -87,9 +93,19 @@ def caag(station: str, param: str, y1: int, fetch: Optional[Callable] = None) ->
     place the product code suggests."""
     d = (fetch or _json)(CAAG.format(station=station, param=param, y0=FIRST_YEAR, y1=y1))
     desc = d.get("description") or {}
+    return {"points": caag_points(d), "title": desc.get("title") or "",
+            "units": desc.get("units") or UNITS.get(param, "")}
+
+
+def caag_points(d: dict) -> list:
+    """The data block of any Climate at a Glance answer, as [period, value]."""
     pts = []
     for k, v in sorted((d.get("data") or {}).items()):
+        # the city and national panels answer with 'value'; the global panel
+        # answers with 'departure', because it publishes an anomaly
         val = (v or {}).get("value")
+        if val is None:
+            val = (v or {}).get("departure")
         if val is None or val == "":
             continue
         try:
@@ -100,7 +116,7 @@ def caag(station: str, param: str, y1: int, fetch: Optional[Callable] = None) ->
         if f <= -99:
             continue
         pts.append([k, round(f, 2)])
-    return {"points": pts, "title": desc.get("title") or "", "units": desc.get("units") or UNITS.get(param, "")}
+    return pts
 
 
 def drought(now: dt.datetime, fetch: Optional[Callable] = None) -> dict:
@@ -128,6 +144,76 @@ def drought(now: dt.datetime, fetch: Optional[Callable] = None) -> dict:
     pts.sort()
     return {"points": pts, "title": "Percent of the contiguous United States in drought (D0-D4)",
             "units": "percent", "area": "CONUS"}
+
+
+# Contracts that read a national or global series rather than a city one. The
+# unit that governs differs and is not cosmetic: the global temperature contract
+# resolves on the Celsius anomaly against the twentieth-century average, and the
+# US contract resolves on the Fahrenheit average of the contiguous states. Each
+# entry says which, and the page repeats it.
+WIDE = {
+    "gt-annual": {"url": CAAG_GLOBE, "scale": "12", "month": "12", "products": ["GT", "GTTA", "RT"],
+                  "source": "NOAA Climate at a Glance, global land and ocean",
+                  "note": "The contract resolves on the Celsius value against the twentieth-century average; "
+                          "Fahrenheit is shown by the exchange for convenience only."},
+    "gt-monthly": {"url": CAAG_GLOBE, "scale": "1", "month": "0", "products": ["GTM", "GTTM", "MRT"],
+                   "source": "NOAA Climate at a Glance, global land and ocean, monthly",
+                   "note": "Celsius against the twentieth-century average."},
+    "ust-annual": {"url": CAAG_NAT, "scale": "12", "month": "12", "products": ["UST"],
+                   "source": "NOAA Climate at a Glance, contiguous United States",
+                   "note": "The contract resolves on the Fahrenheit value; Celsius is shown by the exchange for "
+                           "convenience only."},
+    "ust-monthly": {"url": CAAG_NAT, "scale": "1", "month": "0", "products": ["USTM"],
+                    "source": "NOAA Climate at a Glance, contiguous United States, monthly",
+                    "note": "Fahrenheit, and an average rather than an anomaly."},
+}
+GML_CO2 = "https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.csv"
+
+# Things a reader arriving from the daily letter needs in order to recognise a
+# contract, or would otherwise have to infer. Kept as plain facts: no
+# probability, no view, nothing that could disagree with what is published
+# elsewhere about the same contract.
+PRODUCT_NOTES = {
+    "GTTA": "This is the annual leg of the Paris Agreement Forecast Contracts, which the exchange lists as "
+            "Annual Global Temperature Threshold. It asks whether any year breaches a target on or before an "
+            "end date.",
+    "GTTM": "This is the monthly leg of the Paris Agreement Forecast Contracts, which the exchange lists as "
+            "Monthly Global Temperature Threshold. It asks whether any month breaches a target on or before an "
+            "end date.",
+    "RT": "This contract asks whether the year ranks warmest since 1850, not whether it passes a level. "
+          "Year-to-year swings around the warming trend are driven substantially by El Nino and La Nina, so a "
+          "record is far more likely in some years than the trend alone suggests.",
+    "MRT": "This contract asks whether the month ranks warmest on record, not whether it passes a level. "
+           "Month-to-month swings around the warming trend are driven substantially by El Nino and La Nina.",
+    "GT": "The value is an anomaly against the twentieth-century average, not an absolute temperature.",
+    "UST": "This is an absolute average temperature rather than an anomaly, so it is not comparable with the "
+           "global temperature contracts on this site.",
+}
+# series whose contracts ask about a record, so the page states the mark to beat
+RECORD_SERIES = ("gt-annual", "gt-monthly")
+
+
+def co2_monthly(fetch: Optional[Callable] = None) -> dict:
+    """Mauna Loa monthly mean CO2, as [YYYYMM, ppm]. The file carries a decimal
+    year, the monthly mean, and a de-seasonalised column; the contract reads the
+    monthly mean, so that is the column taken."""
+    raw = (fetch or gw._get_text)(GML_CO2, timeout=90)
+    pts = []
+    for line in raw.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 4:
+            continue
+        try:
+            y, m, mean = int(float(parts[0])), int(float(parts[1])), float(parts[3])
+        except (TypeError, ValueError):
+            continue
+        if mean <= 0 or not (1 <= m <= 12):
+            continue
+        pts.append([f"{y}{m:02d}", round(mean, 2)])
+    pts.sort()
+    return {"points": pts, "title": "Mauna Loa monthly mean carbon dioxide", "units": "parts per million"}
 
 
 def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> int:
@@ -170,6 +256,34 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
                   "note": "The contract resolves on the value published at expiration; later revisions to this "
                           "series do not change how a contract settled."})
 
+    # ---- the national and global temperature series
+    for key, spec in WIDE.items():
+        if deadline.over(15):
+            errors.append(f"{key}: deadline")
+            continue
+        try:
+            url = spec["url"].format(scale=spec["scale"], month=spec["month"], y1=now.year)
+            d = (fetch or _json)(url) if fetch else _json(url)
+            desc = d.get("description") or {}
+            doc = caag_points(d)
+            put(key, {"key": key, "products": spec["products"], "title": desc.get("title") or key,
+                      "units": desc.get("units") or "", "base": desc.get("base_period"),
+                      "points": doc, "source": spec["source"], "note": spec["note"]})
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{key}: {type(e).__name__}: {e}")
+
+    # ---- Mauna Loa carbon dioxide
+    if not deadline.over(15):
+        try:
+            c = co2_monthly(fetch)
+            put("co2-monthly", {"key": "co2-monthly", "products": ["MACD", "ACD"], "title": c["title"],
+                                "units": c["units"], "points": c["points"],
+                                "source": "NOAA Global Monitoring Laboratory, Mauna Loa",
+                                "note": "The monthly mean, which is the column the contract reads, not the "
+                                        "de-seasonalised trend published beside it."})
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"co2: {type(e).__name__}: {e}")
+
     # ---- drought
     if not deadline.over(20):
         try:
@@ -182,10 +296,19 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
         except Exception as e:  # noqa: BLE001
             errors.append(f"USDR: {type(e).__name__}: {e}")
 
+    products = {pid: k for pid, (k, _, _) in PRODUCTS.items()}
+    for key, spec in WIDE.items():
+        for pid in spec["products"]:
+            products[pid] = key
+    for pid in ("MACD", "ACD"):
+        products[pid] = "co2-monthly"
+    products["USDR"] = "drought-us"
+    # only advertise a series that this pass actually wrote or that already
+    # exists, so a page never fetches a key that is not there
+    products = {pid: k for pid, k in products.items() if k in written or store.get(KEY.format(key=k))}
     idx = {"schema": SCHEMA, "asof": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
            "series": [{"key": k, "points": n} for k, n in sorted(written.items())],
-           "products": {pid: k for pid, (k, _, _) in PRODUCTS.items()}}
-    idx["products"]["USDR"] = "drought-us"
+           "products": products, "productNotes": PRODUCT_NOTES, "record": list(RECORD_SERIES)}
     store.put(INDEX, json.dumps(idx, separators=(",", ":")).encode(), "application/json", CACHE)
 
     arch.LAST_STATUS = {"job": "series", "errors": len(errors), "alarms": []}

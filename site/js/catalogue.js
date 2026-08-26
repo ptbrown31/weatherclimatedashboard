@@ -153,7 +153,17 @@ window.WXCat = (() => {
             $('#cBody').appendChild(h('div', { class: 'secttl', text: 'WHAT IT SETTLES ON' }));
             $('#cBody').appendChild(h('div', { class: 'card' }, [c]));
             const bits = [sr.title, sr.units ? 'in ' + sr.units : null, 'from ' + sr.source].filter(Boolean);
-            $('#cBody').appendChild(h('p', { class: 'cap', text: bits.join(' · ') + '. ' + (sr.note || '')
+            // the mark to beat, computed from the series rather than written down,
+            // so it stays right when a new high lands
+            let rec = '';
+            if ((idx.record || []).indexOf(key) >= 0 && sr.points.length) {
+              const best = sr.points.reduce((a, b) => (b[1] > a[1] ? b : a));
+              rec = ' The highest value in this record is ' + best[1] + ' ' + (sr.units || '')
+                  + ', set in ' + String(best[0]).slice(0, 4) + '.';
+            }
+            const pnote = (idx.productNotes || {})[p.id];
+            $('#cBody').appendChild(h('p', { class: 'cap', text: bits.join(' · ') + '. ' + (sr.note || '') + rec
+              + (pnote ? ' ' + pnote : '')
               + (sr.expected && sr.title && sr.title.indexOf(sr.expected.split(',')[0]) < 0
                  ? ' The station drawn is ' + sr.expected + '.' : '') }));
           }
@@ -199,8 +209,14 @@ window.WXCat = (() => {
     const pts = (sr.points || []).slice(-180);
     if (pts.length < 6) return null;
     const W = 960, H = 300, L = 54, R = 782, T = 18, B = 246;
-    const px = k => String(k).length === 6 ? Date.UTC(+String(k).slice(0, 4), +String(k).slice(4, 6) - 1, 15)
-                                           : Date.UTC(+String(k).slice(0, 4), +String(k).slice(4, 6) - 1, +String(k).slice(6, 8));
+    // a period key is a year, a year and month, or a full date, depending on
+    // which series it came from; all three have to land on the same axis
+    const px = k => {
+      const t = String(k);
+      if (t.length === 4) return Date.UTC(+t, 6, 1);
+      if (t.length === 6) return Date.UTC(+t.slice(0, 4), +t.slice(4, 6) - 1, 15);
+      return Date.UTC(+t.slice(0, 4), +t.slice(4, 6) - 1, +t.slice(6, 8) || 1);
+    };
     const ts = pts.map(p => px(p[0])), vs = pts.map(p => p[1]);
     // strikes share the value axis, so the axis has to hold them too
     const sv = (contracts || []).filter(c => c.numeric).map(c => c.strike);
