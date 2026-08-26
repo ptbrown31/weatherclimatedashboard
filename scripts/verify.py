@@ -842,6 +842,17 @@ def run(no_build: bool) -> int:
                 # the tab itself rather than behind a listing link
                 page.goto(f"{srv.url}/agriculture.html")
                 page.wait_for_timeout(900)
+                # an older link to the generic listing must land on the real page,
+                # not on a superseded one rendering under the same highlighted tab
+                page.goto(f"{srv.url}/category.html?c=agriculture"); page.wait_for_timeout(700)
+                chk.add(f"{scheme} agriculture: the old listing link lands on the page",
+                        page.url.endswith("/agriculture.html")
+                        and page.locator("#panels .panel").count() >= 3, page.url[-40:])
+                page.goto(f"{srv.url}/category.html?c=weather"); page.wait_for_timeout(700)
+                chk.add(f"{scheme} category: one without its own page still lists",
+                        page.url.endswith("c=weather") and page.locator("#list table tr").count() > 5,
+                        f"{page.url[-24:]} rows={page.locator('#list table tr').count()}")
+                page.goto(f"{srv.url}/agriculture.html"); page.wait_for_timeout(900)
                 ag_panels = page.locator("#panels .panel").count()
                 chk.add(f"{scheme} agriculture: a panel per crop, drawn on the page",
                         ag_panels >= 3, f"panels={ag_panels}")

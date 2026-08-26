@@ -76,6 +76,16 @@ window.WXCat = (() => {
     const slug = param('c');
     const meta = nav().categories.find(c => c.slug === slug);
     if (!slug || !meta) { $('#catTitle').textContent = 'Unknown category'; return; }
+    // Several categories have a display of their own — the map, the hurricane
+    // page, the climate and crop panels — and the nav sends readers there. This
+    // generic listing is still what an older link, a bookmark or a browser's
+    // autocomplete resolves to, and it renders under the same highlighted tab,
+    // so it reads as the current page while showing the superseded one. Send it
+    // on instead, replacing the entry so Back does not bounce between the two.
+    if (meta.page && meta.page.indexOf('category.html') !== 0) {
+      location.replace(meta.page);
+      return;
+    }
     document.title = meta.l2;
     $('#catTitle').textContent = meta.l2.toUpperCase();
     $('#catCrumb').innerHTML = '<a href="section.html?s=' + esc(meta.l1slug || '') + '">' + esc(meta.l1) + '</a> · ' + esc(meta.l2);
