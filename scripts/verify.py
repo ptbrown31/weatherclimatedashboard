@@ -923,6 +923,18 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} agriculture: no yes/no ladder bars on these panels",
                         page.locator("#panels rect.yes, #panels rect.no").count() == 0,
                         str(page.locator("#panels rect.yes, #panels rect.no").count()))
+                # a department publishes a figure for a period still open and
+                # revises it, so the tail of a crop series is an estimate, not
+                # history, and must not be drawn through the strikes as though
+                # the answer were already known
+                seg = page.eval_on_selector_all(
+                    "#panels .panel:first-child path[stroke='var(--obs)']",
+                    "e=>e.map(x=>x.getAttribute('stroke-dasharray')||'solid')")
+                chk.add(f"{scheme} agriculture: the unsettled tail is drawn as an estimate",
+                        seg.count("solid") == 1 and len(seg) == 2, str(seg))
+                page.locator("#panels .panel:first-child path[stroke='var(--obs)']").last.hover(force=True)
+                page.wait_for_timeout(150)
+
                 # thirty strikes would make a crossing list unreadable, so a
                 # ladder reports what the trend projects for each settling year
                 agb = page.locator("#panels svg").first.bounding_box()

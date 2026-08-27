@@ -116,7 +116,44 @@ window.WXClimate = (() => {
     });
     const yt = 5, step = (yHi - yLo) / yt;
     for (let i = 0; i <= yt; i++) { const v = yLo + i * step; svg.appendChild(txt(fmtAx(v), { x: L - 8, y: Y(v) + 3.5, 'text-anchor': 'end', class: 'ax' })); }
-    if (pts.length) svg.appendChild(el('path', { d: pts.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(''), fill: 'none', stroke: 'var(--obs)', 'stroke-width': opts.lineWidth || (key === 'tempMonthly' ? 1 : 1.8) }));
+    /* Settled record, then the publisher's own estimate.
+
+       A department publishes a figure for a period before that period is over
+       and keeps revising it, so the tail of a series is not history: the crop
+       lanes carry a world yield for a marketing year still under way. Drawn as
+       one line it ran straight through the strikes listed against it, which said
+       the answer was already known when the contract had not settled.
+
+       Which years are still open needs no calendar, because the exchange states
+       it: a contract is listed for a year only while that year can still resolve.
+       So the record is solid up to the first year with a contract on it and
+       dashed from there, in the same colour, because it is the same source —
+       just not final.
+
+       This is asked for rather than assumed, because a listed contract does not
+       always mean the publisher's figure is provisional. A monthly carbon
+       dioxide reading is final for its month even while an annual contract for
+       that year is still trading, and dashing it would say the reading might yet
+       change when it will not. It is the crop lanes that carry a genuine
+       projection: a world yield for a marketing year still under way.
+
+       With no contracts, or with every contract past the end of the series, this
+       is one unbroken line and nothing changes. */
+    const firstOpen = (opts.unsettledFromContracts && cs.length)
+      ? Math.min(...cs.map(c => c.year)) : Infinity;
+    const settled = pts.filter(q => q[0] < firstOpen);
+    const openPts = pts.filter(q => q[0] >= firstOpen);
+    const draw = (qs, dash) => {
+      if (qs.length < 2) return;
+      svg.appendChild(el('path', Object.assign({
+        d: qs.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(''),
+        fill: 'none', stroke: 'var(--obs)',
+        'stroke-width': opts.lineWidth || (key === 'tempMonthly' ? 1 : 1.8) },
+        dash ? { 'stroke-dasharray': '4 3', opacity: .75 } : {})));
+    };
+    draw(settled, false);
+    // the join carries the last settled point so the two meet rather than gap
+    draw(settled.length ? [settled[settled.length - 1]].concat(openPts) : openPts, true);
     // ---- the seasonal projection
     //
     // A monthly series that stops in June cannot be read against a strike for
@@ -235,8 +272,12 @@ window.WXClimate = (() => {
       const d10 = tenYear(q);
       // the sea-level series is a ten-day sample, not monthly: say "Date" and keep the decimal year
       const when = opts.xLabel ? [opts.xLabel, yearLabel(q[0])] : Number.isInteger(q[0]) ? ['Year', yearLabel(q[0])] : key === 'seaLevel' ? ['Date', yearLabel(q[0]) + ' (' + q[0].toFixed(3) + ')'] : ['Month', yearLabel(q[0])];
-      tip.show(e, tip.rows(title, [when, ['Value', fmtV(q[1]) + ' ' + unitShort],
-        ['Change over 10 years', d10 == null ? null : sgn(d10) + ' ' + unitShort], ['Latest', latestText]], source));
+      const open = q[0] >= firstOpen;
+      tip.show(e, tip.rows(title + (open ? ' — not yet settled' : ''),
+        [when, [open ? 'Current estimate' : 'Value', fmtV(q[1]) + ' ' + unitShort],
+        ['Change over 10 years', d10 == null ? null : sgn(d10) + ' ' + unitShort], ['Latest', latestText]],
+        open ? 'the publisher revises this until the period closes, and a contract is listed against it, '
+               + 'so it is an estimate rather than a settled figure' : source));
     });
     svg.addEventListener('mouseleave', () => { clearDot(); tip.hide(); drag = null; });
     document.addEventListener('mouseup', () => { drag = null; });
