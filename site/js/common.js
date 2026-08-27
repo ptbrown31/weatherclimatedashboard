@@ -151,8 +151,9 @@ window.WXC = (() => {
      Returns the button so a caller can place it. */
   function expander(container, label) {
     const b = h('button', { class: 'zb ex', text: label || 'Expand' });
-    let esc = null;
+    let esc = null, corner = null;
     const close = () => {
+      if (corner) { corner.remove(); corner = null; }
       container.classList.remove('full');
       document.body.classList.remove('wtfull');
       b.textContent = label || 'Expand';
@@ -160,12 +161,21 @@ window.WXC = (() => {
       if (esc) { document.removeEventListener('keydown', esc); esc = null; }
       window.dispatchEvent(new Event('resize'));
     };
+    /* A way out that is always on screen.
+
+       The button that opened this sits in a bar that is now behind the overlay,
+       and Escape only helps a reader who thinks to try it. So an expanded thing
+       carries its own close in the corner, where a reader looks for one. */
     b.onclick = () => {
       if (container.classList.contains('full')) return close();
       container.classList.add('full');
       document.body.classList.add('wtfull');
       b.textContent = 'Close';
       b.classList.add('on');
+      corner = h('button', { class: 'fullclose', title: 'Close (Esc)', 'aria-label': 'Close' });
+      corner.textContent = '\u2715 Close';
+      corner.onclick = ev => { ev.stopPropagation(); close(); };
+      container.appendChild(corner);
       esc = ev => { if (ev.key === 'Escape') close(); };
       document.addEventListener('keydown', esc);
       window.dispatchEvent(new Event('resize'));

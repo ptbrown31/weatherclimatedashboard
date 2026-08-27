@@ -261,17 +261,13 @@ def run(no_build: bool) -> int:
                         band == 1, str(band))
                 chk.add(f"{scheme} sub-hourly: it is never drawn as a second observation line",
                         page.locator("#chart path[stroke='var(--obs)'][stroke-dasharray]").count() == 0, "")
-                caps = " ".join(" ".join(t.split()) for t in
-                                page.eval_on_selector_all(".wrap p.cap", "e=>e.map(x=>x.textContent)"))
-                chk.add(f"{scheme} sub-hourly: the page says it is not what settles a contract",
-                        "not the record a contract settles on" in caps
-                        and "settlement reads the hourly METARs" in caps, "")
-                keytxt = page.locator(".key").first.inner_text()
-                chk.add(f"{scheme} sub-hourly: the key names it and says what it is not",
-                        "not the settlement record" in keytxt, keytxt[:110])
+                leg2 = page.eval_on_selector_all("#chart text", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} sub-hourly: the legend names the band and says what it is not",
+                        any("Range between reports" in x for x in leg2)
+                        and any("not settlement" in x for x in leg2), str([x for x in leg2 if "Range" in x]))
                 # the station's own place, so a reader knows what the code means
                 # the ladder box on a city page: the two prices, and very little else
-                page.locator("#skRow .skp.lnk").nth(1).hover(force=True); page.wait_for_timeout(320)
+                page.locator("#chart rect[role='link']").nth(1).hover(force=True); page.wait_for_timeout(320)
                 lt = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} city ladder box: the two prices lead it",
                         page.locator("#tip .tprice .tp").count() == 2
@@ -326,8 +322,9 @@ def run(no_build: bool) -> int:
                 dhref = page.locator("#discussion a").first.get_attribute("href")
                 chk.add(f"{scheme} discussion: it links the office's own page",
                         "forecast.weather.gov" in (dhref or "") and "AFD" in (dhref or ""), str(dhref))
-                page.locator("#discussion summary").click(); page.wait_for_timeout(350)
                 dtxt = page.locator("#discussion .afdtext").inner_text()
+                chk.add(f"{scheme} discussion: it is open without being asked",
+                        page.locator("#discussion details[open]").count() == 1, "")
                 chk.add(f"{scheme} discussion: the text is carried whole, not summarised",
                         len(dtxt) > 800 and "Area Forecast Discussion" in dtxt, str(len(dtxt)))
 
@@ -360,25 +357,19 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} city page: Escape closes it",
                         page.locator("#chartCard.full").count() == 0, "")
 
-                # ---- how current each forecast is: the page has to say, because
-                # these sources do not update together and one line can be minutes
-                # old while another is most of a working day
+                # ---- how current each source is: in the figure's own legend now,
+                # because "standing" and "as issued" were two names for forecasts
+                # that differ only in when they were issued
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2600)
-                fr = page.eval_on_selector_all("#freshness tr td:first-child", "e=>e.map(x=>x.textContent.trim())")
-                chk.add(f"{scheme} freshness: every source on the chart reports its standing cycle",
-                        len(fr) >= 4 and any("National Weather Service" in x for x in fr)
-                        and any("GFS MOS" in x for x in fr), str(fr))
-                ages = page.eval_on_selector_all("#freshness tr td.num", "e=>e.map(x=>x.textContent.trim())")
-                chk.add(f"{scheme} freshness: each one carries an age, not just a timestamp",
-                        len(ages) >= 4 and all(("ago" in a or a == "\u2014") for a in ages), str(ages))
-                fcap = page.locator("#freshness .cap").inner_text()
-                chk.add(f"{scheme} freshness: the two meanings of issued are both defined",
-                        "Standing now" in fcap and "As issued for the day" in fcap
-                        and "never changes" in fcap, fcap[:110])
-                chk.add(f"{scheme} freshness: the as-issued cycle is shown beside the standing one",
-                        page.locator("#freshness tr td:nth-child(4)").count() >= 4,
-                        str(page.locator("#freshness tr td:nth-child(4)").count()))
-
+                leg = page.eval_on_selector_all("#chart text", "e=>e.map(x=>x.textContent)")
+                named = [t for t in leg if t in ("Observed (METAR)", "Weather Service", "Blend of Models",
+                                                 "Aviation guidance", "GFS MOS")]
+                chk.add(f"{scheme} legend: the sources are named inside the figure",
+                        len(named) >= 4, str(named))
+                chk.add(f"{scheme} legend: each source carries when it was issued and how old it is",
+                        sum(1 for t in leg if "old" in t) >= 3, str([t for t in leg if "old" in t][:3]))
+                chk.add(f"{scheme} legend: the separate freshness table is gone",
+                        page.locator("#freshness").count() == 0, "")
                 # ---- the station's own record, drawn on its page
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
                 dots = page.locator("#cityScore circle").count()
@@ -676,22 +667,24 @@ def run(no_build: bool) -> int:
                 page.wait_for_timeout(900)
                 vb_on = page.locator("#chart").get_attribute("viewBox")
                 ladder_on = page.locator("#chart text", has_text="Strike ladders").count()
-                chips = page.locator("#skRow button").count()
-                chk.add(f"{scheme} market on: ladder layout and strike chips", vb_on == "0 0 960 655" and ladder_on == 1 and chips >= 4, f"viewBox={vb_on} ladder={ladder_on} chips={chips}")
+                picks = page.locator("#chart text.strikepick").count()
+                chk.add(f"{scheme} market on: ladder layout, and every strike is a switch",
+                        vb_on == "0 0 960 655" and ladder_on == 1 and picks >= 6,
+                        f"viewBox={vb_on} ladder={ladder_on} switches={picks}")
                 live_lbl = page.locator("#chart text", has_text="ForecastEx quotes").count()
                 chk.add(f"{scheme} market on: ladder labelled with the exchange and its as-of time", live_lbl == 1, f"count={live_lbl}")
                 price_paths = page.locator("#chart path[stroke-width='1.8']").count()
                 chk.add(f"{scheme} market on: quote history drawn for the default strikes", price_paths >= 1, f"paths={price_paths}")
                 # ---- contract links: the price goes to that contract on the exchange
-                lnk = page.locator("#skRow .skp.lnk").count()
-                chk.add(f"{scheme} contract link: strike prices are links", lnk >= 4, f"linked={lnk}")
-                chk.add(f"{scheme} contract link: the strike chip still selects the strike, the price does not",
-                        page.locator("#skRow button[role='link']").count() == 0
-                        and page.locator("#skRow button .skp[role='link']").count() >= 4,
-                        f"chips-as-links={page.locator("#skRow button[role='link']").count()}")
+                lnk = page.locator("#chart rect[role='link']").count()
+                chk.add(f"{scheme} contract link: the ladder bars are links", lnk >= 4, f"linked={lnk}")
+                chk.add(f"{scheme} contract link: the strike label selects, the bar opens the contract",
+                        page.locator("#chart text.strikepick[role='link']").count() == 0
+                        and page.locator("#chart text.strikepick").count() >= 6,
+                        str(page.locator("#chart text.strikepick").count()))
                 bars = page.locator("#chart rect[role='link']").count()
                 chk.add(f"{scheme} contract link: the in-chart Yes and No bars are links too", bars >= 2, f"bars={bars}")
-                href = page.locator("#skRow .skp.lnk").first.get_attribute("data-contract-url") or ""
+                href = page.locator("#chart rect[role='link']").first.get_attribute("data-contract-url") or ""
                 import re as _re
                 m = _re.match(r"^https://www\.interactivebrokers\.com/predictionmarkets/app/#/(\d+)/product-details/"
                               r"contracts\?exchange=FORECASTX&conid_yes=(\d+)$", href or "")
@@ -705,7 +698,7 @@ def run(no_build: bool) -> int:
                     want = str((snap.get("symbols") or {}).get("high", {}).get("productConid") or "")
                     chk.add(f"{scheme} contract link: the path id is the snapshot's product id, not the underlying",
                             m.group(1) == want, f"url={m.group(1)} snapshot={want} underlying={(snap.get('symbols') or {}).get('high', {}).get('conid')}")
-                page.locator("#skRow .skp.lnk").first.hover(force=True); page.wait_for_timeout(200)
+                page.locator("#chart rect[role='link']").first.hover(force=True); page.wait_for_timeout(200)
                 tip_txt = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} contract link: the box names where the click goes",
                         "open the contract" in tip_txt, tip_txt[-70:])
@@ -716,10 +709,10 @@ def run(no_build: bool) -> int:
                 def tip_after(locator):
                     locator.hover(force=True); page.wait_for_timeout(120)
                     return page.locator("#tip").inner_text()
-                t_chip = tip_after(page.locator("#skRow button").nth(2))
-                chk.add(f"{scheme} hover: strike chip shows the book and when it was quoted",
+                t_chip = tip_after(page.locator("#chart rect[role='link']").nth(2))
+                chk.add(f"{scheme} hover: a ladder bar shows the book and when it was quoted",
                         "Yes bid" in t_chip and "No bid" in t_chip and "quoted" in t_chip, t_chip[-90:])
-                chk.add(f"{scheme} hover: strike chip states the payout net of fees", "pays" in t_chip and "×" in t_chip, t_chip[:120])
+                chk.add(f"{scheme} hover: a ladder bar states what each side pays", "pays" in t_chip and "×" in t_chip, t_chip[:120])
                 t_lvl = tip_after(page.locator("#chart text.lvlnm").first)
                 chk.add(f"{scheme} hover: level label names the source, cycle and value", "forecast" in t_lvl and "Cycle" in t_lvl and "Value" in t_lvl, t_lvl[:80])
                 t_pick = tip_after(page.locator("#pick g").nth(3))

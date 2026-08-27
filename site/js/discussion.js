@@ -33,11 +33,11 @@ window.WXDiscussion = (() => {
       host.appendChild(h('p', { class: 'cap', text: 'The discussion for this office has not been read yet.' }));
       return;
     }
-    const det = h('details', { class: 'afd' });
+    const det = h('details', { class: 'afd', open: 'open' });
     const sum = h('summary');
     sum.innerHTML = '<b>' + esc(d.source || 'National Weather Service') + '</b>'
       + (d.issued ? ' &middot; issued ' + esc(d.issued) : '')
-      + ' &middot; <span class="afdmore">read it</span>';
+      + ' &middot; <span class="afdmore">show or hide</span>';
     det.appendChild(sum);
     det.appendChild(h('pre', { class: 'afdtext', text: d.body || d.text }));
     const foot = h('p', { class: 'cap', style: 'margin-top:6px' });

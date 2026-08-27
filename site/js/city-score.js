@@ -178,7 +178,7 @@ window.WXCityScore = (() => {
   const sgn = v => (v == null ? '' : (v > 0 ? '+' : '') + v.toFixed(1));
 
   async function drawTable(station) {
-    const host = $('#cityDays'); if (!host) return;
+    const host = $('#scoredDays'); if (!host) return;
     host.innerHTML = '';
     const r = await WXD.get('scorecard.json', 1440);
     const st = r.data && r.data.stations && r.data.stations[station];

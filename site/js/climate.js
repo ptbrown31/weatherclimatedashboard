@@ -179,6 +179,14 @@ window.WXClimate = (() => {
                                text: FULL ? 'Close' : 'Expand' });
       xb.onclick = () => rebuild(x0, undefined, !FULL);
       ctl.appendChild(xb);
+      // an expanded panel carries its own way out in the corner: the control row
+      // scrolls, and Escape only helps a reader who thinks to try it
+      if (FULL) {
+        const corner = h('button', { class: 'fullclose', title: 'Close (Esc)', 'aria-label': 'Close' });
+        corner.textContent = '\u2715 Close';
+        corner.onclick = () => rebuild(x0, undefined, false);
+        div.appendChild(corner);
+      }
     }
     const pts = ser.filter(q => q[0] >= x0);
     const vals = pts.map(q => q[1]).concat(cs.map(c => c.threshold));

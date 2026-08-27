@@ -161,6 +161,22 @@ window.WXCity = (() => {
     summary.cities.filter(c => !c.onConus).forEach(c => pickDot(w, c, c.wx, c.wy, 1.2));
   }
 
+  /* The page's own heading: which station, and which contract day it is showing.
+
+     A reader arriving on a link needs both before anything else, and the day
+     matters as much as the place: the same chart means a different thing on the
+     day-ahead board than on today's. */
+  function drawTitle(c) {
+    const node = $('#cityTitle'); if (!node || !c) return;
+    const mk = c.markers || {};
+    const shown = full && mk.day && mk.tomorrow
+      ? isoDate(mk.day).replace(/, \d{4}$/, '') + ' \u2013 ' + isoDate(mk.tomorrow).replace(/, \d{4}$/, '')
+      : (mk.day ? isoDate(mk.day).replace(/, \d{4}$/, '') : '');
+    const t = (c.city || c.station) + ' (' + c.station + ')' + (shown ? ' \u2014 ' + shown : '');
+    node.textContent = t;
+    document.title = t;
+  }
+
   /* A small map saying where this station is.
 
      The picker below shows every station and answers "which one shall I look
@@ -246,7 +262,7 @@ window.WXCity = (() => {
     if (window.WXCityDays) WXCityDays.draw(sid).catch(() => {});
     if (window.WXDiscussion) WXDiscussion.draw(sid).catch(() => {});
     const c0 = city();
-    drawFreshness(c0);
+    drawTitle(c0);
     drawLocator(c0);
     const keys = [`forecast/${sid}.json`, `obs/${sid}.json`]
       .concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`, `subhourly/${sid}.json`] : []);
@@ -354,11 +370,15 @@ window.WXCity = (() => {
     const DAY = 864e5, ySeries = [];
     if (showYday) {
       const yObs = rows(ob && ob.rows).filter(p => p.t >= w0 - DAY && p.t < d0).map(p => ({ t: p.t + DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1);
-      if (yObs.length) ySeries.push({ nm: 'Yesterday observed', pts: yObs, col: 'var(--muted)', w: 1.7, dash: null, op: .9 });
-      [['nws', 'Yesterday NWS as issued', '#8fbf95'], ['nbm', 'Yesterday NBM as issued', '#d4a86a'], ['lamp', 'Yesterday LAMP as issued', '#b3a4e0']].forEach(([k, nm, col]) => {
+      // asking for yesterday makes yesterday the subject: it comes in at full
+      // strength in the sources' own colours and today drops back to a
+      // reference behind it, which is the comparison the button is for
+      if (yObs.length) ySeries.push({ nm: 'Yesterday observed', pts: yObs, col: COL.obs, w: 2.4, dash: null, op: 1 });
+      [['nws', 'Yesterday NWS as issued', COL.nws], ['nbm', 'Yesterday NBM as issued', COL.nbm],
+       ['lamp', 'Yesterday LAMP as issued', COL.lamp]].forEach(([k, nm, col]) => {
         const y = YD[k]; if (!y) return;
         const pts = rows(y.rows).map(p => ({ t: p.t + DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1);
-        if (pts.length) ySeries.push({ nm, pts, col, w: 1.5, dash: '6 3', op: .85 });
+        if (pts.length) ySeries.push({ nm, pts, col, w: 2, dash: '6 3', op: 1 });
       });
     }
 
@@ -413,7 +433,14 @@ window.WXCity = (() => {
     // ---- night shading, outside the contract day's daylight
     const sr = M.sunrise ? P(M.sunrise) : null, ss = M.sunset ? P(M.sunset) : null;
     if (sr) g.appendChild(el('rect', { x: x(w0), y: S.T, width: Math.max(0, x(sr) - x(w0)), height: S.B - S.T, fill: 'var(--night)' }));
-    if (ss) g.appendChild(el('rect', { x: x(ss), y: S.T, width: Math.max(0, x(d1) - x(ss)), height: S.B - S.T, fill: 'var(--night)' }));
+    if (ss) {
+      const night1End = S.full && sr ? Math.min(sr + 864e5, d1) : d1;
+      g.appendChild(el('rect', { x: x(ss), y: S.T, width: Math.max(0, x(night1End) - x(ss)), height: S.B - S.T, fill: 'var(--night)' }));
+      if (S.full && sr) {
+        const ss2 = ss + 864e5;
+        if (ss2 < d1) g.appendChild(el('rect', { x: x(ss2), y: S.T, width: Math.max(0, x(d1) - x(ss2)), height: S.B - S.T, fill: 'var(--night)' }));
+      }
+    }
 
     // ---- gridlines and axes
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
@@ -428,8 +455,26 @@ window.WXCity = (() => {
 
     // ---- day markers
     const marks = [['midnight', d0, 'var(--muted)', null], ['sunrise', sr, '#e0a020', '3 3'], ['sunset', ss, '#e0a020', '3 3'], ['day end', d1, 'var(--muted)', null]];
+    /* The second day gets its sun too.
+
+       In the full view the chart runs to the end of the day-ahead contract day,
+       and only the first day's sunrise and sunset were marked — so half the
+       chart had no reference for when its daylight began or ended, which is the
+       thing a temperature trace is shaped by. The snapshot carries one day's
+       times, so the day-ahead pair is the same solar calculation a day on: near
+       enough at these latitudes to place the marks, and marked as the second
+       day's so it is not read as the first's. */
+    if (S.full && sr && ss) {
+      const DAYMS = 864e5;
+      marks.push(['tomorrow’s midnight', dEnd1, 'var(--muted)', null]);
+      marks.push(['tomorrow’s sunrise', sr + DAYMS, '#e0a020', '3 3']);
+      marks.push(['tomorrow’s sunset', ss + DAYMS, '#e0a020', '3 3']);
+    }
     if (market && M.listed) marks.unshift(['listed', P(M.listed), 'var(--muted)', null]);
     const MARK_NOTE = { midnight: 'the contract day begins (station local time)', sunrise: 'NOAA solar approximation for the station', sunset: 'NOAA solar approximation for the station',
+      'tomorrow’s midnight': 'the day-ahead contract day begins (station local time)',
+      'tomorrow’s sunrise': 'the same solar approximation carried forward one day',
+      'tomorrow’s sunset': 'the same solar approximation carried forward one day',
                         'day end': 'the contract day ends; the settlement value is the extreme through here', listed: 'when the exchange listed this day’s contracts (the record’s first quote)' };
     marks.forEach(([lb, t, col, dash]) => {
       if (t == null || t < w0 || t > d1) return;
@@ -534,18 +579,26 @@ window.WXCity = (() => {
                                    'pointer-events': 'none' }));
       }
     }
-    ySeries.forEach(s => { const a = { stroke: s.col, 'stroke-width': s.w, opacity: s.op }; if (s.dash) a['stroke-dasharray'] = s.dash; g.appendChild(line(s.pts, a)); });
+    // with yesterday overlaid, today is the thing being compared against and
+    // steps back; without it, today is at full strength as usual
+    const dim = showYday ? 0.3 : 1;
+    const od = v => Math.round(v * dim * 100) / 100;
+    const drawYesterday = () => ySeries.forEach(sr => {
+      const a = { stroke: sr.col, 'stroke-width': sr.w, opacity: sr.op };
+      if (sr.dash) a['stroke-dasharray'] = sr.dash;
+      g.appendChild(line(sr.pts, a));
+    });
     if (showYday && !YD.nws && !YD.nbm) g.appendChild(txt('Yesterday’s as-issued forecast appears here once the archive is a day old.', { x: S.L + 8, y: S.T + 30, class: 'axl' }));
-    if (LAI.length) g.appendChild(line(LAI, { stroke: COL.lamp, 'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: .7 }));
-    if (NA.length) g.appendChild(line(NA, { stroke: COL.nbm, 'stroke-width': 1.3, 'stroke-dasharray': '2 3', opacity: .75 }));
+    if (LAI.length) g.appendChild(line(LAI, { stroke: COL.lamp, 'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: od(.7) }));
+    if (NA.length) g.appendChild(line(NA, { stroke: COL.nbm, 'stroke-width': 1.3, 'stroke-dasharray': '2 3', opacity: od(.75) }));
     if (A.length) {
-      g.appendChild(line(A, { stroke: COL.nws, 'stroke-width': 1.4, 'stroke-dasharray': '2 3', opacity: .8 }));
+      g.appendChild(line(A, { stroke: COL.nws, 'stroke-width': 1.4, 'stroke-dasharray': '2 3', opacity: od(.8) }));
       const ai = AI.nws;
       g.appendChild(txt((ai.preDay ? 'issued ' : 'first archived cycle, ') + clock(A[0].t, tz), { x: x(A[0].t) + 6, y: y(A[0].v) + 14, class: 'mklab', fill: COL.nws }));
     }
-    if (LA.length) g.appendChild(line(LA, { stroke: COL.lamp, 'stroke-width': 1.6, 'stroke-dasharray': '1 3', opacity: .9 }));
-    if (N.length) g.appendChild(line(N, { stroke: COL.nbm, 'stroke-width': 2, 'stroke-dasharray': '5 4', opacity: .9 }));
-    if (F.length) g.appendChild(line(F, { stroke: COL.nws, 'stroke-width': 2.4, opacity: .95 }));
+    if (LA.length) g.appendChild(line(LA, { stroke: COL.lamp, 'stroke-width': 1.6, 'stroke-dasharray': '1 3', opacity: od(.9) }));
+    if (N.length) g.appendChild(line(N, { stroke: COL.nbm, 'stroke-width': 2, 'stroke-dasharray': '5 4', opacity: od(.9) }));
+    if (F.length) g.appendChild(line(F, { stroke: COL.nws, 'stroke-width': 2.4, opacity: od(.95) }));
     const obsMeta = {};
     ((ob && ob.rows) || []).forEach(r => { obsMeta[P(r.t)] = r; });
     const obsTip = p => { const r = obsMeta[p.t] || {}; const inDay = p.t >= d0 && p.t < d1; return tip.rows((r.type || 'METAR') + ' observation' + (inDay ? '' : ' — before the contract day'), [
@@ -554,9 +607,54 @@ window.WXCity = (() => {
       ['Counts toward ' + isoDate(M.day).replace(/, \d{4}$/, '') + ' settlement', inDay ? (r.type === 'SPECI' ? 'yes (SPECI reports count)' : 'yes') : 'no (outside the contract day)'],
     ], 'aviationweather.gov METAR · the crosshair lists every series at this time'); };
     if (O.length) {
-      g.appendChild(line(O, { stroke: COL.obs, 'stroke-width': 2 }));
-      O.forEach(p => { g.appendChild(el('circle', { cx: x(p.t), cy: y(p.v), r: 1.9, fill: COL.obs })); g.appendChild(bind(el('circle', { cx: x(p.t), cy: y(p.v), r: 5, fill: 'transparent', 'pointer-events': 'all' }), () => obsTip(p), false)); });
+      g.appendChild(line(O, { stroke: COL.obs, 'stroke-width': 2, opacity: od(1) }));
+      O.forEach(p => { g.appendChild(el('circle', { cx: x(p.t), cy: y(p.v), r: 1.9, fill: COL.obs, opacity: od(1) })); g.appendChild(bind(el('circle', { cx: x(p.t), cy: y(p.v), r: 5, fill: 'transparent', 'pointer-events': 'all' }), () => obsTip(p), false)); });
     }
+    // last, so the day being asked about sits on top of the day it is compared with
+    drawYesterday();
+
+    /* The legend, in the figure's own empty ground.
+
+       Lower right of the temperature panel: by then the day's trace has fallen
+       away and nothing else is competing for the space, so the legend sits where
+       a reader is already looking rather than under the chart where it has to be
+       found. Each source carries when its standing cycle was issued, which is
+       the fact that decides how much of the day that line had already seen. */
+    (function legend() {
+      const items = [{ nm: 'Observed (METAR)', col: COL.obs, w: 2.4, dash: null, iss: null }];
+      if (sub.length) items.push({ nm: 'Range between reports', col: COL.obs, band: true,
+                                    iss: 'not settlement' });
+      ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
+        const cyc = c[k + 'Cycle'];
+        const ms = parseStamp(cyc);
+        if (!FULLNAME[k]) return;
+        const age = isNaN(ms) ? null : Date.now() - ms;
+        items.push({ nm: FULLNAME[k], col: COL[k], w: 2, dash: k === 'nbm' ? '5 4' : (k === 'lamp' ? '1 3' : null),
+                     iss: isNaN(ms) ? null : clock(ms, tz) + (age != null ? ' \u00b7 ' + ageText(age) : '') });
+      });
+      const lh = 12.5, bw = 216;
+      const y1 = S.B - 6, y0 = y1 - items.length * lh - 6;
+      const bx = S.R - bw - 6;
+      g.appendChild(el('rect', { x: bx, y: y0, width: bw, height: y1 - y0, rx: 4,
+                                 fill: 'var(--panel)', 'fill-opacity': .82, stroke: 'var(--line)',
+                                 'stroke-width': .8, 'pointer-events': 'none' }));
+      items.forEach((it, i) => {
+        const yy = y0 + 12 + i * lh;
+        if (it.band) {
+          g.appendChild(el('rect', { x: bx + 7, y: yy - 5, width: 15, height: 7, fill: it.col,
+                                     'fill-opacity': .18, 'pointer-events': 'none' }));
+        } else {
+          g.appendChild(el('line', Object.assign({ x1: bx + 7, x2: bx + 22, y1: yy - 2, y2: yy - 2,
+            stroke: it.col, 'stroke-width': it.w || 2, 'pointer-events': 'none' },
+            it.dash ? { 'stroke-dasharray': it.dash } : {})));
+        }
+        g.appendChild(txt(it.nm, { x: bx + 27, y: yy + 1, 'font-size': 9, fill: 'var(--ink)',
+                                   'pointer-events': 'none' }));
+        if (it.iss) g.appendChild(txt(it.iss, { x: bx + bw - 7, y: yy + 1, 'font-size': 8.5,
+                                                'text-anchor': 'end', fill: 'var(--muted)',
+                                                'pointer-events': 'none' }));
+      });
+    })();
 
     // ---- as-of marker
     const asof = snaps.ob && snaps.ob.asof;
@@ -610,10 +708,26 @@ window.WXCity = (() => {
             if (LW - gw >= 26) g.appendChild(txt((100 - L.yes) + '¢', { x: LX + LW - 3, y: yy + 3.2, class: 'ladtxt', 'text-anchor': 'end', 'pointer-events': 'none' }));
           }
           if (labels !== false) {
+            /* The temperature beside the bar is the switch for that strike's
+               price line below. It used to be a second row of chips above the
+               chart doing the same job; one control in the place a reader is
+               already reading the ladder is fewer things on the page. */
+            const sd2 = m === 'high' ? 'h' : 'l';
+            const key = sd2 + ':' + L.strike;
+            const on = checked.has(key);
             const at = S.full ? { x: LX - 5, 'text-anchor': 'end' } : { x: LX + LW + 5 };
-            g.appendChild(bind(txt(cmp + L.strike + '°', Object.assign({ y: yy + 3.5, class: 'ax',
-              fill: m === 'high' ? 'var(--warm)' : 'var(--cool)' }, at)),
-              () => ladderTip(L, m === 'high' ? 'h' : 'l', LD, c), true));
+            const lab = txt(cmp + L.strike + '°', Object.assign({ y: yy + 3.5,
+              class: 'ax strikepick' + (on ? ' on' : ''),
+              fill: on ? skColor(sd2, L.strike, LD) : (m === 'high' ? 'var(--warm)' : 'var(--cool)'),
+              'font-weight': on ? 700 : 400 }, at));
+            lab.style.cursor = 'pointer';
+            lab.onclick = ev => {
+              ev.stopPropagation();
+              if (checked.has(key)) checked.delete(key); else checked.add(key);
+              draw();
+            };
+            bind(lab, () => ladderTip(L, sd2, LD, c), true);
+            g.appendChild(lab);
           }
         });
       });
@@ -637,6 +751,23 @@ window.WXCity = (() => {
         g.appendChild(el('line', { x1: S.L, x2: S.R, y1: p0 - 24, y2: p0 - 24, stroke: 'var(--line)' }));
         g.appendChild(txt(ttl, { x: S.L, y: p0 - 10, class: 'axl' }));
         [0, 50, 100].forEach(p => { g.appendChild(el('line', { x1: S.L, x2: S.R, y1: ypp(p), y2: ypp(p), class: 'grid' })); g.appendChild(txt(p + '¢', { x: S.L - 8, y: ypp(p) + 4, 'text-anchor': 'end', class: 'ax' })); });
+        /* Every strike, faintly; the chosen one dark.
+
+           Drawing only what had been picked meant an empty panel until a reader
+           knew there was something to pick, and gave no sense of how this strike
+           sits against its neighbours. All of them are drawn now — the whole
+           ladder is the shape of the market's opinion — and choosing one brings
+           it forward rather than summoning it. */
+        const chosen = new Set(picked.filter(pk => pk.side === side).map(pk => pk.K));
+        const all = (lad && lad[side === 'h' ? 'high' : 'low']) || [];
+        all.forEach(L => {
+          if (chosen.has(L.strike)) return;
+          const pts = WXM.pricePath(obsRows, fseries, unit, side, L.strike, c).filter(p => p.t >= w0);
+          if (pts.length < 2) return;
+          g.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + ypp(p.v).toFixed(1)).join(''),
+                                     fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1,
+                                     opacity: .22, 'pointer-events': 'none' }));
+        });
         const endLabs = [];
         picked.filter(pk => pk.side === side).forEach(pk => {
           const pts = WXM.pricePath(obsRows, fseries, unit, pk.side, pk.K, c).filter(p => p.t >= w0);
@@ -679,7 +810,7 @@ window.WXCity = (() => {
 
   // ---- crosshair: temperature and time in the top panel, price in the bottom
   function hover(svg) {
-    let hline = null;
+    let hline = null, vline = null;
     svg.addEventListener('mousemove', e => {
       if (!HV) return;
       const S = HV.S;
@@ -688,7 +819,8 @@ window.WXCity = (() => {
       const inTemp = q.x >= S.L && q.x <= S.R && q.y >= S.T && q.y <= S.B;
       const inPrice = HV.market && q.x >= S.L && q.x <= S.R && ((q.y >= S.PH0 && q.y <= S.PH1) || (q.y >= S.PL0 && q.y <= S.PL1));
       const hoverSide = HV.market && q.y >= S.PL0 ? 'l' : 'h';
-      if (!inTemp && !inPrice) { tip.hide(); if (hline) hline.remove(); hline = null; return; }
+      const clear = () => { tip.hide(); if (hline) hline.remove(); if (vline) vline.remove(); hline = vline = null; };
+      if (!inTemp && !inPrice) { clear(); return; }
       const t = HV.w0 + (q.x - S.L) / (S.R - S.L) * (HV.d1 - HV.w0);
       const ts = clock(t, HV.tz) + ' · ' + dateShort(t, HV.tz);
       const near = pts => { let b = null; for (const p of pts) { const d2 = Math.abs(p.t - t); if (d2 <= 45 * 6e4 && (!b || d2 < b.d2)) b = { d2, p }; } return b && b.p; };
@@ -702,86 +834,55 @@ window.WXCity = (() => {
         const o = HV.series.find(s => s.nm === 'Observed'); const op = o && near(o.pts);
         if (op) rows.push([sw(COL.obs) + 'Observed', op.v.toFixed(1) + '°']);
       }
-      if (!rows.length) { tip.hide(); if (hline) hline.remove(); hline = null; return; }
+      if (!rows.length) { clear(); return; }
       tip.show(e, tip.rows(ts, rows, inPrice ? 'Yes price in cents, midway between the Yes bid and one dollar less the No bid' : null));
-      if (!hline || !hline.isConnected) { hline = el('line', { stroke: 'var(--muted)', 'stroke-width': .8, 'stroke-dasharray': '2 2', 'pointer-events': 'none' }); svg.appendChild(hline); }
+      const mk = () => el('line', { stroke: 'var(--muted)', 'stroke-width': .8, 'stroke-dasharray': '2 2', 'pointer-events': 'none' });
+      if (!hline || !hline.isConnected) { hline = mk(); svg.appendChild(hline); }
       hline.setAttribute('x1', q.x); hline.setAttribute('x2', q.x); hline.setAttribute('y1', S.T); hline.setAttribute('y2', HV.market ? S.PL1 : S.B);
+      /* And a line the other way, across the ladders.
+
+         The vertical line answers "what did every series say at this moment".
+         The horizontal one answers the question the ladder is for: at the
+         temperature under the cursor, which strikes are above it and which
+         below, and what is each one priced at. It runs from the plot through
+         both ladders, so a temperature on the trace can be read straight across
+         into the bars. */
+      if (inTemp && HV.market && HV.S.LX != null) {
+        const rEnd = (HV.S.full && HV.S.LX2 != null) ? HV.S.LX2 + HV.S.LW2 : HV.S.LX + HV.S.LW;
+        if (!vline || !vline.isConnected) { vline = mk(); svg.appendChild(vline); }
+        vline.setAttribute('x1', S.L); vline.setAttribute('x2', rEnd);
+        vline.setAttribute('y1', q.y); vline.setAttribute('y2', q.y);
+      } else if (vline) { vline.remove(); vline = null; }
     });
-    svg.addEventListener('mouseleave', () => { tip.hide(); if (hline) hline.remove(); hline = null; });
+    svg.addEventListener('mouseleave', () => { tip.hide(); if (hline) hline.remove(); if (vline) vline.remove(); hline = vline = null; });
   }
 
-  /* How current each forecast on this chart is.
+  /* How current each source is, in the figure's own legend.
 
-     Two different things get called "issued" on this page and they are not the
-     same, so both are named.
+     This was a table under the chart and a distinction that did not survive
+     contact with what the products are. There is no useful line between "the
+     newest cycle" and "the cycle standing before the day began": they are both
+     forecasts, issued at different times, and what a reader needs is when each
+     one was issued and therefore how much of the day it had already seen.
 
-       STANDING NOW is the newest cycle the source has published. It is the solid
-       line, it moves through the day, and by late afternoon it knows most of
-       what the day did.
-
-       AS ISSUED FOR THE DAY is the cycle that was standing before the day began.
-       It is the dotted line and it never changes, which is what makes it worth
-       scoring: it is the forecast, not a running commentary on the observation.
-
-     The age matters and was nowhere on the page. These products do not update
-     together — aviation guidance lands every hour, the model behind GFS MOS four
-     times a day — so at any moment one line can be minutes old and another most
-     of a working day. A reader comparing them is entitled to know which.
-
-     TYPICAL is how often a source normally publishes; a cycle older than twice
-     that is called out rather than left to look current. */
+     So the legend carries the issue time beside the name, in the empty ground
+     at the lower right of the plot, where the day's trace has already fallen
+     away and nothing else is competing for the space. */
   const TYPICAL_H = { nws: 6, nbm: 1, lamp: 1, mav: 6 };
-  const FULLNAME = { nws: 'National Weather Service', nbm: 'Blend of Models',
-                     lamp: 'Aviation guidance (LAMP)', mav: 'GFS MOS' };
+  const FULLNAME = { nws: 'Weather Service', nbm: 'Blend of Models',
+                     lamp: 'Aviation guidance', mav: 'GFS MOS' };
 
   function ageText(ms) {
-    if (ms == null || !isFinite(ms)) return '—';
+    if (ms == null || !isFinite(ms)) return '';
     const m = Math.max(0, Math.round(ms / 60000));
-    if (m < 60) return m + ' min ago';
+    if (m < 60) return m + ' min old';
     const hh = Math.floor(m / 60), mm = m % 60;
-    return hh + ' h ' + (mm ? mm + ' min ' : '') + 'ago';
+    return hh + 'h ' + (mm ? String(mm).padStart(2, '0') + 'm ' : '') + 'old';
   }
   function parseStamp(sid) {
     if (!sid) return NaN;
     const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?Z?$/.exec(sid);
     return Date.parse(m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] || '00'}Z` : sid);
-  }
-
-  function drawFreshness(c) {
-    const host = $('#freshness'); if (!host || !c) return;
-    host.innerHTML = '';
-    const now = Date.now();
-    const t = h('table', { class: 'freshtab' });
-    t.appendChild(h('tr', {}, [h('th', { text: 'Source' }), h('th', { text: 'Standing now, issued' }),
-                               h('th', { class: 'num', text: 'Age' }),
-                               h('th', { text: 'As issued for the day' })]));
-    let anyStale = false;
-    ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
-      const cyc = c[k + 'Cycle'], iss = c[k + 'IssuedCycle'];
-      if (!cyc && !iss) return;
-      const ms = parseStamp(cyc), age = isNaN(ms) ? null : now - ms;
-      const stale = age != null && age > TYPICAL_H[k] * 2 * 3600000;
-      if (stale) anyStale = true;
-      const tr = h('tr', {}, [
-        h('td', {}, [h('span', { class: 'sw', style: 'background:' + COL[k] }),
-                     document.createTextNode(FULLNAME[k])]),
-        h('td', { text: isNaN(ms) ? '—' : stamp(cyc, c.tz) }),
-        h('td', { class: 'num' + (stale ? ' stale' : ''), text: ageText(age) }),
-        h('td', { text: iss ? stamp(iss, c.tz) : '—' }),
-      ]);
-      t.appendChild(tr);
-    });
-    host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
-    host.appendChild(h('p', { class: 'cap',
-      text: 'Standing now is the newest cycle a source has published, which is the solid line and moves through '
-          + 'the day. As issued for the day is the cycle that was standing before the day began, which is the '
-          + 'dotted line and never changes \u2014 that is the one worth scoring, because it is a forecast rather '
-          + 'than a running commentary on what has already happened. These sources do not update together: '
-          + 'aviation guidance publishes hourly, the model behind GFS MOS four times a day, so at any moment one '
-          + 'line can be minutes old and another most of a working day.'
-          + (anyStale ? ' A time in red is older than twice that source\u2019s usual gap between cycles, which '
-                        + 'usually means its feed is behind rather than that the forecast has not changed.' : '')
-          + ' Times are this station\u2019s local time.' }));
   }
 
   async function init(opts = {}) {
@@ -802,10 +903,10 @@ window.WXCity = (() => {
     const dh = $('#cityDaysExpand'), dcard = $('#cityDaysWrap');
     if (dh && dcard && !dh.childElementCount) dh.appendChild(WXC.expander(dcard, 'Expand'));
     const yb = $('#ydayBtn'); if (yb) yb.onclick = e => { showYday = !showYday; e.target.classList.toggle('on'); draw(); };
-    const fb = $('#fullBtn'); if (fb) fb.onclick = e => { full = !full; e.target.classList.toggle('on'); draw(); };
+    const fb = $('#fullBtn'); if (fb) fb.onclick = e => { full = !full; e.target.classList.toggle('on'); draw(); drawTitle(city()); };
     if (!summary.cities.length) { svg.innerHTML = ''; svg.appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
     await select(summary.cities.some(c => c.station === want) ? want : summary.cities[0].station, false);
   }
 
-  return { init, select, drawFreshness };
+  return { init, select };
 })();

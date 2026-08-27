@@ -38,18 +38,19 @@ from . import basemap
 from .storage import Storage
 
 SCHEMA = 1
-SERVICE = ("https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo"
+SERVICE = ("https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo"
            "/MapServer/export")
 KEY = "snapshots/locator/{sid}.png"
 INDEX_KEY = "snapshots/locator/index.json"
 # the picture never changes; the browser and the edge may hold it for a month
 CACHE = "public, max-age=2592000, stale-while-revalidate=2592000, stale-if-error=2592000"
-# about twenty-four kilometres across: wide enough to place a station against its
-# metro area and its terrain, tight enough that the runways are still runways
-HALF_W_KM = 12.0
-HALF_H_KM = 7.5
+# about forty kilometres across: a station is usually at an airport well outside
+# the centre, and the question is where it sits relative to that centre, so the
+# frame has to hold both
+HALF_W_KM = 20.0
+HALF_H_KM = 12.5
 SIZE = (760, 475)
-SOURCE = "USGS The National Map: Imagery and Topo (public domain)"
+SOURCE = "USGS The National Map: US Topo (public domain)"
 
 
 def _iso(t: dt.datetime) -> str:

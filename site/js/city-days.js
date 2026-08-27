@@ -115,8 +115,24 @@ window.WXCityDays = (() => {
           svg.appendChild(ln);
         });
       });
-      if (d.obsHigh != null) svg.appendChild(el('circle', { cx: (a + b) / 2, cy: y(d.obsHigh), r: 3.4, fill: 'var(--obs)', 'pointer-events': 'none' }));
-      if (d.obsLow != null) svg.appendChild(el('circle', { cx: (a + b) / 2, cy: y(d.obsLow), r: 3.4, fill: 'var(--panel)', stroke: 'var(--obs)', 'stroke-width': 1.6, 'pointer-events': 'none' }));
+      /* The day's extremes, on the reading that produced them.
+
+         They were drawn at the middle of the day, floating above and below the
+         trace at a time nothing happened. The high belongs at the hour it was
+         recorded, which is a fact the trace already shows, so each is placed on
+         its own reading and named. */
+      [['obsHigh', 'high', -9], ['obsLow', 'low', 15]].forEach(([k, word, dy]) => {
+        const v = d[k]; if (v == null) return;
+        let at = null;
+        inDay.forEach(r => { if (at == null || Math.abs(r.v - v) < Math.abs(at.v - v)) at = r; });
+        if (!at) return;
+        const cx = x(at.t), cy = y(at.v);
+        svg.appendChild(el('circle', { cx, cy, r: 4, fill: k === 'obsHigh' ? 'var(--obs)' : 'var(--panel)',
+                                       stroke: 'var(--obs)', 'stroke-width': 1.8, 'pointer-events': 'none' }));
+        svg.appendChild(txt(word + ' ' + Math.round(v) + '\u00b0', { x: cx, y: cy + dy,
+          'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 700, fill: 'var(--obs)',
+          'pointer-events': 'none' }));
+      });
     });
 
     // the observations, continuous across the days, with each report marked
@@ -126,6 +142,39 @@ window.WXCityDays = (() => {
     if (gap >= 4.5) keep.forEach(r => svg.appendChild(el('circle',
       { class: 'rdot', cx: x(r.t).toFixed(1), cy: y(r.v).toFixed(1), r: Math.min(2.4, gap / 4),
         fill: 'var(--obs)', 'pointer-events': 'none' })));
+
+    /* Hover: the reading under the cursor, and the day it belongs to.
+
+       Only the level lines answered before, so most of the chart was silent. */
+    const all = keep.slice();
+    const band = el('rect', { x: L, y: T, width: R - L, height: B - T, fill: 'transparent' });
+    let dot = null;
+    band.addEventListener('mousemove', ev => {
+      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const t = t0 + (q.x - L) / Math.max(R - L, 1) * (t1 - t0);
+      let at = null;
+      all.forEach(r => { if (at == null || Math.abs(r.t - t) < Math.abs(at.t - t)) at = r; });
+      if (!at) return;
+      if (!dot) { dot = el('circle', { r: 4, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2,
+                                       'pointer-events': 'none' }); svg.appendChild(dot); }
+      dot.setAttribute('cx', x(at.t)); dot.setAttribute('cy', y(at.v));
+      const dd = dayOf(at.t), d = byDay[dd] || {};
+      const rows = [['Reading', WXC.deg(at.v)],
+                    ['At', WXC.clockFull(at.t, tz) + ' \u00b7 ' + WXC.dateShort(at.t, tz)],
+                    ['That day', (d.obsHigh == null ? '\u2014' : Math.round(d.obsHigh) + '\u00b0') + ' / '
+                                 + (d.obsLow == null ? '\u2014' : Math.round(d.obsLow) + '\u00b0')]];
+      Object.keys(COL).forEach(k => {
+        const f = d[k]; if (!f) return;
+        const eh = f.errHigh == null ? '' : ' (' + (f.errHigh > 0 ? '+' : '') + f.errHigh.toFixed(1) + ')';
+        rows.push(['<span class="sw" style="background:' + COL[k] + '"></span>' + NAME[k],
+                   (f.high == null ? '\u2014' : Math.round(f.high) + '\u00b0' + eh)]);
+      });
+      tip.show(ev, tip.rows(dayLabel(dd), rows,
+        'the hourly record, and each source\u2019s forecast for that day as it stood at six the evening before'));
+    });
+    band.addEventListener('mouseleave', () => { tip.hide(); if (dot) { dot.remove(); dot = null; } });
+    svg.insertBefore(band, svg.firstChild);
 
     const key = $('#cityDaysKey');
     if (key) {

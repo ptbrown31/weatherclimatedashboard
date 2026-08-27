@@ -10,26 +10,24 @@
 </head>
 <body>
 <div class="wrap">
-<h1>Observed against the forecasts issued for the day</h1>
-<p class="sub">Hourly METAR observations (what settlement reads) on one canvas with the National Weather
-Service forecast, NBM and LAMP guidance, and the lines each of them published before the day began, from
-this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high and low for the day.</p>
-<div class="citytop"><div id="locator"></div><div id="skRow"></div></div>
-<div class="bar"><button id="fullBtn">Full: both contract days</button>
-<button id="ydayBtn">Show yesterday</button>
-<span class="cap" style="margin:0">full runs the trace to the end of tomorrow and shows both days&rsquo; strike ladders; yesterday overlays yesterday&rsquo;s observations and as-issued forecasts, shifted 24 hours</span>
-<span id="chartExpand"></span><span id="chartStatus"></span></div>
+<h1 id="cityTitle">&nbsp;</h1>
+
 <div class="card expandable" id="chartCard"><svg id="chart" viewBox="0 0 960 390"></svg></div>
-<div class="key">
-  <span><i style="border-color:var(--obs)"></i>Observed hourly (METAR)</span>
-  <span><i style="border-color:var(--obs);background:var(--obs);opacity:.28"></i>Range between the hourly reports (5-minute stream, not the settlement record)</span>
-  <span><i style="border-color:var(--nws)"></i>NWS hourly, standing now</span>
-  <span><i style="border-color:var(--nws);border-top-style:dotted"></i>NWS as issued for the day</span>
-  <span><i style="border-color:var(--nbm);border-top-style:dashed"></i>NBM hourly guidance</span>
-  <span><i style="border-color:var(--nbm);border-top-style:dotted"></i>NBM as issued</span>
-  <span><i style="border-color:var(--lamp);border-top-style:dotted"></i>LAMP (same-day guidance)</span>
-  <span><i style="border-color:var(--mav)"></i>GFS MOS level for the day</span>
+<div class="bar">
+  <button id="fullBtn">Full: both contract days</button>
+  <button id="ydayBtn">Overlay yesterday</button>
+  <span id="chartExpand"></span>
+  <span id="chartStatus"></span>
 </div>
+<p class="cap" style="margin:2px 0 0"><a href="daily-temperature-markets.html">More information on these
+markets &rarr;</a></p>
+
+<div class="secttl" style="margin-top:22px">WHERE THE STATION IS</div>
+<div id="locator"></div>
+
+<div class="secttl" style="margin-top:22px">NATIONAL WEATHER SERVICE FORECAST DISCUSSION</div>
+<div id="discussion"></div>
+
 <div class="secttl" style="margin-top:22px">PICK A STATION</div>
 <div class="pickwrap">
   <div><div class="pickttl" id="pickTitle">United States &mdash; dot colour and size: observed so far against the NWS high issued for the day</div>
@@ -37,28 +35,13 @@ this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high
   <div><div class="pickttl">International stations and Honolulu</div>
   <svg id="pickW" viewBox="0 60 960 320"></svg></div>
 </div>
-<div class="secttl" style="margin-top:22px">WHAT THE FORECASTER SAID</div>
-<div id="discussion"></div>
 
-<div class="secttl" style="margin-top:22px">THE LAST THREE DAYS, RUN TOGETHER</div>
+<div class="secttl" style="margin-top:22px">THE LAST 3 COMPLETE DAYS</div>
 <div class="bar"><span id="cityDaysExpand"></span><span class="cap" style="margin:0">observations across three
 days with each source&rsquo;s forecast for that day, all pinned to six in the evening the day before</span></div>
 <div class="card expandable" id="cityDaysWrap"><svg id="cityDays" viewBox="0 0 960 330"></svg></div>
 <div class="key" id="cityDaysKey"></div>
 <p class="cap" id="cityDaysCap"></p>
-
-<div class="secttl" style="margin-top:20px">HOW CURRENT EACH FORECAST IS</div>
-<div id="freshness"></div>
-
-<p class="cap">The shaded band behind the observed line is the range the station&rsquo;s five-minute stream covered
-inside each hour. <b>It is context, not the record a contract settles on</b> &mdash; settlement reads the hourly
-METARs, which is the solid line, and a maximum taken over five-minute data lands at or above one taken over the
-hourly reports and effectively never below. Where the band is tall, the hourly number is one sample of a range
-and a brief peak between two reports is a thing that happened but is not in the record the contract reads.</p>
-<p class="cap">The dotted as-issued lines come from this site&rsquo;s forecast archive and cover the elapsed part of
-the day where only observations exist otherwise. Night shading marks the hours outside the contract day&rsquo;s
-daylight. Non-US stations show what US government feeds carry: observations everywhere, NBM guidance for
-Canada, no forecast elsewhere. Times are the station&rsquo;s local time.</p>
 
 <div class="secttl" style="margin-top:24px">THE LAST WEEK AT THIS STATION</div>
 <p class="cap" style="margin-top:0">What each tool said the day's high and low would be, against what the station
@@ -71,9 +54,8 @@ actually recorded. Highs and lows share one axis; observations are black. Hover 
 <p class="cap" style="margin-top:0">Every tool is read at <b>one moment: six in the evening, this station&rsquo;s
 own time, the day before</b> &mdash; so none of them has seen any of the day, and none has had longer to think
 about it than another. The hours under each name are how far that tool&rsquo;s standing run was from midnight at
-that moment: hourly guidance is fresh, a four-times-daily model is not, and that difference belongs to the
-products rather than to the scoring.</p>
-<div id="cityDays"></div>
+that moment.</p>
+<div id="scoredDays"></div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
