@@ -233,7 +233,7 @@ window.WXCat = (() => {
           ['No bid', noBid == null ? '—' : noBid + '¢'],
           ['Buy Yes now at', q && q.ask != null ? Math.round(q.ask * 100) + '¢' : null],
           ['Settles', expDate(c.expiration)],
-          ['On the exchange', u ? '<a href="' + u + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>' : null],
+
         ], 'Yes and No bids sum to $1; there are no sellers · not fee adjusted'
            + (pr && pr.asof ? ' · quoted ' + pr.asof.slice(11, 16) + 'Z' : '')));
         if (u) WXM.linkTo(bar.querySelector('.lv'), u, 'Open ' + (c.label || c.strike) + ' on IBKR');

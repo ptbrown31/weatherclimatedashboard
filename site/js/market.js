@@ -189,6 +189,10 @@ window.WXM = (() => {
     node.style.cursor = 'pointer';
     node.setAttribute('role', 'link');
     node.setAttribute('tabindex', '0');
+    // the destination, on the element that carries the click. The tooltip used
+    // to repeat it as an anchor, but a tooltip that follows the cursor can never
+    // be clicked, so the row was removed; the target still has to be inspectable.
+    node.setAttribute('data-contract-url', url);
     if (title) node.setAttribute('aria-label', title);
     const go = e => { e.preventDefault(); e.stopPropagation(); window.open(url, '_blank', 'noopener,noreferrer'); };
     node.addEventListener('click', go);

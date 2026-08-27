@@ -313,7 +313,7 @@ window.WXStorm = (() => {
            ['Yes bid', c.bid == null ? '—' : cents(c.bid) + '¢'],
            ['No bid', c.ask == null ? '—' : (100 - cents(c.ask)) + '¢'],
            ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
-           ['On the exchange', url ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>' : null]],
+           ],
           'settles on the vendor’s final peak gusts' + (url ? ' · click the price to open the contract' : '')));
         if (url) WXM.linkTo(row.querySelector('.lv'), url, 'Open ' + (c.label || c.strike) + ' on IBKR');
         div.appendChild(row);

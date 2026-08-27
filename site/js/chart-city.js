@@ -68,7 +68,7 @@ window.WXCity = (() => {
     // the link belongs in the box too: it is the one place a reader on a touch
     // screen can reach it, and it says where the click goes before they take it
     const url = strikeUrl(lad, side, L);
-    if (url) rows.push(['On the exchange', '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>']);
+
     return tip.rows(cmp + L.strike + '°' + unit + ' — ' + (side === 'h' ? 'daily high above' : 'daily low below') + ' ' + L.strike,
       rows, 'times in station time · Yes and No bids sum to $1; there are no sellers · not fee adjusted'
         + (url ? ' · clicking a price opens the contract' : '') + (pinHint === false ? ' · click to draw this strike’s price line' : ' · click to pin'));

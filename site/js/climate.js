@@ -187,7 +187,7 @@ window.WXClimate = (() => {
         ['Buy Yes now at', c.ask != null ? cents(c.ask) + (WXM.payoutText(Math.round(c.ask * 100)) ? ' · pays ' + WXM.payoutText(Math.round(c.ask * 100)) : '') : null],
         ['Bids', c.from === 'no' ? (book ? book + '; ' : '') + 'quoted from the No contract' : book],
         ['Series now', fmtV(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],
-        ['On the exchange', url ? '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>' : null]],
+        ],
         (c.label2 || WXM.LABEL) + (url ? ' · click the marker to open the contract' : ''));
       m.onmousemove = e => tip.show(e, html());
       m.onmouseleave = () => tip.hide();

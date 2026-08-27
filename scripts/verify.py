@@ -479,9 +479,7 @@ def run(no_build: bool) -> int:
                         f"chips-as-links={page.locator("#skRow button[role='link']").count()}")
                 bars = page.locator("#chart rect[role='link']").count()
                 chk.add(f"{scheme} contract link: the in-chart Yes and No bars are links too", bars >= 2, f"bars={bars}")
-                page.locator("#skRow .skp.lnk").first.hover(force=True)
-                page.wait_for_timeout(200)
-                href = page.locator("#tip a").first.get_attribute("href") if page.locator("#tip a").count() else ""
+                href = page.locator("#skRow .skp.lnk").first.get_attribute("data-contract-url") or ""
                 import re as _re
                 m = _re.match(r"^https://www\.interactivebrokers\.com/predictionmarkets/app/#/(\d+)/product-details/"
                               r"contracts\?exchange=FORECASTX&conid_yes=(\d+)$", href or "")
@@ -495,8 +493,12 @@ def run(no_build: bool) -> int:
                     want = str((snap.get("symbols") or {}).get("high", {}).get("productConid") or "")
                     chk.add(f"{scheme} contract link: the path id is the snapshot's product id, not the underlying",
                             m.group(1) == want, f"url={m.group(1)} snapshot={want} underlying={(snap.get('symbols') or {}).get('high', {}).get('conid')}")
+                page.locator("#skRow .skp.lnk").first.hover(force=True); page.wait_for_timeout(200)
+                tip_txt = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} contract link: the box names where the click goes",
-                        "open this contract" in page.locator("#tip").inner_text(), page.locator("#tip").inner_text()[-70:])
+                        "opens the contract" in tip_txt, tip_txt[-70:])
+                chk.add(f"{scheme} contract link: the box does not offer a link it cannot be clicked through to",
+                        page.locator("#tip a").count() == 0, str(page.locator("#tip a").count()))
                 chk.add(f"{scheme} market toggles: no script errors", not errs, "; ".join(errs)[:300])
                 # ---- hover layer on the city page: chips, level labels, picker dots and the crosshair
                 def tip_after(locator):
@@ -722,14 +724,9 @@ def run(no_build: bool) -> int:
                     # calling it a missing link
                     href = ""
                     for i in range(min(n, 5)):
-                        page.locator(sel).nth(i).scroll_into_view_if_needed()
-                        page.locator(sel).nth(i).hover(force=True)
-                        page.wait_for_timeout(180)
-                        a = page.locator("#tip a")
-                        if a.count():
-                            href = a.first.get_attribute("href") or ""
-                            if href:
-                                break
+                        href = page.locator(sel).nth(i).get_attribute("data-contract-url") or ""
+                        if href:
+                            break
                     m = _re.match(RE, href or "")
                     chk.add(f"{scheme} hurricane link: {label} links to a contract", bool(m), (href or "no href")[:100])
                     if m:

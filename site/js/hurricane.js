@@ -370,7 +370,7 @@ window.WXHur = (() => {
       const season = c && c.expiryLabel ? c.expiryLabel : (hlf && hlf.contracts[0] && hlf.contracts[0].expiryLabel) || 'season';
       const rows = c ? [['Landfall contract (' + esc(season) + ')', c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid))]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Yes price' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
       const url = c && hlf ? WXM.contractUrl(hlf.productConid, c.conidYes || c.conid) : null;
-      const html = tip.rows(esc(nm), rows.concat(url ? [['On the exchange', exLink(url)]] : []),
+      const html = tip.rows(esc(nm), rows,
         c ? (url ? 'click to open this contract' : null) : (lf ? 'no landfall contract listed for this region' : null));
       return [c && c.mid != null ? ramp(c.mid) : 'var(--map-land)', html, url];
     };
@@ -487,7 +487,6 @@ window.WXHur = (() => {
   // `prod` is the market's product id on the exchange, which a contract link
   // needs alongside the contract's own conid; without it the rows are drawn
   // exactly as before rather than linking somewhere guessed
-  const exLink = url => '<a href="' + url + '" target="_blank" rel="noopener noreferrer">open this contract on IBKR →</a>';
 
   function ladderPanel(title, rows, sub, mname, prod) {
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: title })]);
@@ -502,7 +501,7 @@ window.WXHur = (() => {
       ]);
       const url = r.c && WXM.contractUrl(prod, r.c.conidYes || r.c.conid);
       if (r.c) attach(bar, tip.rows(contractTitle({ name: mname }, r.c),
-        quoteRows(r.c).concat(url ? [['On the exchange', exLink(url)]] : []),
+        quoteRows(r.c),
         asofFoot() + (url ? ' · click the price to open the contract' : '')));
       if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + r.label + ' on IBKR');
       div.appendChild(bar);
@@ -529,7 +528,7 @@ window.WXHur = (() => {
       const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
       attach(bar, tip.rows(contractTitle(m, c),
         quoteRows(c).filter(r => r[0] !== 'Settles').concat([['Expiration', expDate(c.expiration)]])
-          .concat(url ? [['On the exchange', exLink(url)]] : []),
+          ,
         asofFoot() + (url ? ' · click the price to open the contract' : '')));
       if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + c.label + ' on IBKR');
       div.appendChild(bar);
@@ -873,7 +872,7 @@ window.WXHur = (() => {
       const nb = el('rect', { x: px(0) + gw, y: yy - 5, width: Math.max(px(100) - px(0) - gw, 1), height: 10, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
       const url = WXM.contractUrl(prod, b.c.conidYes || b.c.conid);
       const html = tip.rows(contractTitle({ name: (market(cfg.sym) || {}).name }, b.c),
-        [['At least', String(b.n)]].concat(quoteRows(b.c)).concat(url ? [['On the exchange', exLink(url)]] : []),
+        [['At least', String(b.n)]].concat(quoteRows(b.c)),
         asofFoot() + (url ? ' · click a price to open the contract' : ''));
       [yb, nb].forEach(bar => { attach(bar, html); if (url) WXM.linkTo(bar, url, 'Open ' + (b.c.label || b.n) + ' on IBKR'); svg.appendChild(bar); });
       if (one) svg.appendChild(el('rect', { x: px(0), y: yy - 5, width: px(100) - px(0), height: 10, fill: 'none',
@@ -930,7 +929,7 @@ window.WXHur = (() => {
         quoteRows(c)
           .concat([['Pays', c.ask == null ? null : (WXM.payout(cents(c.ask)) != null ? WXM.payout(cents(c.ask)) + '×' : null)],
                    ['On the map', onMap]])
-          .concat(url ? [['On the exchange', exLink(url)]] : []),
+          ,
         asofFoot() + (url ? ' · click the price to open the contract' : '')));
       if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + c.label + ' on IBKR');
       div.appendChild(bar);
@@ -1005,7 +1004,7 @@ window.WXHur = (() => {
         const yesCell = h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) });
         const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), yesCell]);
         const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
-        attach(tr, tip.rows(contractTitle(m, c), quoteRows(c).concat(url ? [['On the exchange', exLink(url)]] : []),
+        attach(tr, tip.rows(contractTitle(m, c), quoteRows(c),
           asofFoot() + (url ? ' · click the Yes price to open the contract' : '')));
         if (url) { yesCell.classList.add('lnk'); WXM.linkTo(yesCell, url, 'Open ' + c.label + ' on IBKR'); }
         tb.appendChild(tr);
