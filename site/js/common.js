@@ -202,11 +202,14 @@ window.WXC = (() => {
          These are the prices to BUY each side: the Yes ask, and one dollar less
          the Yes bid for the No. There are no sellers on this exchange, only bids
          to buy one side or the other, and the two sum to a dollar. */
-      price(yesBuy, noBuy) {
+      price(yesBuy, noBuy, yesSub, noSub) {
         const c = v => (v == null ? '—' : Math.round(v * 100) + '¢');
+        const sub = t => (t ? '<span class="tps">' + t + '</span>' : '');
         return '<div class="tprice">'
-          + '<div class="tp yes"><span class="tpl">Buy Yes</span><span class="tpv">' + c(yesBuy) + '</span></div>'
-          + '<div class="tp no"><span class="tpl">Buy No</span><span class="tpv">' + c(noBuy) + '</span></div>'
+          + '<div class="tp yes"><span class="tpl">Buy Yes</span><span class="tpv">' + c(yesBuy) + '</span>'
+          + sub(yesSub) + '</div>'
+          + '<div class="tp no"><span class="tpl">Buy No</span><span class="tpv">' + c(noBuy) + '</span>'
+          + sub(noSub) + '</div>'
           + '</div>';
       },
       rows(title, pairs, foot) {

@@ -270,6 +270,21 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} sub-hourly: the key names it and says what it is not",
                         "not the settlement record" in keytxt, keytxt[:110])
                 # the station's own place, so a reader knows what the code means
+                # the ladder box on a city page: the two prices, and very little else
+                page.locator("#skRow .skp.lnk").nth(1).hover(force=True); page.wait_for_timeout(320)
+                lt = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} city ladder box: the two prices lead it",
+                        page.locator("#tip .tprice .tp").count() == 2
+                        and "BUY YES" in lt.upper() and "BUY NO" in lt.upper(), lt[:70])
+                chk.add(f"{scheme} city ladder box: what it pays sits under what it costs",
+                        page.locator("#tip .tprice .tps").count() >= 1,
+                        str(page.eval_on_selector_all("#tip .tprice .tps", "e=>e.map(x=>x.textContent)")))
+                chk.add(f"{scheme} city ladder box: it is short, and says what the strike asks",
+                        page.locator("#tip .tg .tk").count() <= 3
+                        and "Settles Yes if" in lt, f"rows={page.locator('#tip .tg .tk').count()}")
+                chk.add(f"{scheme} city ladder box: the book is one line, not five rows",
+                        "they buy, they do not sell" in lt and "Yes bid" in lt, lt[-90:])
+
                 loccap = page.locator("#locator .cap").inner_text()
                 chk.add(f"{scheme} locator: a US station gets metro-scale imagery, pinned",
                         page.locator("#locator .locbox img").count() == 1
@@ -693,7 +708,7 @@ def run(no_build: bool) -> int:
                 page.locator("#skRow .skp.lnk").first.hover(force=True); page.wait_for_timeout(200)
                 tip_txt = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} contract link: the box names where the click goes",
-                        "opens the contract" in tip_txt, tip_txt[-70:])
+                        "open the contract" in tip_txt, tip_txt[-70:])
                 chk.add(f"{scheme} contract link: the box does not offer a link it cannot be clicked through to",
                         page.locator("#tip a").count() == 0, str(page.locator("#tip a").count()))
                 chk.add(f"{scheme} market toggles: no script errors", not errs, "; ".join(errs)[:300])
@@ -702,7 +717,8 @@ def run(no_build: bool) -> int:
                     locator.hover(force=True); page.wait_for_timeout(120)
                     return page.locator("#tip").inner_text()
                 t_chip = tip_after(page.locator("#skRow button").nth(2))
-                chk.add(f"{scheme} hover: strike chip shows the book", "Yes bid" in t_chip and "No bid" in t_chip and "Quotes as of" in t_chip, t_chip[:80])
+                chk.add(f"{scheme} hover: strike chip shows the book and when it was quoted",
+                        "Yes bid" in t_chip and "No bid" in t_chip and "quoted" in t_chip, t_chip[-90:])
                 chk.add(f"{scheme} hover: strike chip states the payout net of fees", "pays" in t_chip and "×" in t_chip, t_chip[:120])
                 t_lvl = tip_after(page.locator("#chart text.lvlnm").first)
                 chk.add(f"{scheme} hover: level label names the source, cycle and value", "forecast" in t_lvl and "Cycle" in t_lvl and "Value" in t_lvl, t_lvl[:80])

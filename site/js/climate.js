@@ -418,7 +418,11 @@ window.WXClimate = (() => {
          number: when it settles, and where the series stands against the strike.
          The book itself is one line at the foot for anyone who wants it. */
       const html = () => '<b>' + product.name + ' — ' + c.label + '</b>'
-        + tip.price(c.ask, c.bid == null ? null : 1 - c.bid)
+        + tip.price(c.ask, c.bid == null ? null : 1 - c.bid,
+                    c.ask == null ? null : (WXM.payoutText(Math.round(c.ask * 100)) || '').split(' ')[0]
+                      ? 'pays ' + (WXM.payoutText(Math.round(c.ask * 100)) || '').split(' ')[0] : null,
+                    c.bid == null ? null : (WXM.payoutText(Math.round((1 - c.bid) * 100)) || '').split(' ')[0]
+                      ? 'pays ' + (WXM.payoutText(Math.round((1 - c.bid) * 100)) || '').split(' ')[0] : null)
         + tip.rows(null, [
           ['Settles', c.expiryLabel],
           ['Series now', fmtV(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],

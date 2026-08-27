@@ -50,30 +50,42 @@ window.WXCity = (() => {
   function ladderTip(L, side, lad, c, pinHint) {
     const cmp = side === 'h' ? '>' : '<', unit = c.unit;
     if (!lad.live) return tip.rows(cmp + L.strike + '°' + unit, [['Yes', L.yes + '¢'], ['No', (100 - L.yes) + '¢']], WXM.PLACEHOLDER);
-    const path = WXM.pricePath([], [], unit, side, L.strike, c);
-    const last = path.length ? path[path.length - 1] : null, prev = path.length > 1 ? path[path.length - 2] : null, first = path.length ? path[0] : null;
     const im = side === 'h' ? lad.impliedHigh : lad.impliedLow;
-    const rows = [
-      ['Contract', L.label || (cmp + L.strike)],
-      [L.side === 'mid' ? 'Yes price (midpoint)' : (L.side === 'bid' ? 'Yes price (Yes bids only)' : (L.side === 'ask' ? 'Yes price (No bids only)' : 'Yes price')), L.yes == null ? 'no bids' : L.yes + '¢'],
-      ['Yes bid', L.bid == null ? '—' : cents(L.bid) + size(L.bidSize)],
-      ['No bid', L.noBid == null ? '—' : cents(L.noBid) + size(L.noBidSize)],
-      ['Buy Yes now at', L.noBid == null ? null : (100 - L.noBid) + '¢' + (WXM.payoutText(100 - L.noBid) ? ' · pays ' + WXM.payoutText(100 - L.noBid) : '')],
-      ['Buy No now at', L.bid == null ? null : (100 - L.bid) + '¢' + (WXM.payoutText(100 - L.bid) ? ' · pays ' + WXM.payoutText(100 - L.bid) : '')],
-      ['Quoted from', L.from === 'no' ? 'the No contract' : null],
-      ['Since the previous sample', last && prev ? ((last.v - prev.v > 0 ? '+' : '') + (last.v - prev.v) + '¢ (' + Math.round((last.t - prev.t) / 60000) + ' min)') : null],
-      ['First sample', first && first !== last ? first.v + '¢ at ' + WXC.clock(first.t, c.tz) + ' · ' + WXC.dateShort(first.t, c.tz) : null],
-      ['Implied median', im && im.value != null ? WXC.deg(im.value) : (im && im.edge ? 'beyond the ladder (' + im.edge + ')' : null)],
-      ['Settles', L.expiration ? isoDate(L.expiration.slice(0, 4) + '-' + L.expiration.slice(4, 6) + '-' + L.expiration.slice(6, 8)) : null],
-      ['Quotes as of', lad.asof ? WXC.clockFull(Date.parse(lad.asof), c.tz) + ' · ' + WXC.dateShort(Date.parse(lad.asof), c.tz) : null],
-    ];
-    // the link belongs in the box too: it is the one place a reader on a touch
-    // screen can reach it, and it says where the click goes before they take it
     const url = strikeUrl(lad, side, L);
+    /* The two prices, and then very little.
 
-    return tip.rows(cmp + L.strike + '°' + unit + ' — ' + (side === 'h' ? 'daily high above' : 'daily low below') + ' ' + L.strike,
-      rows, 'times in station time · Yes and No bids sum to $1; there are no sellers · not fee adjusted'
-        + (url ? ' · clicking a price opens the contract' : '') + (pinHint === false ? ' · click to draw this strike’s price line' : ' · click to pin'));
+       This box carried twelve rows: the midpoint, both bids, both buy prices,
+       which contract the quote came from, the change since the previous sample,
+       the first sample of the day, the implied median, the settlement date and
+       the quote time. Most of it restated the same two numbers in different
+       forms, and the two a reader actually acts on were fifth and sixth.
+
+       What is left is what you would act on: what it costs to take each side,
+       what that pays if it comes in, what the contract is asking, and when it
+       settles. The book is one line at the foot for anyone who wants it. */
+    const buyYes = L.noBid == null ? null : (100 - L.noBid) / 100;
+    const buyNo = L.bid == null ? null : (100 - L.bid) / 100;
+    const payYes = buyYes == null ? null : WXM.payoutText(Math.round(buyYes * 100));
+    const payNo = buyNo == null ? null : WXM.payoutText(Math.round(buyNo * 100));
+    const asks = side === 'h' ? 'Settles Yes if the day\u2019s high is above ' + L.strike + '\u00b0' + unit
+                              : 'Settles Yes if the day\u2019s low is below ' + L.strike + '\u00b0' + unit;
+    const head = '<b>' + (c.city || c.station) + ' \u2014 ' + (L.label || (cmp + L.strike + '\u00b0' + unit)) + '</b>';
+    const mult = t => (t ? String(t).split(' ')[0] : null);
+    const rows = [
+      ['Settles', L.expiration ? isoDate(L.expiration.slice(0, 4) + '-' + L.expiration.slice(4, 6) + '-' + L.expiration.slice(6, 8)) : null],
+      ['Market\u2019s median for the day', im && im.value != null ? WXC.deg(im.value)
+        : (im && im.edge ? 'beyond the ladder (' + im.edge + ')' : null)],
+    ];
+    const book = L.bid == null && L.noBid == null ? 'no bids on either side'
+      : 'Yes bid ' + (L.bid == null ? '\u2014' : cents(L.bid)) + ' \u00b7 No bid '
+        + (L.noBid == null ? '\u2014' : cents(L.noBid)) + ' \u00b7 they buy, they do not sell, and the two sum to a dollar';
+    return head + '<div class="tsub">' + asks + '</div>'
+      + tip.price(buyYes, buyNo, mult(payYes) ? 'pays ' + mult(payYes) : null,
+                  mult(payNo) ? 'pays ' + mult(payNo) : null)
+      + tip.rows(null, rows,
+      book + ' \u00b7 payouts are net of the fee each side'
+      + (lad.asof ? ' \u00b7 quoted ' + WXC.clock(Date.parse(lad.asof), c.tz) : '')
+      + (url ? ' \u00b7 click to open the contract' : ''));
   }
 
   const impliedState = m => ({ unavailable: 'quotes unavailable', unlisted: 'no market listed', day: 'quote summary is for another day',
