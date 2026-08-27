@@ -10,11 +10,7 @@
 </head>
 <body>
 <div class="wrap">
-<h1>US daily temperature stations</h1>
-<p class="sub">Each dot shows where the exchange&rsquo;s market-implied median sits against the National Weather
-Service forecast for the same day with a bias removed from the National Weather Service.</p>
-<p class="cap" style="margin:0 0 10px"><a href="daily-temperature-markets.html">How these contracts work and how they
-settle &rarr;</a></p>
+<h1 id="boardTitle">US daily temperature stations</h1>
 <div class="bar modegrid">
   <div class="mgcol"><span class="mgh">Today</span>
     <button id="m1">Highs</button>
@@ -26,9 +22,13 @@ settle &rarr;</a></p>
   </div>
   <span id="pageStatus"></span>
 </div>
-<div id="modeTitle"></div>
 <div class="card"><svg id="map" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="legend"></div>
+<div id="modeTitle" style="margin-top:8px"></div>
+<p class="sub">Each dot shows where the exchange&rsquo;s market-implied median sits against the National Weather
+Service forecast for the same day with a bias removed from the National Weather Service.</p>
+<p class="cap" style="margin:0 0 10px"><a href="daily-temperature-markets.html">How these contracts work and how they
+settle &rarr;</a></p>
 <div class="pickttl" style="margin-top:14px">INTERNATIONAL STATIONS AND HONOLULU</div>
 <div class="card"><svg id="mapW" viewBox="0 60 960 320"></svg></div>
 <p class="cap">These stations settle in Celsius, so their labels carry the unit. They take the same encoding as the
@@ -74,8 +74,9 @@ day.</p>
 <p><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p></div>
 <div><h3>THE SHADING</h3><p>The pale field is the NWS forecast, cool blues to warm reds, interpolated between the
 listed stations. It is derived here, not an NWS product; the official field is the NDFD grid.</p></div>
-<div><h3>A LABEL</h3><p><b>PHL 88&deg; (&minus;5)</b> reads: Philadelphia, 88&deg;, five degrees below the reference.
-Labels move out of each other&rsquo;s way and never cover another station&rsquo;s dot.</p></div>
+<div><h3>A LABEL</h3><p><b>Philadelphia 88&deg; (&minus;5)</b> reads: 88&deg;, five degrees below the reference.
+Labels move out of each other&rsquo;s way and never cover another station&rsquo;s dot, so where two cities sit close
+together one of them may go unlabelled; its dot is still there and still carries its numbers on hover.</p></div>
 </div>
 </div>
 <script src="js/common.js"></script>

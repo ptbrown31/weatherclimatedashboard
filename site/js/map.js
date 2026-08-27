@@ -45,6 +45,28 @@ window.WXMap = (() => {
   };
   const tmw = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.tomorrow : ''; };
 
+  /* The page's own heading, which is the board being traded and the day it
+     settles on. The board flips at 5 pm Eastern, so before then this reads
+     "today's" and after it "tomorrow's", and it follows the selector rather than
+     the clock once a reader has chosen. The date is the station's local calendar
+     day the contracts settle on, spelled out: a reader who has just arrived
+     should be able to tell what they are looking at without reading a legend. */
+  const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                  'August', 'September', 'October', 'November', 'December'];
+  function spellDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    if (!m) return '';
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return DAYS[d.getUTCDay()] + ', ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate();
+  }
+  function pageTitle(key) {
+    const when = (key === 'hiT' || key === 'loT') ? "Today's" : "Tomorrow's";
+    const side = (key === 'loT' || key === 'lo') ? 'Lows' : 'Highs';
+    const day = spellDate((key === 'hiT' || key === 'loT') ? tdy() : tmw());
+    return 'ForecastEx Weather Prediction Market for ' + when + ' ' + side + (day ? ' ' + day : '');
+  }
+
   // ---- the typical gap
   //
   // The market has sat below the NWS forecast on highs on every day measured so
@@ -187,6 +209,8 @@ window.WXMap = (() => {
     svg.appendChild(el('path', { d: base.statePaths, class: 'state' }));
     svg.appendChild(el('path', { d: base.statePaths, class: 'state2' }));
     $('#modeTitle').textContent = M.title();
+    const hEl = $('#boardTitle');
+    if (hEl) { hEl.textContent = pageTitle(mode); document.title = pageTitle(mode); }
 
     computeBase(M);
     plot(svg, summary.cities.filter(c => c.onConus), M, c => c.px, c => c.py, [2, 2, 958, 598], false);
@@ -248,12 +272,11 @@ window.WXMap = (() => {
       if (!opts.label && av == null && v == null) return;
       const big = v != null && Math.abs(v) >= (M.centred && gapN >= MIN_FOR_BASE ? 1 : 1.5);
       // the international stations settle in Celsius, so their labels carry the unit
-      // the world canvas names its cities, because a three-letter code abroad
-      // is not something a reader can be expected to know, and it carries the
-      // observed reading since US government forecasts stop at the border
+      // both canvases name their cities: a three-letter code is not something a
+      // reader can be expected to decode, at home or abroad
       const s = opts.label
         ? opts.label(c)
-        : c.station.slice(1) + (av != null ? ' ' + av.toFixed(0) + '°' + (withUnit ? (c.unit || '') : '') : '')
+        : c.city + (av != null ? ' ' + av.toFixed(0) + '°' + (withUnit ? (c.unit || '') : '') : '')
           + (big ? ' (' + (v > 0 ? '+' : '') + v.toFixed(0) + ')' : '');
       for (const [dx, dy] of CANDS) {
         const t = txt(s, { x: X + dx, y: Y + dy + 4, class: 'lbl', 'text-anchor': dx < 0 ? 'end' : (dx > 0 ? 'start' : 'middle'),

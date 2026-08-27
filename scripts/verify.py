@@ -195,6 +195,30 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} city full: toggling back restores the single ladder",
                         heads2 == [] and len(errs) == errs_now, str(heads2))
 
+                # ---- the board's heading: which board, which side, which day
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1600)
+                t1 = page.locator("#boardTitle").inner_text()
+                import re as _re2
+                chk.add(f"{scheme} board title: names the market, the side and the day",
+                        t1.startswith("ForecastEx Weather Prediction Market for")
+                        and _re2.search(r"(Today's|Tomorrow's) (Highs|Lows) \w+day, \w+ \d{1,2}$", t1) is not None,
+                        t1[:110])
+                page.locator("#m4").click(); page.wait_for_timeout(700)
+                t2 = page.locator("#boardTitle").inner_text()
+                chk.add(f"{scheme} board title: follows the selector, not just the clock",
+                        "Tomorrow's Lows" in t2, t2[:110])
+                # full city names, not airport codes a reader has to decode
+                labs = page.eval_on_selector_all("#map text.lbl", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} map labels: cities are named, not coded",
+                        any(l.startswith("Chicago") or l.startswith("Denver") or l.startswith("Atlanta") for l in labs)
+                        and not any(_re2.match(r"^[A-Z]{3}\b", l) for l in labs), str(labs[:4]))
+                # the map comes directly after the heading
+                order = page.eval_on_selector_all(".wrap > *", "e=>e.map(x=>x.id||x.className||x.tagName)")
+                body = [o for o in order if o != "site"]
+                chk.add(f"{scheme} landing page: heading first, map above the explanation",
+                        body[0] == "boardTitle" and body.index("card") < body.index("modeTitle"),
+                        str(body[:5]))
+
                 # ---- the station's own record, drawn on its page
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
                 dots = page.locator("#cityScore circle").count()
