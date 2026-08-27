@@ -21,6 +21,11 @@ svg.ts{width:100%;height:auto;display:block}
 .allocChip.on{background:var(--panel);color:var(--ink);border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 #allocTitle{margin:14px 0 2px;font-size:16px}
 #allocAsof{margin:0 0 8px}
+/* expanded: the generic .expandable.full svg rule sets width:auto, which on a
+   viewBox-only svg falls back to a fixed default and SHRINKS the chart; this
+   page's chart should fill the overlay's width and cap at the window */
+#allocWrap.full #alloc{width:100%}
+#allocWrap.full svg.ts{width:100%;height:auto;max-height:calc(100vh - 46px)}
 </style>
 </head>
 <body>
@@ -28,10 +33,13 @@ svg.ts{width:100%;height:auto;display:block}
 <h1>Allocation calculator</h1>
 <p class="sub">A teaching tool for spreading a position across a strike ladder. Type the value you expect and how
 far off you could be, and it turns that into a probability curve, prices every strike&rsquo;s Yes and No against
-it, and sizes a set of purchases three ways &mdash; showing where each dollar goes and what the whole set would pay
-back at every possible outcome. It opens on a made-up example; the picker loads any live ladder on this site.
-Everything here is arithmetic on the numbers you type and the exchange&rsquo;s public prices &mdash; the site adds
-no forecast of its own, and none of this is investment advice.</p>
+it, and splits the whole amount across the ladder three ways &mdash; the entire sum always goes in, and the
+scenarios differ only in where it goes. Conservative hedges widely and pays back smoothly almost wherever the
+value lands; aggressive concentrates near your value and pays big only if you are close. The chart shows the
+prices as they stand, where each dollar goes with its payout multiple, and what the whole set pays at every
+possible outcome. It opens on a made-up example; the picker loads any live ladder on this site. Everything here
+is arithmetic on the numbers you type and the exchange&rsquo;s public prices &mdash; the site adds no forecast of
+its own, and none of this is investment advice.</p>
 
 <div class="allocBar">
   <label>Market
@@ -57,25 +65,33 @@ no forecast of its own, and none of this is investment advice.</p>
 <div id="allocWrap" class="expandable"><div id="alloc"></div></div>
 <p class="cap" id="allocNote"></p>
 
-<h2>How the sizing works</h2>
+<h2>How the split works</h2>
 <p class="sub">Your two numbers define a normal curve: the value you expect is its centre, and the 95&nbsp;percent
-band is two standard deviations either side. For every strike the calculator compares your probability that the
-contract pays with what it costs to buy now &mdash; Yes at one dollar less the No bid, No at one dollar less the
-Yes bid, plus the per-side fee &mdash; and only a side priced below your probability is a candidate. Sizing uses
-the <a href="https://www.princeton.edu/~wbialek/rome/refs/kelly_56.pdf">Kelly criterion</a> (Kelly, 1956): the
-aggressive scenario is the allocation that maximises the expected logarithm of wealth under your curve, computed
-jointly across the whole ladder so overlapping strikes are sized together rather than one at a time. The middle
-and conservative scenarios stake half and a quarter of that allocation and keep the rest in cash &mdash;
-fractional Kelly, the standard way to give up some expected growth for much smaller drawdowns
-(<a href="https://www.stat.berkeley.edu/~aldous/157/Papers/Good_Bad_Kelly.pdf">MacLean, Thorp &amp; Ziemba,
-<i>Good and bad properties of the Kelly criterion</i></a>). On quantities settled in whole units &mdash; daily
-temperatures, storm counts &mdash; &ldquo;above&nbsp;84&rdquo; is read as the settled figure rounding past it, so
-the working threshold sits half a unit beyond the strike, matching how the contracts settle. Dollar figures are
-turned into whole contracts by rounding down, and whatever that leaves over stays in cash.</p>
+band is two standard deviations either side &mdash; that curve says what you think, and the scenario says how
+much it hurts to be wrong; they are deliberately separate questions. The whole amount is always spent, so the
+calculator&rsquo;s only decision is the split: it chooses the one that maximises the expected utility of the
+payout under your curve, computed jointly across the ladder on the exact intervals between strike thresholds.
+The middle scenario uses the logarithm as the utility, which is the
+<a href="https://www.princeton.edu/~wbialek/rome/refs/kelly_56.pdf">Kelly criterion</a> (Kelly, 1956) in its
+original fully-invested form &mdash; and it has Kelly&rsquo;s famous property that when the prices already match
+your curve, the best split simply mirrors your own probabilities. The conservative and aggressive scenarios
+replace the logarithm with a more and a less risk-averse member of the same standard power-utility family
+&mdash; the fully-invested equivalents of quarter-Kelly and double-Kelly, the correspondence set out in
+<a href="https://www.stat.berkeley.edu/~aldous/157/Papers/Good_Bad_Kelly.pdf">MacLean, Thorp &amp; Ziemba,
+<i>Good and bad properties of the Kelly criterion</i></a>. A more risk-averse utility cannot tolerate outcomes
+that pay nothing, so it buys the cheap contracts on both flanks and the payout curve comes out smooth; a less
+risk-averse one accepts them, piles onto the best-priced strikes near your value, and pays several times the
+money &mdash; but only there. Costs are what a buyer pays now: Yes at one dollar less the No bid, No at one
+dollar less the Yes bid, the per-side fee inside every figure. On quantities settled in whole units &mdash;
+daily temperatures, storm counts &mdash; &ldquo;above&nbsp;84&rdquo; is read as the settled figure rounding past
+it, so the working threshold sits half a unit beyond the strike, matching how the contracts settle. Dollar
+shares become whole contracts by rounding down, and the loose change then buys one contract at a time, best
+first, until it cannot afford the cheapest thing left.</p>
 <p class="sub">What this is not: a forecast, a recommendation, or a fair value. The probabilities are yours
 &mdash; the page only does the arithmetic that follows from them, and if your numbers are wrong the expected
 values shown are wrong with them. The market&rsquo;s prices are themselves a probability curve, and when yours
-and the market&rsquo;s agree, the calculator correctly buys nothing.</p>
+and the market&rsquo;s agree, no split has an edge over another &mdash; the differences between the scenarios
+are then purely about how smooth a payout you want.</p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

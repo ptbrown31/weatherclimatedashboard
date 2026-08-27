@@ -1,19 +1,26 @@
-/* The allocation calculator: what a view spread across a strike ladder costs
-   and what it pays.
+/* The allocation calculator: one amount, spread across a strike ladder three
+   ways.
 
    A reader types two numbers — the value they expect, and how far off they
    could be — and the page turns that into a normal curve, prices every strike's
-   Yes and No against it, and sizes a set of purchases three ways. Everything on
-   the page is arithmetic on the reader's own numbers and the exchange's public
-   prices; the site contributes no forecast of its own, and the default ladder
-   is made up.
+   Yes and No against it, and splits a fixed amount across the ladder. The
+   whole amount is always spent: the question the page answers is never how
+   much to commit but where, and the three scenarios are three answers to
+   where. Everything on the page is arithmetic on the reader's own numbers and
+   the exchange's public prices; the site contributes no forecast of its own,
+   and the default ladder is made up.
 
-   The sizing rule is the Kelly criterion (Kelly 1956): choose the allocation
-   that maximises the expected logarithm of wealth under the reader's curve.
-   The three scenarios are the full Kelly allocation and half and a quarter of
-   it — fractional Kelly, the standard way to trade growth for drawdown
-   (MacLean, Thorp and Ziemba). The payoff of a set of these contracts is
-   constant between neighbouring strike thresholds, so the expected log is
+   The split maximises the expected utility of the payout under the reader's
+   curve, with utility from the standard power family (constant relative risk
+   aversion). The middle scenario uses the logarithm — Kelly's growth-optimal
+   rule (Kelly 1956), in its original fully-invested form. Conservative uses a
+   much more risk-averse member (gamma 4), which behaves like quarter-Kelly:
+   it hedges widely and its payout curve is smooth. Aggressive uses a less
+   risk-averse member (gamma one half), the double-Kelly over-bettor: it
+   concentrates near the reader's value and pays big only if the value lands
+   close. The Kelly-fraction-to-power-utility correspondence is the standard
+   one (MacLean, Thorp and Ziemba). The payoff of a set of these contracts is
+   constant between neighbouring strike thresholds, so the expected utility is
    computed exactly on those intervals rather than on a sampled grid.
 
    Prices follow the exchange's structure: there are no sellers, only bids to
@@ -24,10 +31,12 @@
    left out. */
 window.WXAlloc = (() => {
   const { el, txt, h, $ } = WXC;
+  /* gamma is relative risk aversion; 1/gamma is the equivalent Kelly fraction,
+     so these three are quarter-Kelly, Kelly, and double-Kelly. */
   const SCEN = [
-    { key: 'conservative', name: 'Conservative', frac: 0.25, col: 'var(--cool)' },
-    { key: 'middle', name: 'Middle', frac: 0.5, col: 'var(--lamp)' },
-    { key: 'aggressive', name: 'Aggressive', frac: 1, col: 'var(--nbm)' },
+    { key: 'conservative', name: 'Conservative', gamma: 4, col: 'var(--cool)', blurb: 'hedges widest — the smoothest payout' },
+    { key: 'middle', name: 'Middle', gamma: 1, col: 'var(--lamp)', blurb: 'growth-optimal — Kelly’s own rule' },
+    { key: 'aggressive', name: 'Aggressive', gamma: 0.5, col: 'var(--nbm)', blurb: 'concentrated — pays big only near your value' },
   ];
   let tip = null;
 
@@ -61,8 +70,7 @@ window.WXAlloc = (() => {
   /* Ladder rows -> the instruments a buyer could hold.
 
      One per buyable side per strike. cost is in dollars per contract and
-     includes the fee; win is the net gain per contract when it pays (1 - cost)
-     and -cost when it does not. */
+     includes the fee. */
   function instruments(ladder, feeDollars) {
     const out = [];
     (ladder.rows || []).forEach(r => {
@@ -94,7 +102,10 @@ window.WXAlloc = (() => {
      Every instrument's payoff is decided by which side of its threshold the
      value lands on, so between two neighbouring thresholds nothing changes.
      The intervals between the sorted thresholds are therefore the exact
-     outcome space, and each carries its normal probability mass. */
+     outcome space, and each carries its normal probability mass. Intervals
+     the curve gives less than a billionth of a chance are dropped: they are
+     numerical dust, and under a utility that hates zero payout they would
+     otherwise demand meaningless hedges. */
   function bins(instr, mu, sigma) {
     const ts = Array.from(new Set(instr.map(i => i.thr))).sort((a, b) => a - b);
     const edges = [-Infinity].concat(ts, [Infinity]);
@@ -104,12 +115,11 @@ window.WXAlloc = (() => {
       const m = (sigma > 0)
         ? Phi((hi - mu) / sigma) - Phi((lo - mu) / sigma)
         : ((mu > lo && mu <= hi) ? 1 : 0);
-      if (m <= 0) continue;
+      if (m <= 1e-9) continue;
       // a representative value strictly inside the interval decides payoffs
       const v = !isFinite(lo) ? hi - 1 : (!isFinite(hi) ? lo + 1 : (lo + hi) / 2);
       out.push({ lo, hi, mass: m, v });
     }
-    // renormalise the tail mass lost to the erf approximation
     const tot = out.reduce((a, b2) => a + b2.mass, 0);
     if (tot > 0) out.forEach(b2 => { b2.mass /= tot; });
     return out;
@@ -121,113 +131,131 @@ window.WXAlloc = (() => {
     return i.side === 'yes' ? (i.dir > 0 ? above : !above) : (i.dir > 0 ? !above : above);
   };
 
-  /* Full-Kelly weights: maximise sum_b mass_b * log(1 + sum_j f_j g_jb) with
-     f >= 0 and sum f <= CAP, by projected gradient ascent with backtracking.
-     g is the net return per dollar staked: (1-cost)/cost when the contract
-     pays, -1 when it does not. The problem is concave and small (tens of
-     instruments, tens of intervals), so this converges in a few hundred
-     steps. Deterministic: no randomness anywhere. */
-  const CAP = 0.995;                     // full ruin in some interval means log(0)
-  function kelly(instr, B) {
+  /* The split: maximise sum_b mass_b * U(x_b) over the simplex sum f = 1,
+     f >= 0, where f_j is the share of the money on instrument j and
+     x_b = sum_j f_j * a_jb is the payout per dollar in interval b, with
+     a_jb = 1/cost when j pays there and 0 when it does not.
+
+     U is the power utility with relative risk aversion `gamma`; gamma 1 is
+     the logarithm and the problem is then exactly Kelly's fully-invested
+     horse race generalised to overlapping claims. The payout floor XF stands
+     in for U(0), which is minus infinity for gamma >= 1: it keeps the
+     arithmetic finite in intervals no buyable contract covers, where the
+     term is constant in f and moves nothing.
+
+     Projected gradient with backtracking finds the neighbourhood; pairwise
+     transfers polished by golden section finish the job, because adjacent
+     strikes make near-equivalent instruments and gradient steps crawl along
+     the nearly flat ridge between them — stopping with the right objective
+     but the wrong split, a bar on the page the true optimum does not hold.
+     On the simplex a single coordinate cannot move alone, so the polish
+     moves money between pairs. Deterministic throughout. */
+  const XF = 1e-4;
+  function crra(instr, B, gamma) {
     const n = instr.length;
     if (!n || !B.length) return new Array(n).fill(0);
-    const g = instr.map(i => B.map(b => (pays(i, b.v) ? (1 - i.cost) / i.cost : -1)));
-    const W = f => B.map((b, bi) => 1 + f.reduce((a, fj, j) => a + fj * g[j][bi], 0));
+    if (n === 1) return [1];
+    const a = instr.map(i => B.map(b => (pays(i, b.v) ? 1 / i.cost : 0)));
+    const U = gamma === 1 ? (x => Math.log(Math.max(x, XF)))
+      : (x => (Math.pow(Math.max(x, XF), 1 - gamma) - 1) / (1 - gamma));
+    const dU = x => Math.pow(Math.max(x, XF), -gamma);
+    const X = f => B.map((b, bi) => f.reduce((s, fj, j) => s + fj * a[j][bi], 0));
     const G = f => {
-      const w = W(f);
+      const x = X(f);
       let s = 0;
-      for (let bi = 0; bi < B.length; bi++) { if (w[bi] <= 1e-9) return -Infinity; s += B[bi].mass * Math.log(w[bi]); }
+      for (let bi = 0; bi < B.length; bi++) s += B[bi].mass * U(x[bi]);
       return s;
     };
     const grad = f => {
-      const w = W(f);
-      return instr.map((_, j) => B.reduce((a, b, bi) => a + b.mass * g[j][bi] / Math.max(w[bi], 1e-9), 0));
+      const x = X(f);
+      return instr.map((_, j) => B.reduce((s, b, bi) => s + b.mass * dU(x[bi]) * a[j][bi], 0));
     };
-    // Euclidean projection onto {f >= 0, sum f <= CAP}
+    // Euclidean projection onto the simplex {f >= 0, sum f = 1}
     function project(f) {
-      f = f.map(v => Math.max(0, v));
-      let s = f.reduce((a, b) => a + b, 0);
-      if (s <= CAP) return f;
-      // shift by the theta that lands the clipped sum on the cap
-      const sorted = f.slice().sort((a, b) => b - a);
+      const sorted = f.slice().sort((p, q) => q - p);
       let acc = 0, theta = 0;
       for (let k = 0; k < sorted.length; k++) {
         acc += sorted[k];
-        const t = (acc - CAP) / (k + 1);
+        const t = (acc - 1) / (k + 1);
         if (k + 1 === sorted.length || sorted[k + 1] <= t) { theta = t; break; }
       }
       return f.map(v => Math.max(0, v - theta));
     }
-    let f = new Array(n).fill(0), best = 0, eta = 0.25;
+    let f = new Array(n).fill(1 / n), best = G(f), eta = 0.1;
     for (let it = 0; it < 600; it++) {
       const d = grad(f);
-      let cand = project(f.map((v, j) => v + eta * d[j]));
+      const scale = Math.max(1e-12, Math.max(...d.map(Math.abs)));
+      let cand = project(f.map((v, j) => v + (eta / scale) * d[j]));
       let gc = G(cand);
       let tries = 0;
-      while (gc < best - 1e-12 && tries < 30) { eta *= 0.5; cand = project(f.map((v, j) => v + eta * d[j])); gc = G(cand); tries++; }
-      if (gc <= best + 1e-12 && tries >= 30) break;
+      while (gc < best - 1e-12 && tries < 30) { eta *= 0.5; cand = project(f.map((v, j) => v + (eta / scale) * d[j])); gc = G(cand); tries++; }
+      if (gc <= best + 1e-14 && tries >= 30) break;
       if (gc > best) { f = cand; best = gc; }
-      if (it % 20 === 19) eta = Math.min(eta * 2, 0.5);   // recover step size
+      if (it % 20 === 19) eta = Math.min(eta * 2, 0.5);
     }
-    /* Polish by exact coordinate ascent.
-
-       Adjacent strikes make near-equivalent instruments, so the optimum sits
-       on a nearly flat ridge; gradient steps crawl along it and can stop with
-       the right objective but the wrong split between neighbours — a bar on
-       the page the true optimum does not buy. One coordinate at a time the
-       problem is one-dimensional and concave, so golden-section solves it
-       exactly, and cycling to a fixed point lands on the optimum itself.
-       Each 1-D evaluation is O(intervals) via the cached wealth vector, so
-       the whole polish costs less than the gradient phase did. */
-    const w = W(f);
-    const g1 = (j, x) => {                 // G with f_j moved to x, using w
-      const df = x - f[j];
-      let sacc = 0;
-      for (let bi = 0; bi < B.length; bi++) {
-        const wb = w[bi] + df * g[j][bi];
-        if (wb <= 1e-9) return -Infinity;
-        sacc += B[bi].mass * Math.log(wb);
-      }
-      return sacc;
-    };
+    // pairwise polish on the cached payout vector
+    const x = X(f);
     const PHI2 = (Math.sqrt(5) - 1) / 2;
-    for (let sweep = 0; sweep < 400; sweep++) {
+    const pairG = (j, k, t) => {           // move t from k to j
+      let s = 0;
+      for (let bi = 0; bi < B.length; bi++) s += B[bi].mass * U(x[bi] + t * (a[j][bi] - a[k][bi]));
+      return s;
+    };
+    for (let sweep = 0; sweep < 80; sweep++) {
       let gained = 0;
       for (let j = 0; j < n; j++) {
-        const others = f.reduce((a, v, k) => a + (k === j ? 0 : v), 0);
-        let lo = 0, hi = Math.max(0, CAP - others);
-        for (let it2 = 0; it2 < 60; it2++) {
-          const a = hi - PHI2 * (hi - lo), b = lo + PHI2 * (hi - lo);
-          if (g1(j, a) < g1(j, b)) lo = a; else hi = b;
-        }
-        const x = (lo + hi) / 2, before = g1(j, f[j]), after = g1(j, x);
-        if (after > before + 1e-14) {
-          const df = x - f[j];
-          for (let bi = 0; bi < B.length; bi++) w[bi] += df * g[j][bi];
-          f[j] = x; gained += after - before;
+        for (let k = j + 1; k < n; k++) {
+          let lo = -f[j], hi = f[k];
+          if (hi - lo < 1e-12) continue;
+          for (let it2 = 0; it2 < 44; it2++) {
+            const p = hi - PHI2 * (hi - lo), q = lo + PHI2 * (hi - lo);
+            if (pairG(j, k, p) < pairG(j, k, q)) lo = p; else hi = q;
+          }
+          const t = (lo + hi) / 2;
+          const before = pairG(j, k, 0), after = pairG(j, k, t);
+          if (after > before + 1e-14) {
+            for (let bi = 0; bi < B.length; bi++) x[bi] += t * (a[j][bi] - a[k][bi]);
+            f[j] += t; f[k] -= t;
+            gained += after - before;
+          }
         }
       }
       if (gained < 1e-12) break;
     }
-    // the ridge polish can leave a dust of tiny weights; below a tenth of a
-    // percent of the bankroll they can never round to a contract at any
-    // sensible budget and only clutter the picture
-    return f.map(v => (v < 1e-4 ? 0 : v));
+    return f;
   }
 
-  /* One scenario: fractional Kelly at `frac`, turned into whole contracts.
+  /* Shares -> whole contracts, with the change reinvested.
 
-     Contracts are floored, never rounded up, so a scenario cannot spend more
-     than its fractions imply; what the flooring leaves over stays in cash and
-     is shown, because paying for fewer, likelier outcomes IS the conservative
-     lesson. */
-  function scenario(instr, fstar, frac, budget) {
-    const hold = instr.map((i, j) => {
-      const dollars = budget * fstar[j] * frac;
-      const n = Math.floor(dollars / i.cost + 1e-9);
-      return { i, n, spent: n * i.cost };
-    }).filter(x => x.n > 0);
-    const spent = hold.reduce((a, x) => a + x.spent, 0);
+     Flooring each line leaves coins, and the brief here is that the whole
+     amount goes in. So the leftover buys one contract at a time, each time
+     the one that most raises the scenario's own expected utility, until it
+     cannot afford the cheapest thing left. What remains after that is
+     genuinely unspendable. */
+  function fill(instr, f, budget, B, gamma) {
+    const U = gamma === 1 ? (x => Math.log(Math.max(x, XF)))
+      : (x => (Math.pow(Math.max(x, XF), 1 - gamma) - 1) / (1 - gamma));
+    const n = instr.map((i, j) => Math.floor(budget * f[j] / i.cost + 1e-9));
+    let spent = instr.reduce((s, i, j) => s + n[j] * i.cost, 0);
+    // payout per dollar of budget, per interval, for the utility comparisons
+    const x = B.map(b => instr.reduce((s, i, j) => s + (pays(i, b.v) ? n[j] : 0), 0) / budget);
+    const score = () => B.reduce((s, b, bi) => s + b.mass * U(x[bi]), 0);
+    for (let guard = 0; guard < 4000; guard++) {
+      const residual = budget - spent;
+      let bj = -1, bg = -Infinity;
+      const base = score();
+      for (let j = 0; j < instr.length; j++) {
+        if (instr[j].cost > residual + 1e-9) continue;
+        let s = 0;
+        for (let bi = 0; bi < B.length; bi++) s += B[bi].mass * U(x[bi] + (pays(instr[j], B[bi].v) ? 1 / budget : 0));
+        const gain = s - base;
+        if (gain > bg + 1e-15) { bg = gain; bj = j; }
+      }
+      if (bj < 0) break;
+      n[bj] += 1; spent += instr[bj].cost;
+      for (let bi = 0; bi < B.length; bi++) if (pays(instr[bj], B[bi].v)) x[bi] += 1 / budget;
+    }
+    const hold = instr.map((i, j) => ({ i, n: n[j], spent: n[j] * i.cost })).filter(q => q.n > 0);
     return { hold, spent, cash: budget - spent };
   }
 
@@ -248,7 +276,7 @@ window.WXAlloc = (() => {
   // ---------------------------------------------------------- ladder sources
   /* The teaching ladder. Made up: a plausible daily-high board whose prices
      centre a degree and a half below the default belief, so the page opens on
-     a case with something to allocate. Every price is invented and says so. */
+     a case with something to tilt toward. Every price is invented and says so. */
   function teachingLadder() {
     const mu0 = 86.5, s0 = 2.2, rows = [];
     for (let k = 80; k <= 94; k++) {
@@ -317,19 +345,22 @@ window.WXAlloc = (() => {
     const mu = S.value, sg = sigma();
     instr.forEach(i => { i.p = pWin(i.thr, i.side === 'yes' ? i.dir : -i.dir, mu, sg); });
     const B = bins(instr, mu, sg);
-    const fstar = kelly(instr, B);
+    // the share of the curve where at least one buyable contract pays: money
+    // placed anywhere is lost in the rest, whatever the split
+    const cover = B.reduce((s, b) => s + (instr.some(i => pays(i, b.v)) ? b.mass : 0), 0);
     const scen = {};
     SCEN.forEach(sc => {
-      const s = scenario(instr, fstar, sc.frac, S.budget);
+      const f = crra(instr, B, sc.gamma);
+      const s = fill(instr, f, S.budget, B, sc.gamma);
       s.stats = scenarioStats(s, B);
       scen[sc.key] = s;
     });
-    return { instr, B, fstar, scen, fee };
+    return { instr, B, scen, fee, cover };
   }
 
   // ------------------------------------------------------------------- svg
   const fm$ = v => '$' + (Math.round(v * 100) / 100).toFixed(2);
-  const fmS = v => (v < 0 ? '\u2212' : '+') + fm$(Math.abs(v)).slice(1);   // signed, for net outcomes
+  const fmS = v => (v < 0 ? '−' : '+') + fm$(Math.abs(v)).slice(1);   // signed, for net outcomes
   const fmc = v => {
     const c = Math.round(v * 1000) / 10;                  // costs carry the half-cent fee
     return (c % 1 ? c.toFixed(1) : String(c)) + '¢';
@@ -339,6 +370,8 @@ window.WXAlloc = (() => {
     const s = Math.abs(v) >= 100 ? v.toFixed(0) : (Math.round(v * 10) / 10).toString();
     return s + (unit ? ' ' + unit : '');
   };
+  // a payout multiple: 14x for the cheap tail, 1.05x for the near-certainty
+  const fmx = m => (m >= 20 ? Math.round(m) : m >= 2 ? m.toFixed(1) : m.toFixed(2)) + '×';
 
   function draw() {
     const host = $('#alloc'); if (!host) return;
@@ -363,26 +396,28 @@ window.WXAlloc = (() => {
     const pad = Math.max((vHi - vLo) * 0.06, 0.5);
     vHi += pad; vLo -= pad;
 
-    const W = 960, T = 44, Bm = 30;
+    const W = 960, T = 46, Bm = 30;
     const rowH = Math.max(17, Math.min(34, 560 / Math.max(strikes.length, 1)));
     const H = Math.max(430, Math.min(760, T + Bm + strikes.length * rowH + 60));
     const y = v => T + (vHi - v) / (vHi - vLo) * (H - T - Bm);
 
-    // panel x-ranges: belief | allocation | payout
-    const P1 = { x0: 64, x1: 268 }, P2 = { x0: 330, x1: 640 }, P3 = { x0: 700, x1: 936 };
+    // four panels on one value axis:
+    // what you think | what it costs | where the money goes | what it pays
+    const P1 = { x0: 48, x1: 178 }, PL = 234, P2 = { x0: 240, x1: 430 },
+          P3 = { x0: 462, x1: 696 }, P4 = { x0: 726, x1: 936 };
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'ts', id: 'allocSvg' });
 
-    // value axis down the left, and a rule at every strike across all panels
+    // value axis down the left, and a rule at every tick across all panels
     const step = (vHi - vLo) > 60 ? 10 : (vHi - vLo) > 25 ? 5 : (vHi - vLo) > 8 ? 2 : (lad.grain === 'integer' ? 1 : (vHi - vLo) / 8);
     for (let v = Math.ceil(vLo / step) * step; v <= vHi; v += step) {
-      svg.appendChild(txt(fmv(v, ''), { x: P1.x0 - 8, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
-      svg.appendChild(el('line', { x1: P1.x0, x2: P3.x1, y1: y(v), y2: y(v), class: 'grid' }));
+      svg.appendChild(txt(fmv(v, ''), { x: P1.x0 - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
+      svg.appendChild(el('line', { x1: P1.x0, x2: P4.x1, y1: y(v), y2: y(v), class: 'grid' }));
     }
-    svg.appendChild(txt(unit ? 'value (' + unit + ')' : 'value', { x: 14, y: T - 26, class: 'ax' }));
+    if (unit) svg.appendChild(txt(unit, { x: P1.x0 - 6, y: H - Bm + 14, 'text-anchor': 'end', class: 'ax' }));
 
     // ---- panel 1: the reader's curve
-    svg.appendChild(txt('WHAT YOU THINK', { x: P1.x0, y: T - 26, class: 'ax', 'font-weight': 700 }));
-    svg.appendChild(txt('drag the dot or the band edges', { x: P1.x0, y: T - 14, class: 'ax' }));
+    svg.appendChild(txt('WHAT YOU THINK', { x: P1.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
+    svg.appendChild(txt('drag the dot or band edges', { x: P1.x0, y: T - 16, class: 'ax' }));
     {
       const xd = p => P1.x0 + p * (P1.x1 - P1.x0);        // density 0..1 of max
       const pk = 1 / (sg * Math.sqrt(2 * Math.PI));
@@ -412,10 +447,10 @@ window.WXAlloc = (() => {
         c.dataset.drag = kind;
         svg.appendChild(c);
       });
-      svg.appendChild(txt(fmv(mu, unit), { x: mid + 14, y: y(mu) - 8, 'font-weight': 700, 'font-size': 12, fill: 'var(--accent)' }));
+      svg.appendChild(txt(fmv(mu, unit), { x: mid + 12, y: y(mu) - 8, 'font-weight': 700, 'font-size': 12, fill: 'var(--accent)' }));
       [[mu + 2 * sg, '+' + fmv(2 * sg, '')], [mu - 2 * sg, '−' + fmv(2 * sg, '')]].forEach(([v, lab]) => {
         if (v < vLo || v > vHi) return;
-        svg.appendChild(txt(lab, { x: mid + 12, y: y(v) + 3.5, class: 'ax' }));
+        svg.appendChild(txt(lab, { x: mid + 10, y: y(v) + 3.5, class: 'ax' }));
       });
       /* Drag behaviour. Every change redraws the whole SVG, which destroys
          the element a pointer capture would live on and ends the drag after
@@ -446,17 +481,71 @@ window.WXAlloc = (() => {
       });
     }
 
-    // ---- panel 2: the allocation, one bar per buyable side with money in it
-    svg.appendChild(txt('WHERE THE ' + fm$(S.budget) + ' GOES — ' + scSel.name.toUpperCase(), { x: P2.x0, y: T - 26, class: 'ax', 'font-weight': 700 }));
-    svg.appendChild(txt('Yes to the right, No to the left · label is dollars → contracts', { x: P2.x0, y: T - 14, class: 'ax' }));
+    // the strike labels, once, serving the price and allocation panels alike
+    lad.rows.forEach(r => {
+      svg.appendChild(txt(r.label, { x: PL, y: y(r.strike) + 3.5, 'text-anchor': 'end', class: 'ax', 'font-size': 9 }));
+    });
+
+    // held sets, used by the price panel's outlines and the allocation bars
+    const held = {};
+    sel.hold.forEach(x => { held[x.i.side + '@' + x.i.strike] = x; });
+
+    // ---- panel 2: the prices as they stand, with the recommendation on them
+    svg.appendChild(txt('WHAT IT COSTS NOW', { x: P2.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
+    svg.appendChild(txt('outlined = what this split buys', { x: P2.x0, y: T - 16, class: 'ax' }));
     {
-      const spine = (P2.x0 + P2.x1) / 2 + 20;
+      const cw = (P2.x1 - P2.x0) / 100;                    // pixels per cent
+      lad.rows.forEach(r => {
+        const yy = y(r.strike);
+        const bh = Math.min(rowH * 0.72, 16), by = yy - bh / 2;
+        const yesPx = r.mid != null ? r.mid : (r.ask != null ? r.ask : (r.bid != null ? r.bid : null));
+        const oneSided = r.mid == null && yesPx != null;
+        if (yesPx == null) {
+          svg.appendChild(el('rect', { x: P2.x0, y: by, width: P2.x1 - P2.x0, height: bh, rx: 2, fill: 'none', stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
+          svg.appendChild(txt('no bids', { x: (P2.x0 + P2.x1) / 2, y: yy + 3.5, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
+          return;
+        }
+        const split = P2.x0 + yesPx * 100 * cw;
+        const gy = el('rect', { x: P2.x0, y: by, width: Math.max(split - P2.x0, 0.5), height: bh, fill: 'var(--yes)', opacity: oneSided ? 0.45 : 0.85 });
+        const rd = el('rect', { x: split, y: by, width: Math.max(P2.x1 - split, 0.5), height: bh, fill: 'var(--no)', opacity: oneSided ? 0.45 : 0.85 });
+        svg.appendChild(gy); svg.appendChild(rd);
+        // the recommendation: a heavy outline on the side this scenario buys,
+        // and a pill with the count and the price paid
+        ['yes', 'no'].forEach(side => {
+          const x = held[side + '@' + r.strike];
+          if (!x) return;
+          const seg = side === 'yes'
+            ? { x: P2.x0, w: Math.max(split - P2.x0, 3) } : { x: split, w: Math.max(P2.x1 - split, 3) };
+          svg.appendChild(el('rect', { x: seg.x + 0.5, y: by - 1.5, width: Math.max(seg.w - 1, 2), height: bh + 3, rx: 2,
+                                       fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2.2, 'pointer-events': 'none' }));
+          const t = x.n + ' ct @ ' + fmc(x.i.price);
+          const tw = t.length * 5.4 + 10;
+          const cx2 = Math.min(Math.max(seg.x + seg.w / 2, P2.x0 + tw / 2), P2.x1 - tw / 2);
+          svg.appendChild(el('rect', { x: cx2 - tw / 2, y: yy - 6.5, width: tw, height: 13, rx: 6.5, fill: 'var(--panel)', opacity: 0.92, 'pointer-events': 'none' }));
+          svg.appendChild(txt(t, { x: cx2, y: yy + 3.2, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 700, fill: 'var(--ink)', 'pointer-events': 'none' }));
+        });
+        // one hover band per row, with the whole story
+        const band = el('rect', { x: P2.x0, y: by - 2, width: P2.x1 - P2.x0, height: bh + 4, fill: 'transparent' });
+        bind(band, () => priceTip(r, R, held));
+        if (lad.productConid && (r.conidYes != null) && window.WXM && WXM.contractUrl) {
+          WXM.linkTo(band, WXM.contractUrl(lad.productConid, r.conidYes), 'Open ' + r.label + ' on IBKR');
+        }
+        svg.appendChild(band);
+      });
+      // a cents scale under the split bars
+      [0, 50, 100].forEach(c => {
+        svg.appendChild(txt(c + '¢', { x: P2.x0 + c * cw, y: H - Bm + 14, 'text-anchor': 'middle', class: 'ax' }));
+      });
+    }
+
+    // ---- panel 3: where the money goes, with the payout multiple on every bar
+    svg.appendChild(txt('WHERE THE ' + fm$(S.budget).replace(/\.00$/, '') + ' GOES — ' + scSel.name.toUpperCase(), { x: P3.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
+    svg.appendChild(txt('$ → contracts → payout multiple', { x: P3.x0, y: T - 16, class: 'ax' }));
+    {
+      const spine = (P3.x0 + P3.x1) / 2;
       const maxSpend = Math.max(1e-9, ...SCEN.map(s => R.scen[s.key].hold.reduce((a, x) => Math.max(a, x.spent), 0)));
-      const wOf = d => Math.min((P2.x1 - spine - 4), Math.max(2.5, d / maxSpend * (P2.x1 - spine - 8)));
+      const wOf = d => Math.min((P3.x1 - spine - 4), Math.max(2.5, d / maxSpend * (P3.x1 - spine - 8)));
       svg.appendChild(el('line', { x1: spine, x2: spine, y1: T, y2: H - Bm, stroke: 'var(--rule)' }));
-      const held = {};
-      sel.hold.forEach(x => { held[x.i.side + '@' + x.i.strike] = x; });
-      // every strike appears, holding or not, so the ladder's structure shows
       lad.rows.forEach(r => {
         const yy = y(r.strike);
         ['yes', 'no'].forEach(side => {
@@ -471,39 +560,43 @@ window.WXAlloc = (() => {
               WXM.linkTo(bar, WXM.contractUrl(lad.productConid, x.i.conid), 'Open ' + x.i.label + ' on IBKR');
             }
             svg.appendChild(bar);
-            /* The dollar label sits on the empty half of the spine. A No bar
-               grows left, into the same space as the ladder's own labels, so
-               its text goes to the right of the spine instead — the Yes half
-               at that strike is necessarily empty, because buying both sides
-               of one strike costs more than the dollar it returns and the
-               sizing never does it. */
-            const label = fm$(x.spent).replace('.00', '') + ' → ' + x.n + ' ct';
-            // a crossed book can put both sides of one strike in the set, in
-            // which case the No text falls back to the end of its own bar
+            /* Each label carries the whole arithmetic of its line: dollars in,
+               contracts bought, and the payout multiple those dollars come
+               back at if the line pays. The multiple IS the price seen from
+               the other end — 7 cents a contract is 14 times your money — and
+               printing it on every bar is the point of the page.
+
+               The text sits in the opposite half of the spine: the bar's own
+               half runs out of room exactly when the bar is worth reading,
+               and the other side's half at this strike is empty in every
+               uncrossed book, because buying both sides of one strike costs
+               more than the dollar it returns. */
+            const mult = x.n / Math.max(x.spent, 1e-9);
+            const label = fm$(x.spent).replace(/\.00$/, '') + ' → ' + x.n + ' ct → ' + fmx(mult);
             const both = held['yes@' + r.strike] && held['no@' + r.strike];
-            const lx = right ? spine + 1 + w + 5 : (both ? spine - 1 - w - 5 : spine + 6);
-            svg.appendChild(txt(label, { x: lx, y: yy + 3.5, 'text-anchor': (!right && both) ? 'end' : 'start', 'font-size': 9.5, 'font-weight': 600, fill: right ? 'var(--yes)' : 'var(--no)', 'pointer-events': 'none' }));
+            const lx = right ? (both ? spine + 1 + w + 5 : spine - 6) : (both ? spine - 1 - w - 5 : spine + 6);
+            const anch = right ? (both ? 'start' : 'end') : (both ? 'end' : 'start');
+            svg.appendChild(txt(label, { x: lx, y: yy + 3.5, 'text-anchor': anch, 'font-size': 9.5, 'font-weight': 600, fill: right ? 'var(--yes)' : 'var(--no)', 'pointer-events': 'none' }));
           } else if (inst) {
-            // buyable but not bought at these numbers: a tick, so the reader can
-            // still ask it questions
+            // buyable but not bought under this scenario: a tick, so the
+            // reader can still ask it questions
             const t2 = el('rect', { x: right ? spine + 1 : spine - 4, y: yy - 3, width: 3, height: 6, fill: 'var(--rule)' });
             bind(t2, () => instTip(inst, R, unit));
             svg.appendChild(t2);
           }
         });
-        svg.appendChild(txt(lad.rows.find(q => q.strike === r.strike).label, { x: P2.x0, y: yy + 3.5, class: 'ax', 'font-size': 9 }));
       });
     }
 
-    // ---- panel 3: what the whole set pays, as a function of the value
-    svg.appendChild(txt('WHAT THE SET PAYS', { x: P3.x0, y: T - 26, class: 'ax', 'font-weight': 700 }));
-    svg.appendChild(txt('gross dollars, by where the value lands', { x: P3.x0, y: T - 14, class: 'ax' }));
+    // ---- panel 4: what the whole set pays, as a function of the value
+    svg.appendChild(txt('WHAT THE SET PAYS', { x: P4.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
+    svg.appendChild(txt('gross $, by where it lands', { x: P4.x0, y: T - 16, class: 'ax' }));
     {
-      const maxPay = Math.max(S.budget * 0.4, ...SCEN.map(s => {
+      const maxPay = Math.max(S.budget * 1.15, ...SCEN.map(s => {
         const sc = R.scen[s.key];
         return R.B.reduce((a, b) => Math.max(a, payoutAt(sc.hold, b.v)), 0);
       }));
-      const xp = d => P3.x0 + Math.min(d / maxPay, 1) * (P3.x1 - P3.x0);
+      const xp = d => P4.x0 + Math.min(d / maxPay, 1) * (P4.x1 - P4.x0);
       // round-dollar ticks: the largest 1/2/5-series step that gives a few
       const dstep = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 25000, 50000, 100000]
         .filter(st => maxPay / st >= 2 && maxPay / st <= 6).pop() || Math.ceil(maxPay / 4);
@@ -511,6 +604,12 @@ window.WXAlloc = (() => {
         svg.appendChild(el('line', { x1: xp(d), x2: xp(d), y1: T, y2: H - Bm, class: 'grid' }));
         svg.appendChild(txt('$' + d, { x: xp(d), y: H - Bm + 14, 'text-anchor': 'middle', class: 'ax' }));
       }
+      /* One line for the money in: every scenario spends the whole amount (to
+         within coins), so right of this line a scenario is ahead and left of
+         it behind, and the three curves need no cost line each. */
+      svg.appendChild(el('line', { x1: xp(S.budget), x2: xp(S.budget), y1: T, y2: H - Bm, stroke: 'var(--ink)', 'stroke-dasharray': '4 3', opacity: 0.55 }));
+      const bx = xp(S.budget), bRight = bx > (P4.x0 + P4.x1) / 2;
+      svg.appendChild(txt('the ' + fm$(S.budget).replace(/\.00$/, '') + ' in', { x: bRight ? bx - 4 : bx + 4, y: T + 10, 'font-size': 9.5, fill: 'var(--muted)', 'text-anchor': bRight ? 'end' : 'start' }));
       // thresholds where any payoff can change, inside the drawn domain
       const ts = Array.from(new Set(R.instr.map(i => i.thr))).sort((a, b) => a - b).filter(t => t > vLo && t < vHi);
       const edges = [vLo].concat(ts, [vHi]);
@@ -525,31 +624,25 @@ window.WXAlloc = (() => {
           d += (b ? 'L' : 'M') + xp(pay).toFixed(1) + ',' + y(v0).toFixed(1) + 'L' + xp(pay).toFixed(1) + ',' + y(v1).toFixed(1);
         }
         svg.appendChild(el('path', { d, fill: 'none', stroke: s.col, 'stroke-width': on ? 2.4 : 1.3, opacity: on ? 1 : 0.55, 'pointer-events': 'none' }));
-        // the scenario's outlay, on the same dollar axis: right of this line the set is ahead
-        svg.appendChild(el('line', { x1: xp(sc.spent), x2: xp(sc.spent), y1: T, y2: H - Bm, stroke: s.col, 'stroke-dasharray': '3 3', opacity: on ? 0.8 : 0.3 }));
-        if (on) {
-          const cx = xp(sc.spent), rightHalf = cx > (P3.x0 + P3.x1) / 2;
-          svg.appendChild(txt('cost ' + fm$(sc.spent), { x: rightHalf ? cx - 4 : cx + 4, y: T + 10, 'font-size': 9.5, fill: s.col, 'text-anchor': rightHalf ? 'end' : 'start' }));
-        }
       });
       // hover: read all three at a value
-      const band = el('rect', { x: P3.x0, y: T, width: P3.x1 - P3.x0, height: H - T - Bm, fill: 'transparent' });
+      const band = el('rect', { x: P4.x0, y: T, width: P4.x1 - P4.x0, height: H - T - Bm, fill: 'transparent' });
       let mark = null;
       band.addEventListener('mousemove', ev => {
         const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
         const q = pt.matrixTransform(svg.getScreenCTM().inverse());
         const v = vHi - (q.y - T) / (H - T - Bm) * (vHi - vLo);
-        if (!mark) { mark = el('line', { x1: P3.x0, x2: P3.x1, stroke: 'var(--ink)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.5, 'pointer-events': 'none' }); svg.appendChild(mark); }
+        if (!mark) { mark = el('line', { x1: P4.x0, x2: P4.x1, stroke: 'var(--ink)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.5, 'pointer-events': 'none' }); svg.appendChild(mark); }
         mark.setAttribute('y1', q.y); mark.setAttribute('y2', q.y);
         const gr = lad.grain === 'integer' ? Math.round(v) : Math.round(v * 10) / 10;
         const rows = SCEN.map(s => {
           const sc = R.scen[s.key];
           const pay = payoutAt(sc.hold, v);
           return ['<span class="sw" style="background:' + s.col + '"></span>' + s.name,
-                  fm$(pay) + ' (' + (pay - sc.spent >= 0 ? '+' : '−') + fm$(Math.abs(pay - sc.spent)).slice(1) + ' net)'];
+                  fm$(pay) + ' (' + fmS(pay - sc.spent) + ' net)'];
         });
         tip.show(ev, tip.rows('If the value lands at ' + fmv(gr, unit), rows,
-          'gross payout, and net of what each scenario spent'));
+          'gross payout, and net of the money in'));
       });
       band.addEventListener('mouseleave', () => { tip.hide(); if (mark) { mark.remove(); mark = null; } });
       svg.insertBefore(band, svg.firstChild);
@@ -564,7 +657,7 @@ window.WXAlloc = (() => {
       const on = s.key === scSel.key;
       const c = h('button', { class: 'allocChip' + (on ? ' on' : ''), type: 'button' }, [
         h('b', { text: s.name, style: 'color:' + s.col }),
-        h('span', { text: 'spends ' + fm$(sc.spent) + ' · keeps ' + fm$(sc.cash) }),
+        h('span', { text: s.blurb }),
         h('span', { text: 'your expected value ' + fmS(st.evNet) }),
         // signed, not assumed: a set can be ahead even in its worst interval
         h('span', { text: 'worst ' + fmS(st.worstNet) + ' · best ' + fmS(st.bestNet) }),
@@ -575,30 +668,40 @@ window.WXAlloc = (() => {
     host.appendChild(chips);
     const note = $('#allocNote');
     if (note) {
-      const nb = R.instr.filter(i => i.p > i.cost).length;
-      const anyHold = SCEN.some(s2 => R.scen[s2.key].hold.length);
       const nct = sel.hold.reduce((a, x) => a + x.n, 0);
       let msg;
-      if (sel.hold.length) {
-        msg = 'At your numbers, ' + nb + ' of the ' + R.instr.length + ' buyable sides are priced below your probability that they pay. '
-          + 'The ' + scSel.name.toLowerCase() + ' scenario buys ' + nct + (nct === 1 ? ' contract' : ' contracts') + ' across '
-          + sel.hold.length + ' of them for ' + fm$(sel.spent) + '; the expected values shown are under your curve, not anyone else’s.';
-      } else if (anyHold) {
-        msg = 'The ' + scSel.name.toLowerCase() + ' fractions round below one whole contract at this budget. '
-          + 'A bolder scenario still buys; so would more dollars.';
-      } else if (!R.instr.length) {
-        msg = 'Nothing on this ladder can be bought right now \u2014 no strike has a resting bid on the other side to buy against.';
+      if (!R.instr.length) {
+        msg = 'Nothing on this ladder can be bought right now — no strike has a resting bid on the other side to buy against.';
       } else {
-        msg = 'At your numbers nothing on this ladder is priced below your probability that it pays, so no scenario buys anything. Move the value or widen the band to see an allocation.';
+        msg = 'The ' + scSel.name.toLowerCase() + ' split buys ' + nct + (nct === 1 ? ' contract' : ' contracts') + ' across '
+          + sel.hold.length + (sel.hold.length === 1 ? ' line' : ' lines') + ' for ' + fm$(sel.spent)
+          + (sel.cash > 0.005 ? ' — the ' + fm$(sel.cash).replace('$0.', '') + '¢ left cannot buy a whole contract' : '')
+          + '. The expected values shown are under your curve, not anyone else’s.';
+        if (R.cover < 0.995) {
+          msg += ' Your curve puts ' + fmp(1 - R.cover) + ' of its chance where nothing buyable pays — no split avoids losing there.';
+        }
       }
       note.textContent = (lad.synthetic ? lad.sub + ' ' : '') + msg;
     }
   }
 
-  // hover content for a held bar and an unheld tick
+  // hover content
   function bind(node, make) {
     node.addEventListener('mousemove', ev => tip.show(ev, make()));
     node.addEventListener('mouseleave', () => tip.hide());
+  }
+  function priceTip(r, R, held) {
+    const iy = R.instr.find(i => i.strike === r.strike && i.side === 'yes');
+    const ino = R.instr.find(i => i.strike === r.strike && i.side === 'no');
+    const rows = [];
+    if (iy) rows.push(['Buy Yes now at', fmc(iy.price) + ' · pays ' + fmx(1 / iy.cost)]);
+    if (ino) rows.push(['Buy No now at', fmc(ino.price) + ' · pays ' + fmx(1 / ino.cost)]);
+    if (!iy && !ino) rows.push(['No resting bids', 'neither side can be bought now']);
+    if (iy) rows.push(['Your chance Yes pays', fmp(iy.p)]);
+    const hy = held['yes@' + r.strike], hn = held['no@' + r.strike];
+    if (hy) rows.push(['This split buys', hy.n + ' Yes for ' + fm$(hy.spent)]);
+    if (hn) rows.push(['This split buys', hn.n + ' No for ' + fm$(hn.spent)]);
+    return tip.rows(r.label, rows, 'multiples are per contract, net of nothing; the fee is inside the cost');
   }
   function barTip(x, R, unit) {
     const i = x.i;
@@ -608,19 +711,19 @@ window.WXAlloc = (() => {
       ['Cost with the fee', fmc(i.cost)],
       ['Contracts', String(x.n)],
       ['Dollars in', fm$(x.spent)],
-      ['Pays if it hits', fm$(x.n) + ' (' + (x.n / Math.max(x.spent, 1e-9)).toFixed(1) + '×)'],
+      ['Pays if it hits', fm$(x.n) + ' (' + fmx(x.n / Math.max(x.spent, 1e-9)) + ')'],
       ['Your chance it pays', fmp(i.p)],
       ['Breaks even if the chance is', fmp(i.cost)],
-    ], 'your chance above the breakeven chance is the whole reason this bar exists');
+    ], 'the multiple is the price read from the other end');
   }
   function instTip(i, R, unit) {
     const yes = i.side === 'yes';
-    return tip.rows((yes ? 'Yes' : 'No') + ' · ' + i.label + ' — not bought', [
+    return tip.rows((yes ? 'Yes' : 'No') + ' · ' + i.label + ' — not in this split', [
       [yes ? 'Buy Yes now at' : 'Buy No now at', fmc(i.price)],
-      ['Cost with the fee', fmc(i.cost)],
+      ['Cost with the fee', fmc(i.cost) + ' · pays ' + fmx(1 / i.cost)],
       ['Your chance it pays', fmp(i.p)],
       ['Breaks even if the chance is', fmp(i.cost)],
-    ], i.p > i.cost ? 'a small edge the sizing rounded below one contract' : 'at your numbers this side is not cheap');
+    ], 'another scenario may hold it; this one found better uses for the money');
   }
 
   // ------------------------------------------------------------------ picker
@@ -759,7 +862,7 @@ window.WXAlloc = (() => {
       const imp = impDoc != null ? impDoc : impliedMedian(rows);
       setLadder({
         title: (doc.city || doc.station) + ' — daily ' + it.side + ', ' + it.day,
-        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '. Click a bar to open that contract on IBKR.',
+        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '. Click a row to open that contract on IBKR.',
         unit: celsius ? '°C' : '°F', grain: 'integer', rows, synthetic: false,
         productConid: ((doc.symbols || {})[it.side] || {}).productConid,
         defaults: { value: imp != null ? Math.round(imp * 10) / 10 : null, band: celsius ? 2.5 : 4 },
@@ -790,7 +893,7 @@ window.WXAlloc = (() => {
       const span = parsed.length ? parsed[parsed.length - 1].strike - parsed[0].strike : 4;
       setLadder({
         title: name + ' — ' + it.text.replace(/ \(\d+ strikes\)/, ''),
-        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '.' + (productConid ? ' Click a bar to open that contract on IBKR.' : ''),
+        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '.' + (productConid ? ' Click a row to open that contract on IBKR.' : ''),
         unit: '', grain: isCount ? 'integer' : 'continuous', rows: parsed, synthetic: false, productConid,
         defaults: { value: imp != null ? Math.round(imp * 100) / 100 : null, band: Math.max(Math.round(span / 4 * 100) / 100, isCount ? 2 : 0.1) },
       });
@@ -828,6 +931,6 @@ window.WXAlloc = (() => {
   }
 
   // pure pieces exposed for the verification harness, not for pages
-  const _math = { erf, Phi, pWin, instruments, bins, kelly, scenario, payoutAt, parseRow, impliedMedian, pays };
+  const _math = { erf, Phi, pWin, instruments, bins, crra, fill, payoutAt, parseRow, impliedMedian, pays };
   return { init, draw, _math, _state: S };
 })();

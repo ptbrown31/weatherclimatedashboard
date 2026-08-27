@@ -1331,49 +1331,92 @@ def run(no_build: bool) -> int:
             ctx = browser.new_context(viewport={"width": 1200, "height": 1000})
             page = ctx.new_page()
             errs = errors_of(page)
-            page.goto(f"{srv.url}/allocator.html"); page.wait_for_timeout(1600)
+            page.goto(f"{srv.url}/allocator.html"); page.wait_for_timeout(1800)
             chk.add("allocator: opens on the teaching ladder, clearly labelled",
                     "made-up" in page.locator("#allocTitle").inner_text().lower(),
                     page.locator("#allocTitle").inner_text())
             chk.add("allocator: three scenario chips", page.locator(".allocChip").count() == 3,
                     str(page.locator(".allocChip").count()))
-            m = page.evaluate("""() => {
+            m = page.evaluate('''() => {
               const M = WXAlloc._math;
-              // one instrument, believed 60% at a cost of 50 cents: full Kelly
-              // stakes (p-q)/1 = 0.2 of the bankroll, a textbook value
-              const inst = [{strike: 0, side: 'yes', dir: 1, thr: 0, cost: 0.5, price: 0.5}];
-              const B = M.bins(inst, 0.2533, 1);
-              const one = M.kelly(inst, B)[0];
-              // priced exactly at the belief, nothing is worth staking
-              const inst2 = [{strike: 0, side: 'yes', dir: 1, thr: 0, cost: 0.6, price: 0.6}];
-              const zero = M.kelly(inst2, M.bins(inst2, 0.2533, 1))[0];
-              return { one, zero, phi: M.Phi(1.96) };
-            }""")
-            chk.add("allocator: single-bet Kelly lands on the textbook fraction",
-                    abs(m["one"] - 0.2) < 0.005, str(m["one"]))
-            chk.add("allocator: a fairly priced contract gets nothing", m["zero"] < 1e-6, str(m["zero"]))
+              // a complete two-claim market believed 60/40 with both sides at
+              // 50 cents: closed forms exist for every scenario. Log is
+              // Kelly's bet-your-beliefs (0.6); with risk aversion gamma the
+              // split solves f/(1-f) = 1.5^(1/gamma).
+              const inst = [
+                {strike: 0, side: 'yes', dir: 1, thr: 0, cost: 0.5, price: 0.5},
+                {strike: 0, side: 'no',  dir: 1, thr: 0, cost: 0.5, price: 0.5},
+              ];
+              const B = M.bins(inst, 0.2533, 1);   // P(above) = 0.6
+              return { g1: M.crra(inst, B, 1)[0], g4: M.crra(inst, B, 4)[0],
+                       gH: M.crra(inst, B, 0.5)[0],
+                       one: M.crra([inst[0]], M.bins([inst[0]], 0.2533, 1), 1),
+                       phi: M.Phi(1.96) };
+            }''')
+            chk.add("allocator: the log split is Kelly's bet-your-beliefs",
+                    abs(m["g1"] - 0.6) < 0.003, str(m["g1"]))
+            chk.add("allocator: the conservative split matches its closed form",
+                    abs(m["g4"] - 0.5253) < 0.005, str(m["g4"]))
+            chk.add("allocator: the aggressive split matches its closed form",
+                    abs(m["gH"] - 0.6923) < 0.005, str(m["gH"]))
+            chk.add("allocator: one buyable side takes everything", m["one"] == [1], str(m["one"]))
             chk.add("allocator: the normal curve is a normal curve", abs(m["phi"] - 0.975) < 0.001, str(m["phi"]))
-            sp = page.evaluate("""() => [...document.querySelectorAll('.allocChip')].map(c => {
-              const t = c.innerText.match(/spends \\$([0-9.]+)/); return t ? +t[1] : null; })""")
-            chk.add("allocator: conservative spends no more than middle, middle no more than aggressive",
-                    sp[0] is not None and sp[0] <= sp[1] + 1e-6 and sp[1] <= sp[2] + 1e-6, str(sp))
-            chk.add("allocator: no scenario spends past the budget", all(x is not None and x <= 100.01 for x in sp), str(sp))
+            st = page.evaluate('''() => [...document.querySelectorAll('.allocChip')].map(c => {
+              const sp = c.innerText.match(/for \\$([0-9.]+)/);
+              const wn = c.innerText.match(/worst ([+\\u2212])\\$?([0-9.]+)/);
+              const bn = c.innerText.match(/best ([+\\u2212])\\$?([0-9.]+)/);
+              const sgn = t => t && (t[1] === '+' ? 1 : -1) * parseFloat(t[2]);
+              return { worst: sgn(wn), best: sgn(bn) }; })''')
+            chk.add("allocator: the conservative worst case is the shallowest and the aggressive the deepest",
+                    st[0]["worst"] is not None and st[0]["worst"] >= st[1]["worst"] - 1e-6 and st[1]["worst"] >= st[2]["worst"] - 1e-6,
+                    str(st))
+            chk.add("allocator: the aggressive best case is the highest",
+                    st[2]["best"] is not None and st[2]["best"] >= st[1]["best"] - 1e-6 and st[1]["best"] >= st[0]["best"] - 1e-6,
+                    str(st))
+            spent = page.evaluate('''() => {
+              // every scenario must spend the whole amount to within the
+              // cheapest contract still buyable
+              const R = (() => { const M = WXAlloc._math; const S = WXAlloc._state;
+                const fee = WXM.feeCents() / 100;
+                const instr = M.instruments(S.ladder, fee);
+                const B = M.bins(instr, S.value, Math.max(S.band / 2, 1e-6));
+                return [4, 1, 0.5].map(g => {
+                  const f = M.crra(instr, B, g);
+                  const sc = M.fill(instr, f, S.budget, B, g);
+                  const minCost = Math.min(...instr.map(i => i.cost));
+                  return { spent: sc.spent, slack: S.budget - sc.spent, minCost };
+                }); })();
+              return R;
+            }''')
+            chk.add("allocator: the whole amount goes in, to within the cheapest contract",
+                    all(r["slack"] < r["minCost"] + 1e-9 and r["spent"] <= 100.01 for r in spent),
+                    str([(round(r["spent"], 2), round(r["slack"], 2)) for r in spent]))
+            chk.add("allocator: every allocation bar names its payout multiple",
+                    page.evaluate("() => [...document.querySelectorAll('#allocSvg text')].filter(t => /\\u00d7$/.test(t.textContent)).length") > 0, "")
+            chk.add("allocator: the price column outlines what the split buys",
+                    page.locator("#allocSvg rect[stroke='var(--ink)']").count() > 0, "")
             chk.add("allocator: the belief curve has drag handles",
                     page.locator("#allocSvg circle[data-drag]").count() == 3,
                     str(page.locator("#allocSvg circle[data-drag]").count()))
+            # expanding must make the chart bigger, not smaller
+            w0 = page.evaluate("() => document.querySelector('#allocSvg').getBoundingClientRect().width")
+            page.locator("#allocCtl button").click(); page.wait_for_timeout(400)
+            w1 = page.evaluate("() => document.querySelector('#allocSvg').getBoundingClientRect().width")
+            page.keyboard.press("Escape"); page.wait_for_timeout(300)
+            chk.add("allocator: expanding the chart makes it bigger", w1 >= w0 - 1, f"{w0:.0f} -> {w1:.0f}")
             # a live import: the ladder, the prefill, and the click-through
-            page.select_option("#allocMarket", "city:KATL"); page.wait_for_timeout(1400)
+            page.select_option("#allocMarket", "city:KATL"); page.wait_for_timeout(1600)
             chk.add("allocator: a city ladder imports with its own name",
                     "Atlanta" in page.locator("#allocTitle").inner_text(),
                     page.locator("#allocTitle").inner_text())
             v = page.input_value("#allocValue")
             chk.add("allocator: the value prefills from the ladder's implied median",
                     v not in ("", "88"), v)
-            links = page.evaluate("() => document.querySelectorAll('#allocSvg rect[data-contract-url]').length")
-            chk.add("allocator: bought bars click through to the contract", links > 0, str(links))
+            links = page.evaluate("() => document.querySelectorAll('#allocSvg [data-contract-url]').length")
+            chk.add("allocator: rows and bars click through to the contract", links > 0, str(links))
             chk.add("allocator: the tornado count is filed under Weather, not Tropical Cyclones",
-                    page.evaluate("""() => { const g = [...document.querySelectorAll('#allocMarket optgroup')]
-                      .find(g => g.label.includes('Tropical')); return g && ![...g.children].some(o => o.value.includes('SWTUS')); }""") is True, "")
+                    page.evaluate('''() => { const g = [...document.querySelectorAll('#allocMarket optgroup')]
+                      .find(g => g.label.includes('Tropical')); return g && ![...g.children].some(o => o.value.includes('SWTUS')); }''') is True, "")
             t = "\n".join(page.locator(".sub").all_inner_texts()).lower()
             chk.add("allocator: never says ask, sell or offer",
                     "ask" not in t.replace("asked", "") and "sell" not in t and " offer" not in t, "")
