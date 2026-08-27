@@ -154,13 +154,23 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: the curve says what stands behind it",
                         "city-days" in acc_cap and "scored on the same days" in acc_cap, acc_cap[:90])
                 page.goto(f"{srv.url}/daily-temperature-markets.html"); page.wait_for_timeout(500)
-                art_t = page.locator(".prose").inner_text()
+                art_t = " ".join(" ".join(t.split()) for t in page.locator(".prose").all_inner_texts())
                 chk.add(f"{scheme} article: the settlement convention is stated exactly",
                         "strictly above" in art_t and "strictly below" in art_t and "resolves No" in art_t, "")
                 chk.add(f"{scheme} article: no handoff placeholder survived",
                         "SITE-LINK" not in art_t and "{" not in art_t, art_t[:60])
                 chk.add(f"{scheme} article: no internal review note published",
                         "DRAFT UPDATE" not in art_t and "for Patrick" not in art_t, "")
+                # the article names stations and cities, so it shows which
+                chk.add(f"{scheme} article: the stations are drawn and every one is a link",
+                        page.locator("#artMap a").count() >= 20
+                        and page.locator("#artMap text").count() >= 20,
+                        f"links={page.locator('#artMap a').count()} labels={page.locator('#artMap text').count()}")
+                chk.add(f"{scheme} article: it names the settlement source and the strict rule",
+                        "Weather Underground" in art_t and "midnight to midnight local time" in art_t
+                        and "50.5%" in art_t, art_t[:80])
+                chk.add(f"{scheme} article: it links the terms it describes",
+                        page.locator("a[href$='DailyTemperatureTermsandConditions.pdf']").count() >= 1, "")
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(800)
                 l1 = page.eval_on_selector_all("header.site nav.l1 > a", "els => els.map(e => e.textContent)")
                 l2 = page.eval_on_selector_all("header.site nav.l2 a", "els => els.map(e => e.textContent)")
@@ -242,6 +252,28 @@ def run(no_build: bool) -> int:
                 page.locator("#m2").click(); page.wait_for_timeout(500)
                 chk.add(f"{scheme} world map: each station carries its own unit",
                         all(("\u00b0F" not in l) or l.startswith("Honolulu") for l in wlabs), str(wlabs[:4]))
+
+                # ---- what happened between the hourly reports, as context and
+                # never as the settlement record
+                page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2800)
+                band = page.locator("#chart path[fill='var(--obs)'][fill-opacity='0.13']").count()
+                chk.add(f"{scheme} sub-hourly: the intra-hour range is drawn as a band",
+                        band == 1, str(band))
+                chk.add(f"{scheme} sub-hourly: it is never drawn as a second observation line",
+                        page.locator("#chart path[stroke='var(--obs)'][stroke-dasharray]").count() == 0, "")
+                caps = " ".join(" ".join(t.split()) for t in
+                                page.eval_on_selector_all(".wrap p.cap", "e=>e.map(x=>x.textContent)"))
+                chk.add(f"{scheme} sub-hourly: the page says it is not what settles a contract",
+                        "not the record a contract settles on" in caps
+                        and "settlement reads the hourly METARs" in caps, "")
+                keytxt = page.locator(".key").first.inner_text()
+                chk.add(f"{scheme} sub-hourly: the key names it and says what it is not",
+                        "not the settlement record" in keytxt, keytxt[:110])
+                # the station's own place, so a reader knows what the code means
+                chk.add(f"{scheme} locator: the page shows where the station is",
+                        page.locator("#locator svg.loc circle").count() >= 2
+                        and "KATL" in page.locator("#locator .cap").inner_text(),
+                        page.locator("#locator .cap").inner_text()[:60])
 
                 # ---- the forecaster's own words, attributed and linked
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2800)

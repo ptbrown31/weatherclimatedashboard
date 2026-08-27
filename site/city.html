@@ -14,7 +14,7 @@
 <p class="sub">Hourly METAR observations (what settlement reads) on one canvas with the National Weather
 Service forecast, NBM and LAMP guidance, and the lines each of them published before the day began, from
 this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high and low for the day.</p>
-<div id="skRow"></div>
+<div class="citytop"><div id="locator"></div><div id="skRow"></div></div>
 <div class="bar"><button id="fullBtn">Full: both contract days</button>
 <button id="ydayBtn">Show yesterday</button>
 <span class="cap" style="margin:0">full runs the trace to the end of tomorrow and shows both days&rsquo; strike ladders; yesterday overlays yesterday&rsquo;s observations and as-issued forecasts, shifted 24 hours</span>
@@ -22,6 +22,7 @@ this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high
 <div class="card expandable" id="chartCard"><svg id="chart" viewBox="0 0 960 390"></svg></div>
 <div class="key">
   <span><i style="border-color:var(--obs)"></i>Observed hourly (METAR)</span>
+  <span><i style="border-color:var(--obs);background:var(--obs);opacity:.28"></i>Range between the hourly reports (5-minute stream, not the settlement record)</span>
   <span><i style="border-color:var(--nws)"></i>NWS hourly, standing now</span>
   <span><i style="border-color:var(--nws);border-top-style:dotted"></i>NWS as issued for the day</span>
   <span><i style="border-color:var(--nbm);border-top-style:dashed"></i>NBM hourly guidance</span>
@@ -49,6 +50,11 @@ days with each source&rsquo;s forecast for that day, all pinned to six in the ev
 <div class="secttl" style="margin-top:20px">HOW CURRENT EACH FORECAST IS</div>
 <div id="freshness"></div>
 
+<p class="cap">The shaded band behind the observed line is the range the station&rsquo;s five-minute stream covered
+inside each hour. <b>It is context, not the record a contract settles on</b> &mdash; settlement reads the hourly
+METARs, which is the solid line, and a maximum taken over five-minute data lands at or above one taken over the
+hourly reports and effectively never below. Where the band is tall, the hourly number is one sample of a range
+and a brief peak between two reports is a thing that happened but is not in the record the contract reads.</p>
 <p class="cap">The dotted as-issued lines come from this site&rsquo;s forecast archive and cover the elapsed part of
 the day where only observations exist otherwise. Night shading marks the hours outside the contract day&rsquo;s
 daylight. Non-US stations show what US government feeds carry: observations everywhere, NBM guidance for

@@ -147,6 +147,44 @@ window.WXCity = (() => {
     summary.cities.filter(c => !c.onConus).forEach(c => pickDot(w, c, c.wx, c.wy, 1.2));
   }
 
+  /* A small map saying where this station is.
+
+     The picker below shows every station and answers "which one shall I look
+     at". This answers "where is the one I am looking at", which is a different
+     question and worth a second of a reader's time: a page headed KMDW does not
+     tell most people it is on the south-west side of Chicago.
+
+     It reuses the projected geometry the picker already loads, cropped to a box
+     around the station so the dot is not a pinprick on a continent. The crop is
+     in the same projected units, so no reprojection is involved. */
+  function drawLocator(c) {
+    const host = $('#locator'); if (!host || !c || !summary.base) return;
+    host.innerHTML = '';
+    const intl = !c.onConus;
+    const px = intl ? c.wx : c.px, py = intl ? c.wy : c.py;
+    if (px == null || py == null) return;
+    const paths = intl ? summary.base.worldPaths : summary.base.statePaths;
+    if (!paths) return;
+    // a window around the station, wide enough to place it in a region
+    const w = intl ? 300 : 260, hh = intl ? 150 : 130;
+    const x0 = Math.max(0, Math.min(960 - w, px - w / 2));
+    const y0 = Math.max(intl ? 60 : 0, Math.min((intl ? 380 : 600) - hh, py - hh / 2));
+    const svg = el('svg', { viewBox: `${x0} ${y0} ${w} ${hh}`, class: 'loc' });
+    if (intl) svg.appendChild(el('rect', { x: x0, y: y0, width: w, height: hh, fill: 'var(--map-sea)' }));
+    svg.appendChild(el('path', { d: paths, fill: 'var(--map-land)', stroke: 'var(--map-line)',
+                                 'stroke-width': intl ? .8 : 1 }));
+    svg.appendChild(el('circle', { cx: px, cy: py, r: 5.5, fill: 'none', stroke: 'var(--accent)',
+                                   'stroke-width': 1.6, opacity: .55 }));
+    svg.appendChild(el('circle', { cx: px, cy: py, r: 2.6, fill: 'var(--accent)' }));
+    host.appendChild(svg);
+    const bits = [c.city, c.station];
+    if (c.lat != null && c.lon != null) {
+      bits.push(Math.abs(c.lat).toFixed(2) + '\u00b0' + (c.lat >= 0 ? 'N' : 'S') + ' '
+                + Math.abs(c.lon).toFixed(2) + '\u00b0' + (c.lon >= 0 ? 'E' : 'W'));
+    }
+    host.appendChild(h('div', { class: 'cap', style: 'margin:4px 0 0', text: bits.join(' \u00b7 ') }));
+  }
+
   const city = () => summary.cities.find(x => x.station === cur);
 
   async function select(sid, push) {
@@ -161,9 +199,12 @@ window.WXCity = (() => {
     if (window.WXDiscussion) WXDiscussion.draw(sid).catch(() => {});
     const c0 = city();
     drawFreshness(c0);
-    const keys = [`forecast/${sid}.json`, `obs/${sid}.json`].concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`] : []);
+    drawLocator(c0);
+    const keys = [`forecast/${sid}.json`, `obs/${sid}.json`]
+      .concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`, `subhourly/${sid}.json`] : []);
     const r = await WXD.getAll(keys);
-    snaps = { fc: r[`forecast/${sid}.json`], ob: r[`obs/${sid}.json`], nm: r[`normals/${sid}.json`] || null };
+    snaps = { fc: r[`forecast/${sid}.json`], ob: r[`obs/${sid}.json`], nm: r[`normals/${sid}.json`] || null,
+              sub: r[`subhourly/${sid}.json`] || null };
     const mres = await WXM.load(sid);            // the station's quote snapshot (live market layer only)
     const st = $('#chartStatus');
     if (st) {
@@ -417,6 +458,34 @@ window.WXCity = (() => {
         'pointer-events': 'none' })));
       return grp;
     };
+    /* What happened between the hourly reports.
+
+       The trace is the hourly METAR record, which is what a contract settles on
+       and is twenty-four readings of a day that had nearly three hundred. The
+       band is the range the five minute stream covered inside each of those
+       hours: where it is tall, the hourly number is one sample of a range, and a
+       brief peak between two reports is a thing that happened and is not in the
+       record the contract reads.
+
+       Drawn first and faintly, so it sits behind everything and reads as
+       context. It is never a line: a line through it would look like a second
+       observation record, and there is only one of those. */
+    const sub = ((snaps.sub && snaps.sub.data) || {}).hourly || [];
+    if (sub.length) {
+      const band = sub.map(q => ({ t: Date.parse(q.h), lo: q.lo, hi: q.hi, n: q.n }))
+        .filter(q => isFinite(q.t) && q.lo != null && q.hi != null && q.t >= w0 && q.t <= d1)
+        .sort((a, b) => a.t - b.t);
+      if (band.length > 1) {
+        // each hour is a box across the hour it covers, not a point at its start
+        const HR = 3600000;
+        const d = band.map(q => 'M' + x(q.t).toFixed(1) + ',' + y(q.hi).toFixed(1)
+                              + 'L' + x(q.t + HR).toFixed(1) + ',' + y(q.hi).toFixed(1)
+                              + 'L' + x(q.t + HR).toFixed(1) + ',' + y(q.lo).toFixed(1)
+                              + 'L' + x(q.t).toFixed(1) + ',' + y(q.lo).toFixed(1) + 'Z').join(' ');
+        g.appendChild(el('path', { d, fill: 'var(--obs)', 'fill-opacity': .13, stroke: 'none',
+                                   'pointer-events': 'none' }));
+      }
+    }
     ySeries.forEach(s => { const a = { stroke: s.col, 'stroke-width': s.w, opacity: s.op }; if (s.dash) a['stroke-dasharray'] = s.dash; g.appendChild(line(s.pts, a)); });
     if (showYday && !YD.nws && !YD.nbm) g.appendChild(txt('Yesterday’s as-issued forecast appears here once the archive is a day old.', { x: S.L + 8, y: S.T + 30, class: 'axl' }));
     if (LAI.length) g.appendChild(line(LAI, { stroke: COL.lamp, 'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: .7 }));

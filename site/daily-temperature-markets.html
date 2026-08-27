@@ -11,39 +11,76 @@
 <body>
 <div class="wrap">
 <h1>Daily temperature markets at ForecastEx</h1>
-<p class="sub">An updated version of the campus article <a href="https://www.interactivebrokers.com/campus/traders-insight/ibkr-climate-energy/daily-high-temperature-markets-at-forecastex/">Daily High Temperature Markets at ForecastEx</a>, revised in August 2026 for the current contract terms: settlement now reads the station&rsquo;s observation record rather than the daily climate report, and the roster covers daily lows as well as highs. Passages the terms did not change are unaltered.</p>
 <div class="prose">
-<p>ForecastEx operates weather-forecast prediction markets, allowing participants to take financial positions on the daily high and low temperatures at 24 US cities, with additional international stations quoted in Celsius. Participants can access these markets on IBKR ForecastTrader.</p>
-<p>Prediction markets for daily temperatures can benefit both participants and external observers. Participating enables better-than-average forecasters to profit from their predictive skills. Additionally, for entities with a direct stake in temperature-sensitive outcomes, these markets offer a way to hedge risks. For instance, analysis from the International Energy Agency indicates that in hot weather, each additional degree can alter electricity demand by several percent. Therefore, the difference between a 97°F and a 100°F day is highly significant operationally for entities responsible for power supply. A retail electricity provider selling fixed-price energy might buy 100°F Yes contracts at $0.40 each. If the temperature reaches 100°F (and thus the contract settles at $1.00), the $0.60 per-contract gain would help offset higher wholesale costs associated with increased air conditioning and, in turn, electricity demand.</p>
-<p>The financial incentives involved motivate individuals who perceive mispricings to take positions that guide the probabilities toward accuracy. These continuously refined expectations then serve as a valuable public signal. Society has long valued accurate temperature forecasts to manage energy systems, prepare for heat and cold risks, plan daily operations, protect agriculture, and make countless smaller daily decisions, such as what to wear. These markets offer a system for collecting and summarizing information from existing forecasting methods and services, presenting it in a clear probabilistic framework that emphasizes inherent uncertainty rather than sidestepping it.</p>
-<p>The rest of this article covers how the contracts settle under the current terms and offers some tools and established weather-forecasting techniques for participants to use to identify potential mispricings.</p>
-<h2>Contract details and how settlement works</h2>
-<p>The temperatures these markets settle on are recorded by each city's airport weather station, such as the Automated Surface Observing Systems operated at major airports. Temperature varies substantially in space across cities due to changes in land cover, proximity to the central district, shade, and other local factors such as hills and nearby bodies of water, so precisely where the station is located can make a big difference, and the contract names the station.</p>
-<p>Under the current <a href="https://forecastex-public-data.s3.amazonaws.com/regulatory/DailyTemperatureTermsandConditions.pdf">terms and conditions</a>, each contract asks whether the highest (or lowest) temperature at the named station will exceed (or be below) a stated whole-degree threshold on a stated date. Settlement works as follows.</p>
-<p>The contract resolves on the daily temperature values displayed in <a href="https://www.wunderground.com/history">Weather Underground's</a> Daily Observations table for the named station and date, which is the station's record of METAR observations, the routine and special reports the station publishes through the day. The day runs from midnight to midnight local time at the station. The day's highest recorded value in that table settles the high contracts and the day's lowest settles the low contracts, in whole degrees Fahrenheit (whole degrees Celsius at the international stations). A high contract at a threshold resolves Yes only when the settled value is strictly above the threshold, and a low contract only when it is strictly below; landing exactly on the threshold resolves No. The contract resolves once the first observation for the following calendar day has been published, indicating the day's record is complete, and these contracts are not subject to early resolution, so a high that looks banked by mid-afternoon still trades until the day's record closes. Trading in each contract ends at 11:59 PM local time on the contract date.</p>
-<p>Two practical consequences of this convention are worth internalizing. First, because settlement reads the station's observation record rather than the once-daily climate report, the settled extreme can occasionally differ by a degree from the number later printed in a city's climate summary; only the observation table governs. Second, when a strong cold front is moving through, the high temperature for a given day can sometimes be recorded at midnight at the start of the day, whereas most conventional weather forecasts you see online or on TV are for the afternoon high, and the same logic applies in reverse to lows arriving at the end of a day rather than the usual pre-dawn hours.</p>
-<h2>Initial probabilities</h2>
-<p>ForecastEx daily markets for the next day's temperatures reappear once each day, listing around midday US Eastern time. When these markets appear, they are assigned central strike values and initial probabilities to facilitate initial trading, with participants themselves subsequently modifying the probabilities.</p>
-<p>The default public source for forecasts for US cities is the National Weather Service, so its forecasts inform the central strike values. At their core, the National Weather Service forecasts rely on the National Blend of Models, which aims to combine dozens of physics-based weather models, including global, regional, deterministic, and ensemble types, into a single, unified forecast. Instead of selecting one model, the National Blend of Models statistically merges many models and applies systematic adjustments based on their historical performance. This information is then augmented by human forecasters and compiled nationally in the National Digital Forecast Database, which is gridded at a few-kilometer resolution.</p>
-<p>Each market lists a ladder of consecutive whole-degree strikes around the central value, and each price is the market's probability that the day's extreme passes that strike. Understanding the range of uncertainty in temperature forecasts is important, as it helps people grasp the available precision and assess tail risks, and the ladder is exactly that uncertainty made tradable.</p>
-<h2>Considerations and tools for forecasting and identifying mispricings</h2>
-<p>Once the initial probabilities are seeded, traders' activity moves the odds from there. To be successful, participants must be able to identify where the National Weather Service default forecast is off and/or where the market is over- or underestimating uncertainty, meaning there is too much or too little probability density away from the central forecasted value.</p>
-<p>I have participated in the National Forecasting Competition (hosted by the University of Oklahoma Meteorology program) as both a meteorology student and later as a faculty member teaching synoptic meteorology and weather forecasting. From these experiences, I know there are many opportunities for humans to consistently beat the generic National Weather Service forecasts.</p>
-<p>There are many sites that provide an immense amount of weather information where forecasters can glean information on how meteorological conditions are evolving and thus get a general sense of when and where the National Weather Service forecasts might be off (e.g., sites like Pivotal Weather, Weathernerds, Windy, and College of DuPage Meteorology).</p>
-<p>Live per-station pages for every listed city, with the market ladder, the public forecasts, and the day's observations side by side, are maintained on this site's temperature pages: the <a href="index.html">national map</a> for every listed station at once, and a <a href="city.html?station=KLGA">per-station page</a> for one city through the day.</p>
-<p>Most physics-based weather models are computationally intensive and are thus run on supercomputers at most 4 times a day. Thus, a lot of information can come in at higher frequencies than the models can reflect. On the day of expiration, when much of the trading action will occur, forecasting the high temperature essentially involves observing how the atmosphere is changing relative to the story that the physics-based weather models predicted in their most recent runs.</p>
-<p>A participant could ground their forecast with the 3-hourly National Blend of Models text forecast. This can serve as the baseline against which a forecaster looks for deviations. It provides the expected evolution in moisture, sky cover, wind speed, wind direction, etc., associated with the National Weather Service's expected temperature evolution.</p>
-<p>Suppose that the National Blend of Models forecast indicates a high of 82°F, and that comes about under mostly sunny conditions with light southwest winds and a cold front passing through after 8:00 PM. That immediately indicates the necessary physical ingredients for reaching 82°F: long, unbroken sun and a late front. If that story appears to be unfolding accurately, then the central strike is probably reasonable. However, good forecasters can use other tools to assess whether the day is actually following the expected physical script.</p>
-<p>Live station readings show the current atmospheric conditions from the exact sensor that resolves the contract, and under the current settlement terms this is even more direct than it used to be, because the same observation stream the forecaster is watching is the record the contract settles on. Continuing the example, if by late morning the station already reports 79°F under clear skies with southwest winds and no frontal activity, the heating is running ahead of schedule. This is a scenario where the high could be underestimated. Conversely, if the live page indicates persistent low clouds, gentle onshore breezes, and temperatures remaining in the low 70s, the physical conditions might not support a high of 82°F.</p>
-<p>To understand which models might be telling a more plausible physical story as the day progresses, a forecaster could use multi-model ensemble displays such as Meteoblue's, which line up many physics-based weather models on a single chart for each location, covering not just temperature but cloud cover, relative humidity, wind speed, and wind direction. If, for example, some models are warmer mainly because they clear the clouds two hours earlier, while others maintain persistent cloud cover and weaker mixing, a forecaster can see that directly and compare those scenarios with the live station page to determine which models' forecasts are likely to be most accurate in real time. Recent-error verification pages, both Meteoblue's and the National Blend of Models' own, show how the models have performed at that station recently; if the models have run 2-3°F cool on each of the last several similar days, it is entirely reasonable to think the true central tendency sits warmer than the default forecast, and warmer strikes may be underpriced.</p>
-<p>Finally, the NOAA GSL Ensemble Explorer provides a short-range, high-resolution view that is particularly valuable for timing issues crucial to temperature forecasts. It allows forecasters to examine ensembles from HRRR and HREF and see the range of physically plausible conditions hour by hour, identifying the timing of frontal passages, marine layer erosion, afternoon convection, and diurnal wind patterns. If the National Blend of Models expects a front after sunset but most recent HRRR members bring it through two hours earlier, that significantly reduces the afternoon heating window, and the colder strikes may be underpriced.</p>
-<p>Overall, a rough workflow: begin with the National Blend of Models text forecast to understand the physical story behind the central strike; examine multi-model ensembles to identify which models tell that story and which diverge; use the verification pages to weigh which have earned trust in similar recent conditions; and watch the live observations to see which scenario is actually developing. When observations point to a group of models noticeably warmer or cooler than the central market value, that is a signal that taking a position could represent an opportunity.</p>
+<p>ForecastEx&rsquo;s Daily Temperature prediction markets allow participants to take financial positions on
+daily high and low temperatures both domestically and internationally.</p>
 </div>
-<p class="cap">Contract terms are the exchange&rsquo;s and can change; the <a href="https://forecastex-public-data.s3.amazonaws.com/regulatory/DailyTemperatureTermsandConditions.pdf">terms and conditions</a> govern. This page describes how the contracts settle and what a participant might look at; it is not investment advice and not a solicitation to trade.</p>
+
+<p class="cap" style="margin:0 0 6px"><a href="index.html">The board, station by station &rarr;</a></p>
+<div class="card"><svg id="artMap" viewBox="0 0 960 600" style="width:100%;height:auto;display:block"></svg></div>
+<p class="cap" id="artMapCap"></p>
+<p class="cap"><a href="index.html">Today&rsquo;s and tomorrow&rsquo;s boards, with the market against the
+National Weather Service forecast at every station &rarr;</a></p>
+
+<div class="prose">
+<p>Prediction markets for daily high temperatures can benefit both participants and external observers.
+Participating enables better-than-average forecasters to profit from their predictive skills (&ldquo;you must be
+right more than 50.5% of the time to win&rdquo;).</p>
+
+<p>Additionally, for entities with a direct stake in temperature-sensitive outcomes, these markets offer a way
+to hedge risks. For instance, analysis from the International Energy Agency indicates that in hot weather, each
+additional degree can alter electricity demand by several percent. Therefore, the difference between a 97&deg;F
+and a 100&deg;F day is highly significant operationally for entities responsible for power supply. A retail
+electricity provider selling fixed-price energy might buy 100&deg;F YES contracts at $0.40 each. If the
+temperature reaches 100&deg;F (and thus the contract settles at $1.00), the $0.60 per-contract gain would help
+offset higher wholesale costs associated with increased air conditioning and, in turn, electricity demand.</p>
+
+<p>The financial incentives involved motivate individuals who perceive mispricings to take positions that guide
+the probabilities toward accuracy. These continuously refined expectations then serve as a valuable public
+signal. Society has long valued accurate temperature forecasts to manage energy systems, prepare for heat and
+cold risks, plan daily operations, protect agriculture, and make countless smaller daily decisions, such as what
+to wear. These markets offer a system for collecting and summarizing information from existing forecasting
+methods and services, presenting it in a clear probabilistic framework that emphasizes inherent uncertainty
+rather than sidestepping it.</p>
+
+<h2>Contract Details</h2>
+
+<p>The most conventional temperature readings in the US are recorded by weather stations, such as Automated
+Surface Observing Systems co-operated by the Federal Aviation Administration, the Department of Defense, and the
+National Weather Service. What is typically considered the most official of these for a given city is that
+city&rsquo;s main airport&rsquo;s station.</p>
+
+<p>Temperature varies substantially in space across cities due to changes in land cover (e.g., park vs.
+concrete), proximity to the central district (urban heat island effect), shade, and other local factors such as
+hills and nearby bodies of water. Thus, precisely where the station is located can make a big difference.</p>
+
+<p>Under the current terms and conditions, each contract asks whether the highest (or lowest) temperature at the
+named station will exceed (or be below) a stated whole-degree threshold on a stated date.</p>
+
+<p>The contract resolves on the daily temperature values displayed in Weather Underground&rsquo;s Daily
+Observations table for the named station and date, which is the station&rsquo;s record of METAR observations, the
+routine and special reports the station publishes through the day.</p>
+
+<p>The day runs from midnight to midnight local time at the station.</p>
+
+<p>The day&rsquo;s highest recorded value in that table settles the high contracts and the day&rsquo;s lowest
+settles the low contracts, in whole degrees Fahrenheit (whole degrees Celsius at the international stations).</p>
+
+<p>A high contract at a threshold resolves Yes only when the settled value is strictly above the threshold, and a
+low contract only when it is strictly below; landing exactly on the threshold resolves No.</p>
+
+<p>One important note is that when a strong cold front is moving through, the high temperature for a given day
+between 00:00 and 23:59 local time can sometimes be recorded at midnight, whereas most conventional weather
+forecasts you see online or on TV are for the afternoon high.</p>
+
+<p>The exact terms and conditions are
+<a href="https://data.forecastex.com/regulatory/DailyTemperatureTermsandConditions.pdf" target="_blank" rel="noopener noreferrer">here</a>.</p>
+</div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
-<script>WXC.chrome('daily-temperature-markets.html');</script>
+<script src="js/artmap.js"></script>
+<script>WXC.chrome('daily-temperature-markets.html'); WXArtMap.init();</script>
 </body>
 </html>

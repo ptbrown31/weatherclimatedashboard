@@ -76,6 +76,7 @@ parameters: `station`, `theme`, `market`.
                      scorecard.py, normals.py, climate.py, season.py (the count climatology),
                      energy.py (the EIA series behind the energy contracts, needs a key),
                      discussion.py (each forecast office's Area Forecast Discussion),
+                     subhourly.py (the five minute stream, context only, never settlement),
                      traffic.py (page views from the CDN access logs),
                      basemap.py, storage.py, config.py,
                      run.py (command line), handler.py (the only vendor-specific file)
@@ -90,7 +91,7 @@ parameters: `station`, `theme`, `market`.
     tests/           unittest, no network
     DEPLOY.md        the runbook for the steps that need the owner's accounts
 
-Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|quotes|reask|market|scorecard|normals|climate|season|discussion|traffic|half-hourly|daily|all`.
+Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|quotes|reask|market|scorecard|normals|climate|season|discussion|subhourly|traffic|half-hourly|daily|all`.
 Verification: `python3 -m unittest discover -s tests` and `python3 scripts/verify.py` (Playwright).
 
 ## Working style

@@ -26,6 +26,7 @@ Jobs:
     catalogue    what the exchange lists for every product in the registry (once a day)
     series       the underlying series the monthly weather contracts settle on (once a day)
     discussion   the forecast office's own written reasoning, per office   (once a day)
+    subhourly    the five minute stream between the hourly reports    (every 10 min)
     catquotes    prices for the catalogue's monthly and annual contracts   (every 30 min)
     daily        scorecard, normals, climate, season, catalogue, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
@@ -42,7 +43,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -58,6 +59,7 @@ def _register():
     JOBS["catalogue"] = catalogue.catalogue_pass
     JOBS["series"] = series.series_pass
     JOBS["discussion"] = discussion.discussion_pass
+    JOBS["subhourly"] = subhourly.subhourly_pass
     JOBS["catquotes"] = catquotes.catquotes_pass
 
     def chain(*names):
@@ -85,7 +87,7 @@ def _register():
     # headline reads snapshots the steps before it have just written, so it
     # goes last in both chains: after quotes for fresh prices, after the
     # scorecard for the day just scored
-    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes")
+    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes", "subhourly")
     JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "catalogue", "series", "discussion", "headline", "traffic")
     JOBS["market"] = chain("quotes", "reask", "headline")
     JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")

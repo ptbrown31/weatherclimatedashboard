@@ -127,6 +127,44 @@ def c_to_f(c: float) -> float:
 # ===========================================================================
 # OBSERVATIONS — aviationweather.gov
 # ===========================================================================
+def fetch_subhourly(station: str, hours: int = 30) -> list[dict]:
+    """
+    The five minute ASOS stream for one station, from api.weather.gov.
+
+    THIS IS NOT THE SETTLEMENT RECORD and must never be used as one. The
+    contracts resolve on hourly METARs and this site reads those from
+    aviationweather.gov; see fetch_observations above for why. A daily maximum
+    taken over five minute data lands at or above one taken over the hourly
+    reports and effectively never below, so swapping the two would move the
+    number a contract settles on.
+
+    What it is good for is showing what happened BETWEEN the hourly reports. An
+    hourly record is twenty-four readings of a day that had nearly three hundred,
+    and a brief afternoon peak that fell between two reports is invisible in it
+    while being exactly the kind of thing a reader wonders about. Carried
+    separately, drawn separately, and labelled as not the settlement record.
+
+    Rows are {t, tempF, qc}: the observation time, the temperature in Fahrenheit
+    from the feed's Celsius, and the feed's own quality flag, which is passed
+    through rather than interpreted here.
+    """
+    start = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    d = _get(f"https://api.weather.gov/stations/{station}/observations"
+             f"?start={urllib.parse.quote(start)}&limit=500")
+    out = []
+    for f in (d.get("features") or []):
+        p = f.get("properties") or {}
+        t = p.get("timestamp")
+        v = ((p.get("temperature") or {}).get("value"))
+        if not t or v is None:
+            continue
+        out.append({"t": str(t).replace("+00:00", "Z"),
+                    "tempF": round(c_to_f(float(v)), 1),
+                    "qc": (p.get("temperature") or {}).get("qualityControl")})
+    out.sort(key=lambda r: r["t"])
+    return out
+
+
 def fetch_observations(stations: list[str], hours: int = 36) -> dict[str, list[dict]]:
     """
     METAR observations for one or more ICAO stations.

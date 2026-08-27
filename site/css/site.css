@@ -295,3 +295,13 @@ body.wtfull{overflow:hidden}
 .afd[open] summary .afdmore{opacity:.6}
 .afdtext{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
   line-height:1.5;margin:10px 0 6px;max-height:460px;overflow:auto;color:var(--ink)}
+
+
+/* where this station is: a small crop of the same projected geometry the picker
+   uses, so a reader knows what KMDW means without looking it up */
+.citytop{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;margin:0 0 8px}
+.citytop #locator{flex:0 0 240px}
+.citytop #skRow{flex:1 1 380px;min-width:0}
+svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);border-radius:6px;
+  background:var(--map-sea)}
+@media (max-width:700px){.citytop #locator{flex:1 1 100%}svg.loc{width:100%}}
