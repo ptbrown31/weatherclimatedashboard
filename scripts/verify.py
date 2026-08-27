@@ -1128,12 +1128,17 @@ def run(no_build: bool) -> int:
                         page.eval_on_selector_all("#panels circle.rdot",
                             "e=>e.every(x=>getComputedStyle(x).pointerEvents==='none')"), "")
 
-                # every contract names the document that governs it
-                tl = page.locator("#panels .psub a")
+                # every contract names the document that governs it, and offers
+                # the same ladder in the allocation calculator; the sub-line
+                # carries both links and nothing else
+                hrefs = page.eval_on_selector_all("#panels .psub a", "e=>e.map(x=>x.getAttribute('href')||'')")
+                terms_n = sum(1 for u in hrefs if "TermsandConditions.pdf" in u)
+                other = [u for u in hrefs if "TermsandConditions.pdf" not in u]
                 chk.add(f"{scheme} terms: every drawn product links its regulatory document",
-                        tl.count() >= 3 and all("TermsandConditions.pdf" in (tl.nth(i).get_attribute("href") or "")
-                                                for i in range(tl.count())),
-                        str([tl.nth(i).get_attribute("href").rsplit("/", 1)[-1] for i in range(min(3, tl.count()))]))
+                        terms_n >= 3 and all(u.startswith("allocator.html?m=") for u in other),
+                        str([u.rsplit("/", 1)[-1] for u in hrefs[:4]]))
+                chk.add(f"{scheme} terms: every drawn product links the allocation calculator",
+                        len(other) >= 3, str(other[:3]))
                 # rain is T[R/S][region]; TR[Jurisdiction] is tax revenue with its
                 # own document, so a prefix match would put the wrong terms here
                 page.goto(f"{srv.url}/contract.html?id=TRHOU"); page.wait_for_timeout(1200)

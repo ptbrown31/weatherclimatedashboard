@@ -1,30 +1,36 @@
-/* A seasonal ARIMA projection, fitted in the page from the series on the page.
+/* The projection: a straight line through the recent record, with the average
+   seasonal cycle laid on top.
 
-   The panels already offer a straight line through a window you drag. That is
-   useful and it is also the wrong shape for most of these series: rain has a
-   season, a crop yield has a trend and a season, and a straight line through
-   either says January and July are the same month.
+   This used to be a seasonal ARIMA, and a differenced model earns its keep on
+   series where the future hinges on the last few observations. These are not
+   those series: a reader looking at carbon dioxide or sea level wants the most
+   generic possible reading of "more of the same" — a projection that does not
+   visibly leave the recent trend, keeps the seasonal shape the record plainly
+   has, and never invents momentum. The ARIMA did invent momentum: it chased
+   one warm year into a runaway warming rate, read a quiet stretch as a flat
+   future, and on a weekly series its differenced band exploded off the chart.
 
-   This fits ARIMA(p,1,0)(1,1,0)_m by least squares — differenced once, and once
-   more at the seasonal lag where the series has a season, with an autoregressive
-   term on what is left. There is no moving-average term and no likelihood
-   maximisation: those need an optimiser this page does not carry, and on series
-   of a few hundred points the difference is small against the width of the band
-   the projection is drawn with. It is stated on the page as what it is.
+   So: an ordinary least-squares line through the last twelve years (the whole
+   record when it is shorter), a seasonal term that is nothing more than the
+   average deviation from that line at each point of the cycle, and a band of
+   twice the residual scatter that does not widen — because the model claims
+   nothing about the far future beyond "the recent line, continued", and a
+   widening cone would dress that claim up as something more.
 
-   What the differencing buys is that the trend and the season are carried by the
-   model rather than assumed: a seasonal difference removes a repeating annual
-   shape whatever its form, and a regular difference removes a level that drifts.
-   Neither is estimated as a fixed curve, so neither is imposed on the forecast.
-
-   The band is the model's own uncertainty growing with the horizon, not a
-   confidence interval anyone has validated. Twelve months out on a monthly
-   series it is wide, which is the honest answer.
+   The line and the season are fitted together, in two passes: the line, the
+   per-phase means of what is left, then the line again on the deseasonalised
+   record, so a season that peaks late in the window cannot masquerade as
+   trend. A series that has never been negative is never projected negative:
+   for a generic tool that is a fact about the quantity, not a modelling
+   choice.
 
    Nothing here is a fair value, a price, or a claim about a contract. It is
-   arithmetic on a public series, and a reader can see the record it was fitted
-   to on the same axes. */
+   arithmetic on a public series, and a reader can see the record it was
+   fitted to on the same axes. */
 window.WXForecast = (() => {
+
+  const WINDOW_YEARS = 12;
+  const MAX_STEPS = 600;
 
   // the seasonal period implied by how the series is spaced: a year of monthly
   // readings, a year of weekly ones, or an annual series with no season in it
@@ -43,156 +49,80 @@ window.WXForecast = (() => {
     return 1;
   }
 
-  // lag-one autocorrelation, the cheap test for a level that wanders
-  function ac1(v) {
-    const n = v.length;
-    if (n < 8) return 0;
-    const mean = v.reduce((a, b) => a + b, 0) / n;
-    let num = 0, den = 0;
-    for (let i = 0; i < n; i++) {
-      const d = v[i] - mean;
-      den += d * d;
-      if (i) num += d * (v[i - 1] - mean);
-    }
-    return den > 0 ? num / den : 0;
-  }
+  const phaseOf = (x, m) => ((Math.round((x - Math.floor(x)) * m) % m) + m) % m;
 
-  function diff(v, lag) {
-    const out = [];
-    for (let i = lag; i < v.length; i++) out.push(v[i] - v[i - lag]);
-    return out;
-  }
-
-  /* Least squares for an autoregression of order p, by Gaussian elimination on
-     the normal equations. p is small and the matrix is well conditioned after
-     differencing, so this needs no pivoting beyond the largest row. */
-  function fitAR(z, p) {
-    const n = z.length - p;
-    if (n < p + 4) return null;
-    const A = [], b = [];
-    for (let i = 0; i < n; i++) {
-      const row = [];
-      for (let k = 1; k <= p; k++) row.push(z[p + i - k]);
-      A.push(row); b.push(z[p + i]);
-    }
-    const M = [], y = [];
-    for (let r = 0; r < p; r++) {
-      const row = [];
-      for (let c = 0; c < p; c++) {
-        let s = 0;
-        for (let i = 0; i < n; i++) s += A[i][r] * A[i][c];
-        row.push(s);
-      }
-      let s = 0;
-      for (let i = 0; i < n; i++) s += A[i][r] * b[i];
-      M.push(row); y.push(s);
-    }
-    for (let c = 0; c < p; c++) {
-      let piv = c;
-      for (let r = c + 1; r < p; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
-      if (Math.abs(M[piv][c]) < 1e-12) return null;
-      [M[c], M[piv]] = [M[piv], M[c]]; [y[c], y[piv]] = [y[piv], y[c]];
-      for (let r = 0; r < p; r++) {
-        if (r === c) continue;
-        const f = M[r][c] / M[c][c];
-        for (let k = c; k < p; k++) M[r][k] -= f * M[c][k];
-        y[r] -= f * y[c];
-      }
-    }
-    const phi = y.map((v, i) => v / M[i][i]);
-    if (phi.some(v => !isFinite(v))) return null;
-    let ss = 0;
-    for (let i = 0; i < n; i++) {
-      let f = 0;
-      for (let k = 0; k < p; k++) f += phi[k] * A[i][k];
-      ss += (b[i] - f) * (b[i] - f);
-    }
-    return { phi, sigma: Math.sqrt(ss / Math.max(1, n - p)) };
+  function ols(pts) {
+    const n = pts.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    pts.forEach(([x, y2]) => { sx += x; sy += y2; sxx += x * x; sxy += x * y2; });
+    const den = n * sxx - sx * sx;
+    if (Math.abs(den) < 1e-12) return null;
+    const b = (n * sxy - sx * sy) / den;
+    return { a: (sy - b * sx) / n, b };
   }
 
   /* Project a series forward to `toX`.
 
-     `series` is [[x, value], ...] ascending. Returns
-     {points: [{x, v, lo, hi}], m, p, sigma} or null when the record is too
-     short to fit anything, which is a state the caller should say rather than
-     paper over. */
+     `series` is [[x, value], ...] ascending, x in years. Returns
+     {points: [{x, v, lo, hi}], ...} or null when the record is too short to
+     fit anything, which is a state the caller should say rather than paper
+     over. */
   function project(series, toX) {
     const s = (series || []).filter(q => q && isFinite(q[0]) && q[1] != null);
-    if (s.length < 24) return null;
+    if (s.length < 8) return null;
     const xs = s.map(q => q[0]), ys = s.map(q => q[1]);
     const m = period(xs);
-    const step = m > 1 ? 1 / m : (xs.length > 1 ? xs[xs.length - 1] - xs[xs.length - 2] : 1);
-    /* How far to run.
-
-       Far enough to reach the strikes, but not past the point where the band is
-       wider than anything the series has ever done. Drought contracts settle out
-       to 2035, which on a weekly series is nearly five hundred steps and a band
-       of plus or minus a hundred and forty percentage points — a picture of
-       nothing. The run stops at the cap and the caller says it stopped. */
-    const MAX_STEPS = 120;
+    const step = m > 1 ? 1 / m : (xs.length > 1 ? Math.max(xs[xs.length - 1] - xs[xs.length - 2], 1e-6) : 1);
     const want = Math.ceil((toX - xs[xs.length - 1]) / step);
     if (!(want > 0)) return null;
     const horizon = Math.min(want, MAX_STEPS);
-    /* How many times to difference, decided from the series rather than fixed.
 
-       Differencing a series that does not need it is not harmless: each pass
-       roughly doubles the variance of what is left, so a doubly-differenced
-       month of rain came out with a standard error wider than the wettest month
-       on record and the band said nothing.
+    // the window: the last twelve years, or everything when that is thin
+    const cut = xs[xs.length - 1] - WINDOW_YEARS;
+    let win = s.filter(q => q[0] >= cut);
+    if (win.length < Math.max(8, m)) win = s.slice();
+    const windowYears = Math.round((win[win.length - 1][0] - win[0][0]) * 10) / 10;
 
-       A series sampled through the year is differenced at the seasonal lag,
-       which is the standard shape for monthly data and costs nothing where the
-       season is weak. Whether to difference again is asked of the data: a level
-       that wanders needs it, one already stationary is only roughened by it.
-
-       Measuring how strong the season is directly was tried and dropped. On
-       carbon dioxide the trend is so much larger than the annual cycle that the
-       calendar looked to account for almost none of the variance, the seasonal
-       difference was skipped, and the projection came out falling through a
-       record that has risen every year since 1958. */
-    const seasonal = m > 1 && ys.length >= m * 3;
-    const d1 = seasonal ? diff(ys, m) : ys.slice();
-    // lag-one autocorrelation near one is a level that wanders; near or below
-    // zero is a series already stationary, which differencing would only rough up
-    const regular = ac1(d1) > 0.55;
-    const w = regular ? diff(d1, 1) : d1.slice();
-    if (w.length < 12) return null;
-    /* Fit around the mean, not around zero.
-
-       An autoregression with no intercept pulls its forecast toward zero, which
-       on an undifferenced series means toward no rain at all. On a differenced
-       one the mean is the average step, which is the drift — the trend — and
-       must be kept. Taking the mean out before fitting and putting it back after
-       handles both. */
-    const mw = w.reduce((a, b) => a + b, 0) / w.length;
-    const wc = w.map(v => v - mw);
-    const p = Math.min(3, Math.max(1, Math.floor(wc.length / 20)));
-    const fit = fitAR(wc, p) || fitAR(wc, 1);
+    // pass one: the line
+    let fit = ols(win);
     if (!fit) return null;
 
-    const hist = ys.slice();
-    const wser = wc.slice();
+    // the season: the average deviation from the line at each phase, centred
+    // so the season carries shape and the line carries level and slope
+    const seasonal = m > 1 && win.length >= 2 * m;
+    const seas = new Array(m).fill(0);
+    if (seasonal) {
+      const sum = new Array(m).fill(0), cnt = new Array(m).fill(0);
+      win.forEach(([x, y2]) => { const p = phaseOf(x, m); sum[p] += y2 - (fit.a + fit.b * x); cnt[p] += 1; });
+      let tot = 0, ntot = 0;
+      for (let p = 0; p < m; p++) if (cnt[p]) { seas[p] = sum[p] / cnt[p]; tot += seas[p] * cnt[p]; ntot += cnt[p]; }
+      const centre = ntot ? tot / ntot : 0;
+      for (let p = 0; p < m; p++) seas[p] -= centre;
+      // pass two: the line again, on the deseasonalised record
+      const refit = ols(win.map(([x, y2]) => [x, y2 - seas[phaseOf(x, m)]]));
+      if (refit) fit = refit;
+    }
+
+    // the scatter the fit leaves behind, which is the band
+    let ss = 0;
+    win.forEach(([x, y2]) => {
+      const e = y2 - (fit.a + fit.b * x) - (seasonal ? seas[phaseOf(x, m)] : 0);
+      ss += e * e;
+    });
+    const sigma = Math.sqrt(ss / Math.max(1, win.length - 2 - (seasonal ? m - 1 : 0)));
+    const band = 2 * sigma;
+
+    // a quantity that has never been negative is not projected negative
+    const floor0 = Math.min(...ys) >= 0;
     const out = [];
     for (let k = 1; k <= horizon; k++) {
-      let wc_n = 0;
-      for (let i = 0; i < fit.phi.length; i++) wc_n += fit.phi[i] * wser[wser.length - 1 - i];
-      wser.push(wc_n);
-      const wn = wc_n + mw;
-      const n = hist.length;
-      // undo whichever differences were taken, in the order they were applied
-      let val;
-      if (regular && seasonal) val = hist[n - 1] + (hist[n - m] - hist[n - m - 1]) + wn;
-      else if (regular) val = hist[n - 1] + wn;
-      else if (seasonal) val = hist[n - m] + wn;
-      else val = wn;
-      hist.push(val);
-      // the band widens with the square root of the horizon, which is what a
-      // differenced model's error does when the terms are small
-      const band = 1.96 * fit.sigma * Math.sqrt(k);
-      out.push({ x: Math.round((xs[xs.length - 1] + k * step) * 10000) / 10000,
-                 v: val, lo: val - band, hi: val + band });
+      const x = Math.round((xs[xs.length - 1] + k * step) * 10000) / 10000;
+      let v = fit.a + fit.b * x + (seasonal ? seas[phaseOf(x, m)] : 0);
+      let lo = v - band, hi = v + band;
+      if (floor0) { v = Math.max(v, 0); lo = Math.max(lo, 0); hi = Math.max(hi, 0); }
+      out.push({ x, v, lo, hi });
     }
-    return { points: out, m, p: fit.phi.length, sigma: fit.sigma, seasonal, regular,
+    return { points: out, m, seasonal, windowYears, slope: fit.b, sigma,
              capped: want > horizon, reach: out.length ? out[out.length - 1].x : null };
   }
 

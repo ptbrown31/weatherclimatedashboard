@@ -74,6 +74,13 @@ window.WXClimate = (() => {
     // the document that defines what this settles on, one click away
     const tl = product && product.id ? WXM.termsLink(product.id) : '';
     if (tl) sub.innerHTML += ' · ' + tl;
+    // the same ladder, loaded into the allocation calculator with its live
+    // prices; the count products travel under their own route there
+    if (product && product.id && opts.allocLink !== false) {
+      const slug = ((window.WX && WX.nav && WX.nav.product) || {})[product.id];
+      const m = (slug === 'tropical-cyclones' ? 'hur:' : 'prod:') + product.id;
+      sub.innerHTML += ' · <a href="allocator.html?m=' + encodeURIComponent(m) + '">Allocation calculator →</a>';
+    }
     div.appendChild(sub);
     const ctl = h('div', { class: 'zoomrow' }); div.appendChild(ctl);
     const svg = el('svg', { class: 'ts' }); div.appendChild(svg);
@@ -368,12 +375,12 @@ window.WXClimate = (() => {
             'pointer-events': 'none' })));
         }
         note.style.display = 'inline-block';
-        note.textContent = 'Projection: seasonal ARIMA, differenced once'
-          + (fc.seasonal ? ' and again at ' + fc.m + ' steps for the season' : '')
-          + ', with ' + fc.p + ' autoregressive term' + (fc.p === 1 ? '' : 's')
-          + ', fitted by least squares to the whole record. The shaded band is two standard errors and widens '
-          + 'with the horizon, and is clipped where it runs past the panel. It is a model, not a reading, and it carries no information the record does not.'
-          + (fc.capped ? ' It stops short of the furthest strike: beyond that the band is wider than anything the series has done, which is a picture of nothing.' : '');
+        note.textContent = 'Projection: a straight line fitted to the last ' + fc.windowYears + ' years of the record'
+          + (fc.seasonal ? ', with the average seasonal cycle laid on top' : '')
+          + '. The shaded band is twice the scatter that fit leaves behind and does not widen: the model claims '
+          + 'nothing beyond the recent line, continued. It is a model, not a reading, and it carries no '
+          + 'information the record does not.'
+          + (fc.capped ? ' It stops short of the furthest strike.' : '');
       }
     }
 

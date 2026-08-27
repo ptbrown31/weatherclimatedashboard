@@ -20,7 +20,8 @@
   <span id="chartStatus"></span>
 </div>
 <p class="cap" style="margin:2px 0 0"><a href="daily-temperature-markets.html">More information on these
-markets &rarr;</a></p>
+markets &rarr;</a> &middot; <a id="allocLink" href="allocator.html">Size a position with the allocation
+calculator &rarr;</a></p>
 
 <div class="secttl" style="margin-top:22px">WHERE THE STATION IS</div>
 <div id="locator"></div>
@@ -66,6 +67,10 @@ that moment.</p>
 <script src="js/discussion.js"></script>
 <script>
 WXC.chrome('city.html'); WXCityScore.init(); WXCityDays.init();
+// the calculator opens on this station's board, freshest day first
+(function () { const st = new URLSearchParams(location.search).get('station');
+  const a = document.getElementById('allocLink');
+  if (a && st) a.href = 'allocator.html?m=city:' + encodeURIComponent(st); })();
 Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
              fetch('assets/world.json').then(r => r.json()).catch(() => null)])
   .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null }));

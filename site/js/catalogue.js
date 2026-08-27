@@ -191,6 +191,7 @@ window.WXCat = (() => {
                           { id: p.id, name: p.name || p.id, productConid: p.productConid, contracts: cs }, 0,
                           sr.source || '',
                           { markerRadius: 'auto', trendNote: 'byYear', tightRight: true, clampZero: true,
+                            allocLink: false,
                             fmt, fmtAxis: fmt, fmtThreshold: fmt, thresholdSuffix: '',
                             x0: ser.length ? Math.max(ser[0][0], (cs.length ? Math.min(...cs.map(c => c.year)) : ser[ser.length - 1][0]) - 12) : undefined });
           if (true) {
@@ -215,11 +216,36 @@ window.WXCat = (() => {
     } catch (e) { /* no series lane for this product; the ladder still stands */ }
 
     const url = WXM.contractUrl(p.productConid, ((p.contracts || [])[0] || {}).conidYes);
+    const row = h('div', { class: 'bar', style: 'margin:0 0 10px' });
     if (url) {
       const go = h('button', { text: 'Open on IBKR →' });
       go.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
-      $('#cBody').appendChild(h('div', { class: 'bar', style: 'margin:0 0 10px' }, [go]));
+      row.appendChild(go);
     }
+    /* The same board, loaded into the allocation calculator with its live
+       prices. A count product travels under its own route there; a daily
+       temperature board is addressed by its station, recovered from the
+       product code (the ICAO less its first letter, with the exchange's two
+       exceptions), and when the station cannot be recovered the link opens
+       the calculator plain rather than wrongly. */
+    (async () => {
+      const slug = ((window.WX && WX.nav && WX.nav.product) || {})[p.id];
+      let m = (slug === 'tropical-cyclones' ? 'hur:' : 'prod:') + p.id;
+      if (slug === 'daily-temperatures') {
+        m = '';
+        try {
+          const code = String(p.id).replace(/^(UH|UL|SH|SL)/, '');
+          const EXC = { YHC: 'CYVR', FPO: 'LFPG' };
+          const cities = ((await WXD.get('summary.json')).data || {}).cities || [];
+          const hit = EXC[code] || (cities.find(c2 => c2.station && c2.station.slice(1) === code) || {}).station;
+          if (hit) m = 'city:' + hit;
+        } catch (e) { /* the plain link still stands */ }
+      }
+      const go2 = h('button', { text: 'Allocation calculator →' });
+      go2.onclick = () => { location.href = 'allocator.html' + (m ? '?m=' + encodeURIComponent(m) : ''); };
+      row.appendChild(go2);
+    })();
+    $('#cBody').appendChild(row);
     // the ladder, in the same Yes-green No-red language the temperature and
     // hurricane boards use. A plain list of strikes is the fallback, not the
     // default: it appears only when the exchange has quoted nothing at all.

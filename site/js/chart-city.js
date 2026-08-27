@@ -633,8 +633,14 @@ window.WXCity = (() => {
                      iss: isNaN(ms) ? null : clock(ms, tz) + (age != null ? ' \u00b7 ' + ageText(age) : '') });
       });
       const lh = 12.5, bw = 216;
-      const y1 = S.B - 6, y0 = y1 - items.length * lh - 6;
-      const bx = S.R - bw - 6;
+      /* Lower right of the whole figure, not of the temperature panel: on the
+         market layouts that is the ground to the right of the price series
+         and below the strike ladders, which nothing else uses. Without the
+         market panels the figure ends at the temperature panel and the old
+         corner is still the right one. */
+      const y1 = (market && S.PL1 != null) ? S.PL1 : S.B - 6;
+      const y0 = y1 - items.length * lh - 6;
+      const bx = (market && S.PL1 != null) ? S.W - bw - 8 : S.R - bw - 6;
       g.appendChild(el('rect', { x: bx, y: y0, width: bw, height: y1 - y0, rx: 4,
                                  fill: 'var(--panel)', 'fill-opacity': .95, stroke: 'var(--line)',
                                  'stroke-width': .8, 'pointer-events': 'none' }));
@@ -726,7 +732,10 @@ window.WXCity = (() => {
               if (checked.has(key)) checked.delete(key); else checked.add(key);
               draw();
             };
-            bind(lab, () => ladderTip(L, sd2, LD, c), true);
+            /* No hover box here, and no pin on click. The temperature is a
+               switch, and flicking a switch kept planting a tooltip that then
+               had to be dismissed; the bar beside it already answers every
+               question the box used to. */
             g.appendChild(lab);
           }
         });
