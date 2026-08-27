@@ -149,6 +149,10 @@ def season_fresh(season: Optional[dict], storms: list, now: dt.datetime) -> bool
     """
     if not season:
         return False
+    # a block written by an older build, missing something this one puts in it:
+    # it cannot be trusted to be complete, whatever its age
+    if season.get("events") is None:
+        return False
     at = season.get("computedAt")
     if not at:
         return False                      # written before the stamp existed

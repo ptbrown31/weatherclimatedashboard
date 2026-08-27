@@ -148,7 +148,8 @@ class HurricaneReuse(unittest.TestCase):
         fresh = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         prev = {"asof": "2026-08-22T00:00:00Z", "storms": [{"id": "cp012026", "advisory": "038", "updated": "2026-08-21T21:00:00.000Z",
                 "geometryAdvisory": "38", "cone": [[[0, 0]]], "track": [], "past": [], "points": [], "geometryFetched": "x"}],
-                "outlook": [], "season": {"computed": fresh[:10], "computedAt": fresh, "named": 3, "names": ["Arthur"]}}
+                "outlook": [], "season": {"computed": fresh[:10], "computedAt": fresh, "named": 3, "names": ["Arthur"],
+                           "events": {"named": [], "hurricanes": [], "majors": []}}}
         st.put("snapshots/hurricane.json", json.dumps(prev).encode())
         roster = [{"id": "cp012026", "binNumber": "CP2", "name": "Lala", "classification": "HU", "intensity": "80",
                    "lastUpdate": "2026-08-21T21:00:00.000Z", "publicAdvisory": {"advNum": "038", "url": "u"}}]
@@ -185,7 +186,8 @@ class SeasonFreshness(unittest.TestCase):
         return t.isoformat(timespec="seconds").replace("+00:00", "Z")
 
     def season(self, hours, names=("Arthur", "Bertha", "Cristobal")):
-        return {"named": len(names), "names": list(names), "computedAt": self.at(hours)}
+        return {"named": len(names), "names": list(names), "computedAt": self.at(hours),
+                "events": {"named": [], "hurricanes": [], "majors": []}}
 
     def storm(self, name, cls="TS", sid="al042026"):
         return {"id": sid, "name": name, "classification": cls, "basin": sid[:2].upper()}
@@ -209,15 +211,24 @@ class SeasonFreshness(unittest.TestCase):
         self.assertTrue(hurricane.season_fresh(
             self.season(1), [self.storm("Lala", sid="cp012026")], self.now))
 
+    def test_a_block_from_an_older_build_is_redone(self):
+        # it counted correctly but carried no formation dates, and the figure
+        # beside the count would have fallen back to the once-a-day lane
+        stale = self.season(1)
+        stale.pop("events")
+        self.assertFalse(hurricane.season_fresh(stale, [], self.now))
+
     def test_no_stamp_means_redo(self):
-        self.assertFalse(hurricane.season_fresh({"named": 3, "computed": "2026-08-27"}, [], self.now))
+        self.assertFalse(hurricane.season_fresh(
+            {"named": 3, "computed": "2026-08-27", "events": {}}, [], self.now))
         self.assertFalse(hurricane.season_fresh(None, [], self.now))
 
     def test_a_stamp_from_the_future_is_not_trusted(self):
         self.assertFalse(hurricane.season_fresh(self.season(-5), [], self.now))
 
     def test_unreadable_stamp_means_redo(self):
-        self.assertFalse(hurricane.season_fresh({"names": [], "computedAt": "whenever"}, [], self.now))
+        self.assertFalse(hurricane.season_fresh(
+            {"names": [], "computedAt": "whenever", "events": {}}, [], self.now))
 
     def test_counts_carry_the_time_they_were_taken(self):
         # the date alone cannot say whether a storm named at midday is in them
