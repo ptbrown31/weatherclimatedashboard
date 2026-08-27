@@ -204,8 +204,13 @@ window.WXHur = (() => {
     let foot;
     if (v) {
       rows.push(['Storm', esc(v.storm)]);
-      // the ladder, thresholds with at least half a percent, eight at most
-      const ladder = v.thresholds.map((t, i) => (v.p[i] != null && v.p[i] >= 0.5 ? ['&gt; ' + t + ' mph', Math.round(v.p[i]) + '%'] : null)).filter(Boolean).slice(0, 8);
+      /* The ladder as published, to the same figure as the table underneath.
+         Rounding it to whole percent put "3%" in the box over a cell reading
+         3.3%, and culling anything under half a percent left the box showing
+         one rung where the table and the storm card both showed three. A rung
+         the page prints is a rung this box prints; eight is the cap, which
+         only a strong storm reaches. */
+      const ladder = v.thresholds.map((t, i) => (v.p[i] ? ['&gt; ' + t + ' mph', v.p[i] + '%'] : null)).filter(Boolean).slice(0, 8);
       ladder.forEach(r => rows.push(r));
       rows.push(['LiveCyc cycle', utc(v.forecastTime)]);
       foot = esc((RK && RK.attribution) || 'Powered by Reask') + '; probabilities as published';
@@ -539,7 +544,10 @@ window.WXHur = (() => {
     host.appendChild(h('p', { class: 'cap', text: 'A Yes pays if a hurricane makes landfall in the United States at exactly '
       + 'Category 4 on or before the date named. The exchange\u2019s terms are explicit that a higher or lower category does not '
       + 'qualify, so a Category 5 landfall does not resolve this contract Yes. Each date is cumulative: it asks whether at least '
-      + 'one qualifying landfall has happened by then.' }));
+      + 'one qualifying landfall has happened by then. The climatology drawn against it counts landfalls on the continental '
+      + 'United States only: Maria crossed Puerto Rico at exactly Category 4 in 2017 and is not in the line. The exchange\u2019s '
+      + 'terms say \u201cthe United States\u201d without saying whether a Puerto Rico or Virgin Islands landfall counts, so a '
+      + 'reader taking the wider reading should treat this line as the low end.' }));
   }
 
   // ---- how much of the season's chance is still ahead
