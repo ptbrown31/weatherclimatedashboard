@@ -167,15 +167,14 @@ window.WXCityScore = (() => {
   const med = a => { const b = a.slice().sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : null; };
   /* What each tool's number is anchored to.
 
-     Every forecast here is that tool's last cycle issued before the target day
-     began, so none of them has seen any of the day. But they do not all issue at
-     the same time: the Service's runs about five hours before midnight and the
-     Blend's lands on it, which is five hours more of the world for one of them.
-     A skill table that does not say so invites a comparison it has not earned,
-     so each tool carries its own lead in the header. */
+     Every tool here is read at one moment: six in the evening, the station's own
+     time, the day before. What differs between them is how stale each one's
+     standing run is at that moment — hourly guidance is half an hour old, a
+     four-times-daily model can be six hours old — and that is a real difference
+     in what each product offers rather than an artefact of the scoring. So each
+     tool carries its own lead in the header. */
   const leadOf = (days, k) => med(days.map(d => (d[k] || {}).lead).filter(v => v != null));
-  const leadText = v => (v == null ? '' : v < 0.25 ? 'at midnight'
-                        : (Math.round(v * 10) / 10) + 'h before');
+  const leadText = v => (v == null ? '' : (Math.round(v * 10) / 10) + 'h to midnight');
   const sgn = v => (v == null ? '' : (v > 0 ? '+' : '') + v.toFixed(1));
 
   async function drawTable(station) {
@@ -239,12 +238,11 @@ window.WXCityScore = (() => {
     host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
     host.appendChild(h('p', { class: 'cap',
       text: 'The ' + days.length + ' scored day' + (days.length === 1 ? '' : 's') + ' at this station, in '
-            + (st.unit || '°F') + '. Each forecast is that tool\u2019s last cycle issued BEFORE the target day '
-            + 'began, so none of them has seen any of the day it is forecasting. They do not all issue at the same '
-            + 'time, and the hours under each name are how far ahead of the day that tool\u2019s cycle typically '
-            + 'lands: a tool that issues at midnight has had several more hours of the world than one that issued '
-            + 'the previous evening, so read the columns against their own lead before reading them against each '
-            + 'other. The market column is the last quote before the day began. '
+            + (st.unit || '°F') + '. Every tool is read at ONE moment: six in the evening, this station\u2019s own '
+            + 'time, the day before. What differs is how stale each one\u2019s standing run was by then \u2014 hourly '
+            + 'guidance half an hour, a four-times-daily model several \u2014 and the hours under each name are that '
+            + 'run\u2019s distance from midnight. That is a real difference between the products rather than an '
+            + 'artefact of the scoring. The market column is the last quote before the same moment. '
             + 'Every temperature is tinted on the same scale the national map uses, so the coldest reading in the '
             + 'table is the palest and the warmest the deepest. err is the forecast minus what was observed, so a '
             + 'positive number is a forecast that ran warm. A dash is a day that tool was not archived for.' }));

@@ -319,7 +319,10 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} series: a strike names where the series stands against it",
                         "Settles" in t_str and "Series now" in t_str, t_str[:90])
                 chk.add(f"{scheme} series: the strike box carries the exchange's price, not a fair value",
-                        "Yes price" in t_str and "fair value" not in t_str, t_str[-70:])
+                        ("Buy Yes" in t_str or "no bids" in t_str) and "fair value" not in t_str
+                        and "implied" not in t_str.lower(), t_str[-70:])
+                chk.add(f"{scheme} series: the box is short, and the terms are one click away",
+                        t_str.count("\n") <= 12 and "terms" in t_str, str(t_str.count("\n")))
                 # ---- climate change: the unit that governs is not cosmetic, so the
                 # page has to say which one and which baseline
                 for pid, want in (("GT", "Celsius"), ("UST", "Fahrenheit"), ("MACD", "parts per million")):
@@ -986,6 +989,23 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} readings: the marks are decoration, never a hit target",
                         page.eval_on_selector_all("#panels circle.rdot",
                             "e=>e.every(x=>getComputedStyle(x).pointerEvents==='none')"), "")
+
+                # every contract names the document that governs it
+                tl = page.locator("#panels .psub a")
+                chk.add(f"{scheme} terms: every drawn product links its regulatory document",
+                        tl.count() >= 3 and all("TermsandConditions.pdf" in (tl.nth(i).get_attribute("href") or "")
+                                                for i in range(tl.count())),
+                        str([tl.nth(i).get_attribute("href").rsplit("/", 1)[-1] for i in range(min(3, tl.count()))]))
+                # rain is T[R/S][region]; TR[Jurisdiction] is tax revenue with its
+                # own document, so a prefix match would put the wrong terms here
+                page.goto(f"{srv.url}/contract.html?id=TRHOU"); page.wait_for_timeout(1200)
+                href = page.evaluate("()=>WXM.termsUrl('TRHOU')")
+                chk.add(f"{scheme} terms: rain gets the rain document, not tax revenue",
+                        href.endswith("/TTermsandConditions.pdf"), href)
+                chk.add(f"{scheme} terms: the daily temperature series resolves too",
+                        page.evaluate("()=>WXM.termsUrl('DHATL')").endswith("/DailyTemperatureTermsandConditions.pdf"),
+                        page.evaluate("()=>WXM.termsUrl('DHATL')"))
+                page.goto(f"{srv.url}/agriculture.html"); page.wait_for_timeout(1400)
 
                 # the two prices lead the box: it is what a reader hovered for
                 page.locator("#panels svg circle[data-tip]").nth(3).hover(force=True)

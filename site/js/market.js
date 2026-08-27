@@ -177,6 +177,22 @@ window.WXM = (() => {
   // The ids change as contracts are relisted for a new day, which is why they
   // travel with the quote and are never written into the pages.
   const APP = 'https://www.interactivebrokers.com/predictionmarkets/app/#/';
+  /* The regulatory document that governs a product.
+
+     Every contract on the exchange is defined by one, and it is the document
+     that says what the thing settles on and when. A reader deciding whether a
+     number here means what they think it means should be one click from it. */
+  function termsUrl(productId) {
+    const nav = (window.WX && WX.nav) || {};
+    const name = (nav.terms || {})[productId];
+    return name ? (nav.termsBase || '') + name + 'TermsandConditions.pdf' : null;
+  }
+  function termsLink(productId, label) {
+    const u = termsUrl(productId);
+    return u ? '<a href="' + u + '" target="_blank" rel="noopener noreferrer">'
+               + (label || 'Terms and conditions') + ' \u2192</a>' : '';
+  }
+
   function contractUrl(productConid, yesConid) {
     if (!live() || !productConid || !yesConid) return null;
     return APP + encodeURIComponent(productConid) + '/product-details/contracts?exchange=FORECASTX&conid_yes='
@@ -306,5 +322,5 @@ window.WXM = (() => {
   }
 
   return { mode, on, live, load, loadSummary, loadGroup, implied, ladder, pricePath, climateProducts, hurricaneMarkets, label,
-           payout, payoutText, feeCents, contractUrl, linkTo, get LABEL() { return label(); }, PLACEHOLDER };
+           payout, payoutText, feeCents, contractUrl, linkTo, termsUrl, termsLink, get LABEL() { return label(); }, PLACEHOLDER };
 })();

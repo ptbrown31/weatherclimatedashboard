@@ -138,7 +138,8 @@ window.WXPanels = (() => {
       if (sr && (sr.points || []).length) {
         const ser = sr.points.map(q => [xOfPeriod(q[0]), q[1]]).filter(q => q[0] != null && q[1] != null);
         const cs = contracts(prod, qRes.data);
-        const product = { name: prod.name || name, productConid: prod.productConid, contracts: cs };
+        const product = { id: light.id, name: prod.name || name,
+                          productConid: prod.productConid, contracts: cs };
         WXClimate.panel(host, key, sr.title || product.name, sr.units || '', ser, product, 0,
                         sr.source || '', Object.assign({ markerRadius: 'auto', trendNote: 'byYear' }, opts.panel || {}));
         if (sr.note && notes.indexOf(sr.note) < 0) notes.push(sr.note);

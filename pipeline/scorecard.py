@@ -5,7 +5,7 @@ Once a day. For every US station and every local day the archive can
 score, the observed high and low come from the observation record (METAR
 reports, bucketed through the station's IANA zone, decoded with the two
 site-wide constants), and each source's forecast for the day comes from
-the cycle that was standing before the day began:
+the cycle that was standing at a common moment the evening before:
 
     NWS   the official day/night product (daytime high, night-ending low)
     NBM   the NBS bulletin's TXN row
@@ -13,15 +13,31 @@ the cycle that was standing before the day began:
     LAMP  the max and min of the last pre-day hourly run (25 h horizon)
 
 The exchange's own implied median for the day is carried alongside them,
-read from the last quote pass before the same local midnight, so the
+read from the last quote pass before that same anchor, so the
 market can be plotted on the same axis as the forecasts. It is not folded
 into the skill statistics below: those describe forecast products, and a
 market is not one.
 
-A source is scored for a day only when its pre-day cycle was issued within
-the 24 hours before local midnight; older cycles are longer-lead forecasts
-and would not be a fair comparison. The lead (hours from issuance to
-midnight) is recorded with every score.
+THE ANCHOR. Every source is read as it stood at ANCHOR_LOCAL_HOUR on the
+evening before the target day, in the station's own time. Taking instead
+each source's last run before midnight — which this did until it was
+measured — scored them at whatever hour they each happen to issue: the
+Blend's cycle landed on midnight, the Service's about five hours earlier,
+and the table compared a forecast that had seen five more hours of the
+world against one that had not, without saying so.
+
+A common local hour rather than a common instant, because a common instant
+gives an eastern station seven hours to midnight and a western one ten,
+and the comparison is meant to be across cities as well as across tools.
+Six in the evening is late enough that every source has a run standing and
+early enough to be a forecast rather than a nowcast.
+
+Sources still differ in how stale their standing run is at that moment —
+hourly guidance is half an hour old, a four-times-daily model can be six —
+and that is a real difference in what each product offers, so the lead is
+recorded with every score and the pages show it. A source is scored only
+when its standing cycle is within MAX_LEAD_H of the anchor, which is up to
+six hours further from midnight than that.
 
 Error is forecast minus observed, so a positive bias means the source runs
 warm. Per station and per source: n, mean absolute error, bias, and the
@@ -46,7 +62,10 @@ from . import exchange as ex
 from . import snapshots as sn
 from .storage import Storage
 
-MAX_LEAD_H = 24          # a pre-day cycle older than this is not scored for the day
+MAX_LEAD_H = 24          # a cycle older than this AT THE ANCHOR is not scored for the day
+# the common decision point: six in the evening, the station's own time, the day
+# before. Every source is read as it stood then.
+ANCHOR_LOCAL_HOUR = 18
 RECENT_DAYS = 14         # per-day rows carried in the snapshot, newest first
 SOURCES = ("nws", "nbm", "mav", "lamp")
 
@@ -82,7 +101,8 @@ def forecast_for_day(store: Storage, by_kind: dict, source: str, c: dict, tz, da
     last pre-midnight run usually holds the day's maximum but not its
     minimum, which sits in the run before."""
     midnight = _local_midnight(day, tz)
-    cut = midnight.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    anchor = midnight - dt.timedelta(hours=24 - ANCHOR_LOCAL_HOUR)
+    cut = anchor.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     kind = {"nws": "daily", "nbm": "nbs", "mav": "mav", "lamp": "lamp"}[source]
     lv = sn.pick_levels(store, kind, by_kind.get(kind, []), cut, c, tz, day.isoformat(), max_lead_h=MAX_LEAD_H)
     from_hourly = False
@@ -133,10 +153,11 @@ def market_pass_before(store: Storage, when: dt.datetime, cache: dict) -> Option
 
 def market_levels(store: Storage, c: dict, tz, day: dt.date, cache: dict) -> Optional[dict]:
     """{high, low, asof} — the exchange's implied median for one station and
-    local day, from the last quote pass before that day's local midnight, the
-    same moment the model cycles are picked at. None when the quote archive does
+    local day, from the last quote pass before the same evening anchor the model
+    cycles are read at. None when the quote archive does
     not reach back that far or the day was not listed."""
-    body = market_pass_before(store, _local_midnight(day, tz).astimezone(dt.timezone.utc), cache)
+    anchor = _local_midnight(day, tz) - dt.timedelta(hours=24 - ANCHOR_LOCAL_HOUR)
+    body = market_pass_before(store, anchor.astimezone(dt.timezone.utc), cache)
     if not body:
         return None
     diso, out = day.isoformat(), {}

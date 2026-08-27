@@ -69,7 +69,12 @@ window.WXClimate = (() => {
     const thrSuffix = opts.thresholdSuffix != null ? opts.thresholdSuffix : (key.startsWith('temp') ? '°C' : '');
     const div = h('div', { class: 'panel' + (opts._full ? ' full' : '') });
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
-    div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: unit + (product ? ' · markers: ' + WXM.LABEL : '') }));
+    const sub = h('div', { class: 'psub cap', style: 'margin:2px 2px 6px',
+                           text: unit + (product ? ' · markers: ' + WXM.LABEL : '') });
+    // the document that defines what this settles on, one click away
+    const tl = product && product.id ? WXM.termsLink(product.id) : '';
+    if (tl) sub.innerHTML += ' · ' + tl;
+    div.appendChild(sub);
     const ctl = h('div', { class: 'zoomrow' }); div.appendChild(ctl);
     const svg = el('svg', { class: 'ts' }); div.appendChild(svg);
     const note = h('div', { class: 'note', style: 'display:none;margin:6px 0 0;font-size:12px' }); div.appendChild(note);
@@ -404,18 +409,24 @@ window.WXClimate = (() => {
       const noBid = c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100;
       const book = c.bid != null && c.ask != null ? null : (c.bid != null ? 'Yes bids only; the Yes price shown is the Yes bid' : (c.ask != null ? 'No bids only; the Yes price shown is one dollar less the No bid' : 'no bids'));
       if (url) WXM.linkTo(m, url, 'Open ' + c.label + ' on IBKR');
+      /* What a reader needs, and not the rest.
+
+         This box had nine rows under the prices: the midpoint, both bids, the
+         buy price again, the fee, the settlement date, the expiry, the series
+         level and a link that could not be clicked. Most of it restated the two
+         prices in another form. What is left is what changes the meaning of the
+         number: when it settles, and where the series stands against the strike.
+         The book itself is one line at the foot for anyone who wants it. */
       const html = () => '<b>' + product.name + ' — ' + c.label + '</b>'
         + tip.price(c.ask, c.bid == null ? null : 1 - c.bid)
         + tip.rows(null, [
-        ['Settles', c.expiryLabel], ['Expires', /\d{1,2}, \d{4}/.test(c.expiryLabel || '') ? null : expLabel(c.expiration)],
-        ['Yes price', cents(c.yes) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
-        ['Yes bid', c.bid != null ? cents(c.bid) + size(c.bidSize) : null],
-        ['No bid', noBid != null ? cents(noBid) + size(c.askSize) : null],
-        ['Buy Yes now at', c.ask != null ? cents(c.ask) + (WXM.payoutText(Math.round(c.ask * 100)) ? ' · pays ' + WXM.payoutText(Math.round(c.ask * 100)) : '') : null],
-        ['Bids', c.from === 'no' ? (book ? book + '; ' : '') + 'quoted from the No contract' : book],
-        ['Series now', fmtV(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],
-        ],
-        (c.label2 || WXM.LABEL) + (url ? ' · click the marker to open the contract' : ''));
+          ['Settles', c.expiryLabel],
+          ['Series now', fmtV(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],
+        ], (c.bid != null || c.ask != null
+              ? 'Yes bid ' + cents(c.bid) + ' · No bid ' + cents(c.ask == null ? null : 1 - c.ask)
+                + ' · they buy, they do not sell, and the two sum to a dollar'
+              : 'no bids on either side')
+           + (WXM.termsUrl(product.id) ? ' · ' + WXM.termsLink(product.id, 'terms') : ''));
       m.onmousemove = e => tip.show(e, html());
       m.onmouseleave = () => tip.hide();
       m.onclick = e => tip.pin(e, html());

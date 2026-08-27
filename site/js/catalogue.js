@@ -188,7 +188,7 @@ window.WXCat = (() => {
           const fmt = v => (v == null ? '—' : Math.abs(v) >= 10000 ? Math.round(v).toLocaleString('en-US')
                                             : Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2));
           WXClimate.panel(host, key, sr.title || p.name, sr.units || '', ser,
-                          { name: p.name || p.id, productConid: p.productConid, contracts: cs }, 0,
+                          { id: p.id, name: p.name || p.id, productConid: p.productConid, contracts: cs }, 0,
                           sr.source || '',
                           { markerRadius: 'auto', trendNote: 'byYear', tightRight: true, clampZero: true,
                             fmt, fmtAxis: fmt, fmtThreshold: fmt, thresholdSuffix: '',

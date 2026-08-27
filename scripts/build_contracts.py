@@ -23,6 +23,57 @@ OUT = os.path.join(ROOT, "config", "contracts.json")
 # Where a category is already a page on this site, it keeps that page rather
 # than getting a generic listing: the map and the hurricane page are the two
 # displays this site was built around.
+# ---------------------------------------------------------------- terms
+# Which regulatory document governs a product.
+#
+# Read off each document's own "Product Code:" line rather than off the look of
+# the ticker, because the tickers overlap in a way that bites: TRHOU is rain and
+# belongs to T[R/S][region], while TR[Jurisdiction] is TAX REVENUE with its own
+# document. Matching on the longest prefix would put tax-revenue terms on five
+# weather pages. The rules below are ordered, most specific first, and every
+# product is checked against them by scripts/build_contracts.py.
+TERMS_BASE = "https://data.forecastex.com/regulatory/"
+TERMS_RULES = [
+    (r"^(GT|GTM|GTTA|GTTM|MRT|RT|UST|USTM|ACD|MACD|GSL|AMOCW|GCE|USCE|USDR|NGP|OP|USGP|CFSFP|HELPP|HLF|HLFRE)$", None),
+    (r"^GCY[A-Z]{2}$", "GCY"),
+    (r"^ELGP[A-Z]$", "ELGP"),
+    (r"^HCAT\d$", "HCAT"),
+    (r"^MHC[MY]?[A-Z]$", "MHC"),
+    (r"^TROP[A-Z]$", "TROP"),
+    (r"^HC[A-Z]{2}$", "HC"),
+    (r"^FUS[A-Z]{2}$", "FUS"),
+    (r"^SW[A-Z][A-Z]{2}$", "SW"),
+    (r"^H[WS][HC][A-Z]{2}$", "H"),
+    (r"^T[RS][A-Z]{3}$", "T"),
+    (r"^W[A-Z]{2,4}$", "W"),
+    (r"^AE[A-Z]{2}[A-Z]$", "AE"),
+    (r"^RE[A-Z]{2}[A-Z]$", "RE"),
+    (r"^[CE][MY][A-Z]{2}[A-Z]$", None),
+    (r"^GS[A-Z]{3}$", "GS"),
+    (r"^AW[A-Z]{3}$", "AW"),
+    (r"^MG[A-Z]{3}$", "MG"),
+    (r"^HO[A-Z]{3}$", "HO"),
+    (r"^TA[A-Z]{3}$", "TA"),
+    (r"^A\d[A-Z]{3}$", "A"),
+    (r"^O[AHL][A-Z]{3}$", "O"),
+    # the daily temperature document names U and S codes; the D series carries
+    # the same product ("Atlanta Daily Temperature High") and the same question,
+    # so it is governed by that document even though the pattern predates it
+    (r"^[USD][HLA][A-Z]{3}$", "DailyTemperature"),
+]
+
+
+def terms_url(pid):
+    """The document that governs this product, or None when none is published."""
+    import re as _re
+    for pat, name in TERMS_RULES:
+        if _re.match(pat, pid):
+            if name is None:
+                name = pid[0] if (pid[0] in "CE" and len(pid) == 5) else pid
+            return TERMS_BASE + name + "TermsandConditions.pdf"
+    return None
+
+
 CATEGORY_PAGE = {
     "daily-temperatures": "index.html",
     "tropical-cyclones": "hurricane.html",
@@ -61,6 +112,7 @@ def main() -> int:
             # its site as well as this one
             "was": " / ".join(x for x in ((r.get("category_l2") or "").strip(),
                                           (r.get("category_l3") or "").strip()) if x),
+            "terms": terms_url(pid),
         })
     products.sort(key=lambda p: (ORDER_L1.index(p["l1"]) if p["l1"] in ORDER_L1 else 9,
                                  ORDER_L2.get(p["l1"], []).index(p["l2"]) if p["l2"] in ORDER_L2.get(p["l1"], []) else 9,
