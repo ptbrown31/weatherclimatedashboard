@@ -29,7 +29,7 @@ SHARED = ["css/site.css", "js/theme.js", "js/common.js", "js/data.js", "js/marke
 STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorecard.html", "climate.html",
               "faq.html", "accuracy.html", "daily-temperature-markets.html",
               "section.html", "category.html", "contract.html", "js/catalogue.js",
-              "js/chart-city.js", "js/city-score.js", "js/map.js", "js/hurricane.js", "js/storm.js", "js/scorecard.js", "js/climate.js", "js/forecast.js", "js/accuracy.js",
+              "js/chart-city.js", "js/city-score.js", "js/city-days.js", "js/map.js", "js/hurricane.js", "js/storm.js", "js/scorecard.js", "js/climate.js", "js/forecast.js", "js/accuracy.js",
               "agriculture.html", "js/agriculture.js", "js/panels.js",
               "fossil-fuels.html", "electricity-renewables.html", "js/energy.js",
               "weather.html", "js/weather.js",

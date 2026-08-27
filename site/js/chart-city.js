@@ -157,6 +157,7 @@ window.WXCity = (() => {
     // scorecard never holds up the chart the page is for
     if (window.WXCityScore) WXCityScore.draw(sid).catch(() => {});
     if (window.WXCityScore) WXCityScore.drawTable(sid).catch(() => {});
+    if (window.WXCityDays) WXCityDays.draw(sid).catch(() => {});
     const c0 = city();
     drawFreshness(c0);
     const keys = [`forecast/${sid}.json`, `obs/${sid}.json`].concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`] : []);
@@ -677,6 +678,10 @@ window.WXCity = (() => {
     const want = opts.station || WXC.param('station') || WXC.param('city') || 'KLAX';
     const svg = $('#' + svgId);
     hover(svg);
+    const xh = $('#chartExpand'), card = $('#chartCard');
+    if (xh && card && !xh.childElementCount) xh.appendChild(WXC.expander(card, 'Expand'));
+    const dh = $('#cityDaysExpand'), dcard = $('#cityDaysWrap');
+    if (dh && dcard && !dh.childElementCount) dh.appendChild(WXC.expander(dcard, 'Expand'));
     const yb = $('#ydayBtn'); if (yb) yb.onclick = e => { showYday = !showYday; e.target.classList.toggle('on'); draw(); };
     const fb = $('#fullBtn'); if (fb) fb.onclick = e => { full = !full; e.target.classList.toggle('on'); draw(); };
     if (!summary.cities.length) { svg.innerHTML = ''; svg.appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }

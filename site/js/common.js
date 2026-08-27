@@ -139,6 +139,40 @@ window.WXC = (() => {
   //      click elsewhere or Escape releases it. Content is HTML built by the
   //      pages from snapshot values; `rows(title, [[label, value], ...])`
   //      lays out the common two-column form.
+  /* Open any chart to fill the window.
+
+     The series panels do this by redrawing themselves into a bigger box, which
+     they can because every coordinate in them is derived. A chart with a fixed
+     viewBox cannot, but it does not need to: the browser scales it, and a chart
+     that is twice as wide is twice as readable even if the type scales with it.
+
+     So this is the general case — mark a container expandable, get a button and
+     Escape — and a panel that wants to re-derive its geometry does that itself.
+     Returns the button so a caller can place it. */
+  function expander(container, label) {
+    const b = h('button', { class: 'zb ex', text: label || 'Expand' });
+    let esc = null;
+    const close = () => {
+      container.classList.remove('full');
+      document.body.classList.remove('wtfull');
+      b.textContent = label || 'Expand';
+      b.classList.remove('on');
+      if (esc) { document.removeEventListener('keydown', esc); esc = null; }
+      window.dispatchEvent(new Event('resize'));
+    };
+    b.onclick = () => {
+      if (container.classList.contains('full')) return close();
+      container.classList.add('full');
+      document.body.classList.add('wtfull');
+      b.textContent = 'Close';
+      b.classList.add('on');
+      esc = ev => { if (ev.key === 'Escape') close(); };
+      document.addEventListener('keydown', esc);
+      window.dispatchEvent(new Event('resize'));
+    };
+    return b;
+  }
+
   function tooltip() {
     let tip = $('#tip');
     if (!tip) {
@@ -184,5 +218,5 @@ window.WXC = (() => {
 
   const param = k => new URLSearchParams(location.search).get(k);
   const deg = v => (v == null ? '--' : (Math.round(v * 10) / 10).toFixed(v % 1 ? 1 : 0) + '°');
-  return { el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg };
+  return { el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander };
 })();

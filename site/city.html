@@ -14,18 +14,12 @@
 <p class="sub">Hourly METAR observations (what settlement reads) on one canvas with the National Weather
 Service forecast, NBM and LAMP guidance, and the lines each of them published before the day began, from
 this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high and low for the day.</p>
-<div class="pickwrap">
-  <div><div class="pickttl" id="pickTitle">United States &mdash; dot colour and size: observed so far against the NWS high issued for the day</div>
-  <svg id="pick" viewBox="0 0 960 600"></svg></div>
-  <div><div class="pickttl">International stations and Honolulu</div>
-  <svg id="pickW" viewBox="0 60 960 320"></svg></div>
-</div>
 <div id="skRow"></div>
 <div class="bar"><button id="fullBtn">Full: both contract days</button>
 <button id="ydayBtn">Show yesterday</button>
 <span class="cap" style="margin:0">full runs the trace to the end of tomorrow and shows both days&rsquo; strike ladders; yesterday overlays yesterday&rsquo;s observations and as-issued forecasts, shifted 24 hours</span>
-<span id="chartStatus"></span></div>
-<div class="card"><svg id="chart" viewBox="0 0 960 390"></svg></div>
+<span id="chartExpand"></span><span id="chartStatus"></span></div>
+<div class="card expandable" id="chartCard"><svg id="chart" viewBox="0 0 960 390"></svg></div>
 <div class="key">
   <span><i style="border-color:var(--obs)"></i>Observed hourly (METAR)</span>
   <span><i style="border-color:var(--nws)"></i>NWS hourly, standing now</span>
@@ -35,6 +29,20 @@ this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high
   <span><i style="border-color:var(--lamp);border-top-style:dotted"></i>LAMP (same-day guidance)</span>
   <span><i style="border-color:var(--mav)"></i>GFS MOS level for the day</span>
 </div>
+<div class="secttl" style="margin-top:22px">PICK A STATION</div>
+<div class="pickwrap">
+  <div><div class="pickttl" id="pickTitle">United States &mdash; dot colour and size: observed so far against the NWS high issued for the day</div>
+  <svg id="pick" viewBox="0 0 960 600"></svg></div>
+  <div><div class="pickttl">International stations and Honolulu</div>
+  <svg id="pickW" viewBox="0 60 960 320"></svg></div>
+</div>
+<div class="secttl" style="margin-top:22px">THE LAST THREE DAYS, RUN TOGETHER</div>
+<div class="bar"><span id="cityDaysExpand"></span><span class="cap" style="margin:0">observations across three
+days with each source&rsquo;s forecast for that day, all pinned to six in the evening the day before</span></div>
+<div class="card expandable" id="cityDaysWrap"><svg id="cityDays" viewBox="0 0 960 330"></svg></div>
+<div class="key" id="cityDaysKey"></div>
+<p class="cap" id="cityDaysCap"></p>
+
 <div class="secttl" style="margin-top:20px">HOW CURRENT EACH FORECAST IS</div>
 <div id="freshness"></div>
 
@@ -63,8 +71,9 @@ products rather than to the scoring.</p>
 <script src="js/market.js"></script>
 <script src="js/chart-city.js"></script>
 <script src="js/city-score.js"></script>
+<script src="js/city-days.js"></script>
 <script>
-WXC.chrome('city.html'); WXCityScore.init();
+WXC.chrome('city.html'); WXCityScore.init(); WXCityDays.init();
 Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
              fetch('assets/world.json').then(r => r.json()).catch(() => null)])
   .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null }));

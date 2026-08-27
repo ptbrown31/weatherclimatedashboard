@@ -243,6 +243,35 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} world map: each station carries its own unit",
                         all(("\u00b0F" not in l) or l.startswith("Honolulu") for l in wlabs), str(wlabs[:4]))
 
+                # ---- the last few days run together, with each day's forecast
+                # pinned to one moment so the days can be compared with each other
+                page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2800)
+                labs = page.eval_on_selector_all("#cityDays text",
+                    "e=>e.map(x=>x.textContent).filter(t=>/^[A-Z][a-z]{2} \\d/.test(t))")
+                chk.add(f"{scheme} three days: consecutive days are drawn, not overlaid",
+                        len(labs) >= 2 and len(set(labs)) == len(labs), str(labs))
+                lv = page.locator("#cityDays line[stroke^='var(--']").count()
+                chk.add(f"{scheme} three days: each day carries its forecast levels",
+                        lv >= 6, str(lv))
+                chk.add(f"{scheme} three days: the observations are marked, not just drawn",
+                        page.locator("#cityDays circle.rdot").count() >= 10,
+                        str(page.locator("#cityDays circle.rdot").count()))
+                dcap = page.locator("#cityDaysCap").inner_text()
+                chk.add(f"{scheme} three days: the pinned moment is stated",
+                        "six in the evening the day before" in dcap, dcap[:110])
+                # the chart the page is for comes first, and opens to the window
+                order = [o for o in page.eval_on_selector_all(".wrap > *", "e=>e.map(x=>x.id||x.className||x.tagName)")
+                         if o != "site"]
+                chk.add(f"{scheme} city page: the series is at the top, above the picker",
+                        order.index("chartCard") < order.index("pickwrap"), str(order[:6]))
+                page.locator("#chartExpand .zb.ex").click(); page.wait_for_timeout(700)
+                bx = page.locator("#chartCard.full").bounding_box()
+                chk.add(f"{scheme} city page: the series opens to fill the window",
+                        abs(bx["width"] - page.viewport_size["width"]) < 2, str(round(bx["width"])))
+                page.keyboard.press("Escape"); page.wait_for_timeout(500)
+                chk.add(f"{scheme} city page: Escape closes it",
+                        page.locator("#chartCard.full").count() == 0, "")
+
                 # ---- how current each forecast is: the page has to say, because
                 # these sources do not update together and one line can be minutes
                 # old while another is most of a working day
