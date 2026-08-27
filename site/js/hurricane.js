@@ -958,7 +958,16 @@ window.WXHur = (() => {
       div.appendChild(bar);
     });
     host.appendChild(div);
-    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the season named. '
+    /* What this contract actually asks.
+
+       The caption said "a hurricane", which is not the contract: the terms
+       require a Category 3 or higher hurricane at the moment of landfall, and
+       say that hurricane-force winds reaching the area do not count if the eye
+       stays offshore. Both conditions move the probability a long way, and the
+       heading above the panel already said major. */
+    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the '
+      + 'season named while at Category 3 or stronger. The exchange\u2019s terms are on the eye: a storm whose centre stays offshore '
+      + 'has not made landfall for this contract even where hurricane-force winds reach the area. '
       + 'Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. Yes green, No red; the Yes price is midway between the Yes bid '
       + 'and one dollar less the No bid where both sides have bids, else the one side shown, and there are no sellers, only bids to buy '
       + 'Yes or No. “Pays” in the box is what a dollar of payout costs at the price a Yes could be bought at now, net of the '
