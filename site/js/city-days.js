@@ -48,9 +48,16 @@ window.WXCityDays = (() => {
     // adding an offset, so a daylight-saving change does not shift a day
     const dayOf = ms => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
     const rows = obs.map(r => ({ t: Date.parse(r.t), v: r.tempF })).filter(r => isFinite(r.t)).sort((a, b) => a.t - b.t);
+    /* Complete days only: today is still running.
+
+       A day in progress has no high yet -- its warmest reading so far is not the
+       day's maximum, and a forecast level drawn against it would look wrong for
+       a reason that has nothing to do with the forecast. So the window ends at
+       the last local day that has closed, and today is left to the chart above,
+       which is the one built for a day in progress. */
     const today = dayOf(rows[rows.length - 1].t);
     const wanted = [];
-    for (let i = DAYS - 1; i >= 0; i--) {
+    for (let i = DAYS; i >= 1; i--) {
       const d = new Date(Date.parse(today + 'T12:00:00Z') - i * 86400000);
       wanted.push(new Intl.DateTimeFormat('en-CA', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d));
     }
@@ -87,6 +94,7 @@ window.WXCityDays = (() => {
     }
 
     // one band per local day, so a level line can be read against the day it belongs to
+    const shown = wanted.filter(dd => keep.some(r => dayOf(r.t) === dd));
     wanted.forEach(dd => {
       const inDay = keep.filter(r => dayOf(r.t) === dd);
       if (!inDay.length) return;
@@ -183,7 +191,8 @@ window.WXCityDays = (() => {
         + '<span>solid is the forecast high, dashed the low</span>';
     }
     if (cap) {
-      cap.textContent = 'The last ' + wanted.length + ' days at this station, run together. The trace is the hourly '
+      cap.textContent = 'The last ' + shown.length + ' complete days at this station, run together \u2014 today is '
+        + 'still running and belongs to the chart above. The trace is the hourly '
         + 'METAR record, the same one settlement reads. The level lines are each source’s high and low for that '
         + 'day as it stood at six in the evening the day before — one moment for every source and every day, so '
         + 'the days can be compared with each other. The distance from a level line to the trace under it is that '

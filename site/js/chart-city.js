@@ -636,7 +636,7 @@ window.WXCity = (() => {
       const y1 = S.B - 6, y0 = y1 - items.length * lh - 6;
       const bx = S.R - bw - 6;
       g.appendChild(el('rect', { x: bx, y: y0, width: bw, height: y1 - y0, rx: 4,
-                                 fill: 'var(--panel)', 'fill-opacity': .82, stroke: 'var(--line)',
+                                 fill: 'var(--panel)', 'fill-opacity': .95, stroke: 'var(--line)',
                                  'stroke-width': .8, 'pointer-events': 'none' }));
       items.forEach((it, i) => {
         const yy = y0 + 12 + i * lh;
@@ -797,7 +797,12 @@ window.WXCity = (() => {
     } else if (emb) emb.remove();
 
     // ---- titles
-    g.appendChild(txt(c.city + ' (' + c.station + ') — ' + dateShort(d0, tz), { x: S.L, y: 16, 'font-size': 14, 'font-weight': 700, fill: 'var(--navy)' }));
+    // the standalone page has a heading of its own directly above this, so the
+    // figure repeating it is one line of the same words twice; the embed has no
+    // page around it and still needs to say what it is showing
+    if (WX.target === 'embed' || svgId !== 'chart') {
+      g.appendChild(txt(c.city + ' (' + c.station + ') — ' + dateShort(d0, tz), { x: S.L, y: 16, 'font-size': 14, 'font-weight': 700, fill: 'var(--navy)' }));
+    }
     g.appendChild(txt('Temperature (°' + unit + '), local time' + (unit === 'C' ? ' — Celsius station' : ''), { x: S.W - 14, y: 16, 'text-anchor': 'end', class: 'axl' }));
 
     HV = { w0, d1, tz, S, market,
