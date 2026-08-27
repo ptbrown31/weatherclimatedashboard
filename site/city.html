@@ -35,6 +35,9 @@ this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high
   <span><i style="border-color:var(--lamp);border-top-style:dotted"></i>LAMP (same-day guidance)</span>
   <span><i style="border-color:var(--mav)"></i>GFS MOS level for the day</span>
 </div>
+<div class="secttl" style="margin-top:20px">HOW CURRENT EACH FORECAST IS</div>
+<div id="freshness"></div>
+
 <p class="cap">The dotted as-issued lines come from this site&rsquo;s forecast archive and cover the elapsed part of
 the day where only observations exist otherwise. Night shading marks the hours outside the contract day&rsquo;s
 daylight. Non-US stations show what US government feeds carry: observations everywhere, NBM guidance for
@@ -61,7 +64,7 @@ products rather than to the scoring.</p>
 <script src="js/chart-city.js"></script>
 <script src="js/city-score.js"></script>
 <script>
-WXC.chrome('city.html'); WXCityScore.init(WXC.param('station') || 'KLAX');
+WXC.chrome('city.html'); WXCityScore.init();
 Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
              fetch('assets/world.json').then(r => r.json()).catch(() => null)])
   .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null }));

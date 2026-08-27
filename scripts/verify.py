@@ -144,6 +144,13 @@ def run(no_build: bool) -> int:
                         and page.locator("#accChart circle").count() >= 20,
                         f"paths={page.locator('#accChart path').count()} pts={page.locator('#accChart circle').count()}")
                 acc_cap = page.locator("#accCap").inner_text()
+                acc_txt = page.locator("#accCap").inner_text()
+                chk.add(f"{scheme} accuracy: the page says where forecasting stops",
+                        "already been recorded" in acc_txt and "is not forecast skill" in acc_txt,
+                        acc_txt[-120:])
+                chk.add(f"{scheme} accuracy: that region is marked on the chart, not cut out",
+                        any("already happened" in t for t in page.eval_on_selector_all(
+                            "#accChart text", "e=>e.map(x=>x.textContent)")), "")
                 chk.add(f"{scheme} accuracy: the curve says what stands behind it",
                         "city-days" in acc_cap and "scored on the same days" in acc_cap, acc_cap[:90])
                 page.goto(f"{srv.url}/daily-temperature-markets.html"); page.wait_for_timeout(500)
@@ -235,6 +242,25 @@ def run(no_build: bool) -> int:
                 page.locator("#m2").click(); page.wait_for_timeout(500)
                 chk.add(f"{scheme} world map: each station carries its own unit",
                         all(("\u00b0F" not in l) or l.startswith("Honolulu") for l in wlabs), str(wlabs[:4]))
+
+                # ---- how current each forecast is: the page has to say, because
+                # these sources do not update together and one line can be minutes
+                # old while another is most of a working day
+                page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2600)
+                fr = page.eval_on_selector_all("#freshness tr td:first-child", "e=>e.map(x=>x.textContent.trim())")
+                chk.add(f"{scheme} freshness: every source on the chart reports its standing cycle",
+                        len(fr) >= 4 and any("National Weather Service" in x for x in fr)
+                        and any("GFS MOS" in x for x in fr), str(fr))
+                ages = page.eval_on_selector_all("#freshness tr td.num", "e=>e.map(x=>x.textContent.trim())")
+                chk.add(f"{scheme} freshness: each one carries an age, not just a timestamp",
+                        len(ages) >= 4 and all(("ago" in a or a == "\u2014") for a in ages), str(ages))
+                fcap = page.locator("#freshness .cap").inner_text()
+                chk.add(f"{scheme} freshness: the two meanings of issued are both defined",
+                        "Standing now" in fcap and "As issued for the day" in fcap
+                        and "never changes" in fcap, fcap[:110])
+                chk.add(f"{scheme} freshness: the as-issued cycle is shown beside the standing one",
+                        page.locator("#freshness tr td:nth-child(4)").count() >= 4,
+                        str(page.locator("#freshness tr td:nth-child(4)").count()))
 
                 # ---- the station's own record, drawn on its page
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)

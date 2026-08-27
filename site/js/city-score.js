@@ -248,6 +248,6 @@ window.WXCityScore = (() => {
             + 'positive number is a forecast that ran warm. A dash is a day that tool was not archived for.' }));
   }
 
-  function init(station) { tip = WXC.tooltip(); return Promise.all([draw(station), drawTable(station)]); }
+  function init() { tip = WXC.tooltip(); }
   return { init, draw, drawTable };
 })();

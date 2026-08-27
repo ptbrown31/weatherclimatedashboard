@@ -156,7 +156,9 @@ window.WXCity = (() => {
     // the station's own record, below the chart; it loads on its own so a slow
     // scorecard never holds up the chart the page is for
     if (window.WXCityScore) WXCityScore.draw(sid).catch(() => {});
+    if (window.WXCityScore) WXCityScore.drawTable(sid).catch(() => {});
     const c0 = city();
+    drawFreshness(c0);
     const keys = [`forecast/${sid}.json`, `obs/${sid}.json`].concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`] : []);
     const r = await WXD.getAll(keys);
     snaps = { fc: r[`forecast/${sid}.json`], ob: r[`obs/${sid}.json`], nm: r[`normals/${sid}.json`] || null };
@@ -589,6 +591,80 @@ window.WXCity = (() => {
     svg.addEventListener('mouseleave', () => { tip.hide(); if (hline) hline.remove(); hline = null; });
   }
 
+  /* How current each forecast on this chart is.
+
+     Two different things get called "issued" on this page and they are not the
+     same, so both are named.
+
+       STANDING NOW is the newest cycle the source has published. It is the solid
+       line, it moves through the day, and by late afternoon it knows most of
+       what the day did.
+
+       AS ISSUED FOR THE DAY is the cycle that was standing before the day began.
+       It is the dotted line and it never changes, which is what makes it worth
+       scoring: it is the forecast, not a running commentary on the observation.
+
+     The age matters and was nowhere on the page. These products do not update
+     together — aviation guidance lands every hour, the model behind GFS MOS four
+     times a day — so at any moment one line can be minutes old and another most
+     of a working day. A reader comparing them is entitled to know which.
+
+     TYPICAL is how often a source normally publishes; a cycle older than twice
+     that is called out rather than left to look current. */
+  const TYPICAL_H = { nws: 6, nbm: 1, lamp: 1, mav: 6 };
+  const FULLNAME = { nws: 'National Weather Service', nbm: 'Blend of Models',
+                     lamp: 'Aviation guidance (LAMP)', mav: 'GFS MOS' };
+
+  function ageText(ms) {
+    if (ms == null || !isFinite(ms)) return '—';
+    const m = Math.max(0, Math.round(ms / 60000));
+    if (m < 60) return m + ' min ago';
+    const hh = Math.floor(m / 60), mm = m % 60;
+    return hh + ' h ' + (mm ? mm + ' min ' : '') + 'ago';
+  }
+  function parseStamp(sid) {
+    if (!sid) return NaN;
+    const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?Z?$/.exec(sid);
+    return Date.parse(m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] || '00'}Z` : sid);
+  }
+
+  function drawFreshness(c) {
+    const host = $('#freshness'); if (!host || !c) return;
+    host.innerHTML = '';
+    const now = Date.now();
+    const t = h('table', { class: 'freshtab' });
+    t.appendChild(h('tr', {}, [h('th', { text: 'Source' }), h('th', { text: 'Standing now, issued' }),
+                               h('th', { class: 'num', text: 'Age' }),
+                               h('th', { text: 'As issued for the day' })]));
+    let anyStale = false;
+    ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
+      const cyc = c[k + 'Cycle'], iss = c[k + 'IssuedCycle'];
+      if (!cyc && !iss) return;
+      const ms = parseStamp(cyc), age = isNaN(ms) ? null : now - ms;
+      const stale = age != null && age > TYPICAL_H[k] * 2 * 3600000;
+      if (stale) anyStale = true;
+      const tr = h('tr', {}, [
+        h('td', {}, [h('span', { class: 'sw', style: 'background:' + COL[k] }),
+                     document.createTextNode(FULLNAME[k])]),
+        h('td', { text: isNaN(ms) ? '—' : stamp(cyc, c.tz) }),
+        h('td', { class: 'num' + (stale ? ' stale' : ''), text: ageText(age) }),
+        h('td', { text: iss ? stamp(iss, c.tz) : '—' }),
+      ]);
+      t.appendChild(tr);
+    });
+    host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
+    host.appendChild(h('p', { class: 'cap',
+      text: 'Standing now is the newest cycle a source has published, which is the solid line and moves through '
+          + 'the day. As issued for the day is the cycle that was standing before the day began, which is the '
+          + 'dotted line and never changes \u2014 that is the one worth scoring, because it is a forecast rather '
+          + 'than a running commentary on what has already happened. These sources do not update together: '
+          + 'aviation guidance publishes hourly, the model behind GFS MOS four times a day, so at any moment one '
+          + 'line can be minutes old and another most of a working day.'
+          + (anyStale ? ' A time in red is older than twice that source\u2019s usual gap between cycles, which '
+                        + 'usually means its feed is behind rather than that the forecast has not changed.' : '')
+          + ' Times are this station\u2019s local time.' }));
+  }
+
   async function init(opts = {}) {
     svgId = opts.svgId || 'chart';
     onSelect = opts.onSelect || null;
@@ -607,5 +683,5 @@ window.WXCity = (() => {
     await select(summary.cities.some(c => c.station === want) ? want : summary.cities[0].station, false);
   }
 
-  return { init, select };
+  return { init, select, drawFreshness };
 })();

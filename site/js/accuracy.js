@@ -54,6 +54,26 @@ window.WXAccuracy = (() => {
     svg.appendChild(txt('Hours before the end of the target day  →  settlement', { x: (L + R) / 2, y: B + 38,
       'text-anchor': 'middle', class: 'ax' }));
 
+    /* Where forecasting stops.
+
+       A day's high usually happens in the afternoon, so within a few hours of
+       local midnight it has already been recorded and the market is pricing a
+       fact rather than a forecast. Its error goes to nothing there and the
+       improvement reaches a hundred per cent, which is true and is not a
+       measure of forecast skill — the comparison at that end is a market that
+       has seen the day against a forecast that was fixed before it.
+
+       The region is shaded and named rather than cut off. Removing it would be
+       tidier and would also be hiding the part of the record that most needs
+       explaining. */
+    const DECIDED_H = 8;
+    if (xlo <= DECIDED_H) {
+      const x2 = x(Math.max(xlo, 0)), x1b = x(Math.min(DECIDED_H, xhi));
+      svg.appendChild(el('rect', { x: Math.min(x1b, x2), y: T, width: Math.abs(x2 - x1b), height: B - T,
+                                   fill: 'var(--muted)', 'fill-opacity': .09, 'pointer-events': 'none' }));
+      svg.appendChild(txt('the high has usually already happened', { x: (x1b + x2) / 2, y: T + 12,
+                                                                    'text-anchor': 'middle', class: 'ax' }));
+    }
     // a day boundary is worth marking: to the left of it the market is pricing a
     // day that has not started, to the right it is pricing one in progress
     if (xhi >= 24 && xlo <= 24) {
@@ -120,7 +140,12 @@ window.WXAccuracy = (() => {
         + 'would score the Service against a forecast nobody made. The market\'s figure is the degree above the '
         + 'strike where the Yes price crosses 50 cents, because these contracts pay when the recorded high is '
         + 'strictly above the strike, so a market certain of 92 prices the 91 and 92 strikes a dollar apart and '
-        + 'the crossing falls halfway between them.';
+        + 'the crossing falls halfway between them. '
+        + 'Read the shaded end with care: a day\u2019s high usually happens in the afternoon, so within a few '
+        + 'hours of midnight it has already been recorded and the market is pricing something that has happened '
+        + 'rather than forecasting it. The market\u2019s error goes to nothing there and the gap reaches a hundred '
+        + 'per cent, which is real but is not forecast skill. The part of this chart that compares two forecasts '
+        + 'is the unshaded part, and there the market runs between about fifteen and forty per cent closer.';
     }
   }
 

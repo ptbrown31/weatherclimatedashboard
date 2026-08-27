@@ -269,3 +269,13 @@ body.wtfull{overflow:hidden}
 /* the lead a tool's column is anchored to, under its name */
 .daytab th.grp .lead{display:block;font-weight:600;font-size:10px;color:var(--muted);
   letter-spacing:0;text-transform:none;margin-top:1px}
+
+
+/* how current each forecast on a city page is */
+.freshtab{border-collapse:collapse;font-size:12px;width:100%}
+.freshtab th,.freshtab td{padding:5px 10px;white-space:nowrap;text-align:left}
+.freshtab th{font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.02em}
+.freshtab .num{text-align:right;font-variant-numeric:tabular-nums}
+.freshtab td.stale{color:var(--no);font-weight:700}
+.freshtab tr:nth-child(even) td{box-shadow:inset 0 0 0 9999px rgba(127,127,127,.035)}
+.freshtab .sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
