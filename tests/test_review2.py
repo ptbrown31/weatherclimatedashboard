@@ -143,9 +143,12 @@ class HurricaneReuse(unittest.TestCase):
     def test_unchanged_storm_reuses_geometry(self):
         tmp = tempfile.TemporaryDirectory()
         st = storage.LocalStorage(tmp.name)
+        # fresh counts, so the pass reuses them instead of reaching for the best
+        # tracks; without a stamp inside the window this test went to the network
+        fresh = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         prev = {"asof": "2026-08-22T00:00:00Z", "storms": [{"id": "cp012026", "advisory": "038", "updated": "2026-08-21T21:00:00.000Z",
                 "geometryAdvisory": "38", "cone": [[[0, 0]]], "track": [], "past": [], "points": [], "geometryFetched": "x"}],
-                "outlook": [], "season": {"computed": "2026-08-22", "named": 3}}
+                "outlook": [], "season": {"computed": fresh[:10], "computedAt": fresh, "named": 3, "names": ["Arthur"]}}
         st.put("snapshots/hurricane.json", json.dumps(prev).encode())
         roster = [{"id": "cp012026", "binNumber": "CP2", "name": "Lala", "classification": "HU", "intensity": "80",
                    "lastUpdate": "2026-08-21T21:00:00.000Z", "publicAdvisory": {"advNum": "038", "url": "u"}}]
@@ -163,8 +166,81 @@ class HurricaneReuse(unittest.TestCase):
         self.assertEqual(snap["reused"], 1)
         self.assertEqual(snap["storms"][0]["cone"], [[[0, 0]]])
         self.assertEqual(fetched, ["Seven-Day: Potential Development Region"])   # only the outlook was fetched
-        self.assertEqual(snap["season"]["named"], 3)                               # computed today: reused
+        self.assertEqual(snap["season"]["named"], 3)                               # counted recently: reused
         tmp.cleanup()
+
+
+class SeasonFreshness(unittest.TestCase):
+    """When the season-to-date counts have to be worked out again.
+
+    They were recomputed once a UTC day, so a storm named after that pass left
+    the roster saying "Dolly, tropical storm" above a counter that had never
+    heard of it. The count contracts settle on that counter.
+    """
+    def setUp(self):
+        self.now = dt.datetime(2026, 8, 27, 17, 42, tzinfo=dt.timezone.utc)
+
+    def at(self, hours):
+        t = self.now - dt.timedelta(hours=hours)
+        return t.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    def season(self, hours, names=("Arthur", "Bertha", "Cristobal")):
+        return {"named": len(names), "names": list(names), "computedAt": self.at(hours)}
+
+    def storm(self, name, cls="TS", sid="al042026"):
+        return {"id": sid, "name": name, "classification": cls, "basin": sid[:2].upper()}
+
+    def test_recent_counts_stand(self):
+        self.assertTrue(hurricane.season_fresh(self.season(1), [self.storm("Cristobal")], self.now))
+
+    def test_old_counts_are_redone(self):
+        self.assertFalse(hurricane.season_fresh(self.season(9), [], self.now))
+
+    def test_a_named_storm_the_counts_have_not_got_to(self):
+        # the live case: Dolly named at 12Z, counts last taken at 00Z
+        self.assertFalse(hurricane.season_fresh(self.season(1), [self.storm("Dolly")], self.now))
+
+    def test_a_depression_is_not_a_missing_name(self):
+        # an unnamed system has no name to be missing, and asking again every
+        # pass for the days one sits offshore would be a fetch for nothing
+        self.assertTrue(hurricane.season_fresh(self.season(1), [self.storm("Four", cls="TD")], self.now))
+
+    def test_other_basins_do_not_move_an_atlantic_count(self):
+        self.assertTrue(hurricane.season_fresh(
+            self.season(1), [self.storm("Lala", sid="cp012026")], self.now))
+
+    def test_no_stamp_means_redo(self):
+        self.assertFalse(hurricane.season_fresh({"named": 3, "computed": "2026-08-27"}, [], self.now))
+        self.assertFalse(hurricane.season_fresh(None, [], self.now))
+
+    def test_a_stamp_from_the_future_is_not_trusted(self):
+        self.assertFalse(hurricane.season_fresh(self.season(-5), [], self.now))
+
+    def test_unreadable_stamp_means_redo(self):
+        self.assertFalse(hurricane.season_fresh({"names": [], "computedAt": "whenever"}, [], self.now))
+
+    def test_counts_carry_the_time_they_were_taken(self):
+        # the date alone cannot say whether a storm named at midday is in them
+        # a best-track row is read by position: 8 is the wind, 10 the type and
+        # 27 the name, so it is built by index rather than by eye
+        f = ["" for _ in range(28)]
+        f[0], f[1], f[2], f[4] = "AL", "04", "2026082712", "BEST"
+        f[6], f[7], f[8], f[10], f[27] = "136N", "387W", "35", "TS", "DOLLY"
+        body = ", ".join(f) + ","
+        idx = '<a href="bal042026.dat">bal042026.dat</a>'
+        pages = {hurricane.ATCF_BTK: idx, hurricane.ATCF_BTK + "bal042026.dat": body}
+        orig = hurricane.gw._get_text
+        hurricane.gw._get_text = lambda url, **k: pages[url]
+        try:
+            out = hurricane.season_counts(2026)
+        finally:
+            hurricane.gw._get_text = orig
+        self.assertEqual(out["names"], ["Dolly"])          # the parser title-cases them
+        self.assertEqual(out["named"], 1)
+        self.assertTrue(out["computedAt"].endswith("Z"))
+        self.assertTrue(out["computedAt"].startswith(out["computed"]))
+        tail = dt.datetime.fromisoformat(out["computedAt"].replace("Z", "+00:00"))
+        self.assertLess(abs((dt.datetime.now(dt.timezone.utc) - tail).total_seconds()), 120)
 
 
 if __name__ == "__main__":

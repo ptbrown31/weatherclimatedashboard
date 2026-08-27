@@ -21,10 +21,12 @@ whose fetch fails keeps its previous geometry, flagged; the outlook and each
 storm are fetched independently, so one failure cannot blank the rest. The
 layer index is re-read every pass because NHC has renumbered layer ids.
 
-Season-to-date counts come from the ATCF best-track files, computed once a
-day: a system counts as named once a best-track row with a tropical or
-subtropical cyclone type (TS, SS, HU) reaches 34 kt, a hurricane at 64 kt
-and a major at 96 kt on a HU row. Cyclone numbers 01-49 are real systems;
+Season-to-date counts come from the ATCF best-track files: a system counts as
+named once a best-track row with a tropical or subtropical cyclone type (TS,
+SS, HU) reaches 34 kt, a hurricane at 64 kt and a major at 96 kt on a HU row.
+They are recomputed when they get old, and straight away when the active roster
+holds a named Atlantic storm the counts have not got to yet -- see
+season_fresh. Cyclone numbers 01-49 are real systems;
 80-89 are test entries and 90+ are invest areas.
 
 Writes snapshots/hurricane.json.
@@ -56,8 +58,12 @@ def season_counts(year: int) -> dict:
     names each file twice (href and text), so collect a set."""
     idx = gw._get_text(ATCF_BTK, timeout=60)
     nums = sorted({int(m.group(1)) for m in re.finditer(rf"bal(\d\d){year}\.dat", idx)})
+    now = dt.datetime.now(dt.timezone.utc)
     out = {"named": 0, "hurricanes": 0, "majors": 0, "names": [], "year": year,
-           "computed": dt.datetime.now(dt.timezone.utc).date().isoformat()}
+           "computed": now.date().isoformat(),
+           # the date alone could not say whether a storm named at midday was in
+           # the figure, which is the only question a reader has about its age
+           "computedAt": now.isoformat(timespec="seconds").replace("+00:00", "Z")}
     for num in nums:
         if not 1 <= num <= 49:
             continue
@@ -87,6 +93,53 @@ def season_counts(year: int) -> dict:
         if vmax_hu >= 96:
             out["majors"] += 1
     return out
+
+
+SEASON_STALE_HOURS = 3
+# a named storm NHC has not yet carried to 34 kt in the best tracks: the counts
+# stay behind the roster until it does, and asking again every pass through that
+# window costs one directory listing and one small file per cyclone
+NAMED_CLASSES = ("TS", "SS", "HU")
+
+
+def season_fresh(season: Optional[dict], storms: list, now: dt.datetime) -> bool:
+    """Whether the season-to-date counts still stand.
+
+    They were recomputed once a UTC day, which left the page contradicting
+    itself. Dolly was named at 12Z on 27 August and the roster above said so
+    within the half hour, while the counter underneath still read three named
+    storms and would have until the following day. The count contracts settle on
+    that number, so a storm being named is precisely the moment it has to move.
+
+    Two things force a recompute: the figure getting old, and an active storm the
+    ledger has never heard of. The second is a trigger only. The best tracks stay
+    the sole authority for the count, because NHC names a storm on the advisory
+    before a best-track row reaches 34 kt, and counting from the roster would be
+    a second rule that disagrees with the first for a few hours at a time.
+    """
+    if not season:
+        return False
+    at = season.get("computedAt")
+    if not at:
+        return False                      # written before the stamp existed
+    try:
+        age = (now - dt.datetime.fromisoformat(str(at).replace("Z", "+00:00"))).total_seconds()
+    except ValueError:
+        return False
+    if age < 0 or age >= SEASON_STALE_HOURS * 3600:
+        return False
+    known = {str(n).strip().upper() for n in (season.get("names") or [])}
+    for s in storms or []:
+        # Atlantic only, and only once NHC calls it a storm rather than a
+        # depression: an unnamed system has no name to miss from the list
+        if str(s.get("basin") or "").upper() != "AL":
+            continue
+        if str(s.get("classification") or "").upper() not in NAMED_CLASSES:
+            continue
+        nm = str(s.get("name") or "").strip().upper()
+        if nm and nm not in known:
+            return False
+    return True
 
 
 def _fetch_geometry(b: str) -> dict:
@@ -187,7 +240,7 @@ def hurricane_pass(cfg: dict, store: Storage) -> int:
         except Exception as e:
             snap["errors"].append(f"outlook: {type(e).__name__}: {e}")
             snap["outlookAsof"] = prev.get("outlookAsof")
-    season_ok = snap["season"] and snap["season"].get("computed") == now.date().isoformat()
+    season_ok = season_fresh(snap["season"], snap["storms"], now)
     if not season_ok and not deadline.over(60):
         try:
             snap["season"] = season_counts(now.year)

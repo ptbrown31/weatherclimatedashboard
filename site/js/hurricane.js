@@ -660,7 +660,7 @@ window.WXHur = (() => {
     const s = H.season || {};
     const tiles = $('#tiles'); tiles.innerHTML = '';
     const seasonTip = tip.rows((s.year || 'This') + ' season to date', [['Named storms', s.named], ['Hurricanes', s.hurricanes], ['Major hurricanes', s.majors]],
-      ((s.names || []).length ? esc((s.names || []).join(', ')) + '<br>' : '') + 'from the ATCF best tracks, computed ' + esc(s.computed || '—'));
+      ((s.names || []).length ? esc((s.names || []).join(', ')) + '<br>' : '') + 'from the ATCF best tracks, counted ' + esc(s.computedAt ? clockFull(Date.parse(s.computedAt), local()) + ' \u00b7 ' + dateShort(Date.parse(s.computedAt), local()) : (s.computed || '\u2014')));
     tiles.appendChild(tile('named storms, ' + (s.year || 'this season'), s.named, (s.names || []).join(', ') || 'none yet', seasonTip));
     tiles.appendChild(tile('hurricanes', s.hurricanes, 'from the ATCF best tracks', seasonTip));
     tiles.appendChild(tile('major hurricanes', s.majors, 'category 3 or stronger', seasonTip));
@@ -967,10 +967,30 @@ window.WXHur = (() => {
         h('span', { text: s.interim ? 'interim settlement file received' : '' }),
         h('span', { text: s.final ? 'final settlement file received' : '' })]));
       if (lc && lc.sites) {
-        const cols = [70, 80, 90, 100, 110, 120, 130, 150].filter(t => lc.thresholds.includes(t));
+        /* The vendor's lowest rung is on the table.
+
+           It was left off, and on a tropical storm it is the only rung carrying
+           anything: Dolly's ladder was non-zero at 60 mph everywhere and at 70
+           almost nowhere, so three of the six locations printed as a row of
+           zeros underneath a line saying six locations had non-zero
+           probability. A threshold the vendor publishes and the cards already
+           draw does not belong only in the cards. */
+        const cols = [60, 70, 80, 90, 100, 110, 120, 130, 150].filter(t => lc.thresholds.includes(t));
         const idx = cols.map(t => lc.thresholds.indexOf(t));
-        const i80 = lc.thresholds.indexOf(80);
-        const rows = Object.entries(lc.sites).sort((a, b) => (b[1].p[i80] || 0) - (a[1].p[i80] || 0)).slice(0, 16);
+        /* Rank by the ladder from the top rung down.
+
+           Ordering on one fixed rung ranked nothing when no location reached it.
+           A ladder is monotone, so comparing the highest threshold first and
+           dropping to the next only to break ties puts the most exposed location
+           at the top whatever the storm's strength. */
+        const rank = (a, b) => {
+          for (let i = idx.length - 1; i >= 0; i--) {
+            const d = (b[1].p[idx[i]] || 0) - (a[1].p[idx[i]] || 0);
+            if (d) return d;
+          }
+          return 0;
+        };
+        const rows = Object.entries(lc.sites).sort(rank).slice(0, 16);
         const tb = h('table');
         tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
         rows.forEach(([id, r]) => {
