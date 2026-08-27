@@ -112,12 +112,15 @@ window.WXAccuracy = (() => {
     if (cap) {
       const n = pts.reduce((m, p) => Math.max(m, p.cityDays), 0);
       cap.textContent = 'Every forecast either system published for ' + (d.cities || 0) + ' cities between '
-        + d.from + ' and ' + d.to + ', scored on the high the station recorded and averaged by how far ahead it was '
-        + 'made. Up to ' + n + ' city-days stand behind a point; bins holding fewer than ' + (d.minCityDays || 30)
-        + ' are not drawn. The market line is the strike where the Yes price crosses 50 cents. '
-        + 'Both systems are scored on the same days. The capture was widened to every contract station on '
-        + '26 August 2026; those stations enter this curve as their days settle, so the city count grows from '
-        + 'here and the earlier part of the record remains the cities captured since May.';
+        + d.from + ' and ' + d.to + ', scored on the high the station recorded and averaged by how far ahead it '
+        + 'was made. Up to ' + n + ' city-days stand behind a point; bins holding fewer than ' + (d.minCityDays || 30)
+        + ' are not drawn. Both systems are scored on the same days. '
+        + 'The Service\'s figure is the highest its LAMP bulletin forecast for that day: a bulletin covers a '
+        + 'rolling window, so late in the day what remains of it is only the night, and reading that literally '
+        + 'would score the Service against a forecast nobody made. The market\'s figure is the degree above the '
+        + 'strike where the Yes price crosses 50 cents, because these contracts pay when the recorded high is '
+        + 'strictly above the strike, so a market certain of 92 prices the 91 and 92 strikes a dollar apart and '
+        + 'the crossing falls halfway between them.';
     }
   }
 

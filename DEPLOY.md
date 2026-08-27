@@ -223,24 +223,32 @@ Every mapping from a contract to a series was checked against the strikes the ex
 rather than inferred from the contract's name. `pipeline/energy.py` records which readings are
 easy to get wrong and why.
 
-## 11. The accuracy curve (run from the machine that captures it)
+## 11. The accuracy curve (run from the machine that can reach the capture)
 
-The accuracy page draws forecast error against lead time for the National Weather Service
-station forecast and the price-implied high. That comparison is captured hourly by a separate
-system into a SQLite file on the owner's machine. The Lambda has no route to that file, and the
-site's own archive only reaches back to the day it started, which is a fraction of the record,
-so the curve is published from the machine that holds it:
+The accuracy page draws forecast error against lead time for the National Weather Service's LAMP
+bulletin and the price-implied high. Both are captured by a separate system that is not on the
+network and is not named in this repository, which is public. The extractor that reads it therefore
+lives outside this tree, at `~/.weather-tools-site-accuracy/`; it opens that system's database
+read-only, touches only the three tables that record what happened — the bulletin, the exchange's
+own bids and asks, and the recorded daily extreme — and writes nothing back.
 
-    WX_STORAGE_BACKEND=s3 \
-    WX_STORAGE_BUCKET=<bucket> WX_STORAGE_REGION=<region> WX_STORAGE_PREFIX=data \
-    python3 scripts/export_accuracy.py
+    ~/.weather-tools-site-accuracy/run.sh > ~/.weather-tools-site-accuracy/records.jsonl
+    WX_STORAGE_BACKEND=s3 WX_STORAGE_BUCKET=<bucket> WX_STORAGE_REGION=<region> \
+      WX_STORAGE_PREFIX=data \
+      python3 scripts/export_accuracy.py --records ~/.weather-tools-site-accuracy/records.jsonl
 
-`--dry-run` prints the curve and writes nothing. `--db` points at another capture file.
+`--dry-run` prints the curve and writes nothing.
 
-It reads, reduces to a few hundred numbers, and writes one snapshot; it never uploads a row of
-the underlying data. Re-run it whenever the curve should catch up — the page states the window
-it covers, so a stale file is visible rather than silent. Nothing else depends on it, and the
-page says the measurement has not been published yet if the file is missing.
+The two derivations that decide what the curve says are in `scripts/export_accuracy.py`, not in the
+extractor, so they can be read and are covered by `tests/test_accuracy.py`: the Service's figure is
+the highest its bulletin forecast for the day rather than the highest still to come, and the
+market's whole-degree high is the degree above the crossing rather than the nearest one. Both were
+measured before being adopted; the reasoning is in that file's docstring.
+
+No model forecast, fitted probability or fair value is read or published.
+
+Re-run it whenever the curve should catch up — the page states the window it covers, so a stale file
+is visible rather than silent, and it says the measurement has not been published yet if missing.
 
 ## Cloudflare alternative
 
