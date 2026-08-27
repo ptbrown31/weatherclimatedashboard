@@ -115,7 +115,9 @@ window.WXAccuracy = (() => {
         + d.from + ' and ' + d.to + ', scored on the high the station recorded and averaged by how far ahead it was '
         + 'made. Up to ' + n + ' city-days stand behind a point; bins holding fewer than ' + (d.minCityDays || 30)
         + ' are not drawn. The market line is the strike where the Yes price crosses 50 cents. '
-        + 'Both systems are scored on the same days.';
+        + 'Both systems are scored on the same days. The capture was widened to every contract station on '
+        + '26 August 2026; those stations enter this curve as their days settle, so the city count grows from '
+        + 'here and the earlier part of the record remains the cities captured since May.';
     }
   }
 
