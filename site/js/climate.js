@@ -6,7 +6,19 @@
    pin on click; threshold lines list the expirations that carry them. */
 window.WXClimate = (() => {
   const { el, txt, h, $ } = WXC;
-  const RAMP = ['#8b0000', '#d62728', '#ff7f0e', '#ffd700', '#adff2f', '#3ddc84', '#40e0d0', '#4fc3f7', '#1f77b4', '#00008b'];
+  /* Price as colour: red at nothing, green at a dollar.
+
+     A marker's colour is the Yes price, which on these contracts is the market's
+     probability that the series ends above that strike. So the scale runs from
+     red at no chance to green at a certainty, which is the same green and red
+     the Yes and No language uses everywhere else on the site.
+
+     The middle is yellow rather than a blend of the ends, and the ends are dark
+     rather than saturated, so the ramp also varies in brightness. A reader who
+     cannot separate red from green can still read it as light in the middle and
+     dark at both ends, which a pure red-to-green fade does not give them. */
+  const RAMP = ['#A3162A', '#C63A2E', '#E06A34', '#F09B3E', '#F5CE4C',
+                '#D8DA4A', '#9BC63F', '#52A94A', '#157F3C'];
   const X0 = { tempAnnual: 2000, tempMonthly: 2000, seaLevel: 1993, co2: 1995, amoc: 2004 };
   const PANELS = [
     ['tempAnnual', 'Global temperature, annual', '°C above preindustrial'],
@@ -59,7 +71,7 @@ window.WXClimate = (() => {
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
     div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: unit + (product ? ' · markers: ' + WXM.LABEL : '') }));
     const ctl = h('div', { class: 'zoomrow' }); div.appendChild(ctl);
-    const svg = el('svg', { viewBox: '0 0 960 330', class: 'ts' }); div.appendChild(svg);
+    const svg = el('svg', { viewBox: '0 0 960 356', class: 'ts' }); div.appendChild(svg);
     const note = h('div', { class: 'note', style: 'display:none;margin:6px 0 0;font-size:12px' }); div.appendChild(note);
     if (opts._before && opts._before.parentNode === host) host.insertBefore(div, opts._before);
     else host.appendChild(div);
@@ -288,6 +300,26 @@ window.WXClimate = (() => {
       }
     }
 
+    /* The key for that colour, on the panel rather than in a caption.
+
+       Without it a reader has to guess whether green is dear or likely. It is
+       drawn only where there are priced markers to explain. */
+    if (cs.some(c => c.yes != null)) {
+      const kw = 132, kh = 7, kx = R - kw, ky = B + 36;
+      const gid = 'pg' + Math.abs(Math.round(X(x0) * 977 + Y(hi) * 31)) + key.replace(/[^a-z0-9]/gi, '');
+      const defs = el('defs');
+      const lg = el('linearGradient', { id: gid, x1: '0', x2: '1', y1: '0', y2: '0' });
+      RAMP.forEach((col, i) => lg.appendChild(el('stop',
+        { offset: (i / (RAMP.length - 1) * 100).toFixed(1) + '%', 'stop-color': col })));
+      defs.appendChild(lg); svg.appendChild(defs);
+      svg.appendChild(el('rect', { x: kx, y: ky, width: kw, height: kh, fill: 'url(#' + gid + ')',
+                                   stroke: 'var(--line)', 'stroke-width': .5 }));
+      svg.appendChild(txt('0¢', { x: kx - 5, y: ky + kh, 'text-anchor': 'end', class: 'ax' }));
+      svg.appendChild(txt('100¢', { x: kx + kw + 5, y: ky + kh, class: 'ax' }));
+      svg.appendChild(txt('Yes price: the market’s chance it ends above the strike',
+                          { x: kx - 5, y: ky - 4, 'text-anchor': 'end', class: 'ax' }));
+    }
+
     let dragHint = null;
     if (pts.length > 4) { dragHint = txt('← drag across the history to project a linear trend', { x: L + 8, y: T + 14, 'font-size': 11, fill: 'var(--accent)', 'font-weight': 600 }); svg.appendChild(dragHint); }
 
@@ -308,7 +340,9 @@ window.WXClimate = (() => {
       const noBid = c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100;
       const book = c.bid != null && c.ask != null ? null : (c.bid != null ? 'Yes bids only; the Yes price shown is the Yes bid' : (c.ask != null ? 'No bids only; the Yes price shown is one dollar less the No bid' : 'no bids'));
       if (url) WXM.linkTo(m, url, 'Open ' + c.label + ' on IBKR');
-      const html = () => tip.rows(product.name + ' — ' + c.label, [
+      const html = () => '<b>' + product.name + ' — ' + c.label + '</b>'
+        + tip.price(c.ask, c.bid == null ? null : 1 - c.bid)
+        + tip.rows(null, [
         ['Settles', c.expiryLabel], ['Expires', /\d{1,2}, \d{4}/.test(c.expiryLabel || '') ? null : expLabel(c.expiration)],
         ['Yes price', cents(c.yes) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
         ['Yes bid', c.bid != null ? cents(c.bid) + size(c.bidSize) : null],

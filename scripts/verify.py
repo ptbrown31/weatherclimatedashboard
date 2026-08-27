@@ -950,6 +950,38 @@ def run(no_build: bool) -> int:
                 page.locator("#panels .panel:first-child path[stroke='var(--obs)']").last.hover(force=True)
                 page.wait_for_timeout(150)
 
+                # the two prices lead the box: it is what a reader hovered for
+                page.locator("#panels svg circle[data-tip]").nth(3).hover(force=True)
+                page.wait_for_timeout(250)
+                blocks = page.eval_on_selector_all("#tip .tprice .tp",
+                    "e=>e.map(x=>({cls:x.className, lab:x.querySelector('.tpl').textContent, v:x.querySelector('.tpv').textContent}))")
+                chk.add(f"{scheme} strike box: both prices lead, big, in Yes green and No red",
+                        len(blocks) == 2 and blocks[0]["lab"] == "Buy Yes" and blocks[1]["lab"] == "Buy No"
+                        and "yes" in blocks[0]["cls"] and "no" in blocks[1]["cls"],
+                        str(blocks))
+                chk.add(f"{scheme} strike box: the prices are cents, not blank",
+                        all(b["v"].endswith("\u00a2") for b in blocks), str([b["v"] for b in blocks]))
+                # and the colour those markers carry is explained on the panel
+                chk.add(f"{scheme} panel: a colour key explains the marker colour",
+                        page.locator("#panels linearGradient stop").count() >= 5
+                        and any("chance it ends above the strike" in t for t in page.eval_on_selector_all(
+                            "#panels text", "e=>e.map(x=>x.textContent)")),
+                        str(page.locator("#panels linearGradient stop").count()))
+                # red at nothing, green at a dollar: a dear strike and a cheap one
+                # must not come out the same colour
+                pairs = page.eval_on_selector_all("#panels .panel:first-child circle[data-tip]",
+                    "e=>e.map(x=>({y:+x.getAttribute('cy'), f:x.getAttribute('fill')}))")
+                lowest = max(pairs, key=lambda r: r["y"])   # lowest strike sits lowest on screen
+                highest = min(pairs, key=lambda r: r["y"])
+                def _rg(c):
+                    m = __import__("re").match(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)", c or "")
+                    if m: return int(m.group(1)), int(m.group(2))
+                    c = (c or "").lstrip("#")
+                    return (int(c[0:2], 16), int(c[2:4], 16)) if len(c) == 6 else (0, 0)
+                lr, lg = _rg(lowest["f"]); hr, hg = _rg(highest["f"])
+                chk.add(f"{scheme} panel: the ramp runs red at nothing to green at a dollar",
+                        lg > lr and hr > hg, f"cheap-to-exceed={lowest['f']} dear={highest['f']}")
+
                 # thirty strikes would make a crossing list unreadable, so a
                 # ladder reports what the trend projects for each settling year
                 agb = page.locator("#panels svg").first.bounding_box()

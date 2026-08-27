@@ -158,6 +158,23 @@ window.WXC = (() => {
       hide() { if (tip.dataset.pinned) return; tip.style.opacity = 0; },
       pin(e, html) { tip.dataset.pinned = ''; tip.innerHTML = html; tip.style.opacity = 1; place(e); tip.dataset.pinned = '1'; tip.classList.add('pinned'); setTimeout(() => tip.classList.remove('pinned'), 400); },
       pinned: () => !!tip.dataset.pinned,
+      /* The two prices, given the room they deserve.
+
+         A reader hovering a strike wants what it costs to take each side, and
+         those were the fifth and sixth lines of a six-line table. They now sit
+         above everything else, big, in the Yes-green No-red the rest of the site
+         uses. The detail stays underneath for anyone who wants the book.
+
+         These are the prices to BUY each side: the Yes ask, and one dollar less
+         the Yes bid for the No. There are no sellers on this exchange, only bids
+         to buy one side or the other, and the two sum to a dollar. */
+      price(yesBuy, noBuy) {
+        const c = v => (v == null ? '—' : Math.round(v * 100) + '¢');
+        return '<div class="tprice">'
+          + '<div class="tp yes"><span class="tpl">Buy Yes</span><span class="tpv">' + c(yesBuy) + '</span></div>'
+          + '<div class="tp no"><span class="tpl">Buy No</span><span class="tpv">' + c(noBuy) + '</span></div>'
+          + '</div>';
+      },
       rows(title, pairs, foot) {
         const body = pairs.filter(p => p && p[1] != null && p[1] !== '').map(p => '<span class="tk">' + p[0] + '</span><span class="tv">' + p[1] + '</span>').join('');
         return (title ? '<b>' + title + '</b>' : '') + (body ? '<div class="tg">' + body + '</div>' : '') + (foot ? '<div class="tf">' + foot + '</div>' : '');
