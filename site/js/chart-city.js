@@ -391,8 +391,28 @@ window.WXCity = (() => {
       { x: S.L + 8, y: S.T + 16, class: 'axl' }));
 
     // ---- series
-    const line = (pts, attrs) => el('path', Object.assign({ d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + y(p.v).toFixed(1)).join(''),
-      fill: 'none', 'stroke-width': 2, 'stroke-linejoin': 'round' }, attrs));
+    /* Every series here is a sequence of readings — an observation on the hour,
+       a forecast for a step — so each one carries a dot at the value it actually
+       holds. A bare line between them draws a temperature for every instant in
+       between that nothing measured.
+
+       The dots are drawn only where they would read as separate marks; on a
+       crowded axis they would thicken the line rather than clarify it. */
+    const dotsFor = pts => {
+      if (pts.length < 2) return 0;
+      const gap = Math.abs(x(pts[pts.length - 1].t) - x(pts[0].t)) / (pts.length - 1);
+      return gap >= 5 ? Math.min(2.6, Math.max(1.5, gap / 4)) : 0;
+    };
+    const line = (pts, attrs) => {
+      const grp = el('g');
+      grp.appendChild(el('path', Object.assign({ d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + y(p.v).toFixed(1)).join(''),
+        fill: 'none', 'stroke-width': 2, 'stroke-linejoin': 'round' }, attrs)));
+      const r = dotsFor(pts);
+      if (r) pts.forEach(p => grp.appendChild(el('circle', { class: 'rdot', cx: x(p.t).toFixed(1), cy: y(p.v).toFixed(1),
+        r, fill: attrs.stroke || 'var(--ink)', opacity: attrs.opacity == null ? 1 : attrs.opacity,
+        'pointer-events': 'none' })));
+      return grp;
+    };
     ySeries.forEach(s => { const a = { stroke: s.col, 'stroke-width': s.w, opacity: s.op }; if (s.dash) a['stroke-dasharray'] = s.dash; g.appendChild(line(s.pts, a)); });
     if (showYday && !YD.nws && !YD.nbm) g.appendChild(txt('Yesterday’s as-issued forecast appears here once the archive is a day old.', { x: S.L + 8, y: S.T + 30, class: 'axl' }));
     if (LAI.length) g.appendChild(line(LAI, { stroke: COL.lamp, 'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: .7 }));
@@ -502,6 +522,12 @@ window.WXCity = (() => {
           if (!pts.length) return;
           priceSer.push({ label: (pk.side === 'h' ? '>' : '<') + pk.K + '°', col: pk.col, pts });
           g.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + ypp(p.v).toFixed(1)).join(''), fill: 'none', stroke: pk.col, 'stroke-width': 1.8 }));
+          // a price history is a run of quotes, not a continuous price
+          const pr = pts.length > 1
+            ? Math.abs(x(pts[pts.length - 1].t) - x(pts[0].t)) / (pts.length - 1) : 0;
+          if (pr >= 5) pts.forEach(p => g.appendChild(el('circle',
+            { class: 'rdot', cx: x(p.t).toFixed(1), cy: ypp(p.v).toFixed(1), r: Math.min(2.4, pr / 4),
+              fill: pk.col, 'pointer-events': 'none' })));
           endLabs.push({ y: ypp(pts[pts.length - 1].v), s: (pk.side === 'h' ? '>' : '<') + pk.K + '° ' + pts[pts.length - 1].v + '¢', col: pk.col });
         });
         endLabs.sort((a, b) => a.y - b.y);

@@ -85,7 +85,7 @@ text{font-family:inherit}
 .status.none::before{background:var(--bad)}
 .status.none{color:var(--bad)}
 /* tooltips */
-.tip{position:fixed;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);padding:7px 10px;border-radius:6px;font-size:12px;opacity:0;transition:opacity .08s;z-index:9;line-height:1.45;max-width:340px}
+.tip{position:fixed;pointer-events:none;background:var(--tip-bg);color:var(--tip-ink);padding:7px 10px;border-radius:6px;font-size:12px;opacity:0;transition:opacity .08s;z-index:60;line-height:1.45;max-width:340px}
 .tip b{display:block;margin-bottom:2px}
 .tip .tg{display:grid;grid-template-columns:max-content minmax(0,1fr);column-gap:12px;row-gap:1px}
 .tip .tk{opacity:.75;white-space:nowrap}
@@ -249,3 +249,23 @@ svg.serieschart{width:100%;height:auto;display:block}
   border-color:color-mix(in srgb, var(--yes) 45%, transparent);color:var(--yes)}
 .tip .tp.no{background:color-mix(in srgb, var(--no) 16%, transparent);
   border-color:color-mix(in srgb, var(--no) 45%, transparent);color:var(--no)}
+
+
+/* A panel opened to fill the window. Everything in it is the panel's own code
+   drawn into a bigger viewBox, so the zoom, the projection and the hovers come
+   with it rather than being rebuilt for a second layout. */
+body.wtfull{overflow:hidden}
+.panel.full{position:fixed;inset:0;z-index:40;margin:0;padding:18px 22px 22px;
+  background:var(--ground);overflow:auto;display:flex;flex-direction:column}
+.panel.full svg.ts{width:100%;height:auto;max-height:calc(100vh - 190px)}
+.panel.full .note{max-width:none}
+.zoomrow .zb.ex{margin-left:auto}
+.zoomrow .zb.ex.on{border-color:var(--accent);color:var(--accent)}
+@media (max-width:700px){
+  .panel.full{padding:12px 12px 16px}
+  .panel.full svg.ts{max-height:calc(100vh - 230px)}
+}
+
+/* the lead a tool's column is anchored to, under its name */
+.daytab th.grp .lead{display:block;font-weight:600;font-size:10px;color:var(--muted);
+  letter-spacing:0;text-transform:none;margin-top:1px}

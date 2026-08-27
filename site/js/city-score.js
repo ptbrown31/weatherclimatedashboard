@@ -109,13 +109,14 @@ window.WXCityScore = (() => {
         const f = d[s.k]; if (!f) return;
         const eh = f.errHigh == null ? '' : ' (' + (f.errHigh > 0 ? '+' : '') + f.errHigh.toFixed(1) + ')';
         const el2 = f.errLow == null ? '' : ' (' + (f.errLow > 0 ? '+' : '') + f.errLow.toFixed(1) + ')';
-        rows.push(['<span class="sw" style="background:' + s.col + '"></span>' + s.name,
+        const lt = s.k === 'fx' ? '' : (f.lead != null ? ' · ' + leadText(f.lead) : '');
+        rows.push(['<span class="sw" style="background:' + s.col + '"></span>' + s.name + lt,
                    (f.high == null ? '—' : f.high.toFixed(0) + '°' + eh) + ' / '
                    + (f.low == null ? '—' : f.low.toFixed(0) + '°' + el2)]);
       });
       const missing = SERIES.filter(s => !d[s.k]).map(s => s.name);
       band.addEventListener('mousemove', e => tip.show(e, tip.rows(dlab(d.date), rows,
-        'high / low, and each tool’s error against the observation'
+        'high / low, each tool’s error against the observation, and how far before the day its cycle was issued'
         + (missing.length ? ' · not archived yet on this day: ' + missing.join(', ') : ''))));
       band.addEventListener('mouseleave', () => tip.hide());
       svg.appendChild(band);
@@ -163,6 +164,18 @@ window.WXCityScore = (() => {
   }
 
   const f1 = v => (v == null ? '—' : Math.round(v) + '°');
+  const med = a => { const b = a.slice().sort((x, y) => x - y); return b.length ? b[Math.floor(b.length / 2)] : null; };
+  /* What each tool's number is anchored to.
+
+     Every forecast here is that tool's last cycle issued before the target day
+     began, so none of them has seen any of the day. But they do not all issue at
+     the same time: the Service's runs about five hours before midnight and the
+     Blend's lands on it, which is five hours more of the world for one of them.
+     A skill table that does not say so invites a comparison it has not earned,
+     so each tool carries its own lead in the header. */
+  const leadOf = (days, k) => med(days.map(d => (d[k] || {}).lead).filter(v => v != null));
+  const leadText = v => (v == null ? '' : v < 0.25 ? 'at midnight'
+                        : (Math.round(v * 10) / 10) + 'h before');
   const sgn = v => (v == null ? '' : (v > 0 ? '+' : '') + v.toFixed(1));
 
   async function drawTable(station) {
@@ -192,6 +205,9 @@ window.WXCityScore = (() => {
       th.style.borderTopColor = sr.col;
       th.appendChild(h('span', { class: 'sw', style: 'background:' + sr.col }));
       th.appendChild(document.createTextNode(sr.name));
+      const lt = sr.k === 'fx' ? 'last quote before the day'
+                               : leadText(leadOf(days, sr.k));
+      if (lt) th.appendChild(h('span', { class: 'lead', text: lt }));
       hr1.appendChild(th);
       ['High', 'err', 'Low', 'err'].forEach((lab, i) => {
         const c = h('th', { class: 'num' + (i === 0 ? ' gs' : '') + (/err/.test(lab) ? ' err' : ''), text: lab });
@@ -223,10 +239,15 @@ window.WXCityScore = (() => {
     host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
     host.appendChild(h('p', { class: 'cap',
       text: 'The ' + days.length + ' scored day' + (days.length === 1 ? '' : 's') + ' at this station, in '
-            + (st.unit || '°F') + '. Every temperature is tinted on the same scale the national map uses, so the '
-            + 'coldest reading in the table is the palest and the warmest the deepest. Each tool keeps the colour '
-            + 'it has in the chart above. err is the forecast minus what was observed, so a positive number is a '
-            + 'forecast that ran warm. A dash is a day that tool was not archived for.' }));
+            + (st.unit || '°F') + '. Each forecast is that tool\u2019s last cycle issued BEFORE the target day '
+            + 'began, so none of them has seen any of the day it is forecasting. They do not all issue at the same '
+            + 'time, and the hours under each name are how far ahead of the day that tool\u2019s cycle typically '
+            + 'lands: a tool that issues at midnight has had several more hours of the world than one that issued '
+            + 'the previous evening, so read the columns against their own lead before reading them against each '
+            + 'other. The market column is the last quote before the day began. '
+            + 'Every temperature is tinted on the same scale the national map uses, so the coldest reading in the '
+            + 'table is the palest and the warmest the deepest. err is the forecast minus what was observed, so a '
+            + 'positive number is a forecast that ran warm. A dash is a day that tool was not archived for.' }));
   }
 
   function init(station) { tip = WXC.tooltip(); return Promise.all([draw(station), drawTable(station)]); }

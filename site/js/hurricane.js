@@ -591,10 +591,16 @@ window.WXHur = (() => {
       svg.appendChild(txt(Math.round(v * 100) + '%', { x: L - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
     });
     const line = (scale, col, dash) => {
-      const d = days.map(([, f], i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ','
-        + y(Math.min(1 - Math.pow(1 - cond(f), scale), ymax)).toFixed(1)).join('');
+      const vy = i => y(Math.min(1 - Math.pow(1 - cond(days[i][1]), scale), ymax));
+      const d = days.map((_, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + vy(i).toFixed(1)).join('');
       svg.appendChild(el('path', Object.assign({ d, fill: 'none', stroke: col, 'stroke-width': 2,
                                                  'pointer-events': 'none' }, dash ? { 'stroke-dasharray': dash } : {})));
+      // one forecast per day: the value between two days is not something the
+      // vendor issued, so the days themselves are marked
+      const gap = days.length > 1 ? Math.abs(x(days.length - 1) - x(0)) / (days.length - 1) : 0;
+      if (gap >= 5) days.forEach((_, i) => svg.appendChild(el('circle',
+        { class: 'rdot', cx: x(i).toFixed(1), cy: vy(i).toFixed(1), r: Math.min(2.6, gap / 4),
+          fill: col, 'pointer-events': 'none' })));
     };
     line(1, 'var(--cool)', null);
     if (factor) line(factor, 'var(--warm)', '5 4');

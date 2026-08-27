@@ -67,14 +67,22 @@ window.WXClimate = (() => {
     const fmtV = opts.fmt || fv;
     const fmtAx = opts.fmtAxis || (v => (v >= 100 ? v.toFixed(0) : v.toFixed(2)));
     const thrSuffix = opts.thresholdSuffix != null ? opts.thresholdSuffix : (key.startsWith('temp') ? '°C' : '');
-    const div = h('div', { class: 'panel' });
+    const div = h('div', { class: 'panel' + (opts._full ? ' full' : '') });
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
     div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: unit + (product ? ' · markers: ' + WXM.LABEL : '') }));
     const ctl = h('div', { class: 'zoomrow' }); div.appendChild(ctl);
-    const svg = el('svg', { viewBox: '0 0 960 356', class: 'ts' }); div.appendChild(svg);
+    const svg = el('svg', { class: 'ts' }); div.appendChild(svg);
     const note = h('div', { class: 'note', style: 'display:none;margin:6px 0 0;font-size:12px' }); div.appendChild(note);
     if (opts._before && opts._before.parentNode === host) host.insertBefore(div, opts._before);
     else host.appendChild(div);
+    // the page behind must not scroll under a panel that covers it, and Escape
+    // has to close it: a reader who cannot find the button should not be stuck
+    let esc = null;
+    document.body.classList.toggle('wtfull', !!opts._full);
+    if (opts._full) {
+      esc = ev => { if (ev.key === 'Escape') rebuild(opts.x0 == null ? undefined : opts.x0, undefined, false); };
+      document.addEventListener('keydown', esc);
+    }
 
     /* Redraw this panel over a shorter window.
        Zooming holds the right edge and moves the left one, because the right
@@ -83,17 +91,42 @@ window.WXClimate = (() => {
        The panel is rebuilt rather than rescaled so that everything derived from
        the window — the tick step, the marker radius, the axis floor — is derived
        again from the window actually shown. */
-    const rebuild = (x0new, project) => {
+    const rebuild = (x0new, project, full) => {
       const before = div.nextSibling;
+      if (esc) { document.removeEventListener('keydown', esc); esc = null; }
       div.remove();
       panel(host, key, title, unit, ser, product, offsetC, source,
             Object.assign({}, opts, { x0: x0new, _before: before,
-                                      _project: project === undefined ? opts._project : project }));
+                                      _project: project === undefined ? opts._project : project,
+                                      _full: full === undefined ? opts._full : full }));
     };
 
     const cs = product ? product.contracts : [];
     const unitShort = unit.split(/[ ,]/)[0];
-    const W = 960, L = 56, R = 910, T = 16, B = 296;
+    /* The same panel, larger. Every coordinate below is in viewBox units, so
+       opening one full-window is a matter of giving it a bigger box and letting
+       the browser map it: the zoom, the projection, the markers and the hovers
+       are the code they always were, drawn at a different size. */
+    const FULL = !!opts._full;
+    /* Full-window, the box follows the window.
+
+       A fixed landscape box filled a desktop and left a phone with a chart an
+       inch tall above half a screen of nothing: a shape that suits a wide window
+       is the wrong shape for a tall one. So the box takes the aspect of the room
+       it has, within limits — never wider than about two and a half to one,
+       never taller than it is wide — and the layout below is derived from it
+       rather than from constants. */
+    let VW = 960, VH = 356;
+    if (FULL) {
+      const availH = Math.max(260, (window.innerHeight || 800) - 200);
+      const availW = Math.max(300, (window.innerWidth || 1200) - 46);
+      const asp = Math.max(0.4, Math.min(1.2, availH / availW));
+      VW = availW < 620 ? 960 : 1600;
+      VH = Math.round(VW * asp);
+    }
+    const W = VW, L = FULL ? 66 : 56, R = VW - (FULL ? 80 : 50),
+          T = FULL ? 22 : 16, B = VH - (FULL ? 70 : 60);
+    svg.setAttribute('viewBox', '0 0 ' + VW + ' ' + VH);
     const x0 = opts.x0 != null ? opts.x0 : (X0[key] != null ? X0[key] : Math.min(...cs.map(c => c.year)) - 4);
     // The climate ladders run to the 2040s, so the axis is given room to the
     // right regardless of what is listed today. A category whose contracts
@@ -131,6 +164,16 @@ window.WXClimate = (() => {
         pb.onclick = () => rebuild(x0, !opts._project);
         ctl.appendChild(pb);
       }
+      /* Full-window, and back again.
+
+         The chart itself is not the control: dragging it fits a trend, a marker
+         opens a contract and a double-click clears the fit, so a bare click
+         would have to be told apart from three things a reader is already doing
+         with the same button. This says what it does instead. */
+      const xb = h('button', { class: 'zb ex' + (FULL ? ' on' : ''),
+                               text: FULL ? 'Close' : 'Expand' });
+      xb.onclick = () => rebuild(x0, undefined, !FULL);
+      ctl.appendChild(xb);
     }
     const pts = ser.filter(q => q[0] >= x0);
     const vals = pts.map(q => q[1]).concat(cs.map(c => c.threshold));
@@ -204,6 +247,19 @@ window.WXClimate = (() => {
       ? Math.min(...cs.map(c => c.year)) : Infinity;
     const settled = pts.filter(q => q[0] < firstOpen);
     const openPts = pts.filter(q => q[0] >= firstOpen);
+    /* A reading is a reading, so it gets a mark.
+
+       These records are monthly, annual or weekly counts, and a bare line
+       between them draws a value for every instant in between that nobody
+       measured. A dot at each reading says where the record actually is.
+
+       The dots appear when there is room for them to read as separate marks.
+       Four hundred monthly points across eight hundred pixels are two pixels
+       apart, and dotting them makes a thicker line rather than a clearer one —
+       so on a crowded axis the line stands alone, and zooming in brings the
+       readings out, which is a large part of what the zoom is for. */
+    const spacing = pts.length > 1 ? (X(pts[pts.length - 1][0]) - X(pts[0][0])) / (pts.length - 1) : 99;
+    const dotR = spacing >= 4.5 ? Math.min(3, Math.max(1.6, spacing / 3.6)) : 0;
     const draw = (qs, dash) => {
       if (qs.length < 2) return;
       svg.appendChild(el('path', Object.assign({
@@ -211,6 +267,11 @@ window.WXClimate = (() => {
         fill: 'none', stroke: 'var(--obs)',
         'stroke-width': opts.lineWidth || (key === 'tempMonthly' ? 1 : 1.8) },
         dash ? { 'stroke-dasharray': '4 3', opacity: .75 } : {})));
+      if (!dotR) return;
+      qs.forEach(q => svg.appendChild(el('circle', {
+        class: 'rdot', cx: X(q[0]).toFixed(1), cy: Y(q[1]).toFixed(1), r: dotR,
+        fill: dash ? 'var(--panel)' : 'var(--obs)', stroke: 'var(--obs)',
+        'stroke-width': dash ? 1.2 : 0, 'pointer-events': 'none' })));
     };
     draw(settled, false);
     // the join carries the last settled point so the two meet rather than gap
@@ -289,6 +350,9 @@ window.WXClimate = (() => {
             + inWin.map(q => 'L' + X(q.x).toFixed(1) + ',' + Y(q.v).toFixed(1)).join('');
           svg.appendChild(el('path', { d: d3, fill: 'none', stroke: 'var(--fcst)', 'stroke-width': 2,
                                        'stroke-dasharray': '7 3', 'pointer-events': 'none' }));
+          if (dotR) inWin.forEach(q => svg.appendChild(el('circle', {
+            class: 'rdot', cx: X(q.x).toFixed(1), cy: Y(q.v).toFixed(1), r: dotR, fill: 'var(--fcst)',
+            'pointer-events': 'none' })));
         }
         note.style.display = 'inline-block';
         note.textContent = 'Projection: seasonal ARIMA, differenced once'
@@ -305,7 +369,7 @@ window.WXClimate = (() => {
        Without it a reader has to guess whether green is dear or likely. It is
        drawn only where there are priced markers to explain. */
     if (cs.some(c => c.yes != null)) {
-      const kw = 132, kh = 7, kx = R - kw, ky = B + 36;
+      const kw = FULL ? 200 : 132, kh = FULL ? 9 : 7, kx = R - kw, ky = B + (FULL ? 44 : 36);
       const gid = 'pg' + Math.abs(Math.round(X(x0) * 977 + Y(hi) * 31)) + key.replace(/[^a-z0-9]/gi, '');
       const defs = el('defs');
       const lg = el('linearGradient', { id: gid, x1: '0', x2: '1', y1: '0', y2: '0' });

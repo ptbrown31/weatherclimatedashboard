@@ -165,6 +165,14 @@ window.WXStorm = (() => {
       const faint = el('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 1.6, opacity: .22, 'pointer-events': 'none' });
       const solid = el('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' });
       svg.appendChild(faint); svg.appendChild(solid);
+      // one point per delivery: the vendor issues these at set times and nothing
+      // is measured between them, so each reading is marked rather than implied
+      if (pts.length > 1) {
+        const gap = Math.abs(x(pts[pts.length - 1][0]) - x(pts[0][0])) / (pts.length - 1);
+        if (gap >= 5) pts.forEach(v => svg.appendChild(el('circle',
+          { class: 'rdot', cx: x(v[0]).toFixed(1), cy: y(v[1]).toFixed(1), r: Math.min(2.6, gap / 4),
+            fill: col, 'pointer-events': 'none' })));
+      }
       const last = pts[pts.length - 1];
       rungs.push({ t, col, pts, last, solid });
       // ticks and crosses only once a settled gust exists to compare against

@@ -836,8 +836,8 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} cat4: both curves are named, with the climatology window",
                         any("climatology, 19" in k for k in keys) and any("count market" in k for k in keys),
                         str([k for k in keys if "clim" in k or "count" in k]))
-                if page.locator("#cat4 svg.cpanel circle").count():
-                    page.locator("#cat4 svg.cpanel circle").first.hover(force=True); page.wait_for_timeout(250)
+                if page.locator("#cat4 svg.cpanel circle:not(.rdot)").count():
+                    page.locator("#cat4 svg.cpanel circle:not(.rdot)").first.hover(force=True); page.wait_for_timeout(250)
                     t_c4 = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} cat4: a contract is compared against climatology, not a fair value",
                             "Climatology, from today" in t_c4 and "Difference to climatology" in t_c4, t_c4[:80])
@@ -949,6 +949,43 @@ def run(no_build: bool) -> int:
                         seg.count("solid") == 1 and len(seg) == 2, str(seg))
                 page.locator("#panels .panel:first-child path[stroke='var(--obs)']").last.hover(force=True)
                 page.wait_for_timeout(150)
+
+                # a panel opens to fill the window and keeps everything it had
+                page.locator("#panels .panel").first.locator(".zb.ex").click(); page.wait_for_timeout(800)
+                full = page.locator("#panels .panel.full")
+                bx = full.bounding_box()
+                vw = page.viewport_size["width"]; vh = page.viewport_size["height"]
+                chk.add(f"{scheme} expand: the panel fills the window",
+                        full.count() == 1 and abs(bx["width"] - vw) < 2 and abs(bx["height"] - vh) < 2,
+                        f"{round(bx['width'])}x{round(bx['height'])} of {vw}x{vh}")
+                chk.add(f"{scheme} expand: the page behind cannot scroll under it",
+                        page.evaluate("()=>getComputedStyle(document.body).overflow") == "hidden", "")
+                full.locator(".zb", has_text="10y").click(); page.wait_for_timeout(600)
+                full = page.locator("#panels .panel.full")
+                full.locator(".zb.fc").click(); page.wait_for_timeout(800)
+                full = page.locator("#panels .panel.full")
+                chk.add(f"{scheme} expand: zoom and projection still work while expanded",
+                        full.count() == 1 and full.locator("path[stroke='var(--fcst)']").count() == 1,
+                        str(full.count()))
+                full.locator("circle[data-tip]").nth(2).hover(force=True); page.wait_for_timeout(300)
+                chk.add(f"{scheme} expand: hovers still work over the overlay",
+                        page.evaluate("()=>+getComputedStyle(document.querySelector('#tip')).opacity") == 1
+                        and page.locator("#tip .tprice .tp").count() == 2, "")
+                page.keyboard.press("Escape"); page.wait_for_timeout(700)
+                chk.add(f"{scheme} expand: Escape closes it and gives the page back",
+                        page.locator("#panels .panel.full").count() == 0
+                        and page.evaluate("()=>getComputedStyle(document.body).overflow") != "hidden",
+                        "")
+                # a reading is a reading: a line between two of them draws values
+                # nobody measured, so each one carries a mark where there is room
+                page.locator("#panels .panel").first.locator(".zb", has_text="10y").click()
+                page.wait_for_timeout(600)
+                chk.add(f"{scheme} readings: a zoomed series marks each reading",
+                        page.locator("#panels .panel:first-child circle.rdot").count() >= 5,
+                        str(page.locator("#panels .panel:first-child circle.rdot").count()))
+                chk.add(f"{scheme} readings: the marks are decoration, never a hit target",
+                        page.eval_on_selector_all("#panels circle.rdot",
+                            "e=>e.every(x=>getComputedStyle(x).pointerEvents==='none')"), "")
 
                 # the two prices lead the box: it is what a reader hovered for
                 page.locator("#panels svg circle[data-tip]").nth(3).hover(force=True)
