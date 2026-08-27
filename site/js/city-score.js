@@ -66,33 +66,41 @@ window.WXCityScore = (() => {
     }
     days.forEach((d, i) => svg.appendChild(txt(dlab(d.date), { x: x(i), y: B + 16, 'text-anchor': 'middle', class: 'ax' })));
 
-    // one path per tool per side, broken wherever the tool has no value
-    const line = (get, col, dash, wide) => {
-      let d = '', pen = false;
-      days.forEach((day, i) => {
-        const v = get(day);
-        if (v == null) { pen = false; return; }
-        d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(v).toFixed(1);
-        pen = true;
+    /* A dot per tool per day, not a line.
+
+       A line between Monday and Tuesday draws a value for Monday night that no
+       tool ever issued, and where a tool has no forecast archived the line either
+       breaks or leaps a gap it did not measure. These are separate daily
+       forecasts, so they are drawn as separate marks.
+
+       Within a day the tools are spread by a few pixels so a day where they all
+       agree still shows every tool rather than one dot hiding four. A filled dot
+       is the daily high and a hollow one the daily low: the colour is spent on
+       which tool, because that is the comparison the panel is for.
+
+       The observation is black and larger, drawn last, because it is the thing
+       being predicted rather than one forecast among equals. */
+    const wBand = (R - L) / Math.max(days.length - 1, 1);
+    const spread = Math.min(7, wBand / (SERIES.length + 2));
+    const dot = (cx, cy, col, filled, rad) => svg.appendChild(el('circle', {
+      cx, cy, r: rad, fill: filled ? col : 'var(--panel)', stroke: col,
+      'stroke-width': filled ? 0.8 : 1.8, 'pointer-events': 'none' }));
+
+    days.forEach((d, i) => {
+      SERIES.forEach((sr, j) => {
+        const f = d[sr.k]; if (!f) return;
+        const cx = x(i) + (j - (SERIES.length - 1) / 2) * spread;
+        if (f.high != null) dot(cx, y(f.high), sr.col, true, 3.4);
+        if (f.low != null) dot(cx, y(f.low), sr.col, false, 3.4);
       });
-      if (!d) return;
-      svg.appendChild(el('path', Object.assign({ d, fill: 'none', stroke: col, 'stroke-width': wide ? 3.2 : 1.6,
-                                                 'stroke-linejoin': 'round', 'pointer-events': 'none' },
-                                               dash ? { 'stroke-dasharray': dash } : {})));
-    };
-    SERIES.forEach(s => {
-      line(d => (d[s.k] || {}).high, s.col, null);
-      line(d => (d[s.k] || {}).low, s.col, '4 3');
     });
-    // the observation last and heavier, in black: it is the thing being
-    // predicted, not one forecast among the others, and at these line weights a
-    // dark navy tool is otherwise easy to mistake for it
-    line(d => d.obsHigh, 'var(--ink)', null, true);
-    line(d => d.obsLow, 'var(--ink)', '5 4', true);
+    days.forEach((d, i) => {
+      if (d.obsHigh != null) dot(x(i), y(d.obsHigh), 'var(--ink)', true, 5);
+      if (d.obsLow != null) dot(x(i), y(d.obsLow), 'var(--ink)', false, 5);
+    });
 
     // one hover band per day, carrying that day in full
     days.forEach((d, i) => {
-      const wBand = (R - L) / Math.max(days.length - 1, 1);
       const band = el('rect', { x: x(i) - wBand / 2, y: T, width: wBand, height: B - T, fill: 'transparent' });
       const rows = [['Observed high / low',
                      (d.obsHigh == null ? '—' : d.obsHigh.toFixed(1) + '°') + ' / '
@@ -116,16 +124,111 @@ window.WXCityScore = (() => {
     if (key) {
       key.innerHTML = SERIES.map(s => '<span><i style="border-color:' + s.col + '"></i>' + s.name + '</span>').join('')
         + '<span><i style="border-color:var(--ink);border-width:3px"></i><b>Observed</b></span>'
-        + '<span>solid is the daily high, dashed the daily low</span>';
+        + '<span>a filled dot is the daily high, a hollow one the daily low</span>';
     }
     if (cap) {
       cap.textContent = 'The last ' + days.length + ' scored day' + (days.length === 1 ? '' : 's')
-        + ' at this station. A gap in a line is a day that tool was not archived for, which is why the lines start '
-        + 'at different dates; the record grows by a day every day. The ForecastEx line is the strike where the Yes '
+        + ' at this station. A missing dot is a day that tool was not archived for, which is why some tools start '
+        + 'later than others; the record grows by a day every day. Tools are nudged apart within each day so an '
+        + 'agreed forecast still shows every one of them. The ForecastEx line is the strike where the Yes '
         + 'price crosses 50 cents, read from the last quote before local midnight.';
     }
   }
 
-  function init(station) { tip = WXC.tooltip(); return draw(station); }
-  return { init, draw };
+  /* The scored days for this station, as a table.
+
+     It used to sit on the daily-temperatures landing page showing one station —
+     whichever sorted first, which meant every reader saw Atlanta whether or not
+     they cared about it. It belongs with the station it describes.
+
+     Two things carry meaning beyond the numbers. Every temperature is tinted on
+     the same ramp the national map shades with, so a cold morning and a hot
+     afternoon are the same colours here as there and a column can be read down
+     without reading each figure. And each tool keeps its own colour from the
+     chart above, carried on the header and a rule down the left of its columns,
+     so a reader tracking one tool can find it without counting across.
+
+     Errors stay plain text. Tinting them too would put three colour scales in
+     one table and the eye would have nothing to hold on to. */
+  const TRAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
+  const hx = c => [1, 3, 5].map(k => parseInt(c.slice(k, k + 2), 16));
+
+  function tempColor(v, lo, hi) {
+    if (v == null || hi <= lo) return '';
+    const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo))) * (TRAMP.length - 1);
+    const i = Math.floor(t), f = t - i;
+    if (f < 1e-6 || i >= TRAMP.length - 1) return TRAMP[Math.min(i, TRAMP.length - 1)];
+    const A = hx(TRAMP[i]), B = hx(TRAMP[i + 1]);
+    return 'rgb(' + A.map((a, k) => Math.round(a + (B[k] - a) * f)).join(',') + ')';
+  }
+
+  const f1 = v => (v == null ? '—' : Math.round(v) + '°');
+  const sgn = v => (v == null ? '' : (v > 0 ? '+' : '') + v.toFixed(1));
+
+  async function drawTable(station) {
+    const host = $('#cityDays'); if (!host) return;
+    host.innerHTML = '';
+    const r = await WXD.get('scorecard.json', 1440);
+    const st = r.data && r.data.stations && r.data.stations[station];
+    if (!st || !(st.days || []).length) {
+      host.appendChild(h('p', { class: 'cap', text: 'No scored days for this station yet.' }));
+      return;
+    }
+    const days = st.days;
+    // one temperature scale for the whole table, so a cell's colour means the
+    // same thing in every column
+    const all = [];
+    days.forEach(d => {
+      [d.obsHigh, d.obsLow].forEach(v => { if (v != null) all.push(v); });
+      SERIES.forEach(sr => { const x = d[sr.k]; if (x) { if (x.high != null) all.push(x.high); if (x.low != null) all.push(x.low); } });
+    });
+    const lo = Math.min(...all), hi = Math.max(...all);
+
+    const t = h('table', { class: 'daytab' });
+    const hr1 = h('tr', {}, [h('th', { text: '' }), h('th', { class: 'grp obs', colspan: '2', text: 'Observed' })]);
+    const hr2 = h('tr', {}, [h('th', { text: 'Day' }), h('th', { class: 'num obs', text: 'High' }), h('th', { class: 'num obs', text: 'Low' })]);
+    SERIES.forEach(sr => {
+      const th = h('th', { class: 'grp', colspan: '4' });
+      th.style.borderTopColor = sr.col;
+      th.appendChild(h('span', { class: 'sw', style: 'background:' + sr.col }));
+      th.appendChild(document.createTextNode(sr.name));
+      hr1.appendChild(th);
+      ['High', 'err', 'Low', 'err'].forEach((lab, i) => {
+        const c = h('th', { class: 'num' + (i === 0 ? ' gs' : '') + (/err/.test(lab) ? ' err' : ''), text: lab });
+        if (i === 0) c.style.borderLeftColor = sr.col;
+        hr2.appendChild(c);
+      });
+    });
+    t.appendChild(hr1); t.appendChild(hr2);
+
+    days.forEach(d => {
+      const tr = h('tr', {}, [h('td', { text: dlab(d.date) })]);
+      [d.obsHigh, d.obsLow].forEach(v => {
+        const td = h('td', { class: 'num obs', text: f1(v) });
+        const c = tempColor(v, lo, hi); if (c) { td.style.background = c; td.style.color = '#14202b'; }
+        tr.appendChild(td);
+      });
+      SERIES.forEach(sr => {
+        const x = d[sr.k] || {};
+        [['high', 'errHigh'], ['low', 'errLow']].forEach(([vk, ek], i) => {
+          const td = h('td', { class: 'num' + (i === 0 ? ' gs' : ''), text: f1(x[vk]) });
+          if (i === 0) td.style.borderLeftColor = sr.col;
+          const c = tempColor(x[vk], lo, hi); if (c) { td.style.background = c; td.style.color = '#14202b'; }
+          tr.appendChild(td);
+          tr.appendChild(h('td', { class: 'num err', text: sgn(x[ek]) }));
+        });
+      });
+      t.appendChild(tr);
+    });
+    host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
+    host.appendChild(h('p', { class: 'cap',
+      text: 'The ' + days.length + ' scored day' + (days.length === 1 ? '' : 's') + ' at this station, in '
+            + (st.unit || '°F') + '. Every temperature is tinted on the same scale the national map uses, so the '
+            + 'coldest reading in the table is the palest and the warmest the deepest. Each tool keeps the colour '
+            + 'it has in the chart above. err is the forecast minus what was observed, so a positive number is a '
+            + 'forecast that ran warm. A dash is a day that tool was not archived for.' }));
+  }
+
+  function init(station) { tip = WXC.tooltip(); return Promise.all([draw(station), drawTable(station)]); }
+  return { init, draw, drawTable };
 })();

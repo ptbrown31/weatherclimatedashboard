@@ -197,15 +197,25 @@ def run(no_build: bool) -> int:
 
                 # ---- the station's own record, drawn on its page
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
-                lines = page.locator("#cityScore path").count()
-                black = page.eval_on_selector_all("#cityScore path",
-                                                  "e=>e.filter(x=>x.getAttribute('stroke')==='var(--ink)').length")
-                chk.add(f"{scheme} city record: a line per tool, for highs and lows", lines >= 8, f"paths={lines}")
-                chk.add(f"{scheme} city record: the observation is drawn in black, high and low", black == 2, f"black={black}")
-                thick = page.eval_on_selector_all("#cityScore path",
-                    "e=>e.filter(x=>x.getAttribute('stroke')==='var(--ink)').map(x=>x.getAttribute('stroke-width'))")
+                dots = page.locator("#cityScore circle").count()
+                black = page.eval_on_selector_all("#cityScore circle",
+                    "e=>e.filter(x=>x.getAttribute('stroke')==='var(--ink)').length")
+                chk.add(f"{scheme} city record: a dot per tool per day, not a line",
+                        dots >= 20 and page.locator("#cityScore path").count() == 0,
+                        f"dots={dots} paths={page.locator('#cityScore path').count()}")
+                chk.add(f"{scheme} city record: the observation is drawn in black, high and low",
+                        black >= 2, f"black={black}")
+                big = page.eval_on_selector_all("#cityScore circle",
+                    "e=>e.filter(x=>x.getAttribute('stroke')==='var(--ink)').map(x=>+x.getAttribute('r'))")
+                other = page.eval_on_selector_all("#cityScore circle",
+                    "e=>e.filter(x=>x.getAttribute('stroke')!=='var(--ink)').map(x=>+x.getAttribute('r'))")
                 chk.add(f"{scheme} city record: the observation is weighted above the forecasts",
-                        bool(thick) and all(float(w) > 2 for w in thick), str(thick))
+                        bool(big) and bool(other) and min(big) > max(other), f"obs={sorted(set(big))} tools={sorted(set(other))}")
+                # highs are filled and lows hollow, so one palette serves both
+                hollow = page.eval_on_selector_all("#cityScore circle",
+                    "e=>e.filter(x=>x.getAttribute('fill')==='var(--panel)').length")
+                chk.add(f"{scheme} city record: lows are hollow so the colour can mean the tool",
+                        hollow >= 5, f"hollow={hollow}")
                 bands = page.locator("#cityScore rect[fill='transparent']").count()
                 chk.add(f"{scheme} city record: one hover band per day", 1 <= bands <= 7, f"bands={bands}")
                 if bands:

@@ -446,19 +446,23 @@ window.WXScore = (() => {
     const host = $('#stations'); host.innerHTML = '';
     const rowsIn = Object.entries(S.stations).sort((a, b) => a[1].city.localeCompare(b[1].city)).map(([sid, st]) => {
       const hi = {}; ORDER.forEach(s => { hi[s] = (st.summary[s] || {}).high; });
-      return [st.city + ' (' + sid + ')', hi, () => { cur = sid; drawDays(); location.hash = sid; }, sid];
+      return [st.city + ' (' + sid + ')', hi, () => {
+        if ($('#days')) { cur = sid; drawDays(); location.hash = sid; }
+        else location.href = 'city.html?station=' + encodeURIComponent(sid);
+      }, sid];
     });
     const t = table('Daily high, by station', rowsIn);
     bindTips(t, (sid, src) => {
       const st = S.stations[sid], sm = st && (st.summary[src] || {});
       if (!st || !sm.high) return null;
       return tip.rows(st.city + ' (' + sid + ') — ' + NAME[src] + ' daily high',
-        statRows(sm.high).concat(statRows(sm.low, 'daily low ')), 'click → the station’s scored days');
+        statRows(sm.high).concat(statRows(sm.low, 'daily low ')), ($('#days') ? 'click → this station’s scored days' : 'click → this station’s page'));
     });
     host.appendChild(t);
   }
   function drawDays() {
-    const host = $('#days'); host.innerHTML = '';
+    const host = $('#days'); if (!host) return;
+    host.innerHTML = '';
     const st = S.stations[cur]; if (!st) return;
     host.appendChild(h('div', { class: 'secttl', text: st.city.toUpperCase() + ' · the last ' + st.days.length + ' scored days (' + st.unit + ')' }));
     const t = h('table');

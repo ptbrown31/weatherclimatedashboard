@@ -207,3 +207,19 @@ svg.serieschart{width:100%;height:auto;display:block}
 .modegrid .mgcol{display:flex;flex-direction:column;gap:5px;align-items:stretch}
 .modegrid .mgh{font-size:12px;font-weight:700;color:var(--navy);letter-spacing:.04em;text-transform:uppercase}
 .modegrid .mgcol button{min-width:104px;text-align:left}
+
+/* The scored-days table on a city page. Each tool owns a colour, carried on its
+   header and a rule down the left of its first column, so a reader following one
+   tool can find it without counting across; temperatures are tinted by the cell
+   itself. Numbers are tabular so columns line up on the decimal. */
+.daytab{border-collapse:collapse;font-size:12px;width:100%}
+.daytab th,.daytab td{padding:4px 7px;white-space:nowrap}
+.daytab th{font-weight:700;font-size:11px;letter-spacing:.02em;text-align:left;color:var(--muted)}
+.daytab th.grp{border-top:3px solid var(--line);padding-top:6px;color:var(--navy)}
+.daytab th.obs,.daytab td.obs{background-clip:padding-box}
+.daytab th.grp.obs{border-top-color:var(--ink)}
+.daytab .num{text-align:right;font-variant-numeric:tabular-nums}
+.daytab td.gs,.daytab th.gs{border-left:2px solid var(--line)}
+.daytab td.err,.daytab th.err{color:var(--muted);font-size:11px}
+.daytab tr:nth-child(odd) td{box-shadow:inset 0 0 0 9999px rgba(127,127,127,.035)}
+.daytab .sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
