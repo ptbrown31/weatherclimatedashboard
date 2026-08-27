@@ -63,13 +63,29 @@ def season_counts(year: int) -> dict:
            "computed": now.date().isoformat(),
            # the date alone could not say whether a storm named at midday was in
            # the figure, which is the only question a reader has about its age
-           "computedAt": now.isoformat(timespec="seconds").replace("+00:00", "Z")}
+           "computedAt": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+           # formation dates for the same systems, in the shape the season
+           # figure plots. They are taken here, off the files this pass already
+           # reads, so the figure and the count beside it cannot disagree: they
+           # were one number in two places on two cadences, and on the day Dolly
+           # was named the card read four while the chart under it read three.
+           "events": {"named": [], "hurricanes": [], "majors": []}}
     for num in nums:
         if not 1 <= num <= 49:
             continue
         body = gw._get_text(f"{ATCF_BTK}bal{num:02d}{year}.dat", timeout=60)
         vmax_named = vmax_hu = 0
         name = ""
+        # the earliest row meeting each threshold, so the figure can draw when
+        # this season's storms formed and not only how many there are. Taken as
+        # a minimum rather than the first row seen: the file is written in time
+        # order, but nothing here depends on it being so.
+        first = {"named": None, "hurricanes": None, "majors": None}
+
+        def mark(group, when):
+            if when and (first[group] is None or when < first[group]):
+                first[group] = when
+
         for ln in body.splitlines():
             f = [p.strip() for p in ln.split(",")]
             if len(f) <= 27:
@@ -79,19 +95,33 @@ def season_counts(year: int) -> dict:
             except ValueError:
                 continue
             ty = f[10]
+            stamp = f[2]
+            day = f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}" if len(stamp) >= 8 and stamp[:8].isdigit() else None
             if ty in NAMED_TYPES:
                 vmax_named = max(vmax_named, v)
                 if f[27]:
                     name = f[27]
+                if v >= 34:
+                    mark("named", day)
             if ty == "HU":
                 vmax_hu = max(vmax_hu, v)
+                if v >= 64:
+                    mark("hurricanes", day)
+                if v >= 96:
+                    mark("majors", day)
+        sid, shown = f"AL{num:02d}{year}", name.title() or f"#{num}"
         if vmax_named >= 34:
             out["named"] += 1
-            out["names"].append(name.title() or f"#{num}")
+            out["names"].append(shown)
         if vmax_hu >= 64:
             out["hurricanes"] += 1
         if vmax_hu >= 96:
             out["majors"] += 1
+        for group in ("named", "hurricanes", "majors"):
+            if first[group]:
+                out["events"][group].append({"date": first[group], "name": shown, "id": sid})
+    for group in out["events"].values():
+        group.sort(key=lambda r: (r["date"], r["id"]))
     return out
 
 

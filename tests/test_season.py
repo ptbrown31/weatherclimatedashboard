@@ -228,6 +228,19 @@ class AtcfSeason(unittest.TestCase):
         self.assertEqual(len(mine["majors"]), theirs["majors"])
         self.assertEqual([r["name"] for r in mine["named"]], theirs["names"])
 
+    def test_the_two_jobs_agree_on_when_each_storm_formed(self):
+        """The count and the curve beside it are now drawn from the same file.
+
+        They were not, and they were written on different cadences: on the day
+        Dolly was named the card read four named storms and the chart under it
+        read three. Whatever the hurricane job says formed, and on what date,
+        has to be what the season job would have said.
+        """
+        mine = season.season_lists(season.atcf_season(2026))
+        theirs = hurricane.season_counts(2026)["events"]
+        for group in ("named", "hurricanes", "majors"):
+            self.assertEqual(mine[group], theirs[group], group)
+
     def test_lists_are_in_date_order(self):
         lists = season.season_lists(season.atcf_season(2026))
         self.assertEqual([r["date"] for r in lists["named"]], ["2026-06-17", "2026-07-21"])

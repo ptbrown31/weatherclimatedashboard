@@ -734,7 +734,16 @@ window.WXHur = (() => {
     const year = (H.season || {}).year || new Date().getUTCFullYear();
     const month = cfg.monthly ? monthOfSpec(period.sp) : null;
     const clim = climSeries(cfg.key, year, month);
-    const events = ((SZN && SZN.season && SZN.season[cfg.key]) || [])
+    /* Formation dates from the same file as the count beside them.
+
+       These used to come from the daily season job while the count above came
+       from the half-hourly one, so on the day Dolly was named the card read
+       four named storms and the chart under it read three. The hurricane job
+       carries the dates now; the season snapshot is the fallback for a
+       snapshot written before it did, and still the source of the climatology
+       and the seasonal forecast this is drawn against. */
+    const formed = (H.season || {}).events || (SZN && SZN.season) || {};
+    const events = (formed[cfg.key] || [])
       .filter(e => month == null || new Date(e.date + 'T00:00:00Z').getUTCMonth() === month);
     const bars = period.rows.map(r => ({ n: r.c.strike + cfg.step, c: r.c })).filter(b => b.n != null).sort((a, b) => a.n - b.n);
     const fc = (SZN && SZN.forecast) || {};
