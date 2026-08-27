@@ -243,6 +243,23 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} world map: each station carries its own unit",
                         all(("\u00b0F" not in l) or l.startswith("Honolulu") for l in wlabs), str(wlabs[:4]))
 
+                # ---- the forecaster's own words, attributed and linked
+                page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2800)
+                dsum = page.locator("#discussion summary").inner_text()
+                chk.add(f"{scheme} discussion: the office and the issuance are named up front",
+                        "National Weather Service" in dsum and "issued" in dsum, dsum[:100])
+                dcap = page.locator("#discussion > .cap").inner_text()
+                chk.add(f"{scheme} discussion: attribution does not depend on opening it",
+                        "forecaster on shift" in dcap and "public domain" in dcap
+                        and "does not summarise" in dcap, dcap[:110])
+                dhref = page.locator("#discussion a").first.get_attribute("href")
+                chk.add(f"{scheme} discussion: it links the office's own page",
+                        "forecast.weather.gov" in (dhref or "") and "AFD" in (dhref or ""), str(dhref))
+                page.locator("#discussion summary").click(); page.wait_for_timeout(350)
+                dtxt = page.locator("#discussion .afdtext").inner_text()
+                chk.add(f"{scheme} discussion: the text is carried whole, not summarised",
+                        len(dtxt) > 800 and "Area Forecast Discussion" in dtxt, str(len(dtxt)))
+
                 # ---- the last few days run together, with each day's forecast
                 # pinned to one moment so the days can be compared with each other
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2800)

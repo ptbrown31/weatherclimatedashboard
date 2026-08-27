@@ -36,6 +36,9 @@ this site&rsquo;s own archive. Level lines are each source&rsquo;s forecast high
   <div><div class="pickttl">International stations and Honolulu</div>
   <svg id="pickW" viewBox="0 60 960 320"></svg></div>
 </div>
+<div class="secttl" style="margin-top:22px">WHAT THE FORECASTER SAID</div>
+<div id="discussion"></div>
+
 <div class="secttl" style="margin-top:22px">THE LAST THREE DAYS, RUN TOGETHER</div>
 <div class="bar"><span id="cityDaysExpand"></span><span class="cap" style="margin:0">observations across three
 days with each source&rsquo;s forecast for that day, all pinned to six in the evening the day before</span></div>
@@ -72,6 +75,7 @@ products rather than to the scoring.</p>
 <script src="js/chart-city.js"></script>
 <script src="js/city-score.js"></script>
 <script src="js/city-days.js"></script>
+<script src="js/discussion.js"></script>
 <script>
 WXC.chrome('city.html'); WXCityScore.init(); WXCityDays.init();
 Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),

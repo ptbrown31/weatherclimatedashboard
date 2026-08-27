@@ -285,3 +285,13 @@ body.wtfull{overflow:hidden}
 .expandable.full{position:fixed;inset:0;z-index:40;margin:0;padding:20px;background:var(--ground);
   display:flex;align-items:center;justify-content:center;overflow:auto;border-radius:0}
 .expandable.full svg{width:100%;height:auto;max-height:calc(100vh - 46px)}
+
+
+/* the forecast office's own discussion, folded shut */
+.afd{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--panel)}
+.afd summary{cursor:pointer;font-size:13px;list-style:none}
+.afd summary::-webkit-details-marker{display:none}
+.afd summary .afdmore{color:var(--accent);font-weight:700}
+.afd[open] summary .afdmore{opacity:.6}
+.afdtext{white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  line-height:1.5;margin:10px 0 6px;max-height:460px;overflow:auto;color:var(--ink)}

@@ -158,6 +158,7 @@ window.WXCity = (() => {
     if (window.WXCityScore) WXCityScore.draw(sid).catch(() => {});
     if (window.WXCityScore) WXCityScore.drawTable(sid).catch(() => {});
     if (window.WXCityDays) WXCityDays.draw(sid).catch(() => {});
+    if (window.WXDiscussion) WXDiscussion.draw(sid).catch(() => {});
     const c0 = city();
     drawFreshness(c0);
     const keys = [`forecast/${sid}.json`, `obs/${sid}.json`].concat(c0 && c0.unit === 'F' ? [`normals/${sid}.json`] : []);

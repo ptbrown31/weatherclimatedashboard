@@ -25,6 +25,7 @@ Jobs:
     traffic      yesterday's page views, from the CDN access logs      (once a day)
     catalogue    what the exchange lists for every product in the registry (once a day)
     series       the underlying series the monthly weather contracts settle on (once a day)
+    discussion   the forecast office's own written reasoning, per office   (once a day)
     catquotes    prices for the catalogue's monthly and annual contracts   (every 30 min)
     daily        scorecard, normals, climate, season, catalogue, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
@@ -41,7 +42,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -56,6 +57,7 @@ def _register():
     JOBS["traffic"] = traffic.traffic_pass
     JOBS["catalogue"] = catalogue.catalogue_pass
     JOBS["series"] = series.series_pass
+    JOBS["discussion"] = discussion.discussion_pass
     JOBS["catquotes"] = catquotes.catquotes_pass
 
     def chain(*names):
@@ -84,7 +86,7 @@ def _register():
     # goes last in both chains: after quotes for fresh prices, after the
     # scorecard for the day just scored
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes")
-    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "catalogue", "series", "headline", "traffic")
+    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "catalogue", "series", "discussion", "headline", "traffic")
     JOBS["market"] = chain("quotes", "reask", "headline")
     JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")
 
