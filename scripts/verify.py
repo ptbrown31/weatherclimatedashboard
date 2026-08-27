@@ -219,6 +219,23 @@ def run(no_build: bool) -> int:
                         body[0] == "boardTitle" and body.index("card") < body.index("modeTitle"),
                         str(body[:5]))
 
+                # abroad there is no government forecast to compare against, so the
+                # observation and the market's own number are the whole picture.
+                # The Celsius boards are highs only, so this is checked on a highs
+                # view; on a lows view the absence is correct.
+                page.locator("#m2").click(); page.wait_for_timeout(700)
+                wlabs = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} world map: stations carry the market's implied value",
+                        sum(1 for l in wlabs if "market" in l) >= 3,
+                        str([l for l in wlabs if "market" in l][:3]) or str(wlabs[:3]))
+                page.locator("#m4").click(); page.wait_for_timeout(700)
+                wlow = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} world map: no market value on a side the board does not list",
+                        not any("market" in l for l in wlow), str([l for l in wlow if "market" in l][:2]))
+                page.locator("#m2").click(); page.wait_for_timeout(500)
+                chk.add(f"{scheme} world map: each station carries its own unit",
+                        all(("\u00b0F" not in l) or l.startswith("Honolulu") for l in wlabs), str(wlabs[:4]))
+
                 # ---- the station's own record, drawn on its page
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
                 dots = page.locator("#cityScore circle").count()

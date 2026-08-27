@@ -295,8 +295,15 @@ window.WXMap = (() => {
     svg.innerHTML = '';
     svg.appendChild(el('rect', { x: 0, y: 0, width: 960, height: 480, fill: 'var(--map-sea)' }));
     svg.appendChild(el('path', { d: world.worldPaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': .8 }));
-    plot(svg, summary.cities.filter(c => !c.onConus), MODES[mode], c => c.wx, c => c.wy, [2, 62, 958, 378], true,
-         { label: c => c.city + (c.obsHighSoFar != null ? ' ' + c.obsHighSoFar.toFixed(0) + '°' + (c.unit || '') : '') });
+    const M = MODES[mode];
+    const side = (mode === 'loT' || mode === 'lo') ? 'impliedLow' : 'impliedHigh';
+    plot(svg, summary.cities.filter(c => !c.onConus), M, c => c.wx, c => c.wy, [2, 62, 958, 378], true,
+         { label: c => {
+             const u = c.unit || '';
+             const obs = c.obsHighSoFar != null ? ' ' + c.obsHighSoFar.toFixed(0) + '°' + u : '';
+             const im = WXM.on() ? (WXM.implied(c, M.when) || {})[side] : null;
+             return c.city + obs + (im != null ? ' · market ' + im.toFixed(0) + '°' + u : '');
+           } });
   }
 
 
