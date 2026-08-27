@@ -14,6 +14,8 @@
    (ladders, strike chips, price panels) is drawn only when WXM.on(). */
 window.WXCity = (() => {
   const { el, txt, h, $, clock, dateShort, hourTicks, P, deg } = WXC;
+  let locIndex = null;
+  const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
   const COL = { obs: 'var(--obs)', nws: 'var(--nws)', nbm: 'var(--nbm)', lamp: 'var(--lamp)', mav: 'var(--mav)' };
   const NAME = { nws: 'Weather Service', nbm: 'Blend of Models', lamp: 'LAMP', mav: 'GFS MOS' };
   // mid-luminance hues, readable as text on both the light and the dark panel
@@ -158,21 +160,53 @@ window.WXCity = (() => {
      around the station so the dot is not a pinprick on a continent. The crop is
      in the same projected units, so no reprojection is involved. */
   function drawLocator(c) {
-    const host = $('#locator'); if (!host || !c || !summary.base) return;
+    const host = $('#locator'); if (!host || !c) return;
     host.innerHTML = '';
-    const intl = !c.onConus;
-    const px = intl ? c.wx : c.px, py = intl ? c.wy : c.py;
+    // the metro-scale picture where there is one, and the outline where there is
+    // not: the National Map covers the United States, and a map that pretended
+    // otherwise abroad would be worse than an outline that admits what it is
+    const meta = (locIndex && (locIndex.stations || {})[c.station]) || null;
+    if (meta) {
+      const box = h('div', { class: 'locbox' });
+      const img = h('img', { src: WXD.base() + '/snapshots/locator/' + c.station + '.png',
+                             alt: 'Aerial and topographic map centred on ' + (c.city || c.station),
+                             loading: 'lazy', width: String(meta.w || 760), height: String(meta.h || 475) });
+      box.appendChild(img);
+      // the image is centred on the station, so the marker is the middle of it
+      box.appendChild(h('span', { class: 'locpin' }));
+      box.classList.add('expandable');
+      host.appendChild(box);
+      // twenty-four kilometres in a third of a column is a thumbnail; the same
+      // picture full-window is a map
+      const bar = h('div', { class: 'bar', style: 'margin:6px 0 0' });
+      bar.appendChild(WXC.expander(box, 'Expand map'));
+      host.appendChild(bar);
+      const across = Math.round((meta.halfWKm || 12) * 2);
+      const bits = [c.city, c.station];
+      if (c.lat != null && c.lon != null) {
+        bits.push(Math.abs(c.lat).toFixed(3) + '\u00b0' + (c.lat >= 0 ? 'N' : 'S') + ' '
+                  + Math.abs(c.lon).toFixed(3) + '\u00b0' + (c.lon >= 0 ? 'E' : 'W'));
+      }
+      const capEl = h('div', { class: 'cap', style: 'margin:5px 0 0' });
+      capEl.innerHTML = esc(bits.join(' \u00b7 ')) + ' \u00b7 about ' + across + ' km across.<br>'
+        + 'The contract settles on this one station, and a city\u2019s temperature varies with land cover, '
+        + 'distance from the centre, shade and water \u2014 so where it sits matters. Imagery: '
+        + '<a href="https://basemap.nationalmap.gov/" target="_blank" rel="noopener noreferrer">USGS The '
+        + 'National Map</a>, a work of the United States government.';
+      host.appendChild(capEl);
+      return;
+    }
+    if (!summary.base) return;
+    const px = c.wx, py = c.wy;
     if (px == null || py == null) return;
-    const paths = intl ? summary.base.worldPaths : summary.base.statePaths;
+    const paths = summary.base.worldPaths;
     if (!paths) return;
-    // a window around the station, wide enough to place it in a region
-    const w = intl ? 300 : 260, hh = intl ? 150 : 130;
+    const w = 300, hh = 150;
     const x0 = Math.max(0, Math.min(960 - w, px - w / 2));
-    const y0 = Math.max(intl ? 60 : 0, Math.min((intl ? 380 : 600) - hh, py - hh / 2));
+    const y0 = Math.max(60, Math.min(380 - hh, py - hh / 2));
     const svg = el('svg', { viewBox: `${x0} ${y0} ${w} ${hh}`, class: 'loc' });
-    if (intl) svg.appendChild(el('rect', { x: x0, y: y0, width: w, height: hh, fill: 'var(--map-sea)' }));
-    svg.appendChild(el('path', { d: paths, fill: 'var(--map-land)', stroke: 'var(--map-line)',
-                                 'stroke-width': intl ? .8 : 1 }));
+    svg.appendChild(el('rect', { x: x0, y: y0, width: w, height: hh, fill: 'var(--map-sea)' }));
+    svg.appendChild(el('path', { d: paths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': .8 }));
     svg.appendChild(el('circle', { cx: px, cy: py, r: 5.5, fill: 'none', stroke: 'var(--accent)',
                                    'stroke-width': 1.6, opacity: .55 }));
     svg.appendChild(el('circle', { cx: px, cy: py, r: 2.6, fill: 'var(--accent)' }));
@@ -182,7 +216,9 @@ window.WXCity = (() => {
       bits.push(Math.abs(c.lat).toFixed(2) + '\u00b0' + (c.lat >= 0 ? 'N' : 'S') + ' '
                 + Math.abs(c.lon).toFixed(2) + '\u00b0' + (c.lon >= 0 ? 'E' : 'W'));
     }
-    host.appendChild(h('div', { class: 'cap', style: 'margin:4px 0 0', text: bits.join(' \u00b7 ') }));
+    host.appendChild(h('div', { class: 'cap', style: 'margin:4px 0 0',
+                                text: bits.join(' \u00b7 ') + ' \u00b7 detailed imagery is a United States '
+                                      + 'government product and covers the United States only.' }));
   }
 
   const city = () => summary.cities.find(x => x.station === cur);
@@ -741,6 +777,7 @@ window.WXCity = (() => {
     onSelect = opts.onSelect || null;
     tip = WXC.tooltip();
     const sres = await WXD.get('summary.json');
+    try { locIndex = (await WXD.get('locator/index.json', 1440)).data; } catch (e) { locIndex = null; }
     summary = sres.data || { cities: [], asof: null };
     if (opts.basemap) summary.base = opts.basemap;
     await WXM.loadSummary();                      // implied medians for the picker dots (live market layer only)

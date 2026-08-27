@@ -17,7 +17,8 @@ this one has to stay up and stay fresh on its own.
 
 - **US government data only** for weather content: api.weather.gov, aviationweather.gov, NOAA Open
   Data on AWS, NOMADS, NHC, NCEI, NOAA GML, NOAA/NESDIS STAR. No Open-Meteo, no commercial vendors.
-  Documented exceptions: Natural Earth basemap outlines (public domain) and the RAPID AMOC annual means
+  Documented exceptions: USGS The National Map imagery for the station locators (a US government
+  work, fetched server side and served from this site's own bucket), Natural Earth basemap outlines (public domain) and the RAPID AMOC annual means
   (UK NERC, acknowledged in NOTICE), which the owner chose to keep; the exchange's public market-data
   endpoints for contract prices (owner's decision 2026-08-23, `pipeline/exchange.py`); the vendor
   lane for live-storm wind probabilities (`pipeline/reask.py`), which is off by default, needs a
@@ -77,6 +78,7 @@ parameters: `station`, `theme`, `market`.
                      energy.py (the EIA series behind the energy contracts, needs a key),
                      discussion.py (each forecast office's Area Forecast Discussion),
                      subhourly.py (the five minute stream, context only, never settlement),
+                     locator.py (a metro-scale USGS map per station, fetched once),
                      traffic.py (page views from the CDN access logs),
                      basemap.py, storage.py, config.py,
                      run.py (command line), handler.py (the only vendor-specific file)
@@ -91,7 +93,7 @@ parameters: `station`, `theme`, `market`.
     tests/           unittest, no network
     DEPLOY.md        the runbook for the steps that need the owner's accounts
 
-Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|quotes|reask|market|scorecard|normals|climate|season|discussion|subhourly|traffic|half-hourly|daily|all`.
+Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|quotes|reask|market|scorecard|normals|climate|season|discussion|subhourly|locator|traffic|half-hourly|daily|all`.
 Verification: `python3 -m unittest discover -s tests` and `python3 scripts/verify.py` (Playwright).
 
 ## Working style

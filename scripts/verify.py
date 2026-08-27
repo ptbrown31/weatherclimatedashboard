@@ -270,10 +270,34 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} sub-hourly: the key names it and says what it is not",
                         "not the settlement record" in keytxt, keytxt[:110])
                 # the station's own place, so a reader knows what the code means
-                chk.add(f"{scheme} locator: the page shows where the station is",
-                        page.locator("#locator svg.loc circle").count() >= 2
-                        and "KATL" in page.locator("#locator .cap").inner_text(),
-                        page.locator("#locator .cap").inner_text()[:60])
+                loccap = page.locator("#locator .cap").inner_text()
+                chk.add(f"{scheme} locator: a US station gets metro-scale imagery, pinned",
+                        page.locator("#locator .locbox img").count() == 1
+                        and page.locator("#locator .locpin").count() == 1
+                        and "KATL" in loccap, loccap[:70])
+                chk.add(f"{scheme} locator: the imagery is attributed and says why it matters",
+                        "USGS" in loccap and "United States government" in loccap
+                        and "where it sits matters" in loccap, loccap[-90:])
+                chk.add(f"{scheme} locator: it is served from this site, not a government endpoint",
+                        "nationalmap" not in (page.locator("#locator .locbox img").get_attribute("src") or ""),
+                        page.locator("#locator .locbox img").get_attribute("src"))
+                # the pin marks the station, so it must stay on it when expanded
+                page.locator("#locator .zb.ex").click(); page.wait_for_timeout(700)
+                ib = page.locator("#locator .locbox.full img").bounding_box()
+                pb = page.locator("#locator .locbox.full .locpin").bounding_box()
+                chk.add(f"{scheme} locator: the pin stays on the station when expanded",
+                        abs((pb["x"] + pb["width"] / 2) - (ib["x"] + ib["width"] / 2)) < 2
+                        and abs((pb["y"] + pb["height"] / 2) - (ib["y"] + ib["height"] / 2)) < 2, "")
+                page.keyboard.press("Escape"); page.wait_for_timeout(400)
+                # abroad there is no such imagery, and the page says so rather than
+                # showing a map that pretends otherwise
+                page.goto(f"{srv.url}/city.html?station=RJTT"); page.wait_for_timeout(2400)
+                icap = page.locator("#locator .cap").inner_text()
+                chk.add(f"{scheme} locator: a station abroad keeps the outline and explains it",
+                        page.locator("#locator svg.loc").count() == 1
+                        and page.locator("#locator .locbox img").count() == 0
+                        and "United States only" in icap, icap[-80:])
+                page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
 
                 # ---- the forecaster's own words, attributed and linked
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2800)

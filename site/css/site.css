@@ -284,7 +284,7 @@ body.wtfull{overflow:hidden}
 /* any chart marked expandable, opened to fill the window */
 .expandable.full{position:fixed;inset:0;z-index:40;margin:0;padding:20px;background:var(--ground);
   display:flex;align-items:center;justify-content:center;overflow:auto;border-radius:0}
-.expandable.full svg{width:100%;height:auto;max-height:calc(100vh - 46px)}
+.expandable.full svg,.expandable.full img{width:auto;max-width:100%;height:auto;max-height:calc(100vh - 46px)}
 
 
 /* the forecast office's own discussion, folded shut */
@@ -305,3 +305,17 @@ body.wtfull{overflow:hidden}
 svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);border-radius:6px;
   background:var(--map-sea)}
 @media (max-width:700px){.citytop #locator{flex:1 1 100%}svg.loc{width:100%}}
+
+
+/* the station's own place, at metro scale */
+.locbox{position:relative;display:block;border:1px solid var(--line);border-radius:6px;overflow:hidden;
+  line-height:0;background:var(--map-land)}
+.locbox img{width:100%;height:auto;display:block}
+.locbox .locpin{position:absolute;left:50%;top:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;
+  border-radius:50%;border:2.5px solid #fff;background:var(--accent);
+  box-shadow:0 0 0 1.5px rgba(0,0,0,.55),0 1px 4px rgba(0,0,0,.45)}
+.citytop #locator{flex:0 0 340px}
+@media (max-width:760px){.citytop #locator{flex:1 1 100%}}
+
+/* the pin stays on the station when the picture grows */
+.locbox.full{border:0;border-radius:0}
