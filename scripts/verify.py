@@ -112,7 +112,8 @@ def run(no_build: bool) -> int:
                          ("fossil-fuels.html", "#panels svg path", "fossil fuel series"),
                          ("electricity-renewables.html", "#panels svg path", "electricity series"), ("about.html", "footer.site", "footer"),
                          ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", ".prose p", "the accuracy argument"),
-                         ("daily-temperature-markets.html", ".prose h2", "the article sections")]
+                         ("daily-temperature-markets.html", ".prose h2", "the article sections"),
+                         ("allocator.html", "#allocSvg", "the allocation chart")]
                 for path, sel, what in pages:
                     page.goto(f"{srv.url}/{path}")
                     page.wait_for_timeout(900)
@@ -1325,6 +1326,61 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} hover: a headline card explains the number behind it", len(t_cd) > 20, t_cd[:80])
                 chk.add(f"{scheme} hurricane and climate: no script errors", not errs, "; ".join(errs)[:300])
                 ctx.close()
+
+            # ---- the allocation calculator: the maths, the scenarios, the imports
+            ctx = browser.new_context(viewport={"width": 1200, "height": 1000})
+            page = ctx.new_page()
+            errs = errors_of(page)
+            page.goto(f"{srv.url}/allocator.html"); page.wait_for_timeout(1600)
+            chk.add("allocator: opens on the teaching ladder, clearly labelled",
+                    "made-up" in page.locator("#allocTitle").inner_text().lower(),
+                    page.locator("#allocTitle").inner_text())
+            chk.add("allocator: three scenario chips", page.locator(".allocChip").count() == 3,
+                    str(page.locator(".allocChip").count()))
+            m = page.evaluate("""() => {
+              const M = WXAlloc._math;
+              // one instrument, believed 60% at a cost of 50 cents: full Kelly
+              // stakes (p-q)/1 = 0.2 of the bankroll, a textbook value
+              const inst = [{strike: 0, side: 'yes', dir: 1, thr: 0, cost: 0.5, price: 0.5}];
+              const B = M.bins(inst, 0.2533, 1);
+              const one = M.kelly(inst, B)[0];
+              // priced exactly at the belief, nothing is worth staking
+              const inst2 = [{strike: 0, side: 'yes', dir: 1, thr: 0, cost: 0.6, price: 0.6}];
+              const zero = M.kelly(inst2, M.bins(inst2, 0.2533, 1))[0];
+              return { one, zero, phi: M.Phi(1.96) };
+            }""")
+            chk.add("allocator: single-bet Kelly lands on the textbook fraction",
+                    abs(m["one"] - 0.2) < 0.005, str(m["one"]))
+            chk.add("allocator: a fairly priced contract gets nothing", m["zero"] < 1e-6, str(m["zero"]))
+            chk.add("allocator: the normal curve is a normal curve", abs(m["phi"] - 0.975) < 0.001, str(m["phi"]))
+            sp = page.evaluate("""() => [...document.querySelectorAll('.allocChip')].map(c => {
+              const t = c.innerText.match(/spends \\$([0-9.]+)/); return t ? +t[1] : null; })""")
+            chk.add("allocator: conservative spends no more than middle, middle no more than aggressive",
+                    sp[0] is not None and sp[0] <= sp[1] + 1e-6 and sp[1] <= sp[2] + 1e-6, str(sp))
+            chk.add("allocator: no scenario spends past the budget", all(x is not None and x <= 100.01 for x in sp), str(sp))
+            chk.add("allocator: the belief curve has drag handles",
+                    page.locator("#allocSvg circle[data-drag]").count() == 3,
+                    str(page.locator("#allocSvg circle[data-drag]").count()))
+            # a live import: the ladder, the prefill, and the click-through
+            page.select_option("#allocMarket", "city:KATL"); page.wait_for_timeout(1400)
+            chk.add("allocator: a city ladder imports with its own name",
+                    "Atlanta" in page.locator("#allocTitle").inner_text(),
+                    page.locator("#allocTitle").inner_text())
+            v = page.input_value("#allocValue")
+            chk.add("allocator: the value prefills from the ladder's implied median",
+                    v not in ("", "88"), v)
+            links = page.evaluate("() => document.querySelectorAll('#allocSvg rect[data-contract-url]').length")
+            chk.add("allocator: bought bars click through to the contract", links > 0, str(links))
+            chk.add("allocator: the tornado count is filed under Weather, not Tropical Cyclones",
+                    page.evaluate("""() => { const g = [...document.querySelectorAll('#allocMarket optgroup')]
+                      .find(g => g.label.includes('Tropical')); return g && ![...g.children].some(o => o.value.includes('SWTUS')); }""") is True, "")
+            t = "\n".join(page.locator(".sub").all_inner_texts()).lower()
+            chk.add("allocator: never says ask, sell or offer",
+                    "ask" not in t.replace("asked", "") and "sell" not in t and " offer" not in t, "")
+            chk.add("allocator: names both references",
+                    "kelly" in t and "thorp" in t, "")
+            chk.add("allocator: no script errors", not errs, "; ".join(errs[:3]))
+            ctx.close()
 
             # ---- embed target
             ctx = browser.new_context(viewport={"width": 980, "height": 500})
