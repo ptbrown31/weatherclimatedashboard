@@ -166,10 +166,34 @@ window.WXCat = (() => {
       if (key) {
         const sr = (await WXD.get(SERIES(key), 1440)).data;
         if (sr && (sr.points || []).length) {
-          const c = chart(sr, p.contracts || [], priced);
-          if (c) {
-            $('#cBody').appendChild(h('div', { class: 'secttl', text: 'WHAT IT SETTLES ON' }));
-            $('#cBody').appendChild(h('div', { class: 'card' }, [c]));
+          // the same panel the category pages draw, so a product looks the same
+          // wherever it is met and carries the same zoom and projection
+          const host = h('div');
+          $('#cBody').appendChild(h('div', { class: 'secttl', text: 'WHAT IT SETTLES ON' }));
+          $('#cBody').appendChild(host);
+          const ser = (sr.points || []).map(q => [WXPanels.xOfPeriod(q[0]), q[1]])
+            .filter(q => q[0] != null && q[1] != null);
+          const cs = (p.contracts || []).map(c => {
+            const q = priced[String(c.spec || '') + '|' + String(c.strike)] || {};
+            const x = WXPanels.xOf(c.expiryLabel);
+            if (x == null || c.strike == null) return null;
+            return { year: x, threshold: c.strike, label: c.label || ('Above ' + c.strike),
+                     expiration: c.expiration, expiryLabel: c.expiryLabel,
+                     conidYes: c.conidYes, conid: c.conidYes,
+                     yes: q.mid != null ? q.mid : null, bid: q.bid, ask: q.ask,
+                     bidSize: q.bidSize, askSize: q.askSize, from: q.from };
+          }).filter(Boolean);
+          const nums = ser.map(q => q[1]).concat(cs.map(c => c.threshold));
+          const big = nums.length && Math.max(...nums.map(Math.abs)) >= 1000;
+          const fmt = v => (v == null ? '—' : Math.abs(v) >= 10000 ? Math.round(v).toLocaleString('en-US')
+                                            : Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2));
+          WXClimate.panel(host, key, sr.title || p.name, sr.units || '', ser,
+                          { name: p.name || p.id, productConid: p.productConid, contracts: cs }, 0,
+                          sr.source || '',
+                          { markerRadius: 'auto', trendNote: 'byYear', tightRight: true, clampZero: true,
+                            fmt, fmtAxis: fmt, fmtThreshold: fmt, thresholdSuffix: '',
+                            x0: ser.length ? Math.max(ser[0][0], (cs.length ? Math.min(...cs.map(c => c.year)) : ser[ser.length - 1][0]) - 12) : undefined });
+          if (true) {
             const shown = (sr.points || []).length;
             const bits = [sr.title, sr.units ? 'in ' + sr.units : null, 'from ' + sr.source].filter(Boolean);
             // the mark to beat, computed from the series rather than written down,
@@ -250,165 +274,6 @@ window.WXCat = (() => {
       + 'This site does not publish a fair value for any contract.' }));
   }
 
-  // ---- the underlying, with the contract's strikes on it
-  //
-  // The same shape the climate page uses: the measured series, and the strikes
-  // marked where they settle, coloured by nothing at all — this page publishes
-  // no price and no fair value. A strike is a horizontal reach at its own
-  // level from the last observation to its expiry, so a reader can see how far
-  // the number has to travel and by when.
-  // the same ramp the climate page uses, so a strike coloured by its price
-  // reads the same wherever it appears on the site
-  const RAMP = ['#8b0000', '#d62728', '#ff7f0e', '#ffd700', '#adff2f', '#3ddc84', '#40e0d0', '#4fc3f7', '#1f77b4', '#00008b'];
-  function priceColor(p) {
-    if (p == null) return 'var(--line)';
-    const t = Math.max(0, Math.min(1, p)) * (RAMP.length - 1), i = Math.floor(t), f = t - i;
-    if (f < 1e-6 || i >= RAMP.length - 1) return RAMP[Math.min(i, RAMP.length - 1)];
-    const hx = x => [1, 3, 5].map(k => parseInt(x.slice(k, k + 2), 16));
-    const A = hx(RAMP[i]), B = hx(RAMP[i + 1]);
-    return 'rgb(' + A.map((a, k) => Math.round(a + (B[k] - a) * f)).join(',') + ')';
-  }
-
-  function chart(sr, contracts, priced) {
-    const all = sr.points || [];
-    if (all.length < 6) return null;
-    const cs = (contracts || []).filter(c => c.numeric && expMs(c.expiration));
-    // How much history to show is decided by whether the strikes stay legible
-    // in it. A crop's whole record spans sixty-five years and four tonnes per
-    // hectare while its strikes sit inside half a tonne; drawn together the
-    // markers land on top of each other. So the window is trimmed from the left
-    // until the strike band is a readable share of the axis, and never below a
-    // floor, and the caption says what window is drawn.
-    const band = cs.length ? Math.max(...cs.map(c => c.strike)) - Math.min(...cs.map(c => c.strike)) : 0;
-    const FLOOR = Math.min(24, all.length);
-    let pts = all.slice(-240);
-    if (band > 0) {
-      for (let keep = all.length; keep >= FLOOR; keep -= Math.max(1, Math.round(all.length / 60))) {
-        const win = all.slice(-keep);
-        const vs = win.map(q => q[1]).concat(cs.map(c => c.strike));
-        const span = Math.max(...vs) - Math.min(...vs);
-        pts = win;
-        if (span <= 0 || band / span >= 0.28) break;
-      }
-    }
-    if (pts.length < 6) pts = all.slice(-Math.max(6, FLOOR));
-    // The history gets the left of the panel and the listed contracts get a
-    // column each on the right, the way the climate panels lay them out. A time
-    // axis alone cannot do this here: a crop's expirations fall inside its own
-    // history, so on one continuous axis every strike lands on top of the last
-    // observation instead of in a grid.
-    const W = 960, H = 330, L = 54, T = 18, B = 262;
-    const R = cs.length ? 620 : 900, GR = 878;
-    const px = k => {
-      const t = String(k);
-      if (t.length === 4) return Date.UTC(+t, 6, 1);
-      if (t.length === 6) return Date.UTC(+t.slice(0, 4), +t.slice(4, 6) - 1, 15);
-      return Date.UTC(+t.slice(0, 4), +t.slice(4, 6) - 1, +t.slice(6, 8) || 1);
-    };
-    const ts = pts.map(p => px(p[0])), vs = pts.map(p => p[1]);
-    const sv = cs.map(c => c.strike);
-    let lo = Math.min(...vs, ...(sv.length ? sv : [Infinity]));
-    let hi = Math.max(...vs, ...(sv.length ? sv : [-Infinity]));
-    if (!(hi > lo)) hi = lo + 1;
-    const pad = (hi - lo) * 0.08;
-    lo -= pad; hi += pad;
-    const t0 = ts[0], t1 = ts[ts.length - 1];
-    const x = t => L + ((t - t0) / Math.max(t1 - t0, 1)) * (R - L);
-    const y = v => B - ((v - lo) / (hi - lo)) * (B - T);
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'serieschart' });
-
-    for (let i = 0; i <= 4; i++) {
-      const v = lo + (hi - lo) * i / 4;
-      svg.appendChild(el('line', { x1: L, x2: GR, y1: y(v), y2: y(v), class: 'grid' }));
-      svg.appendChild(txt(Math.round(v * 100) / 100, { x: L - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
-    }
-    svg.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(px(p[0])).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(''),
-                                 fill: 'none', stroke: 'var(--obs)', 'stroke-width': 1.8, 'pointer-events': 'none' }));
-    const lastV = vs[vs.length - 1];
-    svg.appendChild(txt('latest ' + lastV, { x: x(t1) - 4, y: y(lastV) - 8, 'text-anchor': 'end', class: 'ax' }));
-
-    // time axis, thinned so labels never stack
-    let lastYear = null, lastX = -1e9;
-    pts.forEach(p => {
-      const yr = String(p[0]).slice(0, 4);
-      if (yr === lastYear) return;
-      const xx = x(px(p[0]));
-      if (xx - lastX < 46) { lastYear = yr; return; }
-      lastYear = yr; lastX = xx;
-      svg.appendChild(txt(yr, { x: xx, y: B + 15, 'text-anchor': 'middle', class: 'ax' }));
-    });
-
-    if (cs.length) {
-      // one column per expiration, one marker per strike, coloured by price
-      const specs = [];
-      cs.forEach(c => { const k = c.expiryLabel || c.spec || String(c.expiration).slice(0, 4);
-                        if (specs.indexOf(k) < 0) specs.push(k); });
-      const gx = i => R + 44 + (specs.length === 1 ? (GR - R - 60) / 2 : (i / (specs.length - 1)) * (GR - R - 88));
-      svg.appendChild(el('line', { x1: R + 18, x2: R + 18, y1: T, y2: B, stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
-      // a dashed guide at every distinct strike, so a marker reads against the
-      // history's own scale rather than floating
-      const levels = [...new Set(cs.map(c => c.strike))].sort((a, b) => a - b);
-      // a marker is sized to the room its own ladder leaves it: AMOC has four
-      // thresholds across six units and can afford big circles, a crop has a
-      // dozen across half a tonne and cannot
-      let gapPx = Infinity;
-      for (let i = 1; i < levels.length; i++) gapPx = Math.min(gapPx, Math.abs(y(levels[i]) - y(levels[i - 1])));
-      const rDot = levels.length < 2 ? 7 : Math.max(2.2, Math.min(7, gapPx / 2));
-      let lastGuide = -1e9;
-      levels.forEach(v => {
-        if (Math.abs(y(v) - lastGuide) < 9) return;      // guides that touch are noise, not a grid
-        lastGuide = y(v);
-        svg.appendChild(el('line', { x1: R + 18, x2: GR, y1: y(v), y2: y(v),
-                                     stroke: 'var(--line)', 'stroke-dasharray': '2 4', 'pointer-events': 'none' }));
-        svg.appendChild(txt(v, { x: GR + 4, y: y(v) + 3.5, class: 'ax' }));
-      });
-      // an expiry label is whatever the exchange calls it, which can be a full
-      // date; compacted to a month and year here, and skipped where the next
-      // one would land on top of it
-      const short = k => {
-        const m = /([A-Z][a-z]{2})[a-z]*\s+\d{1,2},\s*(\d{4})/.exec(String(k));
-        if (m) return m[1] + ' ' + m[2];
-        const y2 = /(\d{4})/.exec(String(k));
-        return y2 ? (String(k).length > 9 ? y2[1] : String(k)) : String(k);
-      };
-      let lastLab = -1e9;
-      specs.forEach((k, i) => {
-        if (gx(i) - lastLab < 54) return;
-        lastLab = gx(i);
-        svg.appendChild(txt(short(k), { x: gx(i), y: B + 15, 'text-anchor': 'middle', class: 'ax' }));
-      });
-      cs.forEach(c => {
-        const k = c.expiryLabel || c.spec || String(c.expiration).slice(0, 4);
-        const i = specs.indexOf(k);
-        const q = (priced || {})[String(c.spec || '') + '|' + String(c.strike)];
-        const yes = q && q.mid != null ? q.mid : null;
-        const dot = el('circle', { cx: gx(i), cy: y(c.strike), r: rDot, fill: priceColor(yes),
-                                   stroke: 'var(--ink)', 'stroke-width': rDot > 4 ? 1 : .5, 'pointer-events': 'all' });
-        const gap = Math.round((c.strike - lastV) * 100) / 100;
-        bind(dot, () => tip.rows(c.label || String(c.strike), [
-          ['Yes price', yes == null ? 'no bids' : Math.round(yes * 100) + '¢'],
-          ['Strike', String(c.strike) + ' ' + (sr.units || '')],
-          ['Latest observation', lastV + ' ' + (sr.units || '')],
-          ['Distance', (gap > 0 ? '+' : '') + gap],
-          ['Settles', expDate(c.expiration)],
-        ], 'colour is the exchange\u2019s Yes price; the strike is where the contract pays'));
-        svg.appendChild(dot);
-      });
-      svg.appendChild(txt('listed contracts', { x: (R + 18 + GR) / 2, y: T - 4, 'text-anchor': 'middle', class: 'axl' }));
-    }
-
-    let kx = L;
-    [[0, '0¢'], [0.25, '25¢'], [0.5, '50¢'], [0.75, '75¢'], [1, '100¢']].forEach(([v, lab]) => {
-      svg.appendChild(el('rect', { x: kx, y: B + 26, width: 13, height: 9, fill: priceColor(v), stroke: 'var(--ink)', 'stroke-width': .5 }));
-      svg.appendChild(txt(lab, { x: kx + 16, y: B + 34, class: 'ax' }));
-      kx += 46;
-    });
-    svg.appendChild(txt('marker colour is the Yes price', { x: kx + 6, y: B + 34, class: 'ax' }));
-    return svg;
-  }
-
-  const expMs = e => (!e || String(e).length < 8) ? null
-    : Date.UTC(+String(e).slice(0, 4), +String(e).slice(4, 6) - 1, +String(e).slice(6, 8));
   function bind(node, html) {
     node.addEventListener('mousemove', e => { e.stopPropagation(); tip.show(e, html()); });
     node.addEventListener('mouseleave', () => tip.hide());

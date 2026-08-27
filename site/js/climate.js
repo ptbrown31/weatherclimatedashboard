@@ -58,9 +58,26 @@ window.WXClimate = (() => {
     const div = h('div', { class: 'panel' });
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
     div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: unit + (product ? ' · markers: ' + WXM.LABEL : '') }));
+    const ctl = h('div', { class: 'zoomrow' }); div.appendChild(ctl);
     const svg = el('svg', { viewBox: '0 0 960 330', class: 'ts' }); div.appendChild(svg);
     const note = h('div', { class: 'note', style: 'display:none;margin:6px 0 0;font-size:12px' }); div.appendChild(note);
-    host.appendChild(div);
+    if (opts._before && opts._before.parentNode === host) host.insertBefore(div, opts._before);
+    else host.appendChild(div);
+
+    /* Redraw this panel over a shorter window.
+       Zooming holds the right edge and moves the left one, because the right
+       edge is where the contracts are and where the record has just got to; a
+       zoom that recentred would walk the thing being looked at off the chart.
+       The panel is rebuilt rather than rescaled so that everything derived from
+       the window — the tick step, the marker radius, the axis floor — is derived
+       again from the window actually shown. */
+    const rebuild = (x0new, project) => {
+      const before = div.nextSibling;
+      div.remove();
+      panel(host, key, title, unit, ser, product, offsetC, source,
+            Object.assign({}, opts, { x0: x0new, _before: before,
+                                      _project: project === undefined ? opts._project : project }));
+    };
 
     const cs = product ? product.contracts : [];
     const unitShort = unit.split(/[ ,]/)[0];
@@ -73,6 +90,36 @@ window.WXClimate = (() => {
     const lastX = Math.max(...cs.map(c => c.year), (ser.length ? ser[ser.length - 1][0] : 0));
     const x1 = opts.tightRight ? lastX + Math.max(0.5, (lastX - x0) * 0.04)
                                : Math.max(...cs.map(c => c.year), new Date().getUTCFullYear() + 5) + 3;
+    /* The zoom control, sized to the record rather than fixed.
+
+       Offering "50 years" on a series that starts in 2001 is a button that does
+       nothing, so the choices are drawn from the span actually available, and
+       the widest one is the whole record. Each window ends at the right edge and
+       reaches back from it. */
+    if (ctl && ser.length > 2) {
+      const span = x1 - ser[0][0];
+      const steps = (span <= 15 ? [2, 5, 10] : span <= 45 ? [5, 10, 20, 40] : [10, 25, 50, 100])
+        .filter(n => n < span - 0.5);
+      const cur = Math.round((x1 - x0) * 10) / 10;
+      ctl.innerHTML = '';
+      ctl.appendChild(h('span', { class: 'zl', text: 'Show' }));
+      steps.concat([null]).forEach(n => {
+        const label = n == null ? 'All' : n + 'y';
+        const target = n == null ? ser[0][0] : x1 - n;
+        const on = n == null ? Math.abs(x0 - ser[0][0]) < 0.6 : Math.abs(cur - n) < 0.6;
+        const b = h('button', { class: 'zb' + (on ? ' on' : ''), text: label });
+        b.onclick = () => rebuild(target);
+        ctl.appendChild(b);
+      });
+      // the projection is off until asked for: it is a model, not a reading, and
+      // a page that draws one unbidden invites it to be read as the record
+      if (window.WXForecast && ser.length >= 24) {
+        const pb = h('button', { class: 'zb fc' + (opts._project ? ' on' : ''),
+                                 text: opts._project ? 'Hide projection' : 'Project forward' });
+        pb.onclick = () => rebuild(x0, !opts._project);
+        ctl.appendChild(pb);
+      }
+    }
     const pts = ser.filter(q => q[0] >= x0);
     const vals = pts.map(q => q[1]).concat(cs.map(c => c.threshold));
     if (!vals.length) { svg.appendChild(txt('No data available.', { x: L, y: T + 16, class: 'axl' })); return; }
@@ -86,9 +133,11 @@ window.WXClimate = (() => {
     const last = ser[ser.length - 1];
     const latestText = fmtV(last[1]) + ' ' + unitShort + ' (' + yearLabel(last[0]) + ')';
 
-    // a decade tick is right for a century of history and leaves a short window
-    // with two labels on it
-    const xStep = (x1 - x0) <= 25 ? 5 : 10;
+    // A decade tick is right for a century of history and leaves a five-year
+    // window with one label on it, which is not an axis. The step follows the
+    // window so a zoomed panel still says which years it is showing.
+    const xSpan = x1 - x0;
+    const xStep = xSpan <= 6 ? 1 : xSpan <= 12 ? 2 : xSpan <= 30 ? 5 : 10;
     for (let yr = Math.ceil(x0 / xStep) * xStep; yr <= x1; yr += xStep) {
       svg.appendChild(el('line', { x1: X(yr), x2: X(yr), y1: T, y2: B, class: 'grid' }));
       svg.appendChild(txt(yr, { x: X(yr), y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
@@ -193,6 +242,49 @@ window.WXClimate = (() => {
           svg.appendChild(el('path', { d: d2, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.6,
                                        'stroke-dasharray': '5 4', opacity: .9, 'pointer-events': 'none' }));
         }
+      }
+    }
+
+    /* The projection, when it has been asked for.
+
+       It is fitted to the whole record, not to the window on screen, because a
+       five-year window on a monthly series is sixty points and a seasonal model
+       wants more than that. It runs to the far edge of the listed strikes so a
+       reader can hold it against every contract on the panel, and it carries its
+       band, which is wide by the end and should be.
+
+       Where the fit fails — too short a record, a singular system — the panel
+       says so rather than drawing a line it does not stand behind. */
+    if (opts._project && window.WXForecast) {
+      const fc = WXForecast.project(ser, Math.max(x1, lastX));
+      if (!fc || !fc.points.length) {
+        note.style.display = 'inline-block';
+        note.textContent = 'This record is too short to fit a projection to.';
+      } else {
+        const inWin = fc.points.filter(q => q.x <= x1 + 1e-6);
+        if (inWin.length) {
+          // the band is often wider than the panel: monthly rain a year out is
+          // plus or minus most of a wet month. It is clipped to the plot rather
+          // than allowed to stretch the axis, because rescaling every panel to
+          // fit an uncertainty band would flatten the record it belongs to
+          const cy = v => Math.max(T, Math.min(B, Y(v)));
+          const band = inWin.map(q => X(q.x).toFixed(1) + ',' + cy(q.hi).toFixed(1)).join(' ')
+            + ' ' + inWin.slice().reverse().map(q => X(q.x).toFixed(1) + ',' + cy(q.lo).toFixed(1)).join(' ');
+          svg.appendChild(el('polygon', { points: band, fill: 'var(--fcst)', 'fill-opacity': .13,
+                                          stroke: 'none', 'pointer-events': 'none' }));
+          const last = ser[ser.length - 1];
+          const d3 = 'M' + X(last[0]).toFixed(1) + ',' + Y(last[1]).toFixed(1)
+            + inWin.map(q => 'L' + X(q.x).toFixed(1) + ',' + Y(q.v).toFixed(1)).join('');
+          svg.appendChild(el('path', { d: d3, fill: 'none', stroke: 'var(--fcst)', 'stroke-width': 2,
+                                       'stroke-dasharray': '7 3', 'pointer-events': 'none' }));
+        }
+        note.style.display = 'inline-block';
+        note.textContent = 'Projection: seasonal ARIMA, differenced once'
+          + (fc.seasonal ? ' and again at ' + fc.m + ' steps for the season' : '')
+          + ', with ' + fc.p + ' autoregressive term' + (fc.p === 1 ? '' : 's')
+          + ', fitted by least squares to the whole record. The shaded band is two standard errors and widens '
+          + 'with the horizon, and is clipped where it runs past the panel. It is a model, not a reading, and it carries no information the record does not.'
+          + (fc.capped ? ' It stops short of the furthest strike: beyond that the band is wider than anything the series has done, which is a picture of nothing.' : '');
       }
     }
 

@@ -303,8 +303,8 @@ def run(no_build: bool) -> int:
                     page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1200)
                     body = page.locator("#cBody").inner_text()
                     chk.add(f"{scheme} series: {pid} draws its underlying",
-                            page.locator("#cBody svg.serieschart").count() == 1
-                            and page.locator("#cBody svg.serieschart circle").count() > 0, body[:70])
+                            page.locator("#cBody svg.ts").count() == 1
+                            and page.locator("#cBody svg.ts circle[data-tip]").count() > 0, body[:70])
                     chk.add(f"{scheme} series: {pid} names the source and the place",
                             want in body and ("Climate at a Glance" in body or "Drought Monitor" in body), body[-150:])
                 chk.add(f"{scheme} series: the drought figure states it is the contiguous states",
@@ -313,11 +313,11 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} series: drought says which area it measures",
                         "contiguous" in page.locator("#cBody").inner_text(), page.locator("#cBody").inner_text()[-120:])
                 page.goto(f"{srv.url}/contract.html?id=TRSEA"); page.wait_for_timeout(1100)
-                page.locator("#cBody svg.serieschart circle").first.hover(force=True)
+                page.locator("#cBody svg.ts circle[data-tip]").first.hover(force=True)
                 page.wait_for_timeout(250)
                 t_str = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} series: a strike names its distance from the latest observation",
-                        "Strike" in t_str and "Latest observation" in t_str and "Distance" in t_str, t_str[:90])
+                chk.add(f"{scheme} series: a strike names where the series stands against it",
+                        "Settles" in t_str and "Series now" in t_str, t_str[:90])
                 chk.add(f"{scheme} series: the strike box carries the exchange's price, not a fair value",
                         "Yes price" in t_str and "fair value" not in t_str, t_str[-70:])
                 # ---- climate change: the unit that governs is not cosmetic, so the
@@ -326,7 +326,7 @@ def run(no_build: bool) -> int:
                     page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1200)
                     body = page.locator("#cBody").inner_text()
                     chk.add(f"{scheme} climate: {pid} draws its underlying",
-                            page.locator("#cBody svg.serieschart").count() == 1, body[:60])
+                            page.locator("#cBody svg.ts").count() == 1, body[:60])
                     chk.add(f"{scheme} climate: {pid} names the unit that resolves it",
                             want in body, body[-140:])
                 page.goto(f"{srv.url}/contract.html?id=GT"); page.wait_for_timeout(1100)
@@ -363,28 +363,43 @@ def run(no_build: bool) -> int:
                 for pid in ("GCYCO", "GCYWH", "GCYRM"):
                     page.goto(f"{srv.url}/contract.html?id={pid}"); page.wait_for_timeout(1400)
                     chk.add(f"{scheme} crops: {pid} draws its yield history",
-                            page.locator("#cBody svg.serieschart").count() == 1
-                            and page.locator("#cBody svg.serieschart circle").count() > 10,
-                            str(page.locator("#cBody svg.serieschart circle").count()))
+                            page.locator("#cBody svg.ts").count() == 1
+                            and page.locator("#cBody svg.ts circle[data-tip]").count() > 10,
+                            str(page.locator("#cBody svg.ts circle[data-tip]").count()))
                     chk.add(f"{scheme} crops: {pid} has no table of strikes",
                             page.locator("#cBody table").count() == 0, "")
                 page.goto(f"{srv.url}/contract.html?id=GCYCO"); page.wait_for_timeout(1600)
-                cols = page.eval_on_selector_all("#cBody svg.serieschart circle", "e=>e.map(x=>x.getAttribute('fill'))")
+                cols = page.eval_on_selector_all("#cBody svg.ts circle[data-tip]", "e=>e.map(x=>x.getAttribute('fill'))")
                 chk.add(f"{scheme} crops: the strikes are coloured by price, not one colour",
                         len(set(cols)) > 5, f"{len(set(cols))} distinct of {len(cols)}")
-                chk.add(f"{scheme} crops: the listed contracts get their own grid, not the time axis",
-                        any(t == "listed contracts" for t in page.eval_on_selector_all(
-                            "#cBody svg.serieschart text", "e=>e.map(x=>x.textContent)")), "")
-                rs = page.eval_on_selector_all("#cBody svg.serieschart circle", "e=>e.map(x=>+x.getAttribute('r'))")
+                rs = page.eval_on_selector_all("#cBody svg.ts circle[data-tip]", "e=>e.map(x=>+x.getAttribute('r'))")
                 chk.add(f"{scheme} crops: markers are sized so a dense ladder stays legible",
-                        bool(rs) and max(rs) <= 7 and min(rs) >= 2, str(sorted(set(rs))[:4]))
-                chk.add(f"{scheme} crops: the colour key is drawn",
-                        any("Yes price" in t for t in page.eval_on_selector_all("#cBody svg.serieschart text", "e=>e.map(x=>x.textContent)")), "")
+                        bool(rs) and max(rs) <= 8 and min(rs) >= 2, str(sorted(set(rs))[:4]))
+                xs = page.eval_on_selector_all("#cBody svg.ts circle[data-tip]", "e=>e.map(x=>+x.getAttribute('cx'))")
+                chk.add(f"{scheme} crops: strikes sit on the time axis, one column per settling year",
+                        bool(xs) and 3 <= len(set(round(v) for v in xs)) <= 8,
+                        str(sorted(set(round(v) for v in xs))))
+                lk = page.locator("#cBody svg.ts circle[role='link']").count()
+                chk.add(f"{scheme} crops: every strike marker opens its contract",
+                        lk == len(rs) and lk > 10, f"linked={lk} of {len(rs)}")
                 body = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} crops: the year offset in the terms is stated",
                         "second year of the marketing year" in body, body[-160:])
                 chk.add(f"{scheme} crops: surpassing is stated as strictly greater",
                         "strictly greater" in body, body[-120:])
+                # the panel travels with its zoom and its projection wherever it
+                # is drawn, including here
+                chk.add(f"{scheme} contract page: the panel brings its zoom",
+                        page.locator("#cBody .zoomrow .zb").count() >= 3,
+                        str(page.locator("#cBody .zoomrow .zb").count()))
+                page.locator("#cBody .zb.fc").click(); page.wait_for_timeout(700)
+                chk.add(f"{scheme} contract page: the projection draws a line and a band",
+                        page.locator("#cBody path[stroke='var(--fcst)']").count() == 1
+                        and page.locator("#cBody polygon[fill='var(--fcst)']").count() == 1,
+                        page.locator("#cBody .note").inner_text()[:80])
+                chk.add(f"{scheme} contract page: the projection says it is a model",
+                        "model, not a reading" in page.locator("#cBody .note").inner_text(),
+                        page.locator("#cBody .note").inner_text()[:90])
                 page.goto(f"{srv.url}/contract.html?id=GSCAL"); page.wait_for_timeout(900)
                 chk.add(f"{scheme} catalogue: an unlisted contract explains itself instead of erroring",
                         "not carrying this contract" in page.locator("#cBody").inner_text(),

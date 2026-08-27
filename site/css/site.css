@@ -6,7 +6,7 @@
   --ground:#F6F7F9; --panel:#FFFFFF; --ink:#1A2330; --muted:#5E6B7A; --line:#D8DEE6; --rule:#B8C1CC;
   --navy:#0B2545; --accent:#1E5AA0; --accent-ink:#FFFFFF;
   --obs:#111111; --nws:#2E7D32; --nbm:#B45309; --lamp:#6B4FBB; --mav:#5C6F8A;
-  --warm:#B2182B; --cool:#2166AC; --yes:#1E7A4F; --no:#B2182B;
+  --warm:#B2182B; --cool:#2166AC; --yes:#1E7A4F; --no:#B2182B; --fcst:#7B4FA8;
   --night:#EEF1F6; --shade:#F4F7FB; --map-land:#EEF1F5; --map-sea:#F6F9FC; --map-line:#FFFFFF;
   --chip:#EEF2F7; --warn:#8A5A00; --warn-soft:#FFF4DC; --bad:#A6452B; --bad-soft:#F8E5DF; --ok:#2E6B3F; --ok-soft:#E3EFE6;
   --tip-bg:#12161C; --tip-ink:#FFFFFF;
@@ -16,7 +16,7 @@
     --ground:#0F141A; --panel:#161C24; --ink:#E4E9F0; --muted:#98A4B3; --line:#2A3440; --rule:#3A4656;
     --navy:#9DB8E3; --accent:#7FB0EA; --accent-ink:#0F141A;
     --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC;
-    --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F;
+    --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F; --fcst:#B98FE0;
     --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
     --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
     --tip-bg:#E4E9F0; --tip-ink:#0F141A;
@@ -26,7 +26,7 @@
   --ground:#0F141A; --panel:#161C24; --ink:#E4E9F0; --muted:#98A4B3; --line:#2A3440; --rule:#3A4656;
   --navy:#9DB8E3; --accent:#7FB0EA; --accent-ink:#0F141A;
   --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC;
-  --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F;
+  --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F; --fcst:#B98FE0;
   --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
   --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
   --tip-bg:#E4E9F0; --tip-ink:#0F141A;
@@ -223,3 +223,16 @@ svg.serieschart{width:100%;height:auto;display:block}
 .daytab td.err,.daytab th.err{color:var(--muted);font-size:11px}
 .daytab tr:nth-child(odd) td{box-shadow:inset 0 0 0 9999px rgba(127,127,127,.035)}
 .daytab .sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
+
+/* The per-panel zoom. Every window ends at the right edge, where the contracts
+   and the newest reading are, and reaches back from it. */
+.zoomrow{display:flex;align-items:center;gap:5px;margin:0 2px 6px;flex-wrap:wrap}
+.zoomrow .zl{font-size:11px;color:var(--muted);margin-right:2px}
+.zoomrow .zb{font-size:11px;padding:2px 8px;border:1px solid var(--line);background:transparent;
+  color:var(--muted);border-radius:11px;cursor:pointer;line-height:1.6}
+.zoomrow .zb:hover{border-color:var(--accent);color:var(--ink)}
+.zoomrow .zb.on{border-color:var(--accent);color:var(--accent);font-weight:700}
+
+.zoomrow .zb.fc{margin-left:6px}
+.zoomrow .zb.fc.on{border-color:var(--fcst);color:var(--fcst)}
