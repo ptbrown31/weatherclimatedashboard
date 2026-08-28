@@ -24,6 +24,12 @@ window.WXAccuracy = (() => {
     const cap = $('#accCap'), key = $('#accKey');
     const r = await WXD.get('accuracy/lead-curve.json', 1440);
     const d = r.data;
+    // This curve is built on the machine that runs the hourly capture rather
+    // than by the site's own schedule, so it can stop arriving while the rest
+    // of the site stays current. The caption names the window it covers, but a
+    // window that has stopped moving reads the same as one that is up to date.
+    const st = $('#pageStatus');
+    if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440)); }
     svg.innerHTML = ''; if (key) key.innerHTML = ''; if (cap) cap.textContent = '';
     const pts = (d && d.points || []).slice().sort((a, b) => b.lead - a.lead);
     if (!pts.length) {

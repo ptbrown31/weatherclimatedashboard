@@ -606,6 +606,22 @@ def run(no_build: bool) -> int:
                         "KCOS" not in page.locator("#map").inner_html()
                         and "KCOS" not in page.locator("#mapW").inner_html(), "")
                 chk.add(f"{scheme} standalone: no script errors", not errs, "; ".join(errs)[:300])
+
+                # ---- the catalogue pages, which nothing else here loads. They
+                # take their slug from the query string, so a page reached with
+                # none still has to render rather than throw.
+                for path, what in (("section.html?slug=climate-weather", "section"),
+                                   ("category.html?slug=daily-temperatures", "category"),
+                                   ("contract.html?id=UHMSP", "contract"),
+                                   ("section.html", "section without a slug"),
+                                   ("category.html", "category without a slug"),
+                                   ("contract.html", "contract without an id")):
+                    del errs[:]
+                    page.goto(f"{srv.url}/{path}"); page.wait_for_timeout(1200)
+                    chk.add(f"{scheme} {what}: no script errors", not errs, "; ".join(errs)[:300])
+                    chk.add(f"{scheme} {what}: the page renders something",
+                            len(page.locator("body").inner_text().strip()) > 40, path)
+                del errs[:]
                 # ---- the map opens on the board that is trading
                 #
                 # Before 5 pm Eastern the current day's contracts are the live

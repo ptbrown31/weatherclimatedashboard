@@ -90,7 +90,8 @@ window.WXCat = (() => {
     $('#catTitle').textContent = meta.l2.toUpperCase();
     $('#catCrumb').innerHTML = '<a href="section.html?s=' + esc(meta.l1slug || '') + '">' + esc(meta.l1) + '</a> · ' + esc(meta.l2);
     const r = await WXD.get(CAT(slug), 1440);
-    const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440));
+    const st = $('#pageStatus');
+    if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440)); }
     const d = r.data;
     const host = $('#list'); host.innerHTML = '';
     if (!d || !(d.products || []).length) {
@@ -129,7 +130,8 @@ window.WXCat = (() => {
     const id = (param('id') || '').toUpperCase();
     if (!id) { $('#cTitle').textContent = 'No contract named'; return; }
     const r = await WXD.get(PROD(id), 1440);
-    const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440));
+    const st = $('#pageStatus');
+    if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440)); }
     const p = r.data;
     if (!p) {
       $('#cTitle').textContent = id;
