@@ -14,7 +14,7 @@
 
 <div class="card expandable" id="chartCard"><svg id="chart" viewBox="0 0 960 390"></svg></div>
 <div class="bar">
-  <button id="fullBtn">Full: both contract days</button>
+  <button id="fullBtn">Both contract days</button>
   <button id="ydayBtn">Overlay yesterday</button>
   <span id="chartExpand"></span>
   <span id="chartStatus"></span>
@@ -23,33 +23,33 @@
 markets &rarr;</a> &middot; <a id="allocLink" href="allocator.html">Size a position with the position allocation
 calculator &rarr;</a></p>
 
-<div class="secttl" style="margin-top:22px">WHERE THE STATION IS</div>
+<div class="secttl" style="margin-top:22px">STATION LOCATION</div>
 <div id="locator"></div>
 
 <div class="secttl" style="margin-top:22px">NATIONAL WEATHER SERVICE FORECAST DISCUSSION</div>
 <div id="discussion"></div>
 
-<div class="secttl" style="margin-top:22px">PICK A STATION</div>
+<div class="secttl" style="margin-top:22px">STATION PICKER</div>
 <div class="pickwrap">
-  <div><div class="pickttl" id="pickTitle">United States &mdash; dot colour and size: observed so far against the NWS high issued for the day</div>
+  <div><div class="pickttl" id="pickTitle">United States. Dot colour and size show observed so far against the NWS high issued for the day</div>
   <svg id="pick" viewBox="0 0 960 600"></svg></div>
   <div><div class="pickttl">International stations and Honolulu</div>
   <svg id="pickW" viewBox="0 60 960 320"></svg></div>
 </div>
 
-<div class="secttl" style="margin-top:22px">THE LAST 3 COMPLETE DAYS</div>
-<div class="bar"><span id="cityDaysExpand"></span><span class="cap" style="margin:0">observations across three
-days with each source&rsquo;s forecast for that day, all pinned to six in the evening the day before</span></div>
-<div class="card expandable" id="cityDaysWrap"><svg id="cityDays" viewBox="0 0 960 330"></svg></div>
-<div class="key" id="cityDaysKey"></div>
-<p class="cap" id="cityDaysCap"></p>
-
-<div class="secttl" style="margin-top:24px">THE LAST WEEK AT THIS STATION</div>
-<p class="cap" style="margin-top:0">What each tool said the day's high and low would be, against what the station
-actually recorded. Highs and lows share one axis; observations are black. Hover a point for the numbers.</p>
-<div class="card"><svg id="cityScore" viewBox="0 0 960 380"></svg></div>
-<div class="key" id="cityScoreKey"></div>
+<div class="secttl" style="margin-top:22px">THE LAST WEEK AT THIS STATION</div>
+<p class="cap" style="margin-top:0">Each day of the past week, then the last three complete days of it hour by
+hour. The shaded columns above are the same three days the panel below opens out, and both panels share one
+temperature scale, so a height means the same thing in each.</p>
+<div class="card expandable" id="cityDaysWrap">
+<svg id="cityScore" viewBox="0 0 960 380"></svg>
+<svg id="cityDays" viewBox="0 0 960 330"></svg>
+</div>
+<div class="bar"><span id="cityDaysExpand"></span></div>
 <p class="cap" id="cityScoreCap"></p>
+<p class="cap" id="cityDaysCap"></p>
+<div class="key" id="cityScoreKey" hidden></div>
+<div class="key" id="cityDaysKey" hidden></div>
 
 <div class="secttl" style="margin-top:24px">EVERY SCORED DAY AT THIS STATION</div>
 <p class="cap" style="margin-top:0">Every tool is read at <b>one moment: six in the evening, this station&rsquo;s

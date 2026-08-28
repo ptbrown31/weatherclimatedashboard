@@ -169,7 +169,7 @@ window.WXCat = (() => {
           // the same panel the category pages draw, so a product looks the same
           // wherever it is met and carries the same zoom and projection
           const host = h('div');
-          $('#cBody').appendChild(h('div', { class: 'secttl', text: 'WHAT IT SETTLES ON' }));
+          $('#cBody').appendChild(h('div', { class: 'secttl', text: 'SETTLEMENT BASIS' }));
           $('#cBody').appendChild(host);
           const ser = (sr.points || []).map(q => [WXPanels.xOfPeriod(q[0]), q[1]])
             .filter(q => q[0] != null && q[1] != null);

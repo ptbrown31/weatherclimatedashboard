@@ -76,6 +76,13 @@ window.WXCityScore = (() => {
     let lo = Math.min(...vals), hi = Math.max(...vals);
     const pad = Math.max(2, (hi - lo) * 0.1);
     lo -= pad; hi += pad;
+    /* One temperature scale for both panels of this figure.
+
+       The panel below opens out the last three of these days hour by hour, and
+       a reader compares heights across the two. Published here because this
+       panel is drawn first and holds the wider set of values, the forecasts as
+       well as the observations. */
+    window.WXCityScale = { lo, hi, days: days.map(d => d.date) };
     const x = i => L + (days.length === 1 ? (R - L) / 2 : (i / (days.length - 1)) * (R - L));
     const y = v => B - ((v - lo) / (hi - lo)) * (B - T);
 
@@ -85,6 +92,25 @@ window.WXCityScore = (() => {
       svg.appendChild(txt(v + '°', { x: L - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
     }
     days.forEach((d, i) => svg.appendChild(txt(dlab(d.date), { x: x(i), y: B + 16, 'text-anchor': 'middle', class: 'ax' })));
+
+    /* The three days the panel below opens out.
+
+       Shaded here and joined to that panel's edges, so the second figure reads
+       as these three days at an hour's resolution rather than as a separate
+       chart of its own. */
+    const sub = days.slice(-3);
+    if (sub.length) {
+      const half = days.length > 1 ? (R - L) / (days.length - 1) / 2 : (R - L) / 2;
+      const a = Math.max(L - 2, x(days.length - sub.length) - half);
+      const b = Math.min(R + 2, x(days.length - 1) + half);
+      svg.insertBefore(el('rect', { x: a, y: T, width: b - a, height: B - T, fill: 'var(--accent)',
+                                    opacity: 0.07, 'pointer-events': 'none' }), svg.firstChild);
+      [a, b].forEach(px => svg.appendChild(el('line', { x1: px, x2: px, y1: T, y2: H - 2, stroke: 'var(--accent)',
+                                                        'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.55,
+                                                        'pointer-events': 'none' })));
+      svg.appendChild(txt('opened out below', { x: (a + b) / 2, y: H - 6, 'text-anchor': 'middle',
+                                                'font-size': 9.5, fill: 'var(--accent)' }));
+    }
 
     /* A dot per tool per day, not a line.
 

@@ -70,7 +70,7 @@ window.WXClimate = (() => {
     const div = h('div', { class: 'panel' + (opts._full ? ' full' : '') });
     div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: title }));
     const sub = h('div', { class: 'psub cap', style: 'margin:2px 2px 6px',
-                           text: unit + (product ? ' · markers: ' + WXM.LABEL : '') });
+                           text: unit + (product ? ' · markers from ' + WXM.LABEL : '') });
     // the document that defines what this settles on, one click away
     const tl = product && product.id ? WXM.termsLink(product.id) : '';
     if (tl) sub.innerHTML += ' · ' + tl;
@@ -375,11 +375,11 @@ window.WXClimate = (() => {
             'pointer-events': 'none' })));
         }
         note.style.display = 'inline-block';
-        note.textContent = 'Projection: a straight line fitted to the last ' + fc.windowYears + ' years of the record'
+        note.textContent = 'A straight line fitted to the last ' + fc.windowYears + ' years of the record'
           + (fc.seasonal ? ', with the average seasonal cycle laid on top' : '')
           + '. The shaded band is twice the scatter that fit leaves behind and does not widen: the model claims '
-          + 'nothing beyond the recent line, continued. It is a model, not a reading, and it carries no '
-          + 'information the record does not.'
+          + 'nothing beyond the recent line continued. The projection is fitted from the record and adds '
+          + 'nothing to it.'
           + (fc.capped ? ' It stops short of the furthest strike.' : '');
       }
     }

@@ -30,7 +30,6 @@ window.WXCityDays = (() => {
   const dayLabel = iso => MON[+iso.slice(5, 7) - 1] + ' ' + (+iso.slice(8, 10));
 
   async function draw(station) {
-    const host = $('#cityDaysWrap'); if (!host) return;
     const svg = $('#cityDays'); if (!svg) return;
     svg.innerHTML = '';
     const [sres, ores, cres] = await Promise.all([
@@ -67,7 +66,7 @@ window.WXCityDays = (() => {
       return;
     }
 
-    const W = 960, H = 330, L = 52, R = 928, T = 18, B = 268;
+    const W = 960, H = 330, L = 52, R = 928, T = 26, B = 268;
     const t0 = keep[0].t, t1 = keep[keep.length - 1].t;
     const byDay = {};
     (st && st.days || []).forEach(d => { byDay[d.date] = d; });
@@ -84,6 +83,11 @@ window.WXCityDays = (() => {
     });
     let lo = Math.min(...vals), hi = Math.max(...vals);
     const pad = Math.max(2, (hi - lo) * 0.12); lo -= pad; hi += pad;
+    // the panel above sets the scale for both, so a height means the same in each
+    const shared = window.WXCityScale;
+    if (shared && isFinite(shared.lo) && isFinite(shared.hi) && shared.hi > shared.lo) {
+      lo = Math.min(lo, shared.lo); hi = Math.max(hi, shared.hi);
+    }
     const x = t => L + (t - t0) / Math.max(t1 - t0, 1) * (R - L);
     const y = v => B - (v - lo) / (hi - lo) * (B - T);
 
@@ -183,6 +187,39 @@ window.WXCityDays = (() => {
     });
     band.addEventListener('mouseleave', () => { tip.hide(); if (dot) { dot.remove(); dot = null; } });
     svg.insertBefore(band, svg.firstChild);
+
+    /* Each source named on its own level line, in the last day it drew one.
+
+       The colours meant nothing without a key underneath, which is a look away
+       from the figure to read it. */
+    {
+      const lastDay = shown[shown.length - 1];
+      const dd2 = byDay[lastDay];
+      const inDay2 = keep.filter(r => dayOf(r.t) === lastDay);
+      if (dd2 && inDay2.length) {
+        const xEnd = Math.min(x(inDay2[inDay2.length - 1].t), R - 2);
+        const placed = [];
+        Object.keys(COL).forEach(k => {
+          const f = dd2[k];
+          if (!f || f.high == null) return;
+          let yy = y(f.high);
+          while (placed.some(q => Math.abs(q - yy) < 10)) yy -= 10;
+          placed.push(yy);
+          svg.appendChild(txt(NAME[k], { x: xEnd, y: yy - 3, 'font-size': 9, 'font-weight': 600,
+                                         fill: COL[k], 'text-anchor': 'end', 'pointer-events': 'none' }));
+        });
+        svg.appendChild(txt('solid is each source\u2019s forecast high, dashed its low', { x: L, y: B + 30,
+                            'font-size': 9, fill: 'var(--muted)' }));
+      }
+    }
+
+    /* Where these three days sit in the week above. */
+    svg.appendChild(el('line', { x1: L, x2: R, y1: 6, y2: 6, stroke: 'var(--accent)', 'stroke-width': 1,
+                                 'stroke-dasharray': '3 3', opacity: 0.55, 'pointer-events': 'none' }));
+    [L, R].forEach(px => svg.appendChild(el('line', { x1: px, x2: px, y1: 2, y2: 10, stroke: 'var(--accent)',
+                                                      'stroke-width': 1, opacity: 0.55, 'pointer-events': 'none' })));
+    svg.appendChild(txt('the shaded three days above, hour by hour', { x: (L + R) / 2, y: 18, 'text-anchor': 'middle',
+                                                                      'font-size': 9.5, fill: 'var(--accent)' }));
 
     const key = $('#cityDaysKey');
     if (key) {

@@ -173,7 +173,7 @@ window.WXMap = (() => {
     ] : [];
     return tip.rows(c.city + ' (' + c.station + ') — tomorrow ' + isoDate(mk.tomorrow), tomorrow) +
       tip.rows('<span class="tk" style="display:block;margin-top:5px">Today · ' + isoDate(mk.day) + '</span>', today) +
-      (enc.length ? tip.rows('<span class="tk" style="display:block;margin-top:5px">What the dot shows</span>', enc, 'click → city chart')
+      (enc.length ? tip.rows('<span class="tk" style="display:block;margin-top:5px">Dot encoding</span>', enc, 'click → city chart')
                   : tip.rows('', [], 'click → city chart'));
   }
 
@@ -297,12 +297,24 @@ window.WXMap = (() => {
     svg.appendChild(el('path', { d: world.worldPaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': .8 }));
     const M = MODES[mode];
     const side = (mode === 'loT' || mode === 'lo') ? 'impliedLow' : 'impliedHigh';
+    /* Abroad the label carries the market's number and nothing else.
+
+       There is no government forecast to compare against outside the United
+       States and Canada, so the observed reading and the market's median sat
+       side by side with nothing to relate them. A station with no listed board
+       gets its name alone; a number that is not there is not written. The date
+       travels with the number because these stations run on their own local
+       days and the contract day is not the reader's. */
+    const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const dayLab = iso => (iso && /^\d{4}-\d{2}-\d{2}$/.test(iso))
+      ? MON[+iso.slice(5, 7) - 1] + ' ' + (+iso.slice(8, 10)) : null;
     plot(svg, summary.cities.filter(c => !c.onConus), M, c => c.wx, c => c.wy, [2, 62, 958, 378], true,
          { label: c => {
              const u = c.unit || '';
-             const obs = c.obsHighSoFar != null ? ' ' + c.obsHighSoFar.toFixed(0) + '°' + u : '';
              const im = WXM.on() ? (WXM.implied(c, M.when) || {})[side] : null;
-             return c.city + obs + (im != null ? ' · market ' + im.toFixed(0) + '°' + u : '');
+             if (im == null) return c.city;
+             const d = dayLab(c.markers && (M.when === 'today' ? c.markers.day : c.markers.tomorrow));
+             return c.city + ' ' + im.toFixed(0) + '°' + u + (d ? ' · ' + d : '');
            } });
   }
 

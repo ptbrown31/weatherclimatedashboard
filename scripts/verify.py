@@ -163,11 +163,10 @@ def run(no_build: bool) -> int:
                         "SITE-LINK" not in art_t and "{" not in art_t, art_t[:60])
                 chk.add(f"{scheme} article: no internal review note published",
                         "DRAFT UPDATE" not in art_t and "for Patrick" not in art_t, "")
-                # the article names stations and cities, so it shows which
-                chk.add(f"{scheme} article: the stations are drawn and every one is a link",
-                        page.locator("#artMap a").count() >= 20
-                        and page.locator("#artMap text").count() >= 20,
-                        f"links={page.locator('#artMap a').count()} labels={page.locator('#artMap text').count()}")
+                # the article carries no figure of its own; the map lives on the
+                # landing page, which is where a reader can use it
+                chk.add(f"{scheme} article: it is text, with no map of its own",
+                        page.locator("#artMap").count() == 0, "")
                 chk.add(f"{scheme} article: it names the settlement source and the strict rule",
                         "Weather Underground" in art_t and "midnight to midnight local time" in art_t
                         and "50.5%" in art_t, art_t[:80])
@@ -244,9 +243,14 @@ def run(no_build: bool) -> int:
                 # view; on a lows view the absence is correct.
                 page.locator("#m2").click(); page.wait_for_timeout(700)
                 wlabs = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
-                chk.add(f"{scheme} world map: stations carry the market's implied value",
-                        sum(1 for l in wlabs if "market" in l) >= 3,
-                        str([l for l in wlabs if "market" in l][:3]) or str(wlabs[:3]))
+                # abroad the label is the market's number and the local date it
+                # applies to; a station with no board is named without a number
+                import re as _re
+                chk.add(f"{scheme} world map: a label carries the market value and its local date",
+                        sum(1 for l in wlabs if _re.search(r"-?\d+\u00b0[CF]? \u00b7 \w+ \d+$", l)) >= 3,
+                        str(wlabs[:3]))
+                chk.add(f"{scheme} world map: a station without a board is named without a number",
+                        all(_re.search(r"\d", l) for l in wlabs if "\u00b7" in l), "")
                 page.locator("#m4").click(); page.wait_for_timeout(700)
                 wlow = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
                 chk.add(f"{scheme} world map: no market value on a side the board does not list",
@@ -536,8 +540,8 @@ def run(no_build: bool) -> int:
                         page.locator("#cBody path[stroke='var(--fcst)']").count() == 1
                         and page.locator("#cBody polygon[fill='var(--fcst)']").count() == 1,
                         page.locator("#cBody .note").inner_text()[:80])
-                chk.add(f"{scheme} contract page: the projection says it is a model",
-                        "model, not a reading" in page.locator("#cBody .note").inner_text(),
+                chk.add(f"{scheme} contract page: the projection says what it was fitted from",
+                        "fitted from the record and adds" in page.locator("#cBody .note").inner_text(),
                         page.locator("#cBody .note").inner_text()[:90])
                 page.goto(f"{srv.url}/contract.html?id=GSCAL"); page.wait_for_timeout(900)
                 chk.add(f"{scheme} catalogue: an unlisted contract explains itself instead of erroring",
@@ -561,10 +565,13 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} scorecard: the standings are not on it, and it says where they are",
                         page.locator("#standings").count() == 0
                         and page.locator("a[href='accuracy.html']").count() >= 1, "")
-                chk.add(f"{scheme} map: the dot key sits under the map it explains",
+                chk.add(f"{scheme} map: the whole key sits under the map it explains",
                         page.evaluate("""() => { const m = document.querySelector('#map').getBoundingClientRect();
-                          const k = [...document.querySelectorAll('.wrap p.cap')].find(x => x.textContent.includes('running warmer'));
-                          return !!k && k.getBoundingClientRect().top - m.bottom < 140; }"""), "")
+                          const k = document.querySelector('.how');
+                          if (!k) return false;
+                          const t = k.textContent;
+                          return k.getBoundingClientRect().top - m.bottom < 160
+                                 && t.includes('THE DOTS') && t.includes('THE SHADING') && t.includes('A LABEL'); }"""), "")
                 chk.add(f"{scheme} scorecard: the map keeps its own status strip",
                         page.locator("#pageStatus .status").count() >= 1, "")
                 chk.add(f"{scheme} roster: Colorado Springs is off the board",
@@ -958,8 +965,8 @@ def run(no_build: bool) -> int:
                 axis = page.locator("#ladders svg.cpanel text", has_text="Yes green, No red").count()
                 chk.add(f"{scheme} market's ladder: the axis says which side is which", axis >= 1, f"labels={axis}")
                 linked_href("#ladders svg.cpanel rect[fill='var(--yes)'][role='link']", "the market's ladder")
-                linked_href("#ladders .lrow .lv[role='link']", "a period ladder row")
-                linked_href("#landfall .lrow .lv[role='link']", "the landfall table")
+                linked_href("#ladders .lrow[role='link']", "a period ladder row")
+                linked_href("#landfall .lrow[role='link']", "the landfall table")
                 # the tornado contracts moved to Weather, so this section is often
                 # empty on the cyclone page; when it is, it must say so
                 if page.locator("#others td.num.lnk").count():
@@ -971,7 +978,7 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} hurricane: the tornado contracts are not on the cyclone page",
                         "SWTUS" not in page.locator("#others").inner_text(),
                         page.locator("#others").inner_text()[:70])
-                linked_href("#cat4 .lrow .lv[role='link']", "the category 4 board")
+                linked_href("#cat4 .lrow[role='link']", "the category 4 board")
                 # the remaining-season curve, and what it must not claim
                 chk.add(f"{scheme} cat4: the remaining-season curve is drawn",
                         page.locator("#cat4 svg.cpanel").count() == 1

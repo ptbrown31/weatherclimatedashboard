@@ -745,19 +745,41 @@ window.WXAlloc = (() => {
     }
 
     // ---- 4: the whole set, outcome by outcome
-    head(P4.x0, ['WHAT THE ENTIRE ALLOCATION PAYS', 'BY WHERE THE NUMBER LANDS'], 'gross dollars');
+    head(P4.x0, ['WHAT THE ENTIRE ALLOCATION PAYS', 'BY WHERE THE NUMBER LANDS'], 'net of the capital committed');
     {
-      const maxPay = Math.max(S.budget * 1.15, ...SCEN.map(s2 => {
+      /* Centred on the capital committed, like the column beside it.
+
+         Drawn from zero, every band was a long bar and the eye had to find the
+         committed line and judge each bar against it. Zero is not the question
+         a participant asks of this column. Measuring from the money in puts
+         the answer on the page directly: bars to the right of the spine are
+         bands where the allocation comes out ahead, bars to the left are bands
+         where it comes out behind, and the length of each is how much. */
+      const netOf = (hold, v, spent) => payoutAt(hold, v) - spent;
+      let worst = 0, bestv = 0;
+      SCEN.forEach(s2 => {
         const sc = R.scen[s2.key];
-        return R.B.reduce((a, b) => Math.max(a, payoutAt(sc.hold, b.v)), 0);
-      }));
-      const xp = d => P4.x0 + Math.min(d / maxPay, 1) * (P4.x1 - P4.x0);
-      const dt = ticks(0, maxPay, 3);
-      dt.vals.forEach(d => {
-        if (d <= 0) return;
-        svg.appendChild(el('line', { x1: xp(d), x2: xp(d), y1: T, y2: H - Bm, class: 'grid' }));
-        svg.appendChild(txt('$' + d.toFixed(dt.dp), { x: xp(d), y: H - Bm + 15, 'text-anchor': 'middle', class: 'ax' }));
+        R.B.forEach(b => {
+          const n = netOf(sc.hold, b.v, sc.spent);
+          worst = Math.min(worst, n); bestv = Math.max(bestv, n);
+        });
       });
+      const reach = Math.max(Math.abs(worst), Math.abs(bestv), S.budget * 0.25);
+      const spine4 = P4.x0 + (P4.x1 - P4.x0) * 0.42;
+      const per4 = Math.min((spine4 - P4.x0) / Math.max(Math.abs(worst), 1e-9),
+                            (P4.x1 - spine4) / Math.max(bestv, 1e-9));
+      const xp = d => spine4 + (d - 0) * per4;          // d is a NET amount
+      const dt = ticks(-Math.abs(worst), bestv, 4);
+      dt.vals.forEach(d => {
+        const x = xp(d);
+        if (x < P4.x0 - 0.5 || x > P4.x1 + 0.5) return;
+        svg.appendChild(el('line', { x1: x, x2: x, y1: T, y2: H - Bm, class: 'grid' }));
+        svg.appendChild(txt((d > 0 ? '+' : d < 0 ? '−' : '') + '$' + Math.abs(d).toFixed(dt.dp),
+                            { x, y: H - Bm + 15, 'text-anchor': 'middle', class: 'ax' }));
+      });
+      svg.appendChild(el('line', { x1: spine4, x2: spine4, y1: T, y2: H - Bm, stroke: 'var(--ink)', 'stroke-width': 1.2, opacity: 0.75 }));
+      svg.appendChild(txt('behind ◂', { x: spine4 - 5, y: T - 4, 'text-anchor': 'end', class: 'ax', 'font-size': 9 }));
+      svg.appendChild(txt('▸ ahead', { x: spine4 + 5, y: T - 4, class: 'ax', 'font-size': 9 }));
       /* One bar per outcome band, not a line.
 
          What the set returns is a step: it is one number for every value
@@ -768,10 +790,11 @@ window.WXAlloc = (() => {
       const edges = [vLo].concat(ts, [vHi]);
       for (let b = 0; b + 1 < edges.length; b++) {
         const v0 = edges[b], v1 = edges[b + 1];
-        const pay = payoutAt(sel.hold, (v0 + v1) / 2);
+        const net = netOf(sel.hold, (v0 + v1) / 2, sel.spent);
         const yTop = y(v1), hgt = Math.max(y(v0) - y(v1) - 1.4, 1.2);
-        svg.appendChild(el('rect', { x: P4.x0, y: yTop + 0.7, width: Math.max(xp(pay) - P4.x0, 0.6), height: hgt,
-                                     fill: scSel.col, opacity: 0.85 }));
+        const x = xp(net);
+        svg.appendChild(el('rect', { x: Math.min(spine4, x), y: yTop + 0.7, width: Math.max(Math.abs(x - spine4), 0.8),
+                                     height: hgt, fill: net >= 0 ? scSel.col : 'var(--collat)', opacity: 0.85 }));
       }
       SCEN.filter(s2 => s2.key !== scSel.key).forEach(s2 => {
         const sc = R.scen[s2.key];
@@ -779,14 +802,12 @@ window.WXAlloc = (() => {
         let d = '';
         for (let b = 0; b + 1 < edges.length; b++) {
           const v0 = edges[b], v1 = edges[b + 1];
-          const pay = payoutAt(sc.hold, (v0 + v1) / 2);
-          d += (b ? 'L' : 'M') + xp(pay).toFixed(1) + ',' + y(v0).toFixed(1) + 'L' + xp(pay).toFixed(1) + ',' + y(v1).toFixed(1);
+          const n = netOf(sc.hold, (v0 + v1) / 2, sc.spent);
+          d += (b ? 'L' : 'M') + xp(n).toFixed(1) + ',' + y(v0).toFixed(1) + 'L' + xp(n).toFixed(1) + ',' + y(v1).toFixed(1);
         }
         svg.appendChild(el('path', { d, fill: 'none', stroke: s2.col, 'stroke-width': 1.2, opacity: 0.6, 'pointer-events': 'none' }));
       });
-      const bx = xp(S.budget), bRight = bx > (P4.x0 + P4.x1) / 2;
-      svg.appendChild(el('line', { x1: bx, x2: bx, y1: T, y2: H - Bm, stroke: 'var(--ink)', 'stroke-dasharray': '4 3', opacity: 0.6 }));
-      svg.appendChild(txt('the ' + fm$(S.budget).replace(/\.00$/, '') + ' committed', { x: bx, y: H - Bm + 27,
+      svg.appendChild(txt('against the ' + fm$(sel.spent).replace(/\.00$/, '') + ' committed', { x: spine4, y: H - Bm + 27,
                           'font-size': 9.5, fill: 'var(--muted)', 'text-anchor': 'middle' }));
       const band3 = el('rect', { x: P4.x0, y: T, width: P4.x1 - P4.x0, height: H - T - Bm, fill: 'transparent' });
       let mark = null;
@@ -801,9 +822,9 @@ window.WXAlloc = (() => {
           const sc = R.scen[s2.key];
           const pay = payoutAt(sc.hold, v);
           return ['<span class="sw" style="background:' + s2.col + '"></span>' + s2.name,
-                  fm$(pay) + ' (' + fmS(pay - sc.spent) + ' net)'];
+                  fmS(pay - sc.spent) + ' net (' + fm$(pay) + ' back)'];
         });
-        tip.show(ev, tip.rows('If the number lands at ' + fmv(gr, unit), rows, 'gross payout, and net of the capital committed'));
+        tip.show(ev, tip.rows('If the number lands at ' + fmv(gr, unit), rows, 'against the capital committed'));
       });
       band3.addEventListener('mouseleave', () => { tip.hide(); if (mark) { mark.remove(); mark = null; } });
       svg.insertBefore(band3, svg.firstChild);
@@ -869,18 +890,32 @@ window.WXAlloc = (() => {
     node.addEventListener('mousemove', ev => tip.show(ev, make()));
     node.addEventListener('mouseleave', () => tip.hide());
   }
+  /* Each side against the price the user's own curve puts on it.
+
+     The two lines under a side are the whole decision at that strike. A tick
+     marks the side this split buys, and the number beside it is what it buys. */
   function priceTip(r, R, held) {
-    const iy = R.instr.find(i => i.strike === r.strike && i.side === 'yes');
-    const ino = R.instr.find(i => i.strike === r.strike && i.side === 'no');
-    const rows = [];
-    if (iy) rows.push(['Buy Yes now at', fmc(iy.price) + ' · pays ' + fmx(1 / iy.cost)]);
-    if (ino) rows.push(['Buy No now at', fmc(ino.price) + ' · pays ' + fmx(1 / ino.cost)]);
-    if (!iy && !ino) rows.push(['No resting bids', 'neither side can be bought now']);
-    if (iy) rows.push(['The user’s chance Yes pays', fmp(iy.p)]);
+    const iy = R.all.find(i => i.strike === r.strike && i.side === 'yes');
+    const ino = R.all.find(i => i.strike === r.strike && i.side === 'no');
     const hy = held['yes@' + r.strike], hn = held['no@' + r.strike];
-    if (hy) rows.push(['This split buys', hy.n + ' Yes for ' + fm$(hy.spent)]);
-    if (hn) rows.push(['This split buys', hn.n + ' No for ' + fm$(hn.spent)]);
-    return tip.rows(r.label, rows, 'multiples are per contract, net of nothing; the fee is inside the cost');
+    const rows = [];
+    const TICK = '<span style="color:var(--ok);font-weight:700">\u2713</span> ';
+    if (iy) {
+      rows.push([(hy ? TICK : '') + 'Buy Yes now at', fmc(iy.price) + ' \u00b7 pays ' + fmx(1 / iy.cost)]);
+      rows.push(['User\u2019s implied fair Yes', fmc(iy.p)]);
+      if (hy) rows.push(['This split buys', hy.n + ' Yes for ' + fm$(hy.spent)]);
+    }
+    if (ino) {
+      rows.push([(hn ? TICK : '') + 'Buy No now at', fmc(ino.price) + ' \u00b7 pays ' + fmx(1 / ino.cost)]);
+      rows.push(['User\u2019s implied fair No', fmc(ino.p)]);
+      if (hn) rows.push(['This split buys', hn.n + ' No for ' + fm$(hn.spent)]);
+    }
+    if (!iy && !ino) rows.push(['No resting bids', 'neither side can be bought now']);
+    const foot = (iy && !iy.tradeable) || (ino && !ino.tradeable)
+      ? 'outside the 5 to 95 percent window, so no capital goes here'
+      : (hy || hn) ? 'the tick marks the side this split buys'
+                   : 'neither side is cheap enough against the user\u2019s own value';
+    return tip.rows(r.label, rows, foot);
   }
   function barTip(x, R, unit) {
     const i = x.i;

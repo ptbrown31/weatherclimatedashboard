@@ -31,6 +31,9 @@ hurricane contracts at their quoted prices.</p>
 <div id="storms"></div>
 
 <div id="atlanticOnly">
+<div class="secttl">NATIONAL HURRICANE CENTER DISCUSSION</div>
+<div id="stormDiscussion"></div>
+
 <div class="secttl">SEASON TO DATE AND THE COUNT CONTRACTS</div>
 <p class="cap" style="margin-top:0">For each count product: on the left how many have formed this season against the pace of an
 average season, and on the right the price of the Yes contract at each count, read across the same
@@ -38,11 +41,10 @@ vertical axis. The pace curve is the 1991&ndash;2020 formation calendar in the N
 blue line is where an average season stands on this date, not a forecast of this one.</p>
 <div class="tiles" id="tiles"></div>
 <div class="ladders" id="ladders"></div>
-<p class="cap" id="laddersCap2"></p>
+<p class="cap" id="laddersCap"></p>
 
 <div class="secttl">CATEGORY 4 UNITED STATES LANDFALL</div>
 <div id="cat4"></div>
-<p class="cap" id="laddersCap"></p>
 
 <div class="secttl">MAJOR HURRICANE LANDFALL</div>
 <div id="landfall"></div>
@@ -54,9 +56,9 @@ to see them.</p>
 <div class="secttl">LIVE-STORM WIND CONTRACTS, DELIVERY BY DELIVERY</div>
 <p class="cap" style="margin-top:0">While a storm is running, each reference location the vendor has signalled on gets a
 chart of its probability ladder as it moved from one delivery to the next, with the exchange&rsquo;s price for the
-matching contract marked on the same axis &mdash; a probability in percent and a price in cents share the 0 to 100
-scale. The horizontal axis counts vendor deliveries, not clock time: nobody knows in advance how many a storm
-will produce or when it will dissipate, so a new delivery adds a column and never moves what is already drawn.
+matching contract marked on the same axis, since a probability in percent and a price in cents share the 0 to 100
+scale. The horizontal axis counts vendor deliveries rather than clock time. Nobody knows in advance how many a
+storm will produce or when it will dissipate, so a new delivery adds a column and never moves what is already drawn.
 The rightmost column is reserved for settlement from the first delivery and stays empty until the vendor&rsquo;s
 final file arrives. The strip above the charts is one tick per delivery; drag it, use the arrows or press
 &larr; and &rarr; to step the cursor back through the storm, and every chart moves together. Stepping back also
@@ -84,6 +86,7 @@ storm point, dot, tile or table row for its values; a click pins the box, Escape
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
 <script src="js/storm.js"></script>
+<script src="js/discussion.js"></script>
 <script src="js/hurricane.js"></script>
 <script>WXC.chrome('hurricane.html'); WXHur.init();</script>
 </body>

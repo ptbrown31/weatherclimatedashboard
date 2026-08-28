@@ -79,6 +79,18 @@ window.WXHur = (() => {
     return notes.join(', ') || null;
   }
   // the rows every contract tooltip shares
+  /* The two prices, above everything else.
+
+     A reader hovering a strike wants what it costs to take each side. The rest
+     of the book stays underneath. Buying Yes costs the Yes ask; buying No costs
+     one dollar less the Yes bid, because there are no sellers and the two sides
+     sum to a dollar. */
+  const priceHead = c => (!c ? '' : tip.price(
+    c.ask == null ? null : c.ask,
+    c.bid == null ? null : 1 - c.bid,
+    c.ask == null ? null : (WXM.payout(cents(c.ask)) != null ? 'pays ' + WXM.payout(cents(c.ask)) + '\u00d7' : null),
+    c.bid == null ? null : (WXM.payout(cents(1 - c.bid)) != null ? 'pays ' + WXM.payout(cents(1 - c.bid)) + '\u00d7' : null)));
+
   const quoteRows = c => (!c ? [] : [
     ['Yes bid', side(c.bid, c.bidSize)], ['No bid', side(noBid(c), c.askSize)],
     ['Yes price', c.mid == null ? 'no bids' : pct(cents(c.mid)) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
@@ -505,10 +517,10 @@ window.WXHur = (() => {
         h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
       ]);
       const url = r.c && WXM.contractUrl(prod, r.c.conidYes || r.c.conid);
-      if (r.c) attach(bar, tip.rows(contractTitle({ name: mname }, r.c),
+      if (r.c) attach(bar, priceHead(r.c) + tip.rows(contractTitle({ name: mname }, r.c),
         quoteRows(r.c),
-        asofFoot() + (url ? ' · click the price to open the contract' : '')));
-      if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + r.label + ' on IBKR');
+        asofFoot() + (url ? ' · click either side to open this strike on IBKR' : '')));
+      if (url) WXM.linkTo(bar, url, 'Open ' + r.label + ' on IBKR');
       div.appendChild(bar);
     });
     if (!rows.length) div.appendChild(h('div', { class: 'cap', text: 'Not listed.' }));
@@ -531,11 +543,10 @@ window.WXHur = (() => {
         h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
       ]);
       const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
-      attach(bar, tip.rows(contractTitle(m, c),
-        quoteRows(c).filter(r => r[0] !== 'Settles').concat([['Expiration', expDate(c.expiration)]])
-          ,
-        asofFoot() + (url ? ' · click the price to open the contract' : '')));
-      if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + c.label + ' on IBKR');
+      attach(bar, priceHead(c) + tip.rows(contractTitle(m, c),
+        quoteRows(c).filter(r => r[0] !== 'Settles').concat([['Expiration', expDate(c.expiration)]]),
+        asofFoot() + (url ? ' · click either side to open this strike on IBKR' : '')));
+      if (url) WXM.linkTo(bar, url, 'Open ' + c.label + ' on IBKR');
       div.appendChild(bar);
     });
     const chart = cat4Chart(m);
@@ -543,7 +554,7 @@ window.WXHur = (() => {
     host.appendChild(div);
     host.appendChild(h('p', { class: 'cap', text: 'A Yes pays if a hurricane makes landfall in the United States at exactly '
       + 'Category 4 on or before the date named. The exchange\u2019s terms are explicit that a higher or lower category does not '
-      + 'qualify, so a Category 5 landfall does not resolve this contract Yes. Each date is cumulative: it asks whether at least '
+      + 'qualify, so a Category 5 landfall does not resolve this contract Yes. Each date is cumulative, asking whether at least '
       + 'one qualifying landfall has happened by then. The climatology drawn against it counts landfalls on the continental '
       + 'United States only: Maria crossed Puerto Rico at exactly Category 4 in 2017 and is not in the line. The exchange\u2019s '
       + 'terms say \u201cthe United States\u201d without saying whether a Puerto Rico or Virgin Islands landfall counts, so a '
@@ -634,7 +645,7 @@ window.WXHur = (() => {
       if (i < 0 || c.mid == null) return;
       const dot = el('circle', { cx: x(i), cy: y(Math.min(c.mid, ymax)), r: 4.5, fill: 'var(--accent)', 'pointer-events': 'all' });
       const f = cond(cum[k] != null ? cum[k] : cum['11-30']);
-      attach(dot, tip.rows(c.label || 'contract', [
+      attach(dot, priceHead(c) + tip.rows(c.label || 'contract', [
         ['Yes price', Math.round(c.mid * 100) + '¢'],
         ['Climatology, from today', (f * 100).toFixed(1) + '%'],
         [factor ? 'Scaled by the count market' : null, factor ? ((1 - Math.pow(1 - f, factor)) * 100).toFixed(1) + '%' : null],
@@ -697,7 +708,7 @@ window.WXHur = (() => {
           const wrap = h('div', { class: 'cwrap' }, [h('div', { class: 'lt', text: cfg.title + ' in ' + p.label + ' (' + cfg.sym + ')' })]);
           wrap.appendChild(countPanel(cfg, p));
           wrap.appendChild(h('p', { class: 'cap', html: '<a href="allocator.html?m=' + encodeURIComponent('hur:' + cfg.sym)
-            + '">Size a position on this ladder — position allocation calculator →</a>' }));
+            + '">Size a position on this ladder in the position allocation calculator →</a>' }));
           lad.appendChild(wrap);
         } else {
           lad.appendChild(ladderPanel(cfg.title + ', ' + p.label + ' (' + cfg.sym + ')', p.rows,
@@ -950,13 +961,10 @@ window.WXHur = (() => {
         h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
       ]);
       const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
-      attach(bar, tip.rows(contractTitle(m, c),
-        quoteRows(c)
-          .concat([['Pays', c.ask == null ? null : (WXM.payout(cents(c.ask)) != null ? WXM.payout(cents(c.ask)) + '×' : null)],
-                   ['On the map', onMap]])
-          ,
-        asofFoot() + (url ? ' · click the price to open the contract' : '')));
-      if (url) WXM.linkTo(bar.querySelector('.lv'), url, 'Open ' + c.label + ' on IBKR');
+      attach(bar, priceHead(c) + tip.rows(contractTitle(m, c),
+        quoteRows(c).concat([['On the map', onMap]]),
+        asofFoot() + (url ? ' · click either side to open this strike on IBKR' : '')));
+      if (url) WXM.linkTo(bar, url, 'Open ' + c.label + ' on IBKR');
       div.appendChild(bar);
     });
     host.appendChild(div);
@@ -968,12 +976,12 @@ window.WXHur = (() => {
        stays offshore. Both conditions move the probability a long way, and the
        heading above the panel already said major. */
     host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the '
-      + 'season named while at Category 3 or stronger. The exchange\u2019s terms are on the eye: a storm whose centre stays offshore '
+      + 'season named while at Category 3 or stronger. The exchange\u2019s terms require the storm\u2019s centre to cross the coast, so one that stays offshore '
       + 'has not made landfall for this contract even where hurricane-force winds reach the area. '
       + 'Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. Yes green, No red; the Yes price is midway between the Yes bid '
       + 'and one dollar less the No bid where both sides have bids, else the one side shown, and there are no sellers, only bids to buy '
       + 'Yes or No. “Pays” in the box is what a dollar of payout costs at the price a Yes could be bought at now, net of the '
-      + WXM.feeCents() + '¢ per-side execution fee — the same arithmetic behind treating a landfall contract as parametric cover.' }));
+      + WXM.feeCents() + '¢ per-side execution fee.' }));
   }
 
   // ---- the vendor lane
@@ -1031,7 +1039,7 @@ window.WXHur = (() => {
       }
       if (s.final && s.final.sites) {
         const fin = Object.entries(s.final.sites).sort((a, b) => b[1].peakGustMph - a[1].peakGustMph).slice(0, 10);
-        host.appendChild(h('p', { class: 'cap', text: 'Final peak gusts: ' + fin.map(([id, r]) => r.name + ' ' + r.peakGustMph + ' mph').join(' · ') }));
+        host.appendChild(h('p', { class: 'cap', text: 'Final peak gusts, highest first. ' + fin.map(([id, r]) => r.name + ' ' + r.peakGustMph + ' mph').join(' · ') }));
       }
     });
     host.appendChild(h('p', { class: 'cap attrib', text: (RK.attribution || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + '.' }));
@@ -1090,6 +1098,7 @@ window.WXHur = (() => {
       };
     });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); drawOthers(); basinSections();
+    if (window.WXDiscussion) WXDiscussion.drawStorms((H && H.storms) || []);
     if (window.WXStorm) {
       WXStorm.init(tip);
       // the map's dots ask this module for a location's series, so the map is

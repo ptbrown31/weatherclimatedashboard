@@ -24,12 +24,18 @@
 </div>
 <div class="card"><svg id="map" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="legend"></div>
-<p class="cap" style="margin:6px 0 0"><span class="chip" style="background:var(--warm)"></span>running warmer
-<span class="chip" style="background:var(--cool)"></span>running cooler &middot; grey means no listed contracts
-or no bids yet. Colour is the sign of the market-implied median minus the NWS forecast for the same day and
-size is the gap. The market has sat below the NWS forecast on highs most days so far, so most dots are usually
-blue and the size is what varies. On the last view colour is instead the sign of observed-so-far minus the NWS
-high issued for the day.</p>
+<div class="how" style="margin:8px 0 0">
+<div><h3>THE DOTS</h3><p>One dot per station. Colour is the sign of the market-implied median minus the NWS
+forecast for the same day and size is the gap; grey means no listed contracts or no bids yet. The market has sat
+below the NWS forecast on highs most days so far, so most dots are usually blue and the size is what varies. On
+the last view colour is the sign of observed-so-far minus the NWS high issued for the day.</p>
+<p><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p></div>
+<div><h3>THE SHADING</h3><p>The pale field is the NWS forecast, cool blues to warm reds, interpolated between the
+listed stations. It is derived here; the official NWS field is the NDFD grid.</p></div>
+<div><h3>A LABEL</h3><p><b>Philadelphia 88&deg; (&minus;5)</b> is 88&deg;, five degrees below the reference.
+Labels move out of each other&rsquo;s way and never cover another station&rsquo;s dot, so where two cities sit
+close together one of them may go unlabelled; its dot is still there and still carries its numbers on hover.</p></div>
+</div>
 <div id="modeTitle" style="margin-top:8px"></div>
 <p class="sub">Each dot shows where the exchange&rsquo;s market-implied median sits against the National Weather
 Service forecast for the same day with a bias removed from the National Weather Service.</p>
@@ -44,7 +50,7 @@ Each station is named with its observed reading so far and, where the exchange h
 market&rsquo;s implied median for the day being shown. With no government forecast to compare against, those two
 numbers are the whole picture abroad. Click a station for its chart.</p>
 <div class="secttl" style="margin-top:26px">FORECAST SCORECARD</div>
-<p class="sub">Where the forecasts disagreed with each other, and where the day actually landed. On a scored day
+<p class="sub">Where the forecasts disagreed with each other, and where the day landed. On a scored day
 every station sits on one axis of degrees from what was observed, so each tool's distance from the centre is its
 own error. On a day still ahead there is nothing to measure against, so the axis is the station's consensus
 median and a wide row is a station the sources could not agree on. Hover any dot, diamond or row for the numbers
@@ -55,16 +61,8 @@ behind it; click to pin the box.</p>
 <div class="key" id="divKey"></div>
 <p class="cap" id="divCap"></p>
 
-<p class="cap">How each tool has actually scored over the last week: <a href="accuracy.html">the standings</a>,
-on the accuracy page.</p>
+<p class="cap">How each tool has scored over the last week is on <a href="accuracy.html">the accuracy page</a>.</p>
 
-<div class="how">
-<div><h3>THE SHADING</h3><p>The pale field is the NWS forecast, cool blues to warm reds, interpolated between the
-listed stations. It is derived here, not an NWS product; the official field is the NDFD grid.</p></div>
-<div><h3>A LABEL</h3><p><b>Philadelphia 88&deg; (&minus;5)</b> reads: 88&deg;, five degrees below the reference.
-Labels move out of each other&rsquo;s way and never cover another station&rsquo;s dot, so where two cities sit close
-together one of them may go unlabelled; its dot is still there and still carries its numbers on hover.</p></div>
-</div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

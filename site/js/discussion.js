@@ -42,12 +42,46 @@ window.WXDiscussion = (() => {
     det.appendChild(h('pre', { class: 'afdtext', text: d.body || d.text }));
     const foot = h('p', { class: 'cap', style: 'margin-top:6px' });
     foot.innerHTML = 'Written by the forecaster on shift at the ' + esc(d.source || '') + ' office and carried '
-      + 'here whole and unedited &mdash; a work of the United States government, in the public domain. '
+      + 'here whole and unedited, a work of the United States government in the public domain. '
       + 'This site did not write it and does not summarise it. '
       + '<a href="' + esc(d.url) + '" target="_blank" rel="noopener noreferrer">Read it on the '
       + 'National Weather Service site &rarr;</a>';
     host.appendChild(det);
     host.appendChild(foot);
   }
-  return { draw };
+  /* The same treatment for a storm.
+
+     The National Hurricane Center writes a Tropical Cyclone Discussion for
+     each active system, which is the hurricane counterpart of the office
+     discussion a city page carries. The storm snapshot holds it, so this only
+     has to lay it out. */
+  function drawStorms(storms) {
+    const host = $('#stormDiscussion'); if (!host) return;
+    host.innerHTML = '';
+    const withText = (storms || []).filter(s => s.discussion && s.discussion.text);
+    if (!withText.length) {
+      host.appendChild(h('p', { class: 'cap', text: (storms || []).length
+        ? 'No discussion has been issued for the active storms yet.'
+        : 'No active storms, so there is no discussion to carry.' }));
+      return;
+    }
+    withText.forEach(s => {
+      const d = s.discussion;
+      const det = h('details', { class: 'afd', open: withText.length === 1 ? 'open' : null });
+      const sum = h('summary');
+      sum.innerHTML = '<b>' + esc(s.name || s.id) + '</b> &middot; ' + esc(d.source || 'National Hurricane Center')
+        + (d.issued ? ' &middot; issued ' + esc(String(d.issued).replace('T', ' ').replace(/\+.*$/, ' UTC')) : '')
+        + ' &middot; <span class="afdmore">show or hide</span>';
+      det.appendChild(sum);
+      det.appendChild(h('pre', { class: 'afdtext', text: d.text }));
+      host.appendChild(det);
+    });
+    const foot = h('p', { class: 'cap', style: 'margin-top:6px' });
+    foot.innerHTML = 'Written by the specialist on shift at the National Hurricane Center and carried here whole '
+      + 'and unedited, a work of the United States government in the public domain. '
+      + '<a href="https://www.nhc.noaa.gov/cyclones/">Read the originals on the National Hurricane Center site &rarr;</a>';
+    host.appendChild(foot);
+  }
+
+  return { draw, drawStorms };
 })();

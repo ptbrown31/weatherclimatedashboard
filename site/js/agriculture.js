@@ -18,7 +18,7 @@ window.WXAg = (() => {
     return WXPanels.init('agriculture', {
       panel: { x0: X0, fmt, fmtAxis: fmt, fmtThreshold: fmt, thresholdSuffix: '', xLabel: 'Year', tightRight: true, clampZero: true,
                unsettledFromContracts: true },
-      source: 'Series: USDA Foreign Agricultural Service, Production Supply and Distribution.',
+      source: 'Series from the USDA Foreign Agricultural Service, Production Supply and Distribution.',
     });
   }
   return { init };

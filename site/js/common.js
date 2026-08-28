@@ -117,6 +117,44 @@ window.WXC = (() => {
         '<a href="about.html">Sources and methods</a>.' }),
     ]);
     wrap.appendChild(footer);
+    offsite();
+  }
+
+  /* Links that leave the site open in their own tab.
+
+     Done in one place rather than on every anchor. A page builds most of its
+     links from snapshots after load, so marking them up by hand would cover
+     only the ones written into the HTML, and every later link would have to
+     remember. The click handler runs in the capture phase and catches anything
+     on the page whatever built it; the attributes are set as well so a
+     middle-click, a long-press and the keyboard all behave the same way. */
+  function offsite() {
+    const external = a => {
+      if (!a || !a.getAttribute) return false;
+      const href = a.getAttribute('href') || '';
+      if (!/^https?:/i.test(href)) return false;
+      try { return new URL(href, location.href).host !== location.host; } catch (e) { return false; }
+    };
+    const mark = root => {
+      (root || document).querySelectorAll('a[href^="http"]').forEach(a => {
+        if (!external(a) || a.target === '_blank') return;
+        a.target = '_blank';
+        a.rel = (a.rel ? a.rel + ' ' : '') + 'noopener noreferrer';
+      });
+    };
+    mark(document);
+    document.addEventListener('click', ev => {
+      const a = ev.target && ev.target.closest && ev.target.closest('a[href]');
+      if (!external(a) || a.target === '_blank') return;
+      ev.preventDefault();
+      window.open(a.href, '_blank', 'noopener,noreferrer');
+    }, true);
+    // links a page draws after its own load still get the attributes
+    if (window.MutationObserver) {
+      new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
+        if (n.nodeType === 1) mark(n.querySelectorAll ? n : null);
+      }))).observe(document.body, { childList: true, subtree: true });
+    }
   }
 
   // ---- status strip for one or more snapshot results

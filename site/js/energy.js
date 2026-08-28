@@ -27,7 +27,7 @@ window.WXEnergy = (() => {
   function init(slug) {
     return WXPanels.init(slug, {
       panel: { x0: X0, fmt, fmtAxis: fmt, fmtThreshold: fmt, thresholdSuffix: '', xLabel: 'Period', tightRight: true, clampZero: true },
-      source: 'Series: US Energy Information Administration.',
+      source: 'Series from the US Energy Information Administration.',
       ladderNote: 'This contract resolves on an event rather than on a published series, so its strikes are '
                   + 'listed rather than plotted.',
     });

@@ -31,11 +31,15 @@ svg.ts{width:100%;height:auto;display:block}
    page's chart should fill the overlay's width and cap at the window */
 #allocWrap.full #alloc{width:100%}
 #allocWrap.full svg.ts{width:100%;height:auto;max-height:calc(100vh - 46px)}
-#ladderFig{max-width:780px}
+#ladderFig{max-width:820px}
+/* the prose runs wider here than elsewhere, so a four-column figure is not much
+   wider than the paragraph explaining it */
+.wrap{max-width:1180px}
+.allocPage p.sub{max-width:none}
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap allocPage">
 <h1>Position allocation calculator</h1>
 <p class="sub">A tool for understanding what a position spread across an exceedance ladder costs and what it pays
 back. It opens on a made-up example; the picker loads any live ladder on this site. Everything here is arithmetic
@@ -52,7 +56,7 @@ hurricane wind contract, for example, the exceedance ladder might contain &ge;15
 155&nbsp;mph, all of the Yeses pay out and none of the Nos do.</p>
 <div class="card" id="ladderFig"><svg id="schematic" viewBox="0 0 720 290"></svg></div>
 
-<div class="secttl" style="margin-top:24px">WHAT THE CALCULATOR DOES</div>
+<div class="secttl" style="margin-top:24px">THE CALCULATOR</div>
 <p class="sub" style="margin-top:0">It helps users understand net payouts for different allocations of a position
 across these overlapping exceedance strike ladders, for both hypothetical market prices and actual live prices for
 the contracts of interest. It takes as input the user&rsquo;s prediction, a user-defined measure of uncertainty in
@@ -103,7 +107,7 @@ the window stay drawn, faint, and take no capital.</p>
 <div id="allocWrap" class="expandable"><div id="alloc"></div></div>
 <p class="cap" id="allocNote"></p>
 
-<div class="secttl" style="margin-top:24px">CHOOSING BETWEEN ALLOCATIONS</div>
+<div class="secttl" style="margin-top:24px">THE THREE ALLOCATIONS</div>
 <p class="sub" style="margin-top:0">Even with a prediction and an uncertainty distribution fixed, the question
 remains how to allocate capital according to a risk appetite. A participant could take an aggressive strategy and
 place the entire position in the few contracts their distribution implies are most mispriced and which carry the

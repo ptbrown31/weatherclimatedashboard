@@ -20,7 +20,7 @@ window.WXWeather = (() => {
     return WXPanels.init('weather', {
       panel: { x0: X0, fmt, fmtAxis: fmt, fmtThreshold: fmt, thresholdSuffix: '',
                xLabel: 'Month', tightRight: true, clampZero: true, project: true },
-      source: 'Series: NOAA Climate at a Glance city time series and the US Drought Monitor.',
+      source: 'Series from the NOAA Climate at a Glance city time series and the US Drought Monitor.',
     });
   }
   return { init };

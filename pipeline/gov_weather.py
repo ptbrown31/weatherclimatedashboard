@@ -394,6 +394,43 @@ def fetch_forecast_discussion(grid: dict) -> str:
     return _get(items[0]["@id"])["productText"] if items else ""
 
 
+_TCD_ID = re.compile(r"\b([AECP][LP]\d{6})\b")
+
+
+def fetch_storm_discussions(limit: int = 12) -> dict:
+    """The forecaster's reasoning on each active cyclone, keyed by ATCF id.
+
+    The Tropical Cyclone Discussion is the hurricane equivalent of the Area
+    Forecast Discussion a city page carries: a few hundred words from the
+    specialist on shift saying what the models are doing and what the centre
+    decided. The product names the storm it belongs to on its own second line
+    (AL042026), which is the id the storm snapshot already uses.
+
+    Products are listed newest first, so the first one seen for a storm is its
+    current discussion and later issuances for the same storm are skipped.
+    """
+    idx = _get("https://api.weather.gov/products/types/TCD")
+    out = {}
+    for item in (idx.get("@graph") or [])[:limit]:
+        pid = item.get("id")
+        if not pid:
+            continue
+        try:
+            prod = _get("https://api.weather.gov/products/" + pid)
+        except Exception:                       # noqa: BLE001 - one product must not sink the rest
+            continue
+        text = (prod.get("productText") or "").strip()
+        m = _TCD_ID.search(text)
+        if not m:
+            continue
+        sid = m.group(1).lower()
+        if sid in out:
+            continue                            # a newer issuance is already held
+        out[sid] = {"id": pid, "storm": sid, "issued": prod.get("issuanceTime"),
+                    "office": prod.get("issuingOffice"), "text": text}
+    return out
+
+
 _CLI_SUMMARY = re.compile(r"CLIMATE SUMMARY FOR (\w+ \d{1,2} \d{4})")
 
 

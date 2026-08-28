@@ -274,6 +274,20 @@ def hurricane_pass(cfg: dict, store: Storage) -> int:
         except Exception as e:
             snap["errors"].append(f"outlook: {type(e).__name__}: {e}")
             snap["outlookAsof"] = prev.get("outlookAsof")
+    # the forecaster's own reasoning on each active storm, the hurricane
+    # counterpart of the Area Forecast Discussion a city page carries
+    try:
+        tcd = gw.fetch_storm_discussions()
+    except Exception as e:  # noqa: BLE001 - the board stands without it
+        tcd = {}
+        snap["errors"].append(f"discussion: {type(e).__name__}")
+    for st in snap["storms"]:
+        d = tcd.get(str(st.get("id") or "").lower())
+        if d:
+            st["discussion"] = {"text": d["text"], "issued": d["issued"], "office": d["office"],
+                                "source": "NWS National Hurricane Center",
+                                "url": "https://www.nhc.noaa.gov/cyclones/"}
+
     season_ok = season_fresh(snap["season"], snap["storms"], now)
     if not season_ok and not deadline.over(60):
         try:
