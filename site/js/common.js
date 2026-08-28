@@ -164,13 +164,23 @@ window.WXC = (() => {
     return h('span', { class: 'status ' + cls, text: statusText(worst, cadenceMin) });
   }
   const rank = r => (r.source === 'none' ? 3 : r.source === 'cache' ? 2 : r.stale ? 1 : 0);
+  // Minutes are the right unit for a ten-minute feed and the wrong one for a
+  // daily series, where they run to four digits and stop being read at all.
+  const plur = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+  function spanText(mins) {
+    if (mins < 90) return plur(Math.round(mins), 'minute');
+    if (mins < 48 * 60) return plur(Math.round(mins / 60), 'hour');
+    return plur(Math.round(mins / (60 * 24)), 'day');
+  }
   function statusText(r, cadenceMin) {
     if (r.source === 'none') return 'No data available. The data feed could not be reached and nothing is cached.';
     const when = r.asof ? clockFull(r.asof, Intl.DateTimeFormat().resolvedOptions().timeZone) : 'unknown time';
-    const age = r.ageMin == null ? '' : (r.ageMin < 1 ? 'just now' : Math.round(r.ageMin) + ' min ago');
+    const age = r.ageMin == null ? '' : (r.ageMin < 1 ? 'just now' : spanText(r.ageMin) + ' ago');
+    const every = cadenceMin >= 48 * 60 ? 'every ' + spanText(cadenceMin)
+                : cadenceMin >= 24 * 60 ? 'daily' : 'every ' + spanText(cadenceMin);
     if (r.source === 'cache') return `Showing the last data this browser saved (as of ${when}, ${age}); the live fetch failed.`;
-    if (r.stale) return `Data as of ${when} (${age}); updates are normally every ${cadenceMin} min and the feed is behind.`;
-    return `Data as of ${when} (${age}) · updates every ${cadenceMin} min`;
+    if (r.stale) return `Data as of ${when} (${age}); updates are normally ${every} and the feed is behind.`;
+    return `Data as of ${when} (${age}) · updates ${every}`;
   }
 
   // ---- tooltip: one shared box, placed beside the pointer and flipped to stay
