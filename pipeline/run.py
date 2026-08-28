@@ -44,7 +44,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -57,6 +57,7 @@ def _register():
     JOBS["reask"] = reask.reask_pass
     JOBS["headline"] = headline.headline_pass
     JOBS["traffic"] = traffic.traffic_pass
+    JOBS["report"] = report.report_pass
     JOBS["catalogue"] = catalogue.catalogue_pass
     JOBS["series"] = series.series_pass
     JOBS["discussion"] = discussion.discussion_pass
@@ -90,7 +91,8 @@ def _register():
     # goes last in both chains: after quotes for fresh prices, after the
     # scorecard for the day just scored
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes", "subhourly")
-    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "catalogue", "series", "discussion", "locator", "headline", "traffic")
+    # report last, so it reads the day traffic has just counted
+    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "catalogue", "series", "discussion", "locator", "headline", "traffic", "report")
     JOBS["market"] = chain("quotes", "reask", "headline")
     JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")
 

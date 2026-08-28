@@ -9,6 +9,11 @@ the function (set in ops/aws/template.yaml), never as code.
     event = {"job": "half-hourly"}      # archive, then forecast, then hurricane
     event = {"job": "obs"}              # every 10 minutes
 
+A pass may also compose a report (see report.py). The generic code writes it
+to the archive and leaves it in archive.LAST_REPORT; this file posts it to the
+SNS topic named by WX_REPORT_TOPIC_ARN, which is the only place the pipeline
+knows how mail is delivered here.
+
 Sizing, from measurements on 2026-08-21 and the review of them: a pass
 streams two ~30 MB NBM bulletins plus LAMP and MAV; streamed, memory stays
 near a megabyte per chunk, but set the function to 512 MB anyway (CPU scales
@@ -33,6 +38,28 @@ from . import config, storage
 from .run import JOBS, _register
 
 
+def _send_report(archive) -> None:
+    """Post a report the pass composed, where the site is deployed.
+
+    The generic code decides what the message says and writes it to the
+    archive; this is the only part that knows it goes to an SNS topic. A
+    delivery that fails is logged and swallowed: a report is not worth failing
+    a pass that already did its work, and the message is on the archive either
+    way.
+    """
+    msg = getattr(archive, "LAST_REPORT", None)
+    archive.LAST_REPORT = {}
+    arn = os.environ.get("WX_REPORT_TOPIC_ARN", "")
+    if not msg or not arn:
+        return
+    try:
+        import boto3
+        boto3.client("sns").publish(TopicArn=arn, Subject=msg["subject"][:100], Message=msg["body"])
+        print(json.dumps({"kind": "report", "sent": True, "subject": msg["subject"]}))
+    except Exception as e:  # noqa: BLE001 - the pass itself already succeeded
+        print(json.dumps({"kind": "report", "sent": False, "error": f"{type(e).__name__}: {e}"}))
+
+
 def lambda_handler(event, context):
     _register()
     job = (event or {}).get("job", "half-hourly")
@@ -44,6 +71,7 @@ def lambda_handler(event, context):
     store = storage.from_config(cfg)
     status = JOBS[job](cfg, store)
     from . import archive
+    _send_report(archive)
     alarms = (archive.LAST_STATUS or {}).get("alarms") or []
     if status:
         raise RuntimeError(f"{job}: every request in the pass failed")

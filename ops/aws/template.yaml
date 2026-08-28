@@ -320,6 +320,13 @@ Resources:
                 Condition:
                   StringLike:
                     s3:prefix: ["data/*"]
+        - PolicyName: publish-reports
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [sns:Publish]
+                Resource: !Ref ReportTopic
         - PolicyName: access-logs-read
           PolicyDocument:
             Version: "2012-10-17"
@@ -361,6 +368,7 @@ Resources:
           WX_REASK_API_KEY: !Ref ReaskApiKey
           WX_EIA_API_KEY: !Ref EiaApiKey
           WX_REASK_BASE_URL: !Ref ReaskBaseUrl
+          WX_REPORT_TOPIC_ARN: !Ref ReportTopic
           WX_TRAFFIC_LOG_BUCKET: !Ref LogBucket
           WX_TRAFFIC_LOG_PREFIX: cf
       # placeholder body; DEPLOY.md replaces it with dist/lambda.zip
@@ -455,6 +463,21 @@ Resources:
       TopicArn: !Ref AlarmTopic
       Protocol: email
       Endpoint: !Ref AlarmEmail
+  # A daily report on the alarm topic would train the reader to ignore alarm
+  # mail, and unsubscribing from one would silence the other. They are separate
+  # topics carrying the same address.
+  ReportTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${SiteName}-reports"
+  ReportSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref ReportTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
   PipelineErrors:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -503,5 +526,8 @@ Outputs:
     Value: !Ref Distribution
   FunctionName:
     Value: !Ref Pipeline
+  ReportTopicArn:
+    Description: SNS topic the daily traffic report is posted to
+    Value: !Ref ReportTopic
   SiteUrl:
     Value: !If [HasDomain, !Sub "https://${DomainName}/", !Sub "https://${Distribution.DomainName}/"]

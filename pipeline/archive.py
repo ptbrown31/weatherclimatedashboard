@@ -76,6 +76,7 @@ BULLETIN_MAX_NEW = 4           # new cycles fetched per source per pass (a catch
 FAIL_STREAK_ALARM = 6          # passes in a row before a source's failure is an alarm (3 h at 30 min)
 
 LAST_STATUS: dict = {}         # set by one_pass: per-source outcome of the latest pass
+LAST_REPORT: dict = {}         # set by report.py: {subject, body} for handler.py to send
 
 
 def _gz(data: bytes) -> bytes:
