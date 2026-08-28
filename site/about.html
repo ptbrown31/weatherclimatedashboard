@@ -13,24 +13,16 @@
 <h1>About this site</h1>
 <p class="sub" id="disclosureTop"></p>
 
-<h2>What it shows</h2>
-<p>Live displays of US government weather data for the stations that daily temperature contracts settle on:
-observed temperature against the forecasts that were standing before the day began, a national map, a
-forecast scorecard, and hurricane tracking. The displays are meant for people deciding whether to trust a
-forecast, so they show what each source said and when, and nothing is smoothed into looking more certain
-than it is.</p>
-
-<h2>Sources</h2>
-<p>Every feed behind these pages, with what it is and why it was chosen, is listed on the <a href="faq.html#sources">FAQ page</a>.</p>
-
-<h2>Methods</h2>
-<p>Every forecast cycle is archived as published, because no public endpoint returns an earlier
-forecast. &ldquo;As issued&rdquo; means the source&rsquo;s last cycle before local midnight at the station. Day
-boundaries are the station&rsquo;s local calendar day through its IANA time zone. The map shading is an
-inverse-distance interpolation of the listed stations&rsquo; NWS forecasts and is labelled derived; it is not
-an NWS product. Nothing here is an official National Weather Service product, and nothing implies
-endorsement by or affiliation with NOAA or the NWS.</p>
-<p id="decode"></p>
+<h2>The site</h2>
+<p>Live displays built on public data for the markets Interactive Brokers lists on weather, climate and natural
+disasters. Each page pairs the market&rsquo;s own prices with the public record the contract settles on, so a
+reader can see what the market is saying and what the underlying data has done, side by side. The pages cover
+daily temperatures at the contract stations, tropical cyclones, longer-run climate series, and the agriculture
+and energy quantities the exchange lists.</p>
+<p>Nothing here is a forecast of the site&rsquo;s own. Where a projection is drawn it is fitted from the record
+shown beside it and says so. Prices are the exchange&rsquo;s, with the time they were read.</p>
+<p>The <a href="faq.html">FAQ</a> covers the forecast systems, the data sources and how the daily temperature
+contracts settle. Sources are listed there in full.</p>
 
 <h2>Freshness</h2>
 <p id="fresh">Observations and contract prices refresh every 10 minutes and forecasts every 30. Each page shows the time of the data it
@@ -64,13 +56,6 @@ document.getElementById('disclosureTop').textContent = (window.WX && WX.disclosu
 document.getElementById('marketNote').textContent = (window.WX && WX.market === 'live')
   ? 'Contract prices on this site are read from the exchange\u2019s public market-data endpoints on a ten-minute cycle and shown with the time they were read; they are the exchange\u2019s published bids, not a bid or a solicitation to trade by this site, and can be stale. Nothing here is investment advice.'
   : 'This site shows no live market prices. Where market elements appear they are labelled placeholders that exist to show layout, not values.';
-WXD.get('manifest.json').then(r => {
-  const d = r.data && r.data.decode;
-  if (d) document.getElementById('decode').textContent = 'Decode convention in force: temperatures from the METAR ' +
-    (d.TEMP_SOURCE === 'remarks' ? 'remarks group (tenths of a degree where reported)' : 'body group (whole degrees)') +
-    '; SPECI reports ' + (d.INCLUDE_SPECI ? 'count' : 'do not count') + ' toward the daily extreme. Archive depth: ' +
-    (r.data.archiveDays || 0) + ' days.';
-});
 </script>
 </body>
 </html>

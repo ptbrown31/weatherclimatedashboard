@@ -1,7 +1,7 @@
 /* Forecast error against lead time, pooled over every city and every hour.
 
    The page argues that market prices can be good forecasts. This is the
-   measurement that argument rests on: two lines, the National Weather Service's
+   measurement that argument rests on. Two lines, the aviation guidance's
    tailored station forecast and the price-implied high, each scored as the
    average distance from the temperature the station actually recorded, plotted
    against how long before the end of the day the forecast was made.
@@ -102,7 +102,7 @@ window.WXAccuracy = (() => {
          no improvement figure is written. The right-hand end has neither. */
       const first = pts[0];
       if (first) {
-        svg.appendChild(txt('National Weather Service', { x: x(first.lead) + 6, y: y(first.nws) - 7,
+        svg.appendChild(txt('Aviation guidance (LAMP)', { x: x(first.lead) + 6, y: y(first.nws) - 7,
                             'font-size': 10.5, 'font-weight': 700, fill: NWS, 'pointer-events': 'none' }));
         svg.appendChild(txt('ForecastEx implied', { x: x(first.lead) + 6, y: y(first.fx) + 14,
                             'font-size': 10.5, 'font-weight': 700, fill: FX, 'pointer-events': 'none' }));
@@ -127,7 +127,7 @@ window.WXAccuracy = (() => {
     pts.forEach(p => {
       const band = el('rect', { x: x(p.lead) - wBand / 2, y: T, width: wBand, height: B - T, fill: 'transparent' });
       const rows = [
-        ['<span class="sw" style="background:' + NWS + '"></span>National Weather Service', p.nws.toFixed(2) + '°'],
+        ['<span class="sw" style="background:' + NWS + '"></span>Aviation guidance (LAMP)', p.nws.toFixed(2) + '°'],
         ['<span class="sw" style="background:' + FX + '"></span>ForecastEx implied', p.fx.toFixed(2) + '°'],
         ['City-days behind this point', String(p.cityDays)],
       ];
@@ -149,9 +149,14 @@ window.WXAccuracy = (() => {
         + d.from + ' and ' + d.to + ', scored on the high the station recorded and averaged by how far ahead it '
         + 'was made. Up to ' + n + ' city-days stand behind a point; bins holding fewer than ' + (d.minCityDays || 30)
         + ' are not drawn. Both systems are scored on the same days. '
-        + 'The Service\'s figure is the highest its LAMP bulletin forecast for that day: a bulletin covers a '
+        + 'The forecast measured here is LAMP, the Localized Aviation MOS Program, which the National Weather '
+        + 'Service publishes hourly and updates with each new observation. It is the only public product that '
+        + 'reissues often enough to be compared with a market at every lead, and it is the strongest of the four '
+        + 'this site tracks inside a day. The other three, including the National Weather Service\u2019s own '
+        + 'public forecast, issue a few times a day and are compared on the scorecard instead. '
+        + 'LAMP\u2019s figure is the highest its bulletin forecast for that day, because a bulletin covers a '
         + 'rolling window, so late in the day what remains of it is only the night, and reading that literally '
-        + 'would score the Service against a forecast nobody made. The market\'s figure is the degree above the '
+        + 'would score it against a forecast nobody made. The market\'s figure is the degree above the '
         + 'strike where the Yes price crosses 50 cents, because these contracts pay when the recorded high is '
         + 'strictly above the strike, so a market certain of 92 prices the 91 and 92 strikes a dollar apart and '
         + 'the crossing falls halfway between them. '

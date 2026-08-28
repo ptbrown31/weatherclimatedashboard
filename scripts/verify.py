@@ -555,13 +555,25 @@ def run(no_build: bool) -> int:
                         f"anchor={page.locator('#sources').count()}")
                 page.goto(f"{srv.url}/about.html"); page.wait_for_timeout(400)
                 about_txt = page.locator(".wrap").inner_text()
-                chk.add(f"{scheme} sources: About points at its new home and no longer carries the table",
+                chk.add(f"{scheme} about: an overview of the site and its author, not the detail",
                         "aviationweather.gov METAR" not in about_txt
-                        and page.locator("a[href='faq.html#sources']").count() == 1,
+                        and "as issued" not in about_txt.lower()
+                        and page.locator("a[href='faq.html']").count() >= 1,
                         about_txt[:70])
+                page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(700)
+                faq_t2 = page.locator(".wrap").inner_text()
+                chk.add(f"{scheme} faq: it opens on how prediction markets work, with both primers",
+                        "How do prediction markets work?" in faq_t2
+                        and page.locator("a[href='https://forecastex.com/faq']").count() == 1
+                        and page.locator("a[href='https://www.interactivebrokers.com/predictionmarkets/en/home.php']").count() == 1, "")
+                chk.add(f"{scheme} faq: it says it is mostly about the daily temperature contracts",
+                        "Mostly about the daily temperature contracts" in faq_t2, faq_t2[:60])
+                chk.add(f"{scheme} faq: it carries the build detail that left About",
+                        "archived as published" in faq_t2 and "Decode convention" in faq_t2, "")
+                page.goto(f"{srv.url}/about.html"); page.wait_for_timeout(500)
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1800)
-                chk.add(f"{scheme} scorecard: the figure is on the daily temperatures page",
-                        page.locator("#divsvg g").count() > 10, f"rows={page.locator('#divsvg g').count()}")
+                chk.add(f"{scheme} scorecard: the grid is on the daily temperatures page",
+                        page.locator("#divsvg rect").count() > 40, f"cells={page.locator('#divsvg rect').count()}")
                 chk.add(f"{scheme} scorecard: the standings are not on it, and it says where they are",
                         page.locator("#standings").count() == 0
                         and page.locator("a[href='accuracy.html']").count() >= 1, "")
@@ -1260,15 +1272,6 @@ def run(no_build: bool) -> int:
                 # over whatever each archive lane happens to have collected
                 # scored days are measured against what happened; days still ahead
                 # have nothing to measure against and keep the consensus centre
-                page.locator("#divControls button").first.click(); page.wait_for_timeout(500)
-                ax = page.eval_on_selector_all("#divsvg text.axl", "e=>e.map(x=>x.textContent)")
-                chk.add(f"{scheme} scorecard: a scored view is centred on the observed",
-                        any(x == "observed" for x in ax), str(ax[:2]))
-                page.locator("#divControls button").nth(2).click(); page.wait_for_timeout(500)
-                ax2 = page.eval_on_selector_all("#divsvg text.axl", "e=>e.map(x=>x.textContent)")
-                chk.add(f"{scheme} scorecard: a day still ahead keeps the consensus centre",
-                        any(x == "consensus median" for x in ax2), str(ax2[:2]))
-                page.locator("#divControls button").first.click(); page.wait_for_timeout(400)
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(1600)
                 chk.add(f"{scheme} standings: they are on the accuracy page, beside the argument",
                         page.locator("#standChart rect[data-key]").count() >= 4,
@@ -1276,39 +1279,52 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} standings: the page says the sample is matched",
                         "Matched sample" in page.locator("#standings").inner_text(),
                         page.locator("#standings").inner_text()[:70])
+                accTexts = page.eval_on_selector_all("#accChart text", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} accuracy: the measured system is named as LAMP",
+                        any("LAMP" in t for t in accTexts)
+                        and not any(t == "National Weather Service" for t in accTexts), str(accTexts[:4]))
+
+                # ---- the scorecard grid: a row per station, a column per system
                 page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1400)
-                # ---- the divergence figure: four views, ranking column and hover
-                fig_rows = page.locator("#divsvg g").count()
-                chk.add(f"{scheme} scorecard: divergence figure draws a row per station", fig_rows >= 20, f"rows={fig_rows}")
-                page.locator("#divsvg circle").first.hover(force=True); page.wait_for_timeout(120)
-                t_dot = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hover: figure dot shows the forecast and its gap from the centre",
-                        "Consensus median" in t_dot and ("From the observed" in t_dot or "From the consensus" in t_dot), t_dot[:80])
-                titles = []
-                for i in range(4):
-                    page.locator("#divControls button").nth(i).click(); page.wait_for_timeout(250)
-                    titles.append(page.locator("#divTitle").inner_text())
-                # ---- the view is addressable: the daily letter links one of the four
-                # directly, and clicking one has to leave a link that reopens it
-                chk.add(f"{scheme} scorecard: clicking a view puts it in the address bar",
-                        "view=" in page.url, page.url[-40:])
-                for key, want in (("tlow", "Tomorrow"), ("ylow", "Yesterday")):
-                    page.goto(f"{srv.url}/scorecard.html?view={key}")
-                    page.wait_for_timeout(900)
-                    on = page.locator("#divControls button.on").inner_text()
-                    chk.add(f"{scheme} scorecard: ?view={key} opens on that panel",
-                            want in on and "low" in on.lower(), f"{on} / {page.locator('#divTitle').inner_text()[:40]}")
-                page.goto(f"{srv.url}/scorecard.html?view=nonsense")
-                page.wait_for_timeout(900)
-                chk.add(f"{scheme} scorecard: an unknown view falls back rather than blanking",
-                        page.locator("#divControls button.on").count() == 1 and page.locator("#divsvg g").count() >= 20,
-                        page.locator("#divControls button.on").inner_text())
-                page.goto(f"{srv.url}/scorecard.html")
-                page.wait_for_timeout(900)
-                chk.add(f"{scheme} scorecard: all four views render a titled figure", len([t for t in titles if t]) == 4 and page.locator("#divsvg g").count() >= 20, "; ".join(t[:26] for t in titles))
-                page.locator("#divControls button").first.click(); page.wait_for_timeout(250)
-                col = page.locator("#divsvg text", has_text="Consensus error").count()
-                chk.add(f"{scheme} scorecard: the scored view ranks by consensus error", col == 1, f"header={col}")
+                cells = page.locator("#divsvg rect").count()
+                chk.add(f"{scheme} scorecard: the grid draws a cell per station and system", cells >= 60, f"cells={cells}")
+                heads = page.eval_on_selector_all("#divsvg text", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} scorecard: it carries the four systems, the market and the observation",
+                        all(w in heads for w in ["Service", "Models", "MOS", "(LAMP)", "implied", "OBSERVED"]),
+                        str([w for w in ["Service", "Models", "MOS", "(LAMP)", "implied", "OBSERVED"] if w not in heads]))
+                chk.add(f"{scheme} scorecard: both margins are drawn",
+                        "mean absolute error" in heads and "this station" in heads, "")
+                # the market is a price, so it must not be inside the skill margins
+                mae = page.evaluate("""() => { const S = document.querySelectorAll('#divsvg text');
+                  return [...S].map(t => t.textContent); }""")
+                chk.add(f"{scheme} scorecard: the colour scale is on the figure",
+                        any("too cold" in t for t in mae) and any("too warm" in t for t in mae), "")
+                # seven scored days and both ends of the day, all addressable
+                btns = page.eval_on_selector_all("#divControls button", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} scorecard: both ends of the day and up to seven days are offered",
+                        btns[:2] == ["Highs", "Lows"] and 3 <= len(btns) <= 9, str(btns))
+                page.locator("#divControls button").nth(1).click(); page.wait_for_timeout(400)
+                chk.add(f"{scheme} scorecard: choosing an end puts it in the address bar",
+                        "side=low" in page.url, page.url[-34:])
+                chk.add(f"{scheme} scorecard: the title names the day and the end being read",
+                        "low" in page.locator("#divTitle").inner_text(),
+                        page.locator("#divTitle").inner_text()[:60])
+                if len(btns) > 3:
+                    page.locator("#divControls button").nth(3).click(); page.wait_for_timeout(400)
+                    chk.add(f"{scheme} scorecard: choosing a day puts it in the address bar too",
+                            "day=" in page.url, page.url[-34:])
+                page.goto(f"{srv.url}/scorecard.html?side=low"); page.wait_for_timeout(1100)
+                chk.add(f"{scheme} scorecard: a link reopens the same end of the day",
+                        "low" in page.locator("#divTitle").inner_text(),
+                        page.locator("#divTitle").inner_text()[:50])
+                page.goto(f"{srv.url}/scorecard.html?day=nonsense"); page.wait_for_timeout(1100)
+                chk.add(f"{scheme} scorecard: an unknown day falls back rather than blanking",
+                        page.locator("#divsvg rect").count() >= 60, "")
+                page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1100)
+                page.locator("#divsvg rect[fill='transparent']").first.hover(force=True); page.wait_for_timeout(200)
+                t_cell = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} hover: a grid cell shows the forecast, the observation and the error",
+                        "Observed" in t_cell and "Error" in t_cell, t_cell[:80])
                 sbars = page.locator("#standChart rect[data-key]").count()
                 chk.add(f"{scheme} scorecard: the standings rank every scored tool as bars", sbars >= 4, f"bars={sbars}")
                 # ranked best first, so the bars must not shorten going down

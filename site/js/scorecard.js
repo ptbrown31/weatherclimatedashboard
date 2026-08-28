@@ -45,6 +45,9 @@ window.WXScore = (() => {
   // directly and a link that lands on the wrong panel is worse than no link
   let S = null, SUM = null, cur = null, tip = null;
   let view = (VIEWS.find(v => v.key === WXC.param('view')) || VIEWS[0]).key;
+  // the grid's own state: which scored day, and which end of it
+  let gridDate = WXC.param('day') || null;
+  let gridSide = (WXC.param('side') === 'low') ? 'low' : 'high';
 
   const fmt = v => (v == null ? '—' : (Math.round(v * 10) / 10).toFixed(1));
   const pct = v => (v == null ? '—' : Math.round(v * 100) + '%');
@@ -184,139 +187,193 @@ window.WXScore = (() => {
   }
 
   // ---------------------------------------------------------------- the figure
-  function drawFigure() {
-    const host = $('#divergence'); if (!host) return;
-    const v = VIEWS.find(x => x.key === view);
-    const built = rows(v);
-    const R = built.rows.slice();
-    host.innerHTML = '';
-    const cap = $('#divCap');
-    if (!R.length) {
-      host.appendChild(h('p', { class: 'cap', text: v.when === 'past' ? 'No scored day yet.' : 'No forecasts for tomorrow yet.' }));
-      cap.textContent = ''; $('#divTitle').textContent = ''; return;
-    }
-    R.sort(v.when === 'past'
-      ? (a, b) => Math.abs(b.err) - Math.abs(a.err) || b.spread - a.spread
-      : (a, b) => b.spread - a.spread || a.city.localeCompare(b.city));
+  /* The scorecard grid.
 
-    const W = 960, ROW = 30, L = 214, Rt = 792, T = 74;
-    const H = T + R.length * ROW + 54;
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, id: 'divsvg' });
-    // a symmetric axis: the widest excursion on either side, rounded out to an even degree
-    let dom = 2;
-    R.forEach(r => {
-      SERIES.forEach(s => { if (r.vals[s.k] != null) dom = Math.max(dom, Math.abs(r.vals[s.k] - r.centre)); });
-      if (r.actual != null) dom = Math.max(dom, Math.abs(r.actual - r.centre));
-      dom = Math.max(dom, Math.abs(r.consensus - r.centre));
-    });
-    dom = Math.ceil(dom / 2) * 2;
-    const mid = (L + Rt) / 2, x = t => mid + (t / dom) * (Rt - L) / 2;
+     One row per station, one column per system, each cell carrying the forecast
+     and its error against what the station recorded. The colour is the error, so
+     a column that ran warm reads as a red stripe down the grid and a station
+     nobody caught reads as a red row. The margins are means of absolute error,
+     the right column per station and the bottom row per system.
 
-    // gridlines, zero line, axis
-    for (let t = -dom; t <= dom; t += 2) {
-      svg.appendChild(el('line', { x1: x(t), x2: x(t), y1: T - 12, y2: T + R.length * ROW, class: 'grid' }));
-      svg.appendChild(txt((t > 0 ? '+' : '') + t + '°', { x: x(t), y: T + R.length * ROW + 20, 'text-anchor': 'middle', class: 'ax' }));
-    }
-    svg.appendChild(el('line', { x1: mid, x2: mid, y1: T - 26, y2: T + R.length * ROW, stroke: 'var(--rule)', 'stroke-width': 1.2 }));
-    const cname = v.when === 'past' ? 'observed' : 'consensus median';
-    svg.appendChild(txt(cname, { x: mid, y: T - 32, 'text-anchor': 'middle', class: 'axl' }));
-    svg.appendChild(txt('Degrees from the station’s ' + cname + ' (°F)', { x: mid, y: T + R.length * ROW + 42, 'text-anchor': 'middle', class: 'axl' }));
-    svg.appendChild(txt(v.when === 'past' ? 'Consensus error' : 'Spread', { x: 900, y: T - 32, 'text-anchor': 'end', class: 'axl', 'font-weight': 700 }));
+     This is the figure the daily letter publishes, drawn from the site's own
+     archive so a reader can move the day rather than wait for the next letter.
 
-    let labelledEscape = false;
-    R.forEach((r, i) => {
-      const y = T + i * ROW + ROW / 2;
-      const g = el('g');
-      // the row's own hover target sits under everything, so a dot always wins
-      const hit = el('rect', { x: 8, y: y - ROW / 2, width: W - 16, height: ROW, fill: 'transparent' });
-      bind(hit, () => rowTip(r, v), true);
-      g.appendChild(hit);
-      if (i % 2) g.appendChild(el('rect', { x: 8, y: y - ROW / 2, width: W - 16, height: ROW, fill: 'var(--shade)', opacity: .5, 'pointer-events': 'none' }));
-      // the band the forecasts span
-      g.appendChild(el('rect', { x: x(r.lo - r.centre), y: y - 8, width: Math.max(x(r.hi - r.centre) - x(r.lo - r.centre), 1.5), height: 16,
-        fill: 'var(--rule)', 'fill-opacity': .34, 'pointer-events': 'none' }));
-      // the station, red when the day escaped every forecast
-      g.appendChild(bind(txt(r.city, { x: 196, y: y + 4, 'text-anchor': 'end', class: 'ax', 'font-size': 12.5,
-        fill: r.outside ? 'var(--warm)' : 'var(--ink)', 'font-weight': r.outside ? 700 : 400 }), () => rowTip(r, v), true));
-      // the dots, stacked vertically only where they would overlap
-      const placed = [];
-      SERIES.filter(s => r.vals[s.k] != null)
-        .map(s => ({ s, px: x(r.vals[s.k] - r.centre) }))
-        .sort((a, b) => a.px - b.px)
-        .forEach(d => {
-          let lvl = 0;
-          while (placed.some(p => p.lvl === lvl && Math.abs(p.px - d.px) < 13)) lvl++;
-          placed.push({ px: d.px, lvl });
-          const dy = [0, -9, 9, -18, 18][Math.min(lvl, 4)];
-          const c = el('circle', { cx: d.px, cy: y + dy, r: 5, fill: d.s.col, stroke: 'var(--panel)', 'stroke-width': 1 });
-          g.appendChild(bind(c, () => dotTip(r, d.s, v), true));
-          /* The first row names every source on its own dot.
+     The market is drawn beside the forecasts but left out of both margins. It
+     is a price, not a forecast product, and averaging it into a forecast skill
+     figure would answer a different question from the one the margins ask. */
+  const SHORT_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const shortDay = iso => DOW[new Date(iso + 'T12:00:00Z').getUTCDay()].slice(0, 3) + ' '
+    + SHORT_MON[+iso.slice(5, 7) - 1] + ' ' + (+iso.slice(8, 10));
 
-             The names were swatches under the figure, which meant carrying a
-             colour in mind down to the chart. Only the top row is labelled;
-             the same colour then means the same source all the way down. */
-          if (i === 0) {
-            g.appendChild(txt(d.s.name, { x: d.px, y: y + dy - 9, 'text-anchor': 'middle', 'font-size': 9,
-                                          'font-weight': 700, fill: d.s.col, 'pointer-events': 'none' }));
-          }
-        });
-      // what the station recorded
-      if (r.actual != null) {
-        const ax = x(r.actual - r.centre), s = r.outside ? 8 : 6.5;
-        if (i === 0) g.appendChild(txt('observed', { x: ax, y: y - s - 5, 'text-anchor': 'middle', 'font-size': 9,
-                                       'font-weight': 700, fill: 'var(--obs)', 'pointer-events': 'none' }));
-        if (r.outside && !labelledEscape) {
-          labelledEscape = true;
-          g.appendChild(txt('outside every forecast', { x: ax, y: y + s + 11, 'text-anchor': 'middle', 'font-size': 9,
-                            'font-weight': 700, fill: 'var(--warm)', 'pointer-events': 'none' }));
-        }
-        const dpath = 'M' + ax + ' ' + (y - s) + 'L' + (ax + s) + ' ' + y + 'L' + ax + ' ' + (y + s) + 'L' + (ax - s) + ' ' + y + 'Z';
-        if (r.outside) g.appendChild(el('path', { d: dpath, fill: 'none', stroke: 'var(--warm)', 'stroke-width': 4, 'pointer-events': 'none' }));
-        g.appendChild(bind(el('path', { d: dpath, fill: 'var(--obs)', stroke: 'var(--panel)', 'stroke-width': 1 }), () => actualTip(r, v), true));
-      }
-      // the ranking column
-      const val = v.when === 'past' ? signed(r.err) + '°' : r.spread + '°';
-      g.appendChild(bind(txt(val, { x: 900, y: y + 4, 'text-anchor': 'end', class: 'ax', 'font-weight': 700, 'font-size': 12.5,
-        fill: v.when === 'past' && Math.abs(r.err) >= 3 ? 'var(--warm)' : 'var(--muted)' }), () => rowTip(r, v), true));
-      svg.appendChild(g);
-    });
-    host.appendChild(svg);
+  const GRID = ORDER.concat(['fx']);
+  const GRID_NAME = { nws: 'National\nWeather\nService', nbm: 'Blend of\nModels', lamp: 'Aviation\nguidance\n(LAMP)',
+                      mav: 'GFS\nMOS', fx: 'ForecastEx\nimplied' };
+  const ERR_CAP = 6;                     // the colour saturates here, in degrees
 
-    // title, legend and the notes the figure needs to be read honestly
-    const label = dayLabel(built.day);
-    $('#divTitle').textContent = (v.side === 'high' ? 'Daily highs, ' : 'Daily lows, ') + label +
-      (v.when === 'past' ? ', against what the stations recorded' : ', where the forecasts disagree');
-    // every mark names itself on the top row of the figure
-    const key = $('#divKey'); if (key) key.innerHTML = '';
-    const gone = {};
-    R.forEach(r => r.missing.forEach(k => { gone[k] = (gone[k] || 0) + 1; }));
-    const esc = R.filter(r => r.outside);
-    const notes = [];
-    notes.push(v.when === 'past'
-      ? 'Rows are ranked by how far the consensus median finished from the observation, widest first; the column on the right is that error, signed, with a positive value meaning the forecasts were too warm.'
-      : 'Rows are ranked by spread, the coldest forecast to the warmest, widest first. Nothing has been observed yet.');
-    Object.entries(gone).forEach(([k, n]) => {
-      const s = SERIES.find(x => x.k === k);
-      notes.push(s.name + ' is absent for ' + n + ' of ' + R.length + ' stations' +
-        (k === 'lamp' ? ', whose horizon is 25 hours and rarely reaches a following day'
-         : k === 'fx' ? (v.when === 'past' ? ', for days before the quote archive began' : ', where the exchange has not listed that day yet')
-         : '') + '.');
-    });
-    if (v.when === 'past' && esc.length) {
-      const cold = esc.filter(r => r.actual < r.lo), warm = esc.filter(r => r.actual > r.hi);
-      notes.push(esc.length + ' station' + (esc.length > 1 ? 's' : '') + ' finished outside every forecast: ' +
-        esc.map(r => r.city + ' ' + r.escape + '° ' + (r.actual < r.lo ? 'colder' : 'warmer')).join(', ') + '.' +
-        (cold.length && !warm.length ? ' All of them were cold.' : warm.length && !cold.length ? ' All of them were warm.' : ''));
-    }
-    cap.textContent = notes.join(' ');
+  function errFill(e) {
+    if (e == null) return 'var(--shade)';
+    const t = Math.max(-1, Math.min(1, e / ERR_CAP)), a = Math.abs(t);
+    const c = t >= 0 ? [178, 24, 43] : [33, 102, 172];
+    return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + (0.10 + 0.72 * a).toFixed(3) + ')';
   }
 
-  // hover, leave, and a pinning click
-  function bind(node, html, pin) {
-    node.addEventListener('mousemove', e => { e.stopPropagation(); tip.show(e, html()); });
+  /* The scored days this station set has, newest first. */
+  function scoredDays() {
+    const seen = {};
+    Object.values(S.stations || {}).forEach(st => (st.days || []).forEach(d => { seen[d.date] = 1; }));
+    return Object.keys(seen).sort().reverse().slice(0, 7);
+  }
+
+  function gridRows(date, side) {
+    const hi = side === 'high';
+    const out = [];
+    Object.entries(S.stations || {}).forEach(([sid, st]) => {
+      const d = (st.days || []).find(q => q.date === date);
+      if (!d) return;
+      const obs = hi ? d.obsHigh : d.obsLow;
+      if (obs == null) return;
+      const vals = {}, errs = [];
+      GRID.forEach(k => {
+        const f = d[k];
+        if (!f) return;
+        const v = hi ? f.high : f.low;
+        const e = hi ? f.errHigh : f.errLow;
+        if (v == null) return;
+        vals[k] = { v, e: e != null ? e : v - obs };
+        if (k !== 'fx' && vals[k].e != null) errs.push(Math.abs(vals[k].e));
+      });
+      out.push({ sid, city: st.city || sid, unit: st.unit || '°F', obs, vals,
+                 mae: errs.length ? errs.reduce((a, b) => a + b, 0) / errs.length : null });
+    });
+    // worst forecast first, which is the order the letter uses
+    out.sort((a, b) => (b.mae == null ? -1 : b.mae) - (a.mae == null ? -1 : a.mae));
+    return out;
+  }
+
+  function drawFigure() {
+    const host = $('#divergence'); if (!host) return;
+    host.innerHTML = '';
+    const days = scoredDays();
+    if (!days.length) { host.appendChild(h('p', { class: 'cap', text: 'No scored days yet.' })); return; }
+    if (!gridDate || days.indexOf(gridDate) < 0) gridDate = days[0];
+    const R = gridRows(gridDate, gridSide);
+    const cap = $('#divCap');
+    if (!R.length) {
+      host.appendChild(h('p', { class: 'cap', text: 'Nothing scored on this day yet.' }));
+      if (cap) cap.textContent = '';
+      return;
+    }
+
+    const CW = 78, MW = 62, LW = 150, RH = 30, HH = 52, W = 960;
+    const cols = GRID.length;
+    const gw = LW + cols * CW + MW + MW;
+    const H = HH + (R.length + 1) * RH + 26;
+    const svg = el('svg', { viewBox: '0 0 ' + Math.max(W, gw) + ' ' + H, class: 'ts', id: 'divsvg' });
+    const xOf = j => LW + j * CW;
+    const xObs = LW + cols * CW, xMae = xObs + MW;
+
+    // headings
+    GRID.forEach((k, j) => {
+      const lines = GRID_NAME[k].split('\n');
+      lines.forEach((ln, li) => svg.appendChild(txt(ln, { x: xOf(j) + CW / 2, y: HH - 34 + li * 10.5,
+        'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 700,
+        fill: k === 'fx' ? 'var(--accent)' : 'var(--ink)' })));
+    });
+    svg.appendChild(txt('OBSERVED', { x: xObs + MW / 2, y: HH - 12, 'text-anchor': 'middle', 'font-size': 9,
+                                      'font-weight': 700, fill: 'var(--ink)' }));
+    svg.appendChild(txt('ERROR', { x: xMae + MW / 2, y: HH - 22, 'text-anchor': 'middle', 'font-size': 9,
+                                   'font-weight': 700, fill: 'var(--warn)' }));
+    svg.appendChild(txt('this station', { x: xMae + MW / 2, y: HH - 12, 'text-anchor': 'middle', 'font-size': 8,
+                                          fill: 'var(--muted)' }));
+
+    R.forEach((r, i) => {
+      const yy = HH + i * RH;
+      svg.appendChild(txt(r.city, { x: LW - 8, y: yy + RH / 2 + 4, 'text-anchor': 'end', 'font-size': 11.5,
+                                    fill: 'var(--ink)' }));
+      GRID.forEach((k, j) => {
+        const cell = r.vals[k];
+        const g = el('rect', { x: xOf(j) + 1, y: yy + 1, width: CW - 2, height: RH - 2, rx: 2,
+                               fill: cell ? errFill(cell.e) : 'var(--shade)' });
+        svg.appendChild(g);
+        if (!cell) {
+          svg.appendChild(txt('—', { x: xOf(j) + CW / 2, y: yy + RH / 2 + 4, 'text-anchor': 'middle',
+                                     class: 'ax', 'pointer-events': 'none' }));
+          return;
+        }
+        const dark = Math.abs(cell.e) >= 3.5;
+        svg.appendChild(txt(Math.round(cell.v) + '°', { x: xOf(j) + CW / 2 - 1, y: yy + RH / 2 + 4,
+          'text-anchor': 'end', 'font-size': 12, 'font-weight': 700,
+          fill: dark ? '#FFFFFF' : 'var(--ink)', 'pointer-events': 'none' }));
+        svg.appendChild(txt((cell.e > 0 ? '+' : cell.e < 0 ? '−' : '') + Math.abs(cell.e).toFixed(1),
+          { x: xOf(j) + CW / 2 + 4, y: yy + RH / 2 + 4, 'font-size': 9.5,
+            fill: dark ? 'rgba(255,255,255,.9)' : 'var(--muted)', 'pointer-events': 'none' }));
+        const hit = el('rect', { x: xOf(j) + 1, y: yy + 1, width: CW - 2, height: RH - 2, fill: 'transparent' });
+        bind2(hit, () => tip.rows(r.city + ' ' + (gridSide === 'high' ? 'high' : 'low') + ', ' + dayLabel(gridDate),
+          [['<span class="sw" style="background:' + (SERIES.find(x => x.k === k) || {}).col + '"></span>'
+            + (SERIES.find(x => x.k === k) || {}).name, Math.round(cell.v) + r.unit],
+           ['Observed', Math.round(r.obs) + r.unit],
+           ['Error', (cell.e > 0 ? '+' : '') + cell.e.toFixed(1) + ' (' + (cell.e > 0 ? 'too warm' : 'too cold') + ')']],
+          k === 'fx' ? 'the exchange’s implied median, left out of the margins'
+                     : 'as this source stood at six the evening before'));
+        svg.appendChild(hit);
+      });
+      svg.appendChild(el('rect', { x: xObs + 1, y: yy + 1, width: MW - 2, height: RH - 2, rx: 2, fill: 'var(--shade)' }));
+      svg.appendChild(txt(Math.round(r.obs) + '°', { x: xObs + MW / 2, y: yy + RH / 2 + 4, 'text-anchor': 'middle',
+                          'font-size': 12, 'font-weight': 700, fill: 'var(--ink)', 'pointer-events': 'none' }));
+      svg.appendChild(el('rect', { x: xMae + 1, y: yy + 1, width: MW - 2, height: RH - 2, rx: 2, fill: 'var(--warn-soft)' }));
+      svg.appendChild(txt(r.mae == null ? '—' : r.mae.toFixed(1), { x: xMae + MW / 2, y: yy + RH / 2 + 4,
+                          'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 700, fill: 'var(--warn)',
+                          'pointer-events': 'none' }));
+    });
+
+    // the bottom margin: each system's mean absolute error across the stations
+    const yb = HH + R.length * RH;
+    svg.appendChild(txt('mean absolute error', { x: LW - 8, y: yb + RH / 2 + 4, 'text-anchor': 'end',
+                        'font-size': 10, 'font-weight': 700, fill: 'var(--navy)' }));
+    const sysMae = {};
+    GRID.forEach(k => {
+      const e = R.map(r => r.vals[k]).filter(Boolean).map(c => Math.abs(c.e));
+      sysMae[k] = e.length ? e.reduce((a, b) => a + b, 0) / e.length : null;
+      svg.appendChild(el('rect', { x: xOf(GRID.indexOf(k)) + 1, y: yb + 1, width: CW - 2, height: RH - 2, rx: 2,
+                                   fill: 'var(--warn-soft)' }));
+      svg.appendChild(txt(sysMae[k] == null ? '—' : sysMae[k].toFixed(2),
+        { x: xOf(GRID.indexOf(k)) + CW / 2, y: yb + RH / 2 + 4, 'text-anchor': 'middle', 'font-size': 11.5,
+          'font-weight': 700, fill: 'var(--warn)', 'pointer-events': 'none' }));
+    });
+    const four = ORDER.map(k => sysMae[k]).filter(v => v != null);
+    svg.appendChild(el('rect', { x: xMae + 1, y: yb + 1, width: MW - 2, height: RH - 2, rx: 2, fill: 'var(--chip)' }));
+    svg.appendChild(txt(four.length ? (four.reduce((a, b) => a + b, 0) / four.length).toFixed(2) : '—',
+      { x: xMae + MW / 2, y: yb + RH / 2 + 4, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 700,
+        fill: 'var(--navy)', 'pointer-events': 'none' }));
+
+    // the colour scale, on the figure
+    const rx = LW, ry = H - 12;
+    for (let i = 0; i < 40; i++) {
+      svg.appendChild(el('rect', { x: rx + i * 3, y: ry - 8, width: 3.4, height: 8,
+                                   fill: errFill(-ERR_CAP + (2 * ERR_CAP) * i / 39) }));
+    }
+    svg.appendChild(txt('−' + ERR_CAP + '° too cold', { x: rx - 6, y: ry - 1, 'text-anchor': 'end', class: 'ax' }));
+    svg.appendChild(txt('too warm +' + ERR_CAP + '°', { x: rx + 126, y: ry - 1, class: 'ax' }));
+
+    host.appendChild(svg);
+    const t = $('#divTitle');
+    if (t) t.textContent = 'Forecast standing at six the evening before, for the '
+      + (gridSide === 'high' ? 'high' : 'low') + ' on ' + dayLabel(gridDate);
+    if (cap) {
+      cap.textContent = 'Every value in ' + (R[0].unit || '°F') + '. Each cell carries the forecast and, beside it, '
+        + 'its error against what the station recorded, red where the forecast ran warm and blue where it ran cold. '
+        + 'The right column is that station’s mean absolute error across the four forecast systems and the bottom '
+        + 'row is each system’s across the stations. The exchange’s implied median is drawn beside them and left out '
+        + 'of both margins, because it is a price rather than a forecast product. Stations run worst-forecast first. '
+        + R.length + ' stations scored on this day.';
+    }
+  }
+
+  // one hover binding for a cell
+  function bind2(node, make) {
+    node.addEventListener('mousemove', e => tip.show(e, make()));
     node.addEventListener('mouseleave', () => tip.hide());
-    if (pin) { node.addEventListener('click', e => { e.stopPropagation(); tip.pin(e, html()); }); node.setAttribute('data-tip-pin', '1'); }
-    return node;
+    node.style.cursor = 'default';
   }
 
   // ---------------------------------------------------------- the standings
@@ -542,23 +599,42 @@ window.WXScore = (() => {
     const st = $('#scoreStatus') || $('#pageStatus');
     if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440)); }
     S = r.data; SUM = sres.data;
-    const btns = {};
-    // the accuracy page carries the standings alone; the view buttons and the
-    // divergence figure belong to the daily temperatures page
-    if ($('#divControls')) VIEWS.forEach(v => {
-      const b = h('button', { class: 'vbtn' + (v.key === view ? ' on' : ''), text: v.label });
-      b.onclick = () => {
-        view = v.key;
-        Object.values(btns).forEach(x => x.classList.remove('on'));
-        b.classList.add('on');
-        // keep the address bar on the panel being read, so a copied link reopens it
-        const u = new URL(location.href); u.searchParams.set('view', v.key);
+    /* The grid's controls: which end of the day, and which of the last seven
+       scored days. Both go in the address bar so a link reopens the same
+       panel, which the daily letter relies on. */
+    const ctl = $('#divControls');
+    if (ctl && S && S.stations) {
+      const stamp = () => {
+        const u = new URL(location.href);
+        u.searchParams.set('side', gridSide);
+        if (gridDate) u.searchParams.set('day', gridDate);
         history.replaceState(null, '', u);
-        drawFigure();
       };
-      btns[v.key] = b;
-      $('#divControls').appendChild(b);
-    });
+      const sideBtns = {};
+      [['high', 'Highs'], ['low', 'Lows']].forEach(([k, lab]) => {
+        const b = h('button', { class: 'vbtn' + (k === gridSide ? ' on' : ''), text: lab });
+        b.onclick = () => {
+          gridSide = k;
+          Object.values(sideBtns).forEach(x => x.classList.remove('on'));
+          b.classList.add('on');
+          stamp(); drawFigure();
+        };
+        sideBtns[k] = b; ctl.appendChild(b);
+      });
+      const days = scoredDays();
+      if (!gridDate || days.indexOf(gridDate) < 0) gridDate = days[0];
+      const dayBtns = {};
+      days.forEach(dte => {
+        const b = h('button', { class: 'vbtn' + (dte === gridDate ? ' on' : ''), text: shortDay(dte) });
+        b.onclick = () => {
+          gridDate = dte;
+          Object.values(dayBtns).forEach(x => x.classList.remove('on'));
+          b.classList.add('on');
+          stamp(); drawFigure();
+        };
+        dayBtns[dte] = b; ctl.appendChild(b);
+      });
+    }
     if (!S || !S.stations) {
       const ov = $('#overall'); if (ov) ov.textContent = 'No scorecard available yet.';
       const sd = $('#standings'); if (sd) sd.textContent = 'No scorecard available yet.';

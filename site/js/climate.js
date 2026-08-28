@@ -170,7 +170,13 @@ window.WXClimate = (() => {
       });
       // the projection is off until asked for: it is a model, not a reading, and
       // a page that draws one unbidden invites it to be read as the record
-      if (window.WXForecast && ser.length >= 24) {
+      /* Ten readings is enough to fit a line and a band to.
+
+         The gate was twenty-four, which suited the differenced model this
+         page used to run and locks out an annual series like the RAPID AMOC
+         record, twenty-one years long and the one climate series here with a
+         contract settling forty years out. */
+      if (window.WXForecast && ser.length >= 10) {
         const pb = h('button', { class: 'zb fc' + (opts._project ? ' on' : ''),
                                  text: opts._project ? 'Hide projection' : 'Project forward' });
         pb.onclick = () => rebuild(x0, !opts._project);

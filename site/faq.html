@@ -11,7 +11,15 @@
 <body>
 <div class="wrap">
 <h1>Frequently asked questions</h1>
-<p class="sub">These answers come from the daily letter this site accompanies, which compares ForecastEx against eleven public forecast tools. Where an answer says &ldquo;here&rdquo;, it means that comparison. This site draws a narrower set &mdash; the National Weather Service forecast, the National Blend of Models, LAMP and GFS MOS &mdash; and <a href="about.html">About</a> lists exactly what it uses and where each feed comes from.</p>
+<p class="sub">Mostly about the daily temperature contracts, which are the most detailed part of this site.
+Some answers come from the daily letter this site accompanies, which compares ForecastEx against eleven public
+forecast tools; where an answer says &ldquo;here&rdquo;, it means that comparison. This site draws a narrower set
+(the National Weather Service forecast, the National Blend of Models, LAMP and GFS MOS).</p>
+
+<h2>How do prediction markets work?</h2>
+<p>General primers on how these prediction markets work are available in the
+<a href="https://www.interactivebrokers.com/predictionmarkets/en/home.php">IBKR prediction markets FAQ</a> and the
+<a href="https://forecastex.com/faq">ForecastEx FAQ</a>.</p>
 <div class="prose">
 <h2>What is a weather prediction market?</h2>
 <p>A market in which each contract pays one dollar if a stated weather outcome occurs and nothing if it does not, so the contract's price is the market's probability of that outcome. ForecastEx lists these on daily high and low temperatures at individual weather stations, on Atlantic named storm and hurricane counts, and on major hurricane landfall by location, among many others.</p>
@@ -22,6 +30,15 @@
 <ul><li><a href="https://vlab.noaa.gov/web/mdl/ndfd">National Weather Service</a> — the official public forecast, human judgment layered on model guidance; that judgment is subjective and can lag a fast-changing day.</li><li><a href="https://vlab.noaa.gov/web/mdl/lamp">Aviation Forecast</a> — statistically corrected to each station and strong inside a day; reaches only about 25 hours and is anchored in past situations.</li><li><a href="https://vlab.noaa.gov/web/mdl/nbm">National Blend of Models</a> — averaging many models cancels much of their individual error; a blend can be slow to commit when the models genuinely split.</li><li><a href="https://www.ecmwf.int/en/forecasts/documentation-and-support/medium-range-forecasts">European model</a> — consistently among the most accurate global physical models; raw grid-box output still carries station-level bias.</li><li><a href="https://www.emc.ncep.noaa.gov/emc/pages/numerical_forecast_systems/gfs.php">American model</a> — a global physical model updated four times a day; prone to systematic warm or cold stretches in conditions it resolves poorly.</li><li><a href="https://www.dwd.de/EN/research/weatherforecasting/num_modelling/01_num_weather_prediction_modells/icon_description.html">German model</a> — a modern global physical model with strong mid-latitude performance; the same grid-box limitations as its peers.</li><li><a href="https://www.dwd.de/EN/ourservices/met_application_mosmix/met_application_mosmix.html">German statistical model</a> — station-calibrated output built on multiple physical models; anchored in past relationships between forecast and outcome.</li><li><a href="https://weather.gc.ca/model_forecast/model_e.html">Canadian model</a> — an independent global physical model whose errors differ usefully from the American and European models; raw station-level accuracy is middling.</li><li><a href="https://www.metoffice.gov.uk/research/approach/modelling-systems/unified-model">UK model</a> — a long-developed global physical model; coarser at United States stations than the domestic systems.</li><li><a href="https://www.umr-cnrm.fr/spip.php?article121&amp;amp;lang=en">French model</a> — an independent global physical model that adds diversity to the panel; raw station-level accuracy trails the leaders.</li><li><a href="https://www.jma.go.jp/jma/en/Activities/nwp.html">Japanese model</a> — an independent global physical model; often the weakest of the panel on the daily-high standings, which is itself informative about model diversity.</li></ul>
 <h2>How does a ForecastEx ladder become a single forecast temperature?</h2>
 <p>ForecastEx does not publish a single forecast temperature. It lists a ladder of contracts at different strikes, and each price is the ForecastEx probability that the day's extreme passes that strike. Comparing ForecastEx with the other systems therefore requires converting that ladder into a central estimate. The 50 percent level is the ForecastEx implied median, so where two adjacent listed strikes bracket that crossing, the central value is interpolated between them. Where the ladder does not bracket 50 percent, because every listed strike sits far in or far out of the money, no central value is recorded and ForecastEx is left unscored rather than extrapolated beyond the quoted ladder. That reflects how the strikes happened to be listed rather than anything about forecast quality, so it should count neither for nor against ForecastEx.</p>
+<h2>How the daily temperature displays are built</h2>
+<p>Every forecast cycle is archived as published, because no public endpoint returns an earlier forecast.
+&ldquo;As issued&rdquo; means the source&rsquo;s last cycle before local midnight at the station. Day boundaries
+are the station&rsquo;s local calendar day through its IANA time zone. The map shading is an inverse-distance
+interpolation of the listed stations&rsquo; NWS forecasts and is labelled derived; it is not an NWS product.
+Nothing here is an official National Weather Service product, and nothing implies endorsement by or affiliation
+with NOAA or the NWS.</p>
+<p id="decode"></p>
+
 <h2 id="sources">Data sources</h2>
 <p>Every feed behind these pages. Weather content is US government data; the exceptions are named here and in the <a href="about.html">About</a> page.</p>
 <table>
@@ -51,6 +68,14 @@
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
-<script>WXC.chrome('faq.html');</script>
+<script>
+WXC.chrome('faq.html');
+WXD.get('manifest.json').then(r => {
+  const d = r.data && r.data.decode;
+  if (d) document.getElementById('decode').textContent = 'Decode convention in force: temperatures from the METAR '
+    + (d.TEMP_SOURCE === 'remarks' ? 'remarks group, to a tenth of a degree' : 'body group, to a whole degree')
+    + '; SPECI reports ' + (d.INCLUDE_SPECI ? 'count toward the day\u2019s extremes' : 'are excluded') + '.';
+}).catch(() => {});
+</script>
 </body>
 </html>
