@@ -22,7 +22,14 @@ window.WXCity = (() => {
   const HP = ['#c0392b', '#e6550d', '#d6604d', '#b5651d', '#e07b6b'];
   const LP = ['#2b7bba', '#3690c0', '#4393c3', '#5f8fd6', '#2a9d8f'];
 
-  let cur = null, checked = new Set(), showYday = false, full = false, HV = null, tip = null;
+  /* Which contract day the chart is on.
+
+     'today' is the day being traded now, 'tomorrow' the day-ahead board on its
+     own, and 'both' the wide layout that carries the two side by side. The
+     day-ahead board is worth a view of its own: it is the one a reader is
+     positioning into rather than watching settle, and on the wide layout it
+     gets half the width and none of the observations. */
+  let cur = null, checked = new Set(), showYday = false, dayMode = 'today', HV = null, tip = null;
   let summary = null, snaps = {}, svgId = 'chart', onSelect = null;
   const DESC = { nws: 'the official National Weather Service forecast', nbm: 'National Blend of Models guidance',
                  lamp: 'LAMP, observation-updated same-day guidance', mav: 'GFS MOS, a single-model statistical forecast' };
@@ -169,10 +176,11 @@ window.WXCity = (() => {
   function drawTitle(c) {
     const node = $('#cityTitle'); if (!node || !c) return;
     const mk = c.markers || {};
-    const shown = full && mk.day && mk.tomorrow
-      ? isoDate(mk.day).replace(/, \d{4}$/, '') + ' \u2013 ' + isoDate(mk.tomorrow).replace(/, \d{4}$/, '')
-      : (mk.day ? isoDate(mk.day).replace(/, \d{4}$/, '') : '');
-    const t = (c.city || c.station) + ' (' + c.station + ')' + (shown ? ' \u2014 ' + shown : '');
+    const one = d => (d ? isoDate(d).replace(/, \d{4}$/, '') : '');
+    const shown = dayMode === 'both' && mk.day && mk.tomorrow
+      ? one(mk.day) + ' \u2013 ' + one(mk.tomorrow)
+      : one(dayMode === 'tomorrow' ? mk.tomorrow : mk.day);
+    const t = (c.city || c.station) + ' (' + c.station + ')' + (shown ? ', ' + shown : '');
     node.textContent = t;
     document.title = t;
   }
@@ -341,18 +349,35 @@ window.WXCity = (() => {
     const fc = (snaps.fc && snaps.fc.data) || null;
     const ob = (snaps.ob && snaps.ob.data) || null;
     const market = WXM.on();
-    const S = layout(market, full);
+    const S = layout(market, dayMode === 'both');
     const svg = $('#' + svgId);
     svg.setAttribute('viewBox', `0 0 ${S.W} ${S.H}`);
     svg.innerHTML = '';
     const g = el('g'); svg.appendChild(g);
     const tz = c.tz, unit = c.unit;
-    const M = (fc && fc.markers) || c.markers;
-    if (!M) { g.appendChild(txt('No data available for this station.', { x: S.L + 8, y: S.T + 16, class: 'axl' })); return; }
+    const M0 = (fc && fc.markers) || c.markers;
+    if (!M0) { g.appendChild(txt('No data available for this station.', { x: S.L + 8, y: S.T + 16, class: 'axl' })); return; }
+    /* On the day-ahead view every boundary moves forward one local day.
+
+       The lead-in keeps the same shape it has on today's view, half a day
+       before the contract day opens, so the two views are read the same way.
+       Sunrise and sunset are a day old and are dropped rather than drawn in
+       the wrong place. */
+    const DAY = 24 * 3600 * 1000;
+    const M = dayMode !== 'tomorrow' ? M0 : (() => {
+      const ds = P(M0.dayEnd), de = ds + DAY;
+      const iso = t => new Date(t).toISOString().replace('.000', '');
+      return Object.assign({}, M0, {
+        day: M0.tomorrow, yesterday: M0.day, tomorrow: null,
+        dayStart: iso(ds), dayEnd: iso(de), ydayStart: M0.dayStart,
+        winStart: iso(ds - (P(M0.dayStart) - P(M0.winStart))),
+        sunrise: null, sunset: null,
+      });
+    })();
     const w0 = P(M.winStart), d0 = P(M.dayStart);
     // the full view runs to the end of the day-ahead contract day, which is one
     // more local day past the end of this one
-    const d1 = P(M.dayEnd) + (S.full ? 24 * 3600 * 1000 : 0);
+    const d1 = P(M.dayEnd) + (S.full ? DAY : 0);
     const dEnd1 = P(M.dayEnd);
     const val = r => (unit === 'F' ? r.tempF : (r.tempC != null ? r.tempC : (r.tempF - 32) * 5 / 9));
     const rows = a => (a || []).map(r => ({ t: P(r.t), v: val(r) }));
@@ -367,7 +392,7 @@ window.WXCity = (() => {
     const YD = (fc && fc.yesterday) || {};
 
     // ---- show-yesterday overlay, shifted exactly 24 h so the days line up by clock time
-    const DAY = 864e5, ySeries = [];
+    const ySeries = [];
     if (showYday) {
       const yObs = rows(ob && ob.rows).filter(p => p.t >= w0 - DAY && p.t < d0).map(p => ({ t: p.t + DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1);
       // asking for yesterday makes yesterday the subject: it comes in at full
@@ -415,7 +440,7 @@ window.WXCity = (() => {
     const nm = snaps.nm && snaps.nm.data && snaps.nm.data.days ? snaps.nm.data.days[M.day.slice(5)] : null;
     const normals = nm && nm.tmax != null ? [{ v: nm.tmax, nm: 'normal high' }, { v: nm.tmin, nm: 'normal low' }] : [];
 
-    const lad = market ? WXM.ladder(c, levelsFor(c)) : null;
+    const lad = market ? WXM.ladder(c, levelsFor(c), dayMode === 'tomorrow' ? 'tomorrow' : undefined) : null;
     const picked = market ? [...checked].map(k => { const [pfx, K] = k.split(':'); return { side: pfx, K: +K, col: skColor(pfx, +K, lad) }; }).sort((a, b) => b.K - a.K) : [];
 
     // ---- scales
@@ -917,7 +942,18 @@ window.WXCity = (() => {
     const dh = $('#cityDaysExpand'), dcard = $('#cityDaysWrap');
     if (dh && dcard && !dh.childElementCount) dh.appendChild(WXC.expander(dcard, 'Expand'));
     const yb = $('#ydayBtn'); if (yb) yb.onclick = e => { showYday = !showYday; e.target.classList.toggle('on'); draw(); };
-    const fb = $('#fullBtn'); if (fb) fb.onclick = e => { full = !full; e.target.classList.toggle('on'); draw(); drawTitle(city()); };
+    /* One control, three states, so the day being read is always visible
+       rather than inferred from whether a toggle is pressed. */
+    const modes = { dayToday: 'today', dayTomorrow: 'tomorrow', dayBoth: 'both' };
+    Object.entries(modes).forEach(([id, mode]) => {
+      const b = $('#' + id); if (!b) return;
+      b.classList.toggle('on', dayMode === mode);
+      b.onclick = () => {
+        dayMode = mode;
+        Object.keys(modes).forEach(k => { const o = $('#' + k); if (o) o.classList.toggle('on', k === id); });
+        draw(); drawTitle(city());
+      };
+    });
     if (!summary.cities.length) { svg.innerHTML = ''; svg.appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
     await select(summary.cities.some(c => c.station === want) ? want : summary.cities[0].station, false);
   }

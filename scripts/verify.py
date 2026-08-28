@@ -198,7 +198,7 @@ def run(no_build: bool) -> int:
                 heads0 = page.eval_on_selector_all("#chart text.axl",
                     "e=>e.map(x=>x.textContent).filter(t=>/Today ·|Tomorrow ·/.test(t))")
                 chk.add(f"{scheme} city full: one ladder before the toggle", heads0 == [], str(heads0))
-                page.locator("#fullBtn").click(); page.wait_for_timeout(1200)
+                page.locator("#dayBoth").click(); page.wait_for_timeout(1200)
                 heads1 = page.eval_on_selector_all("#chart text.axl",
                     "e=>e.map(x=>x.textContent).filter(t=>/Today ·|Tomorrow ·/.test(t))")
                 chk.add(f"{scheme} city full: both contract days are headed", len(heads1) == 2
@@ -207,11 +207,27 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} city full: the forecast names shorten so they clear the strikes",
                         bool(nm) and all(len(x) <= 12 for x in nm), str(nm[:3]))
                 errs_now = len(errs)
-                page.locator("#fullBtn").click(); page.wait_for_timeout(900)
+                page.locator("#dayToday").click(); page.wait_for_timeout(900)
                 heads2 = page.eval_on_selector_all("#chart text.axl",
                     "e=>e.map(x=>x.textContent).filter(t=>/Today ·|Tomorrow ·/.test(t))")
-                chk.add(f"{scheme} city full: toggling back restores the single ladder",
+                chk.add(f"{scheme} city days: going back to today restores the single ladder",
                         heads2 == [] and len(errs) == errs_now, str(heads2))
+                # the day-ahead board on its own
+                page.locator("#dayTomorrow").click(); page.wait_for_timeout(1100)
+                t_tom = page.locator("#cityTitle").inner_text()
+                t_tod = None
+                page.locator("#dayToday").click(); page.wait_for_timeout(900)
+                t_tod = page.locator("#cityTitle").inner_text()
+                chk.add(f"{scheme} city days: tomorrow is a day of its own, not today's",
+                        t_tom != t_tod and "–" not in t_tom, f"{t_tom} / {t_tod}")
+                page.locator("#dayTomorrow").click(); page.wait_for_timeout(1100)
+                bounds = page.eval_on_selector_all("#chart text",
+                    "e=>e.map(x=>x.textContent).filter(t=>/midnight|day end/.test(t))")
+                chk.add(f"{scheme} city days: the day-ahead view brackets its own contract day",
+                        len(bounds) >= 1 and len(errs) == errs_now, str(bounds))
+                chk.add(f"{scheme} city days: exactly one day button is pressed at a time",
+                        page.locator("#dayToday.on, #dayTomorrow.on, #dayBoth.on").count() == 1, "")
+                page.locator("#dayToday").click(); page.wait_for_timeout(700)
 
                 # ---- the board's heading: which board, which side, which day
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1600)
