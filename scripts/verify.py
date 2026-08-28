@@ -599,7 +599,7 @@ def run(no_build: bool) -> int:
                           if (!k) return false;
                           const t = k.textContent;
                           return k.getBoundingClientRect().top - m.bottom < 160
-                                 && t.includes('THE DOTS') && t.includes('THE SHADING') && t.includes('A LABEL'); }"""), "")
+                                 && t.includes('DOTS') && t.includes('SHADING') && t.includes('LABELS'); }"""), "")
                 chk.add(f"{scheme} scorecard: the map keeps its own status strip",
                         page.locator("#pageStatus .status").count() >= 1, "")
                 chk.add(f"{scheme} roster: Colorado Springs is off the board",
@@ -654,10 +654,29 @@ def run(no_build: bool) -> int:
                         "not from zero" in leg, leg[-90:])
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_enc = page.locator("#tip").inner_text()
-                for want in ("Gap to NWS", "The board", "against that"):
+                # the day-ahead views read against the NWS forecast; the
+                # current-day views read against the day's expected extreme,
+                # which folds in what the station has already recorded
+                for want in ("Gap to", "The board", "against that"):
                     chk.add(f"{scheme} map colour: the box shows '{want}'", want in t_enc, t_enc[-140:])
                 chk.add(f"{scheme} map colour: the raw gap is still shown, not replaced",
-                        "Gap to NWS" in t_enc and ("typical" in t_enc), t_enc[-140:])
+                        "Gap to" in t_enc and ("typical" in t_enc), t_enc[-140:])
+                # m1 is today's highs, m2 tomorrow's. A current-day low that has
+                # already been recorded is out of the standing forecast, so the
+                # today views read against the day's expected extreme instead.
+                chk.add(f"{scheme} map: the current-day view reads against what the day is expected to reach",
+                        "Gap to expected" in t_enc, t_enc[-140:])
+                page.locator("#m2").click(); page.wait_for_timeout(400)
+                page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
+                t_tmw = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} map: the day-ahead view reads against the NWS forecast",
+                        "Gap to NWS" in t_tmw, t_tmw[-140:])
+                page.locator("#m3").click(); page.wait_for_timeout(400)
+                page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
+                t_lo = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} map: today's lows name both the expected low and what has been recorded",
+                        "Expected low today" in t_lo and "Observed high / low so far" in t_lo, t_lo[:200])
+                page.locator("#m1").click(); page.wait_for_timeout(400)
                 # observed-versus-issued is not a market gap and keeps the plain sign
                 chk.add(f"{scheme} map: the observed-versus-issued view is gone",
                         page.locator("#m5").count() == 0, "")
@@ -1293,7 +1312,7 @@ def run(no_build: bool) -> int:
                         page.locator("#standChart rect[data-key]").count() >= 4,
                         str(page.locator("#standChart rect[data-key]").count()))
                 chk.add(f"{scheme} standings: the page says the sample is matched",
-                        "Matched sample" in page.locator("#standings").inner_text(),
+                        "sample is matched" in page.locator("#standings").inner_text(),
                         page.locator("#standings").inner_text()[:70])
                 accTexts = page.eval_on_selector_all("#accChart text", "e=>e.map(x=>x.textContent)")
                 chk.add(f"{scheme} accuracy: the measured system is named as LAMP",
@@ -1515,6 +1534,40 @@ def run(no_build: bool) -> int:
             chk.add("allocator: names both references",
                     "kelly" in t and "thorp" in t, "")
             chk.add("allocator: no script errors", not errs, "; ".join(errs[:3]))
+            ctx.close()
+
+            # ---- house prose style, checked on the pages rather than trusted
+            #
+            # Titles are noun phrases without a leading article, prose carries
+            # no colons and no em-dashes, and nothing is defined by saying what
+            # it is not. These crept back once after being swept, so they are
+            # a gate now.
+            ctx = browser.new_context(viewport={"width": 1200, "height": 900})
+            page = ctx.new_page()
+            PAGES_PROSE = ["index.html", "city.html?station=KLAX", "hurricane.html", "allocator.html",
+                           "climate.html", "weather.html", "agriculture.html", "scorecard.html",
+                           "accuracy.html", "about.html", "fossil-fuels.html", "electricity-renewables.html"]
+            # the owner's own copy, which the style rules do not touch
+            OWNER = ("faq.html", "daily-temperature-markets.html")
+            bad_title, bad_colon, bad_not = [], [], []
+            for path in PAGES_PROSE:
+                page.goto(f"{srv.url}/{path}"); page.wait_for_timeout(1100)
+                titles = page.eval_on_selector_all(".wrap .secttl, .wrap h2, .wrap h3",
+                                                   "e=>e.map(x=>x.textContent.trim())")
+                for t in titles:
+                    if re.match(r"^(the|a|an)\s", t, re.I):
+                        bad_title.append(f"{path}: {t}")
+                body = page.eval_on_selector_all(".wrap p, .wrap li", "e=>e.map(x=>x.textContent)")
+                for t in body:
+                    if re.search(r"[a-z)][:]\s+[a-z]", t):
+                        bad_colon.append(f"{path}: {t[:70]}")
+                    if re.search(r"\bWhat this is not\b|\bis a [a-z ]+, not a\b", t):
+                        bad_not.append(f"{path}: {t[:70]}")
+                    if "\u2014" in t or " -- " in t:
+                        bad_colon.append(f"{path} (dash): {t[:70]}")
+            chk.add("prose: no section title opens with an article", not bad_title, "; ".join(bad_title[:3]))
+            chk.add("prose: no colons or em-dashes in page copy", not bad_colon, "; ".join(bad_colon[:2]))
+            chk.add("prose: nothing is defined by what it is not", not bad_not, "; ".join(bad_not[:2]))
             ctx.close()
 
             # ---- embed target

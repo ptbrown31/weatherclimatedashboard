@@ -346,6 +346,47 @@ def _max_min_in_day(rows: list, tz, day: str) -> tuple:
     return (round(max(vals), 1), round(min(vals), 1)) if vals else (None, None)
 
 
+def _max_min_ahead(rows: list, tz, day: str, now: dt.datetime) -> tuple:
+    """Max and min over the hours of `day` that are still ahead of `now`.
+
+    The part of a day still to come is the only part a forecast can speak
+    for; the part that has passed is in the observation record instead."""
+    vals = [r["tempF"] for r in rows
+            if _parse_iso(r["t"]) >= now and local_day_key(_parse_iso(r["t"]), tz) == day]
+    return (round(max(vals), 1), round(min(vals), 1)) if vals else (None, None)
+
+
+def _running_today(level, rest, seen, pick):
+    """Today's extreme as the day now stands.
+
+    Before the day starts, the forecast's own figure for it is the answer.
+    Once the day is under way the answer is what the station has recorded so
+    far taken with the forecast for the hours still ahead, and the forecast's
+    figure for the whole day is no longer usable for either part.
+
+    It goes wrong in both directions. A forecast begins at the current hour,
+    so a low set at dawn drops out of it within hours and its remaining
+    minimum is the coolest hour still to come, which can sit ten degrees or
+    more above what the day will settle on. In the other direction an
+    official overnight period that has already ended keeps publishing its
+    number for a stretch the day has finished and did not reach."""
+    if seen is None:
+        return level
+    return seen if rest is None else pick(rest, seen)
+
+
+def _obs_today(store: Storage, sid: str, day: Optional[str]) -> dict:
+    """{"high", "low"} the station has recorded so far on `day`, in its own
+    unit. Empty when there is no obs snapshot or it refers to another day."""
+    raw = store.get(f"snapshots/obs/{sid}.json")
+    if not raw:
+        return {}
+    t = (json.loads(raw) or {}).get("today") or {}
+    if not day or t.get("date") != day:
+        return {}
+    return {"high": (t.get("high") or {}).get("v"), "low": (t.get("low") or {}).get("v")}
+
+
 def _u(v, unit: str):
     """A Fahrenheit level in the station's native unit. International
     contracts quote Celsius, and their pages show Celsius directly rather
@@ -437,13 +478,15 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
         hi, lo = _official_hi_lo(daily_rows, tz)
         h_today, l_today = _max_min_in_day(hourly, tz, day)
         h_tmw, l_tmw = _max_min_in_day(hourly, tz, tmw)
+        rest_h, rest_l = _max_min_ahead(hourly, tz, day, now)
         snap["nws"] = {"cycle": _stamp_of(by_kind["hourly"][-1]), "dailyCycle": _stamp_of(by_kind["daily"][-1]) if by_kind["daily"] else None,
                        "hourly": hourly, "daily": daily_rows,
                        "highToday": _u(hi.get(day, h_today), unit), "lowToday": _u(lo.get(day, l_today), unit),
                        "highTomorrow": _u(hi.get(tmw, h_tmw), unit), "lowTomorrow": _u(lo.get(tmw, l_tmw), unit),
                        "officialHighToday": day in hi, "officialLowToday": day in lo,
                        "officialHighTomorrow": tmw in hi, "officialLowTomorrow": tmw in lo,
-                       "officialToday": day in hi and day in lo, "officialTomorrow": tmw in hi and tmw in lo}
+                       "officialToday": day in hi and day in lo, "officialTomorrow": tmw in hi and tmw in lo,
+                       "highRest": _u(rest_h, unit), "lowRest": _u(rest_l, unit)}
     # ---- NBM: hourly from NBH, the blend's own daily max/min from NBS
     if by_kind["nbh"]:
         parsed = gw.parse_hourly_block(_read_gz(store, by_kind["nbh"][-1]).decode("ascii", "replace"))
@@ -460,14 +503,18 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
         nbm["highTomorrow"] = nbm["txn"].get(tmw, {}).get("max")
         nbm["lowTomorrow"] = nbm["txn"].get(tmw, {}).get("min")
         nbm["hourlyFrom"] = rows[0]["t"] if rows else None
+        rest_h, rest_l = _max_min_ahead(rows, tz, day, now)
+        nbm["highRest"], nbm["lowRest"] = _u(rest_h, unit), _u(rest_l, unit)
         snap["nbm"] = nbm
     # ---- LAMP: the same-day hourly trace; its "today" extremes cover only the hours it has left
     if by_kind["lamp"]:
         parsed = gw.parse_hourly_block(_read_gz(store, by_kind["lamp"][-1]).decode("ascii", "replace"))
         rows = _hourly_rows(parsed, unit)
         h, l = _max_min_in_day(rows, tz, day)
+        rest_h, rest_l = _max_min_ahead(rows, tz, day, now)
         snap["lamp"] = {"cycle": _iso(parsed["cycle"]), "hourly": rows, "hourlyFrom": rows[0]["t"] if rows else None,
-                        "highToday": _u(h, unit), "lowToday": _u(l, unit), "partialDay": True}
+                        "highToday": _u(h, unit), "lowToday": _u(l, unit), "partialDay": True,
+                        "highRest": _u(rest_h, unit), "lowRest": _u(rest_l, unit)}
     # ---- GFS MOS MAV: an independent daily max/min, 3-hourly trace
     if by_kind["mav"]:
         parsed = gw.parse_mav_block(_read_gz(store, by_kind["mav"][-1]).decode("ascii", "replace"))
@@ -526,7 +573,8 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
             s = snap[k] or {}
             fc[k] = {kk: s.get(kk) for kk in ("cycle", "highToday", "lowToday", "highTomorrow", "lowTomorrow",
                                                 "officialHighToday", "officialLowToday", "officialHighTomorrow", "officialLowTomorrow",
-                                                "highTodayFrom", "lowTodayFrom", "partialDay")} if snap[k] else None
+                                                "highTodayFrom", "lowTodayFrom", "partialDay",
+                                                "highRest", "lowRest")} if snap[k] else None
             ai = snap["asIssued"].get(k)
             fc[k + "Issued"] = ({kk: ai.get(kk) for kk in ("cycle", "preDay", "highToday", "lowToday", "levelCycleHigh",
                                                             "levelCycleLow", "levelPreDay", "fromHourly")} if ai else None)
@@ -546,7 +594,14 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
             for c in roster:
                 f = summary_fc.get(c["station"], {})
                 n = f.get("nws") or {}
-                pts.append({**c, "hi": n.get(hi_key), "lo": n.get(lo_key)})
+                hi, lo = n.get(hi_key), n.get(lo_key)
+                if when == "today":
+                    # the shading has to agree with the dots drawn over it, and
+                    # both are the day's extreme rather than the rest of it
+                    seen = _obs_today(store, c["station"], f.get("day"))
+                    hi = _running_today(hi, n.get("highRest"), seen.get("high"), max)
+                    lo = _running_today(lo, n.get("lowRest"), seen.get("low"), min)
+                pts.append({**c, "hi": hi, "lo": lo})
                 if f.get(date_key):
                     for_dates[c["station"]] = f[date_key]
             one = basemap.idw_field(grid, pts, "hi", "lo")
@@ -612,6 +667,14 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
             src = f.get(k) or {}
             for fld in ("highToday", "lowToday", "highTomorrow", "lowTomorrow"):
                 row[f"{k}{fld[0].upper()}{fld[1:]}"] = src.get(fld) if fc_same else None
+            if fc_same:
+                for fld, obs_fld, rest_fld, pick in (("HighToday", "obsHighSoFar", "highRest", max),
+                                                     ("LowToday", "obsLowSoFar", "lowRest", min)):
+                    seen = row[obs_fld]
+                    row[f"{k}{fld}"] = _running_today(row[f"{k}{fld}"], src.get(rest_fld), seen, pick)
+                    # whether the day has already reached this figure, which is
+                    # what separates a number the record settled from a forecast
+                    row[f"{k}{fld}Running"] = seen is not None and row[f"{k}{fld}"] == seen
             row[f"{k}Cycle"] = src.get("cycle")
             if k == "nws":
                 for fld in ("officialHighToday", "officialLowToday", "officialHighTomorrow", "officialLowTomorrow"):

@@ -98,6 +98,57 @@ class DayBucketing(unittest.TestCase):
         self.assertEqual(hi, {"2026-08-21": 79.0, "2026-08-22": 80.0})
         self.assertEqual(lo, {"2026-08-22": 69.0})           # the night ENDING on the 22nd
 
+    def test_running_today_uses_the_record_and_the_hours_ahead(self):
+        """KMSP, 2026-08-28. The station bottomed out at 59 before dawn; the
+        forecast began at noon and its minimum for the rest of the day was 74.
+        A day low of 74 is not reachable once 59 is recorded, and the market's
+        implied 59.5 was right."""
+        self.assertEqual(snapshots._running_today(74.0, 74.0, 59.0, min), 59.0)
+        # KLGA the same week, the other direction. An official overnight period
+        # that had already ended still said 64 while the station's actual low
+        # was 66.9 and every hour still ahead was warmer.
+        self.assertEqual(snapshots._running_today(64.0, 68.0, 66.9, min), 66.9)
+        # the rest of the day is forecast colder than the morning managed, so
+        # the forecast leads and the record does not bind
+        self.assertEqual(snapshots._running_today(88.0, 88.0, 91.0, min), 88.0)
+        # highs: the afternoon is still ahead, then it has been and gone
+        self.assertEqual(snapshots._running_today(85.0, 85.0, 79.0, max), 85.0)
+        self.assertEqual(snapshots._running_today(76.0, 76.0, 85.0, max), 85.0)
+        # nothing recorded for the day yet, so the forecast's own figure stands
+        self.assertEqual(snapshots._running_today(57.0, 74.0, None, min), 57.0)
+        # no hours left in the day, so the record is the whole answer
+        self.assertEqual(snapshots._running_today(74.0, None, 59.0, min), 59.0)
+        self.assertIsNone(snapshots._running_today(None, None, None, min))
+
+    def test_max_min_ahead_drops_the_hours_already_past(self):
+        tz = ZoneInfo("America/Chicago")
+        rows = [{"t": "2026-08-28T09:00:00Z", "tempF": 59.0},    # 4am local, the day's low
+                {"t": "2026-08-28T18:00:00Z", "tempF": 78.0},
+                {"t": "2026-08-29T01:00:00Z", "tempF": 74.0},    # 8pm local, still today
+                {"t": "2026-08-29T06:00:00Z", "tempF": 66.0}]    # tomorrow local
+        now = snapshots._parse_iso("2026-08-28T17:00:00Z")
+        self.assertEqual(snapshots._max_min_ahead(rows, tz, "2026-08-28", now), (78.0, 74.0))
+        early = snapshots._parse_iso("2026-08-28T05:00:00Z")
+        self.assertEqual(snapshots._max_min_ahead(rows, tz, "2026-08-28", early), (78.0, 59.0))
+        late = snapshots._parse_iso("2026-08-29T04:00:00Z")
+        self.assertEqual(snapshots._max_min_ahead(rows, tz, "2026-08-28", late), (None, None))
+
+    def test_obs_today_only_answers_for_the_day_asked(self):
+        class FakeStore(object):
+            def __init__(self, d):
+                self.d = d
+
+            def get(self, k):
+                return self.d.get(k)
+
+        body = json.dumps({"today": {"date": "2026-08-28",
+                                     "high": {"v": 79.0}, "low": {"v": 59.0}}}).encode()
+        st = FakeStore({"snapshots/obs/KMSP.json": body})
+        self.assertEqual(snapshots._obs_today(st, "KMSP", "2026-08-28"), {"high": 79.0, "low": 59.0})
+        self.assertEqual(snapshots._obs_today(st, "KMSP", "2026-08-27"), {})
+        self.assertEqual(snapshots._obs_today(st, "KMSP", None), {})
+        self.assertEqual(snapshots._obs_today(FakeStore({}), "KMSP", "2026-08-28"), {})
+
     def test_obs_decode_and_extremes(self):
         raw = [
             {"icaoId": "KLAX", "obsTime": 1787349180, "temp": 26.1, "metarType": "METAR", "temp_source": "tgroup"},   # 21:53Z

@@ -1,12 +1,21 @@
-/* The landing map: every station on one canvas, shaded by the NWS forecast.
+/* The landing map: every station on one canvas, shaded by the day's level.
 
    Data in: summary.json (stations, observed so far, forecast levels),
    field.json (the derived shading), assets/basemap.json (state outlines,
-   pre-projected). Modes: tomorrow's highs and lows shaded by the NWS
-   forecast, and today's observed-so-far against the forecast that was
-   issued for the day. With the market layer on, the dots carry the gap
-   between the market-implied median (live: the exchange's ladder; else a
-   labelled placeholder) and the NWS forecast instead. */
+   pre-projected). Four modes, each a day and a side.
+
+   The reference the dots and the shading are read against differs by day.
+   Tomorrow it is the NWS forecast. Today it is what the day is now expected
+   to reach, which is what the station has already recorded taken with the
+   forecast for the hours left: a forecast begins at the current hour, so a
+   day whose low was set at dawn no longer has that low anywhere in it, and
+   the forecast's own minimum is then the coolest hour still to come. The
+   summary applies that before the field is interpolated, so the dots and the
+   shading under them are the same quantity.
+
+   With the market layer on, the dots carry the gap between the
+   market-implied median (live: the exchange's ladder; else a labelled
+   placeholder) and that reference. */
 window.WXMap = (() => {
   const { el, txt, h, $, deg } = WXC;
   const RAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
@@ -31,12 +40,12 @@ window.WXMap = (() => {
     return 'rgb(' + A.map((av, k) => Math.round(av + (B[k] - av) * f)).join(',') + ')';
   }
 
-  // The reference field is interpolated for tomorrow only, so the current day's
-  // views carry no background shading; the dots are the whole signal there.
+  // Both days are interpolated into one field file, so every view has shading
+  // under its dots. Columns 2 and 3 are tomorrow, 4 and 5 today.
   const MODES = {
-    hiT: { title: () => "TODAY'S HIGHS · shaded by the National Weather Service forecast for " + tdy(), fld: 4, centred: true,
+    hiT: { title: () => "TODAY'S HIGHS · shaded by the level now expected for " + tdy(), fld: 4, centred: true,
            val: c => c.nwsHighToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divHigh : null },
-    loT: { title: () => "TODAY'S LOWS · shaded by the National Weather Service forecast for " + tdy(), fld: 5, centred: true,
+    loT: { title: () => "TODAY'S LOWS · shaded by the level now expected for " + tdy(), fld: 5, centred: true,
            val: c => c.nwsLowToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divLow : null },
     hi:  { title: () => "TOMORROW'S HIGHS · shaded by the National Weather Service forecast for " + tmw(), fld: 2, centred: true,
            val: c => c.nwsHighTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divHigh : null },
@@ -124,6 +133,7 @@ window.WXMap = (() => {
   const gap = d => (d == null ? '' : ' (' + (d > 0 ? '+' + d : d < 0 ? '−' + Math.abs(d) : '0') + '°)');
   const srcTag = s => (s === 'tgroup' ? 'tenths' : s === 'body' ? 'whole degrees' : null);
   const FIELD_FOOT = 'inverse-distance interpolation of the listed stations’ NWS forecasts; not an NWS product';
+  const TODAY_FOOT = 'inverse-distance interpolation of what each station has recorded so far today and the NWS forecast for the hours left; not an NWS product';
 
   // the market-implied median for one side, as a tooltip value: the number
   // with its gap against the NWS forecast, or the reason there is none
@@ -154,8 +164,16 @@ window.WXMap = (() => {
       const ms = Date.parse(c.obsLatest.t), day = WXC.dateShort(ms, c.tz);
       latest = (day !== isoDate(mk.day) ? day + ' ' : '') + WXC.clockFull(ms, c.tz) + (c.obsLatest.type ? ' ' + c.obsLatest.type : '');
     }
+    // "expected" is the day's extreme as it now stands: what the station has
+    // recorded so far, taken with the forecast for the hours still ahead. The
+    // standing forecast on its own speaks only for the rest of the day and
+    // reads far too warm on the low side once the morning has set it.
+    const expTag = run => run ? ' <span class="tk">(already recorded)</span>' : '';
     const today = [
-      c.nwsIssuedHigh != null ? ['NWS high issued for today', deg(c.nwsIssuedHigh)] : ['NWS high today (standing)', dg(c.nwsHighToday)],
+      ['Expected high today', dg(c.nwsHighToday) + expTag(c.nwsHighTodayRunning)],
+      ['Expected low today', dg(c.nwsLowToday) + expTag(c.nwsLowTodayRunning)],
+      c.nwsIssuedHigh != null ? ['NWS high issued for today', deg(c.nwsIssuedHigh)] : null,
+      c.nwsIssuedLow != null ? ['NWS low issued for today', deg(c.nwsIssuedLow)] : null,
       ['Observed high / low so far', (c.obsHighSoFar == null && c.obsLowSoFar == null) ? '—' : dg(c.obsHighSoFar) + ' / ' + dg(c.obsLowSoFar) + obsTag],
       ['Latest METAR', latest],
     ];
@@ -167,9 +185,9 @@ window.WXMap = (() => {
     const sgn = x => (x > 0 ? '+' : '') + x.toFixed(1) + '°';
     const enc = centred ? [
       ['<b>On this map</b>', (M.when === 'today' ? 'today' : 'tomorrow') + '’s ' + (mode === 'lo' || mode === 'loT' ? 'lows' : 'highs')],
-      ['Gap to NWS', sgn(raw)],
+      [M.when === 'today' ? 'Gap to expected' : 'Gap to NWS', sgn(raw)],
       ['The board’s typical gap', sgn(gapBase) + ' (median of ' + gapN + ')'],
-      ['This station, against that', sgn(raw - gapBase) + (Math.abs(raw - gapBase) < 0.5 ? ' — about typical' : (raw > gapBase ? ' — warmer than typical' : ' — cooler than typical'))],
+      ['This station, against that', sgn(raw - gapBase) + (Math.abs(raw - gapBase) < 0.5 ? ', about typical' : (raw > gapBase ? ', warmer than typical' : ', cooler than typical'))],
     ] : [];
     return tip.rows(c.city + ' (' + c.station + ') — tomorrow ' + isoDate(mk.tomorrow), tomorrow) +
       tip.rows('<span class="tk" style="display:block;margin-top:5px">Today · ' + isoDate(mk.day) + '</span>', today) +
@@ -182,7 +200,9 @@ window.WXMap = (() => {
     const cell = field.cells[i], M = MODES[mode];
     if (!cell || M.fld == null || cell.length <= M.fld) return '';
     const NAME = { 2: 'Tomorrow’s high', 3: 'Tomorrow’s low', 4: 'Today’s high', 5: 'Today’s low' };
-    return tip.rows('NWS forecast field (derived)', [[NAME[M.fld] || 'Forecast', deg(cell[M.fld])]], FIELD_FOOT);
+    const foot = M.when === 'today' ? TODAY_FOOT : FIELD_FOOT;
+    return tip.rows(M.when === 'today' ? 'Expected field (derived)' : 'NWS forecast field (derived)',
+                    [[NAME[M.fld] || 'Forecast', deg(cell[M.fld])]], foot);
   }
   const cellIndex = e => { const i = e.target && e.target.getAttribute && e.target.getAttribute('data-i'); return i == null ? null : +i; };
 
@@ -223,12 +243,13 @@ window.WXMap = (() => {
       // the colour key itself lives in the panel below the map; repeating it here
       // said the same thing twice, so this line carries only what that panel
       // cannot know: the gap the dots are centred on today
+      const ref = M.when === 'today' ? 'expected' : 'NWS';
       legend.innerHTML = centred
-        ? '<span>Typical gap today: ' + sgn + gapBase.toFixed(1) + '° across ' + gapN + ' stations (' + w + ' minus NWS). '
-          + 'Colour and size are each station’s distance from that, not from zero — hover for the raw gap.</span>'
-        : '<span>Too few stations priced to centre on a typical gap, so the dots show the raw gap against the NWS forecast.</span>';
+        ? '<span>Typical gap today ' + sgn + gapBase.toFixed(1) + '° across ' + gapN + ' stations (' + w + ' minus ' + ref + '). '
+          + 'Colour and size are each station’s distance from that, not from zero. Hover for the raw gap.</span>'
+        : '<span>Too few stations priced to centre on a typical gap, so the dots show the raw gap against ' + ref + '.</span>';
     }
-    else legend.innerHTML = '<span>Number is the NWS forecast · pale shading is the NWS forecast level interpolated between stations (derived)</span>';
+    else legend.innerHTML = '<span>Number is the ' + (M.when === 'today' ? 'expected' : 'NWS forecast') + ' level · pale shading is that level interpolated between stations (derived)</span>';
     drawWorld();
   }
 

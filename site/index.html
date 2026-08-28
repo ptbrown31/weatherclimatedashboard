@@ -25,16 +25,20 @@
 <div class="card"><svg id="map" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="legend"></div>
 <div class="how" style="margin:8px 0 0">
-<div><h3>THE DOTS</h3><p>One dot per station. Colour is the sign of the market-implied median minus the NWS
-forecast for the same day and size is the gap; grey means no listed contracts or no bids yet. The market has sat
-below the NWS forecast on highs most days so far, so most dots are usually blue and the size is what varies. On
-the last view colour is the sign of observed-so-far minus the NWS high issued for the day.</p>
+<div><h3>DOTS</h3><p>Each dot represents a station. Its colour is the sign of the market-implied median minus the
+reference for the same day, and its size is the gap. A grey dot means no listed contracts or no bids yet. The
+market has sat below the NWS forecast on highs most days so far, so most dots are blue and the size is what
+varies.</p>
 <p><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p></div>
-<div><h3>THE SHADING</h3><p>The pale field is the NWS forecast, cool blues to warm reds, interpolated between the
+<div><h3>SHADING</h3><p>The pale field is the reference level, cool blues to warm reds, interpolated between the
 listed stations. It is derived here; the official NWS field is the NDFD grid.</p></div>
-<div><h3>A LABEL</h3><p><b>Philadelphia 88&deg; (&minus;5)</b> is 88&deg;, five degrees below the reference.
+<div><h3>REFERENCE</h3><p>On the day-ahead views it is the NWS forecast. On the current-day views it is what the
+day is now expected to reach, which is what the station has already recorded taken with the NWS forecast for the
+hours left. A forecast starts at the current hour, so once the morning has set the day&rsquo;s low the forecast
+alone no longer holds it.</p></div>
+<div><h3>LABELS</h3><p><b>Philadelphia 88&deg; (&minus;5)</b> means 88&deg;, five degrees below the reference.
 Labels move out of each other&rsquo;s way and never cover another station&rsquo;s dot, so where two cities sit
-close together one of them may go unlabelled; its dot is still there and still carries its numbers on hover.</p></div>
+close together one of them may go unlabelled. Its dot is still there and still carries its numbers on hover.</p></div>
 </div>
 <div id="modeTitle" style="margin-top:8px"></div>
 <p class="sub">Each dot shows where the exchange&rsquo;s market-implied median sits against the National Weather
