@@ -39,10 +39,11 @@ is quoted and No is used only when Yes has no book at all.
 from __future__ import annotations
 import datetime as dt
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from . import gov_weather as gw
 
@@ -100,6 +101,69 @@ def fetch_tree() -> dict:
 
 def fetch_market(conid: int) -> dict:
     return _get_json(MARKET_PATH.format(conid=conid)) or {}
+
+
+# ------------------------------------------------------------------ breaker
+QUOTE_BREAKER_TRIP = 50     # consecutive failures before a pass gives up on the exchange
+
+
+class BreakerOpen(RuntimeError):
+    """Raised in place of a request the breaker has decided not to make."""
+
+
+class Breaker:
+    """Stop asking once the exchange has clearly stopped answering.
+
+    A quote that fails costs far more than one that succeeds: eight seconds to
+    time out, a second of backoff, eight more for the retry. When the exchange
+    is unreachable every call pays that, so a pass that normally makes 888
+    calls in under a minute spends its entire budget failing them. Measured on
+    27 August 2026: 871 seconds and 888 failures for the work that took 58
+    seconds the hour before, and roughly 1,800 requests aimed at an exchange
+    that was already refusing them.
+
+    Nothing is learned from the 889th attempt after 888 have failed. Once
+    `trip` calls have failed with no success between them, the breaker opens
+    and every later call in the pass raises at once, ending it in seconds.
+    Nothing else changes: the pass reports the same failure, keeps the previous
+    ladders rather than writing half-read ones, and a pass that quoted nothing
+    still raises. What changes is how long it takes to find out.
+
+    One success closes it again. Scattered failures among working calls are an
+    ordinary state — of 432 healthy passes 431 had none at all and one had 73 —
+    and must never stop a pass that is otherwise working.
+
+    One breaker belongs to one pass. It is deliberately not process-global: a
+    warm Lambda container would carry an open breaker into the next
+    invocation, which would turn one outage into a silent outage of its own.
+    """
+
+    def __init__(self, trip: int = QUOTE_BREAKER_TRIP):
+        self.trip = trip
+        self.consecutive = 0
+        self.failures = 0
+        self.opened = False
+        self._lock = threading.Lock()
+
+    def guard(self, fetch: Callable) -> Callable:
+        """`fetch`, wrapped so the pass stops once the exchange is plainly down."""
+        def wrapped(conid):
+            with self._lock:
+                if self.opened:
+                    raise BreakerOpen(f"exchange unreachable: {self.failures} calls failed, pass abandoned")
+            try:
+                out = fetch(conid)
+            except Exception:
+                with self._lock:
+                    self.failures += 1
+                    self.consecutive += 1
+                    if self.consecutive >= self.trip:
+                        self.opened = True
+                raise
+            with self._lock:
+                self.consecutive = 0
+            return out
+        return wrapped
 
 
 def fetch_quote(conid: int) -> dict:

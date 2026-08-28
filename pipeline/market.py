@@ -49,6 +49,15 @@ def _cents(v: Optional[float]) -> Optional[int]:
     return None if v is None else int(round(v * 100))
 
 
+def _cut_short(row: dict) -> bool:
+    """Whether this row is missing because the pass stopped, not because the
+    contract had no book. Both reasons — the deadline, and the breaker giving
+    up on an unreachable exchange — mean the ladder is incomplete and the
+    previous snapshot should stand."""
+    err = str((row or {}).get("error") or "")
+    return err == "deadline" or err.startswith("BreakerOpen")
+
+
 def _quote_rows(contracts: Dict[str, Dict[float, dict]], fetch: Callable, deadline: arch.Deadline) -> Dict[str, List[dict]]:
     """Quote every strike of every day in `contracts` (grouped by
     exchange.group_contracts). Returns {day: [row]} with rows in strike
@@ -143,6 +152,10 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         log(kind="market", skipped="sources.exchange is off")
         return {"skipped": True, "quoted": 0, "failed": 0, "stations": 0}
     deadline = deadline or arch.Deadline(arch.remaining_budget(cfg))
+    # one breaker for this pass: when the exchange stops answering the pass
+    # stops asking, rather than spending its whole budget timing out
+    breaker = ex.Breaker()
+    fetch = breaker.guard(ex.fetch_quote)
     xcfg = cfg.get("exchange") or {}
     ex.set_base_url(xcfg.get("base_url") or ex.BASE_URL)
     global QUOTE_WORKERS
@@ -215,7 +228,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         c = next(x for x in roster if x["station"] == key)
         mk = day_markers(c, now)
         grouped = ex.group_contracts(mkt, {mk["day"], mk["tomorrow"]})
-        rows = _quote_rows(grouped, ex.fetch_quote, deadline)
+        rows = _quote_rows(grouped, fetch, deadline)
         st = by_station.setdefault(key, {"markets": {}, "days": {}, "listed": {}, "partial": False})
         st["markets"][side] = {"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"),
                                "conid": m["conid"], "productConid": m.get("productConid")}
@@ -225,7 +238,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             for r in rs:
                 quoted += r.get("error") is None
                 failed += r.get("error") is not None
-                if r.get("error") == "deadline":
+                if _cut_short(r):
                     st["partial"] = True
                 archive_rows.append({"station": key, "day": day, "side": side, **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
 
@@ -249,7 +262,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             sd = str(cn.get("side") or "").upper()
             if sd in ("Y", "N") and cn.get("conid"):
                 slot[sd] = cn["conid"]
-        rows = _quote_rows(spec_groups, ex.fetch_quote, deadline)
+        rows = _quote_rows(spec_groups, fetch, deadline)
         contracts = []
         for spec, rs in rows.items():
             for r in rs:
@@ -313,7 +326,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         summary_rows.append(row)
 
     for name, items in groups.items():
-        cut = any(c.get("error") == "deadline" for m in items for c in m.get("contracts") or [])
+        cut = any(_cut_short(c) for m in items for c in m.get("contracts") or [])
         if cut and store.get(f"{PREFIX}{name}.json"):
             partial_kept.append(name)
             log(kind="market", step="group", group=name, kept="previous snapshot: the deadline cut this group's quotes short")
@@ -348,6 +361,9 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
                        + ", ".join(partial_kept[:8])) if partial_kept else None),
         },
     }, now, key=arch.MARKET_HEALTH_KEY)
+    if breaker.opened:
+        log(kind="market", step="breaker", opened=True, failures=breaker.failures,
+            note="the exchange stopped answering; the pass was abandoned rather than timing out on every call")
     log(kind="market", step="written", stations=len(by_station), partialKept=partial_kept,
         groups={k: len(v) for k, v in groups.items()}, archiveRows=len(archive_rows))
     return {"quoted": quoted, "failed": failed, "stations": len(by_station), "health": health}

@@ -91,7 +91,10 @@ def quote_one(job, fetch: Callable, deadline: arch.Deadline):
 def catquotes_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> int:
     t0 = time.time()
     now = _iso(dt.datetime.now(dt.timezone.utc))
-    fetch = fetch or ex.fetch_quote
+    # the same breaker the quote job uses: this lane makes the same kind of
+    # call to the same exchange, and pays the same price when it is down
+    breaker = ex.Breaker()
+    fetch = breaker.guard(fetch or ex.fetch_quote)
     reg = cfg.get("contracts") or {}
     cats = reg.get("categories") or []
     if not cats:
@@ -219,6 +222,7 @@ def catquotes_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) 
                         "alarms": ["catquotes: exchange stopped answering"] if throttled else []}
     print(json.dumps({"kind": "catquotes", "products": done, "contracts": quoted, "unlisted": skipped,
                       "partial": partial, "throttled": throttled, "errors": errors[:5],
+                      "breakerOpened": breaker.opened, "quoteFailures": breaker.failures,
                       "seconds": round(time.time() - t0, 1)}))
     return 1 if (throttled or (errors and not done)) else 0
 

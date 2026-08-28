@@ -236,6 +236,97 @@ class QuoteJob(unittest.TestCase):
         self.assertTrue(all(r.get("error") == "deadline" for r in rows))
 
 
+class QuoteBreaker(unittest.TestCase):
+    """The exchange going down used to cost a whole pass.
+
+    On 27 August 2026 a pass logged `quoted 0, failed 888` and ran 871 seconds
+    against an 870-second budget: the same 888 calls that take 58 seconds when
+    answered, each paying an eight-second timeout, a second of backoff and an
+    eight-second retry. The breaker stops the pass once the exchange has
+    plainly stopped answering.
+    """
+    def test_it_opens_after_a_run_of_failures_and_refuses_the_rest(self):
+        b = ex.Breaker(trip=10)
+        calls = []
+
+        def down(conid):
+            calls.append(conid)
+            raise OSError("connection refused")
+        f = b.guard(down)
+        refused = 0
+        for i in range(888):
+            try:
+                f(i)
+            except ex.BreakerOpen:
+                refused += 1
+            except OSError:
+                pass
+        # ten requests actually left the machine; the other 878 did not
+        self.assertEqual(len(calls), 10)
+        self.assertEqual(refused, 878)
+        self.assertTrue(b.opened)
+
+    def test_a_success_closes_it(self):
+        # 431 of 432 healthy passes had no failures at all and one had 73:
+        # scattered failures among working calls must not stop the pass
+        b = ex.Breaker(trip=5)
+        state = {"n": 0}
+
+        def flaky(conid):
+            state["n"] += 1
+            if state["n"] % 4:            # three fail, the fourth works, repeatedly
+                raise OSError("blip")
+            return {"bid": 0.4}
+        f = b.guard(flaky)
+        for i in range(400):
+            try:
+                f(i)
+            except OSError:
+                pass
+        self.assertFalse(b.opened)
+
+    def test_a_working_exchange_is_untouched(self):
+        b = ex.Breaker(trip=3)
+        f = b.guard(lambda conid: {"bid": 0.5, "ask": 0.6})
+        self.assertEqual(f(1), {"bid": 0.5, "ask": 0.6})
+        self.assertEqual(b.failures, 0)
+        self.assertFalse(b.opened)
+
+    def test_a_broken_pass_still_reports_every_row_and_keeps_the_ladder(self):
+        """The rows come back marked, so the ladder is seen as cut short and
+        the previous snapshot stands — the same handling a deadline gets."""
+        from pipeline import archive as arch
+        grouped = ex.group_contracts(MARKET, {"2026-08-23"})
+        b = ex.Breaker(trip=1)
+
+        def down(conid):
+            raise OSError("down")
+        rows = market._quote_rows(grouped, b.guard(down), arch.Deadline(None))["2026-08-23"]
+        self.assertTrue(rows, "every strike still produces a row")
+        self.assertTrue(all(r["mid"] is None for r in rows))
+        self.assertTrue(any(market._cut_short(r) for r in rows))
+
+    def test_a_contract_with_no_book_is_not_a_failure(self):
+        # an empty dict is the exchange answering "no bids", which is a normal
+        # state for a far-out strike and must never count toward the trip
+        b = ex.Breaker(trip=3)
+        f = b.guard(lambda conid: {})
+        for i in range(50):
+            f(i)
+        self.assertFalse(b.opened)
+        self.assertEqual(b.failures, 0)
+
+    def test_the_measured_outage_ends_in_seconds_not_minutes(self):
+        """The 27 August shape, costed: 888 calls, each failing call ~4 s of
+        timeout and retry, four workers."""
+        trip, calls, per_fail, workers = ex.QUOTE_BREAKER_TRIP, 888, 4.0, 4
+        before = calls * per_fail / workers
+        after = trip * per_fail / workers
+        self.assertGreater(before, 800)              # what was observed: 871 s
+        self.assertLess(after, 60)                   # what it costs now
+        self.assertGreater(before / after, 15)
+
+
 class QuoteCompleteness(unittest.TestCase):
     """A pass that ran out of time keeps the previous ladders, so every snapshot
     it leaves behind still carries a plausible as-of time. Reported as healthy,
