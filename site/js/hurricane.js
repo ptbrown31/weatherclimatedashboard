@@ -697,7 +697,7 @@ window.WXHur = (() => {
           const wrap = h('div', { class: 'cwrap' }, [h('div', { class: 'lt', text: cfg.title + ' in ' + p.label + ' (' + cfg.sym + ')' })]);
           wrap.appendChild(countPanel(cfg, p));
           wrap.appendChild(h('p', { class: 'cap', html: '<a href="allocator.html?m=' + encodeURIComponent('hur:' + cfg.sym)
-            + '">Size a position on this ladder — allocation calculator →</a>' }));
+            + '">Size a position on this ladder — position allocation calculator →</a>' }));
           lad.appendChild(wrap);
         } else {
           lad.appendChild(ladderPanel(cfg.title + ', ' + p.label + ' (' + cfg.sym + ')', p.rows,

@@ -74,12 +74,12 @@ window.WXClimate = (() => {
     // the document that defines what this settles on, one click away
     const tl = product && product.id ? WXM.termsLink(product.id) : '';
     if (tl) sub.innerHTML += ' · ' + tl;
-    // the same ladder, loaded into the allocation calculator with its live
+    // the same ladder, loaded into the position allocation calculator with its live
     // prices; the count products travel under their own route there
     if (product && product.id && opts.allocLink !== false) {
       const slug = ((window.WX && WX.nav && WX.nav.product) || {})[product.id];
       const m = (slug === 'tropical-cyclones' ? 'hur:' : 'prod:') + product.id;
-      sub.innerHTML += ' · <a href="allocator.html?m=' + encodeURIComponent(m) + '">Allocation calculator →</a>';
+      sub.innerHTML += ' · <a href="allocator.html?m=' + encodeURIComponent(m) + '">Position allocation calculator →</a>';
     }
     div.appendChild(sub);
     const ctl = h('div', { class: 'zoomrow' }); div.appendChild(ctl);

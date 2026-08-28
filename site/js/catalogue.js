@@ -222,7 +222,7 @@ window.WXCat = (() => {
       go.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
       row.appendChild(go);
     }
-    /* The same board, loaded into the allocation calculator with its live
+    /* The same board, loaded into the position allocation calculator with its live
        prices. A count product travels under its own route there; a daily
        temperature board is addressed by its station, recovered from the
        product code (the ICAO less its first letter, with the exchange's two
@@ -241,7 +241,7 @@ window.WXCat = (() => {
           if (hit) m = 'city:' + hit;
         } catch (e) { /* the plain link still stands */ }
       }
-      const go2 = h('button', { text: 'Allocation calculator →' });
+      const go2 = h('button', { text: 'Position allocation calculator →' });
       go2.onclick = () => { location.href = 'allocator.html' + (m ? '?m=' + encodeURIComponent(m) : ''); };
       row.appendChild(go2);
     })();

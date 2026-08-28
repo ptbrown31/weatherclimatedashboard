@@ -72,7 +72,7 @@ window.WXC = (() => {
     // the scorecard lives on the daily temperatures page now; scorecard.html
     // still answers, because the daily letter links its four views directly
     const REF = [['daily-temperature-markets.html', 'Trading temp markets'],
-                 ['allocator.html', 'Allocation calculator'],
+                 ['allocator.html', 'Position calculator'],
                  ['accuracy.html', 'Accuracy'], ['faq.html', 'FAQ'], ['about.html', 'About']];
     const nav = cfg.nav || { l1: [], categories: [] };
     const cats = nav.categories || [];

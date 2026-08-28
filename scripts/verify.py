@@ -28,6 +28,7 @@ import datetime as dt
 import json
 import os
 import socket
+import re
 import subprocess
 import sys
 import time
@@ -1361,10 +1362,10 @@ def run(no_build: bool) -> int:
                 {strike: 0, side: 'yes', dir: 1, thr: 0, cost: 0.5, price: 0.5},
                 {strike: 0, side: 'no',  dir: 1, thr: 0, cost: 0.5, price: 0.5},
               ];
-              const B = M.bins(inst, 0.2533, 1);   // P(above) = 0.6
+              const B = M.bins(inst, 0.2533, 2);   // band 2 is sigma 1, so P(above) = 0.6
               return { g1: M.crra(inst, B, 1)[0], g4: M.crra(inst, B, 4)[0],
                        gH: M.crra(inst, B, 0.5)[0],
-                       one: M.crra([inst[0]], M.bins([inst[0]], 0.2533, 1), 1),
+                       one: M.crra([inst[0]], M.bins([inst[0]], 0.2533, 2), 1),
                        phi: M.Phi(1.96) };
             }''')
             chk.add("allocator: the log split is Kelly's bet-your-beliefs",
@@ -1405,10 +1406,48 @@ def run(no_build: bool) -> int:
             chk.add("allocator: the whole amount goes in, to within the cheapest contract",
                     all(r["slack"] < r["minCost"] + 1e-9 and r["spent"] <= 100.01 for r in spent),
                     str([(round(r["spent"], 2), round(r["slack"], 2)) for r in spent]))
-            chk.add("allocator: every allocation bar names its payout multiple",
+            chk.add("allocator: every held line names its payout multiple",
                     page.evaluate("() => [...document.querySelectorAll('#allocSvg text')].filter(t => /\\u00d7$/.test(t.textContent)).length") > 0, "")
-            chk.add("allocator: the price column outlines what the split buys",
+            chk.add("allocator: the ladder column outlines what the split buys",
                     page.locator("#allocSvg rect[stroke='var(--ink)']").count() > 0, "")
+            chk.add("allocator: the collateral and payout column draws both bars",
+                    page.locator("#allocSvg rect[fill='var(--collat)']").count() > 0
+                    and page.locator("#allocSvg rect[fill='var(--payout)']").count() > 0, "")
+            chk.add("allocator: the schematic shows one ladder read three times",
+                    page.locator("#schematic rect").count() == 15, str(page.locator("#schematic rect").count()))
+            chk.add("allocator: the page is written in the third person",
+                    not re.search(r"\b(you|your|yours)\b", page.locator(".wrap").inner_text(), re.I),
+                    (re.search(r".{40}\b(you|your)\b.{40}", page.locator(".wrap").inner_text(), re.I) or [""])[0])
+            shp = page.evaluate('''() => {
+              const M = WXAlloc._math, r = {};
+              // every shape keeps the prediction as the median and the stated
+              // span as the 95 percent interval; only the split changes
+              const q = (p, shape) => { let lo = -1e4, hi = 1e4;
+                for (let i = 0; i < 90; i++) { const m = (lo + hi) / 2; if (M.cdf(m, 50, 10, shape) < p) lo = m; else hi = m; }
+                return (lo + hi) / 2; };
+              for (const shape of ['normal', 'right', 'left']) {
+                r[shape] = { med: M.cdf(50, 50, 10, shape), lo: q(0.025, shape), hi: q(0.975, shape) };
+              }
+              return r;
+            }''')
+            for name, v in shp.items():
+                chk.add(f"allocator: the {name} shape keeps the prediction as its median",
+                        abs(v["med"] - 0.5) < 0.002, f"{v['med']:.4f}")
+                chk.add(f"allocator: the {name} shape keeps the stated 95 percent span",
+                        abs((v["hi"] - v["lo"]) - 20) < 0.6, f"{v['hi'] - v['lo']:.2f}")
+            chk.add("allocator: the skewed shapes put the long tail on the named side",
+                    (shp["right"]["hi"] - 50) > 3 * (50 - shp["right"]["lo"])
+                    and (50 - shp["left"]["lo"]) > 3 * (shp["left"]["hi"] - 50), "")
+            chk.add("allocator: only strikes the market prices between 5 and 95 percent are allocated",
+                    page.evaluate('''() => { const M = WXAlloc._math, S = WXAlloc._state;
+                      const all = M.instruments(S.ladder, 0.005);
+                      return all.filter(i => i.tradeable).every(i => i.mkt >= M.LIQUID_LO && i.mkt <= M.LIQUID_HI)
+                          && all.some(i => !i.tradeable) === all.some(i => i.mkt < M.LIQUID_LO || i.mkt > M.LIQUID_HI); }''') is True, "")
+            tkv = page.evaluate("() => WXAlloc._math.ticks(4.66, 5.08, 7)")
+            chk.add("allocator: a tight ladder gets axis labels that tell every tick apart",
+                    len(tkv["vals"]) >= 3
+                    and len(set(f"{v:.{tkv['dp']}f}" for v in tkv["vals"])) == len(tkv["vals"]),
+                    f"dp={tkv['dp']} vals={tkv['vals'][:5]}")
             chk.add("allocator: the belief curve has drag handles",
                     page.locator("#allocSvg circle[data-drag]").count() == 3,
                     str(page.locator("#allocSvg circle[data-drag]").count()))

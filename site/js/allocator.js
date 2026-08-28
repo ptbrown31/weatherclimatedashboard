@@ -1,4 +1,4 @@
-/* The allocation calculator: one amount, spread across a strike ladder three
+/* The position allocation calculator: one amount, spread across a strike ladder three
    ways.
 
    A reader types two numbers — the value they expect, and how far off they
@@ -36,7 +36,7 @@ window.WXAlloc = (() => {
   const SCEN = [
     { key: 'conservative', name: 'Conservative', gamma: 4, col: 'var(--cool)', blurb: 'hedges widest — the smoothest payout' },
     { key: 'middle', name: 'Middle', gamma: 1, col: 'var(--lamp)', blurb: 'growth-optimal — Kelly’s own rule' },
-    { key: 'aggressive', name: 'Aggressive', gamma: 0.5, col: 'var(--nbm)', blurb: 'concentrated — pays big only near your value' },
+    { key: 'aggressive', name: 'Aggressive', gamma: 0.5, col: 'var(--nbm)', blurb: 'concentrated — pays big only near the prediction' },
   ];
   let tip = null;
 
@@ -50,6 +50,62 @@ window.WXAlloc = (() => {
   }
   const Phi = z => 0.5 * (1 + erf(z / Math.SQRT2));
 
+  /* The shape of the user's uncertainty.
+
+     A normal curve says the prediction is as likely to be too low as too high
+     and by the same amount. Plenty of the quantities on this exchange are not
+     like that: a wind speed or a rainfall total has a long right tail, a crop
+     yield a long left one — the bad year is much worse than the good year is
+     good.
+
+     The skewed shapes keep both numbers the user gave. The median stays on the
+     predicted value, and the 95 percent span stays the width they typed; what
+     changes is how that span is divided, roughly three parts of it on the long
+     side to one on the short. They are lognormal in shape but shifted, so they
+     work on a quantity that can go negative — a temperature in Fahrenheit —
+     which a bare lognormal cannot represent at all.
+
+       W = exp(sigma_log Z)          median 1, long right tail
+       V = mu + dir k (W - 1)        median mu, k set by the 95 percent span
+
+     Everything downstream asks this file two questions — the chance the value
+     lands below a threshold, and the height of the curve at a point — so those
+     are the only two functions the shapes have to provide. */
+  const SHAPES = { normal: 'Symmetric', right: 'Long tail above', left: 'Long tail below' };
+  const SIGMA_LOG = 0.6;              // fixed skew: the long tail is about three times the short one
+  const Z95 = 1.959964;
+
+  function shapeK(band) {             // the scale that makes the 95% span match the band
+    const w = Math.exp(Z95 * SIGMA_LOG) - Math.exp(-Z95 * SIGMA_LOG);
+    return (2 * band) / w;
+  }
+
+  /* P(value <= v) under the user's curve. */
+  function cdf(v, mu, band, shape) {
+    const sg = Math.max(band / 2, 1e-9);
+    if (shape !== 'right' && shape !== 'left') return Phi((v - mu) / sg);
+    const dir = shape === 'right' ? 1 : -1;
+    const k = shapeK(Math.max(band, 1e-9));
+    const w = 1 + dir * (v - mu) / k;                 // the lognormal variable this v implies
+    if (w <= 0) return dir > 0 ? 0 : 1;
+    const below = Phi(Math.log(w) / SIGMA_LOG);
+    return dir > 0 ? below : 1 - below;
+  }
+
+  /* The height of the curve at v, for drawing only. */
+  function pdf(v, mu, band, shape) {
+    const sg = Math.max(band / 2, 1e-9);
+    if (shape !== 'right' && shape !== 'left') {
+      return Math.exp(-0.5 * Math.pow((v - mu) / sg, 2)) / (sg * Math.sqrt(2 * Math.PI));
+    }
+    const dir = shape === 'right' ? 1 : -1;
+    const k = shapeK(Math.max(band, 1e-9));
+    const w = 1 + dir * (v - mu) / k;
+    if (w <= 1e-12) return 0;
+    const lw = Math.log(w);
+    return Math.exp(-0.5 * Math.pow(lw / SIGMA_LOG, 2)) / (w * SIGMA_LOG * Math.sqrt(2 * Math.PI) * k);
+  }
+
   /* The reader's probability that a contract pays.
 
      `thr` is the threshold on the continuous value: for "Above 84" on a
@@ -58,12 +114,12 @@ window.WXAlloc = (() => {
      rounds to 84 and does not pay. On a quantity published with its own
      decimals the threshold is the strike itself. `dir` is +1 for above, -1
      for below. */
-  const pWin = (thr, dir, mu, sigma) => {
+  const pWin = (thr, dir, mu, band, shape) => {
     // the degenerate branch mirrors pays(): above is strict, its complement
-    // takes the boundary. Unreachable from the page (sigma is floored), kept
+    // takes the boundary. Unreachable from the page (the band is floored), kept
     // consistent so the exported maths cannot disagree with itself.
-    if (!(sigma > 0)) return (dir > 0 ? (mu > thr) : !(mu > thr)) ? 1 : 0;
-    const p = 1 - Phi((thr - mu) / sigma);
+    if (!(band > 0)) return (dir > 0 ? (mu > thr) : !(mu > thr)) ? 1 : 0;
+    const p = 1 - cdf(thr, mu, band, shape);
     return dir > 0 ? p : 1 - p;
   };
 
@@ -71,10 +127,26 @@ window.WXAlloc = (() => {
 
      One per buyable side per strike. cost is in dollars per contract and
      includes the fee. */
+  /* The window the calculator will allocate inside.
+
+     Outside it the exchange's book thins out: a contract the market puts at
+     one chance in fifty has few resting bids on the far side, so a position
+     sized here could not actually be filled at anything near the price shown,
+     and the payout multiples that make those strikes look attractive are the
+     least attainable numbers on the board. They stay drawn, faint, so the
+     shape of the whole ladder is still visible — they are simply not
+     allocated to. */
+  const LIQUID_LO = 0.05, LIQUID_HI = 0.95;
+
   function instruments(ladder, feeDollars) {
     const out = [];
     (ladder.rows || []).forEach(r => {
       if (r.strike == null || !isFinite(r.strike)) return;
+      /* The market's own probability for this strike, which is the Yes price.
+         The midpoint where both sides have bids; the one live side otherwise,
+         which is the best the book will say. */
+      const mkt = r.mid != null ? r.mid : (r.ask != null ? r.ask : (r.bid != null ? r.bid : null));
+      const tradeable = mkt != null && mkt >= LIQUID_LO && mkt <= LIQUID_HI;
       const dir = r.dir;                                   // +1 above, -1 below
       const half = ladder.grain === 'integer' ? 0.5 : 0;
       // above k pays past k; at-least k pays at k itself, so its threshold
@@ -85,13 +157,13 @@ window.WXAlloc = (() => {
       // carries as the ask on the Yes contract
       if (r.ask != null && r.ask > 0 && r.ask < 1) {
         const c = r.ask + feeDollars;
-        if (c < 1) out.push({ strike: r.strike, side: 'yes', dir, thr, cost: c, price: r.ask, label: r.label, conid: r.conidYes, atLeast: r.atLeast });
+        if (c < 1) out.push({ strike: r.strike, side: 'yes', dir, thr, cost: c, price: r.ask, label: r.label, conid: r.conidYes, atLeast: r.atLeast, mkt, tradeable });
       }
       // buying No now costs one dollar less the Yes bid
       if (r.bid != null && r.bid > 0 && r.bid < 1) {
         const c = (1 - r.bid) + feeDollars;
         // the contract page is addressed by the Yes conid for either side
-        if (c < 1) out.push({ strike: r.strike, side: 'no', dir, thr, cost: c, price: 1 - r.bid, label: r.label, conid: r.conidYes });
+        if (c < 1) out.push({ strike: r.strike, side: 'no', dir, thr, cost: c, price: 1 - r.bid, label: r.label, conid: r.conidYes, mkt, tradeable });
       }
     });
     return out;
@@ -106,14 +178,14 @@ window.WXAlloc = (() => {
      the curve gives less than a billionth of a chance are dropped: they are
      numerical dust, and under a utility that hates zero payout they would
      otherwise demand meaningless hedges. */
-  function bins(instr, mu, sigma) {
+  function bins(instr, mu, band, shape) {
     const ts = Array.from(new Set(instr.map(i => i.thr))).sort((a, b) => a - b);
     const edges = [-Infinity].concat(ts, [Infinity]);
     const out = [];
     for (let b = 0; b + 1 < edges.length; b++) {
       const lo = edges[b], hi = edges[b + 1];
-      const m = (sigma > 0)
-        ? Phi((hi - mu) / sigma) - Phi((lo - mu) / sigma)
+      const m = (band > 0)
+        ? cdf(hi, mu, band, shape) - cdf(lo, mu, band, shape)
         : ((mu > lo && mu <= hi) ? 1 : 0);
       if (m <= 1e-9) continue;
       // a representative value strictly inside the interval decides payoffs
@@ -333,11 +405,14 @@ window.WXAlloc = (() => {
   const S = {
     ladder: null,            // {title, sub, unit, grain, rows, synthetic}
     value: 0, band: 1, budget: 100,
+    shape: 'normal',
     scenKey: 'middle',
     pick: { kind: 'teaching' },
   };
 
   function sigma() { return Math.max(S.band / 2, 1e-6); }   // the band is two sigma
+  const beliefCdf = v => cdf(v, S.value, Math.max(S.band, 1e-9), S.shape);
+  const beliefPdf = v => pdf(v, S.value, Math.max(S.band, 1e-9), S.shape);
 
   /* The resolution the contract settles on.
 
@@ -369,10 +444,16 @@ window.WXAlloc = (() => {
 
   function compute() {
     const fee = (window.WXM && WXM.feeCents ? WXM.feeCents() : 0.5) / 100;
-    const instr = instruments(S.ladder, fee);
-    const mu = S.value, sg = sigma();
-    instr.forEach(i => { i.p = pWin(i.thr, i.side === 'yes' ? i.dir : -i.dir, mu, sg); });
-    const B = bins(instr, mu, sg);
+    const all = instruments(S.ladder, fee);
+    const mu = S.value, band = Math.max(S.band, 1e-9);
+    all.forEach(i => {
+      i.p = pWin(i.thr, i.side === 'yes' ? i.dir : -i.dir, mu, band, S.shape);
+      // what the user's curve says this side is worth, against what it costs
+      i.edge = i.p - i.cost;
+    });
+    // only the liquid window is allocated across; the rest is drawn and skipped
+    const instr = all.filter(i => i.tradeable);
+    const B = bins(instr, mu, band, S.shape);
     // the share of the curve where at least one buyable contract pays: money
     // placed anywhere is lost in the rest, whatever the split
     const cover = B.reduce((s, b) => s + (instr.some(i => pays(i, b.v)) ? b.mass : 0), 0);
@@ -383,7 +464,8 @@ window.WXAlloc = (() => {
       s.stats = scenarioStats(s, B);
       scen[sc.key] = s;
     });
-    return { instr, B, scen, fee, cover };
+    return { all, instr, B, scen, fee, cover,
+             skipped: all.filter(i => !i.tradeable).length };
   }
 
   // ------------------------------------------------------------------- svg
@@ -401,6 +483,24 @@ window.WXAlloc = (() => {
   // a payout multiple: 14x for the cheap tail, 1.05x for the near-certainty
   const fmx = m => (m >= 20 ? Math.round(m) : m >= 2 ? m.toFixed(1) : m.toFixed(2)) + '×';
 
+  /* Axis ticks that land on readable numbers, with the decimals the step
+     needs. The old rule took an eighth of the domain and printed it to one
+     decimal, so a rice ladder spanning half a bushel printed 5.2 twice and
+     skipped 5.1 entirely. */
+  function ticks(lo, hi, want) {
+    const span = Math.max(hi - lo, 1e-9);
+    const raw = span / Math.max(want, 2);
+    const mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+    const step = [1, 2, 2.5, 5, 10].map(f => f * mag).find(v => v >= raw * 0.999) || mag * 10;
+    const out = [];
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+    // the fewest decimals that still tell every tick apart: deriving them from
+    // the step alone rounded a 2.5 step's middle tick onto its neighbour
+    let dp = 0;
+    while (dp < 6 && new Set(out.map(v => v.toFixed(dp))).size < out.length) dp++;
+    return { vals: out, dp };
+  }
+
   function draw() {
     const host = $('#alloc'); if (!host) return;
     if (tip) tip.hide();                  // the element under the cursor is about to be rebuilt
@@ -414,79 +514,88 @@ window.WXAlloc = (() => {
     const R = compute();
     const scSel = SCEN.find(s => s.key === S.scenKey) || SCEN[1];
     const sel = R.scen[scSel.key];
+    const mu = S.value, band = Math.max(S.band, 1e-9);
 
-    // ---- vertical scale: strikes high at the top. The domain covers the
-    //      ladder and the reader's band, so neither is ever off the chart.
-    const strikes = lad.rows.map(r => r.strike);
-    const mu = S.value, sg = sigma();
-    let vHi = Math.max(Math.max(...strikes), mu + 2.6 * sg);
-    let vLo = Math.min(Math.min(...strikes), mu - 2.6 * sg);
-    const pad = Math.max((vHi - vLo) * 0.06, 0.5);
+    /* The value axis covers what is actually in play.
+
+       It used to span every strike on the board plus the whole prediction,
+       which on a ladder like rice — strikes a hundredth apart, a prediction a
+       tenth wide — left the interesting part squeezed into a fifth of the
+       panel with the labels on top of one another. It now covers the strikes
+       the calculator will trade and the middle of the curve, and only widens
+       past that for strikes it is actually holding. */
+    const liquid = R.instr.map(i => i.strike);
+    const held = {};
+    sel.hold.forEach(x => { held[x.i.side + '@' + x.i.strike] = x; });
+    const heldStrikes = sel.hold.map(x => x.i.strike);
+    const anchor = liquid.concat(heldStrikes);
+    const all = lad.rows.map(r => r.strike);
+    const lo0 = anchor.length ? Math.min(...anchor) : Math.min(...all);
+    const hi0 = anchor.length ? Math.max(...anchor) : Math.max(...all);
+    let vHi = Math.max(hi0, mu + 2.4 * sigma());
+    let vLo = Math.min(lo0, mu - 2.4 * sigma());
+    const pad = Math.max((vHi - vLo) * 0.08, grainStep() * 0.5);
     vHi += pad; vLo -= pad;
 
-    const W = 960, T = 46, Bm = 30;
-    const rowH = Math.max(17, Math.min(34, 560 / Math.max(strikes.length, 1)));
-    const H = Math.max(430, Math.min(760, T + Bm + strikes.length * rowH + 60));
+    const W = 960, T = 52, Bm = 34;
+    const shown = lad.rows.filter(r => r.strike >= vLo && r.strike <= vHi);
+    const rowH = Math.max(15, Math.min(30, 520 / Math.max(shown.length, 1)));
+    const H = Math.max(440, Math.min(780, T + Bm + shown.length * rowH + 60));
     const y = v => T + (vHi - v) / (vHi - vLo) * (H - T - Bm);
 
-    // four panels on one value axis:
-    // what you think | what it costs | where the money goes | what it pays
-    const P1 = { x0: 48, x1: 178 }, PL = 234, P2 = { x0: 240, x1: 430 },
-          P3 = { x0: 462, x1: 696 }, P4 = { x0: 726, x1: 936 };
+    // the prediction | the ladder | collateral and payout | the whole set
+    const P1 = { x0: 46, x1: 150 }, PL = 214, P2 = { x0: 220, x1: 430 },
+          P3 = { x0: 470, x1: 700 }, P4 = { x0: 738, x1: 944 };
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'ts', id: 'allocSvg' });
 
-    // value axis down the left, and a rule at every tick across all panels
-    const step = (vHi - vLo) > 60 ? 10 : (vHi - vLo) > 25 ? 5 : (vHi - vLo) > 8 ? 2 : (lad.grain === 'integer' ? 1 : (vHi - vLo) / 8);
-    for (let v = Math.ceil(vLo / step) * step; v <= vHi; v += step) {
-      svg.appendChild(txt(fmv(v, ''), { x: P1.x0 - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
+    const tk = ticks(vLo, vHi, 7);
+    tk.vals.forEach(v => {
+      svg.appendChild(txt(v.toFixed(tk.dp), { x: P1.x0 - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }));
       svg.appendChild(el('line', { x1: P1.x0, x2: P4.x1, y1: y(v), y2: y(v), class: 'grid' }));
-    }
-    if (unit) svg.appendChild(txt(unit, { x: P1.x0 - 6, y: H - Bm + 14, 'text-anchor': 'end', class: 'ax' }));
+    });
+    if (unit) svg.appendChild(txt(unit, { x: P1.x0 - 6, y: H - Bm + 15, 'text-anchor': 'end', class: 'ax' }));
 
-    // ---- panel 1: the reader's curve
-    svg.appendChild(txt('WHAT YOU THINK', { x: P1.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
-    svg.appendChild(txt('drag the dot or band edges', { x: P1.x0, y: T - 16, class: 'ax' }));
+    /* Two lines of title, then the note. The titles name what the column is
+       for in the reader's words, which makes them longer than one line of a
+       960-wide figure holds. */
+    const head = (x0, lines, note) => {
+      lines.forEach((ln, i) => svg.appendChild(txt(ln, { x: x0, y: T - 42 + i * 11, class: 'ax', 'font-weight': 700 })));
+      if (note) svg.appendChild(txt(note, { x: x0, y: T - 42 + lines.length * 11 + 1, class: 'ax' }));
+    };
+
+    // ---- 1: the prediction
+    head(P1.x0, ['THE PREDICTION'], 'drag the dot or the band edges');
     {
-      const xd = p => P1.x0 + p * (P1.x1 - P1.x0);        // density 0..1 of max
-      const pk = 1 / (sg * Math.sqrt(2 * Math.PI));
-      const pts = [];
-      const n = 90;
+      const xd = q => P1.x0 + q * (P1.x1 - P1.x0);
+      let pk = 0;
+      const n = 110, pts = [];
       for (let i = 0; i <= n; i++) {
         const v = vLo + (vHi - vLo) * i / n;
-        const d = Math.exp(-0.5 * Math.pow((v - mu) / sg, 2)) / (sg * Math.sqrt(2 * Math.PI));
-        pts.push([xd(d / pk * 0.92), y(v)]);
+        const d = beliefPdf(v);
+        pk = Math.max(pk, d);
+        pts.push([v, d]);
       }
-      // the 95 percent band, shaded between its edges
-      const b0 = Math.max(vLo, mu - 2 * sg), b1 = Math.min(vHi, mu + 2 * sg);
-      svg.appendChild(el('rect', { x: P1.x0, y: y(b1), width: P1.x1 - P1.x0, height: Math.max(y(b0) - y(b1), 1), fill: 'var(--accent)', opacity: 0.08 }));
-      const d = 'M' + xd(0).toFixed(1) + ',' + y(vLo).toFixed(1)
-        + pts.map(p => 'L' + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('')
-        + 'L' + xd(0).toFixed(1) + ',' + y(vHi).toFixed(1) + 'Z';
-      svg.appendChild(el('path', { d, fill: 'var(--accent)', opacity: 0.16, 'pointer-events': 'none' }));
-      svg.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(''), fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.6, 'pointer-events': 'none' }));
-      // centre line and drag handles
-      svg.appendChild(el('line', { x1: P1.x0, x2: P1.x1, y1: y(mu), y2: y(mu), stroke: 'var(--accent)', 'stroke-width': 1.4, 'stroke-dasharray': '4 3' }));
+      pk = pk || 1;
+      const b0 = Math.max(vLo, quantile(0.025)), b1 = Math.min(vHi, quantile(0.975));
+      svg.appendChild(el('rect', { x: P1.x0, y: y(b1), width: P1.x1 - P1.x0,
+                                   height: Math.max(y(b0) - y(b1), 1), fill: 'var(--accent)', opacity: 0.08 }));
+      const path = pts.map((q, i) => (i ? 'L' : 'M') + xd(q[1] / pk * 0.92).toFixed(1) + ',' + y(q[0]).toFixed(1)).join('');
+      svg.appendChild(el('path', { d: 'M' + xd(0).toFixed(1) + ',' + y(vLo).toFixed(1) + path.slice(1)
+                                     + 'L' + xd(0).toFixed(1) + ',' + y(vHi).toFixed(1) + 'Z',
+                                   fill: 'var(--accent)', opacity: 0.16, 'pointer-events': 'none' }));
+      svg.appendChild(el('path', { d: path, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.6, 'pointer-events': 'none' }));
+      svg.appendChild(el('line', { x1: P1.x0, x2: P1.x1, y1: y(mu), y2: y(mu), stroke: 'var(--accent)',
+                                   'stroke-width': 1.4, 'stroke-dasharray': '4 3' }));
       const mid = (P1.x0 + P1.x1) / 2;
-      [[mu, 'mu'], [mu + 2 * sg, 'hi'], [mu - 2 * sg, 'lo']].forEach(([v, kind]) => {
+      [[mu, 'mu'], [quantile(0.975), 'hi'], [quantile(0.025), 'lo']].forEach(([v, kind]) => {
         if (v < vLo || v > vHi) return;
         const c = el('circle', { cx: mid, cy: y(v), r: kind === 'mu' ? 7 : 5,
-                                 fill: kind === 'mu' ? 'var(--accent)' : 'var(--panel)', stroke: 'var(--accent)', 'stroke-width': 2,
-                                 cursor: 'ns-resize', style: 'touch-action:none' });
+                                 fill: kind === 'mu' ? 'var(--accent)' : 'var(--panel)', stroke: 'var(--accent)',
+                                 'stroke-width': 2, cursor: 'ns-resize', style: 'touch-action:none' });
         c.dataset.drag = kind;
         svg.appendChild(c);
       });
-      svg.appendChild(txt(fmv(mu, unit), { x: mid + 12, y: y(mu) - 8, 'font-weight': 700, 'font-size': 12, fill: 'var(--accent)' }));
-      [[mu + 2 * sg, '+' + fmv(2 * sg, '')], [mu - 2 * sg, '−' + fmv(2 * sg, '')]].forEach(([v, lab]) => {
-        if (v < vLo || v > vHi) return;
-        svg.appendChild(txt(lab, { x: mid + 10, y: y(v) + 3.5, class: 'ax' }));
-      });
-      /* Drag behaviour. Every change redraws the whole SVG, which destroys
-         the element a pointer capture would live on and ends the drag after
-         one move. So the move and release listeners go on the window for the
-         duration of the drag, and the pixel-to-value map is frozen from the
-         moment the drag starts — the rebuilt chart occupies the same box, so
-         the frozen map stays true unless the domain itself shifts, which
-         inside the ladder it does not. */
+      svg.appendChild(txt(fmv(mu, unit), { x: mid + 11, y: y(mu) - 8, 'font-weight': 700, 'font-size': 12, fill: 'var(--accent)' }));
       svg.addEventListener('pointerdown', ev => {
         const k = ev.target && ev.target.dataset && ev.target.dataset.drag;
         if (!k) return;
@@ -497,10 +606,7 @@ window.WXAlloc = (() => {
         const vAt = cy => vHi - (cy - yTop) * scale;
         const move = e => {
           const v = vAt(e.clientY);
-          // both land on the grid the contract settles on, so dragging cannot
-          // produce a value the market has no way of resolving to
           if (k === 'mu') S.value = snapFix(snap(v));
-          // the handle sits at the 95 percent edge, a full band from the centre
           else S.band = Math.max(grainStep(), snapFix(snap(Math.abs(v - S.value))));
           syncInputs(); draw();
         };
@@ -511,208 +617,251 @@ window.WXAlloc = (() => {
       });
     }
 
-    // the strike labels, once, serving the price and allocation panels alike
-    lad.rows.forEach(r => {
-      svg.appendChild(txt(r.label, { x: PL, y: y(r.strike) + 3.5, 'text-anchor': 'end', class: 'ax', 'font-size': 9 }));
+    /* Strike labels, thinned. Two strikes a hundredth apart cannot both carry
+       a label at this height; the ladder's shape is still drawn for every one
+       of them, and the box on hover names the strike exactly. */
+    // strikes ascend, so their y positions descend; the gap is a distance
+    let lastLab = null;
+    shown.slice().sort((a, b) => b.strike - a.strike).forEach(r => {
+      const yy = y(r.strike);
+      if (lastLab != null && Math.abs(yy - lastLab) < 10.5) return;
+      lastLab = yy;
+      const inst = R.all.find(i => i.strike === r.strike);
+      svg.appendChild(txt(r.label, { x: PL, y: yy + 3.5, 'text-anchor': 'end', class: 'ax', 'font-size': 9,
+                                     opacity: (inst && !inst.tradeable) ? 0.42 : 1 }));
     });
 
-    // held sets, used by the price panel's outlines and the allocation bars
-    const held = {};
-    sel.hold.forEach(x => { held[x.i.side + '@' + x.i.strike] = x; });
-
-    // ---- panel 2: the prices as they stand, with the recommendation on them
-    svg.appendChild(txt('WHAT IT COSTS NOW', { x: P2.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
-    svg.appendChild(txt('outlined = what this split buys', { x: P2.x0, y: T - 16, class: 'ax' }));
+    // ---- 2: the ladder, its prices, and where the user disagrees
+    head(P2.x0, ['WHERE IN THE LADDER', 'TO ALLOCATE'],
+         'market price, then the user’s own');
     {
-      const cw = (P2.x1 - P2.x0) / 100;                    // pixels per cent
-      lad.rows.forEach(r => {
+      const cw = (P2.x1 - P2.x0) / 100;
+      const px = q => P2.x0 + Math.max(0, Math.min(1, q)) * 100 * cw;
+      const impl = [];
+      shown.forEach(r => {
         const yy = y(r.strike);
-        const bh = Math.min(rowH * 0.72, 16), by = yy - bh / 2;
-        const yesPx = r.mid != null ? r.mid : (r.ask != null ? r.ask : (r.bid != null ? r.bid : null));
-        const oneSided = r.mid == null && yesPx != null;
-        if (yesPx == null) {
-          svg.appendChild(el('rect', { x: P2.x0, y: by, width: P2.x1 - P2.x0, height: bh, rx: 2, fill: 'none', stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
-          svg.appendChild(txt('no bids', { x: (P2.x0 + P2.x1) / 2, y: yy + 3.5, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
+        const bh = Math.min(rowH * 0.68, 15), by = yy - bh / 2;
+        const iy = R.all.find(i => i.strike === r.strike && i.side === 'yes');
+        const ino = R.all.find(i => i.strike === r.strike && i.side === 'no');
+        const inst = iy || ino;
+        const mkt = inst ? inst.mkt : null;
+        const live = inst && inst.tradeable;
+        if (mkt == null) {
+          svg.appendChild(el('rect', { x: P2.x0, y: by, width: P2.x1 - P2.x0, height: bh, rx: 2, fill: 'none',
+                                       stroke: 'var(--rule)', 'stroke-dasharray': '3 3', opacity: 0.6 }));
           return;
         }
-        const split = P2.x0 + yesPx * 100 * cw;
-        const gy = el('rect', { x: P2.x0, y: by, width: Math.max(split - P2.x0, 0.5), height: bh, fill: 'var(--yes)', opacity: oneSided ? 0.45 : 0.85 });
-        const rd = el('rect', { x: split, y: by, width: Math.max(P2.x1 - split, 0.5), height: bh, fill: 'var(--no)', opacity: oneSided ? 0.45 : 0.85 });
-        svg.appendChild(gy); svg.appendChild(rd);
-        // the recommendation: a heavy outline on the side this scenario buys,
-        // and a pill with the count and the price paid
+        const split = px(mkt);
+        const op = live ? 0.85 : 0.2;
+        svg.appendChild(el('rect', { x: P2.x0, y: by, width: Math.max(split - P2.x0, 0.5), height: bh, fill: 'var(--yes)', opacity: op }));
+        svg.appendChild(el('rect', { x: split, y: by, width: Math.max(P2.x1 - split, 0.5), height: bh, fill: 'var(--no)', opacity: op }));
+        // the user's own probability that this strike's Yes pays, and the gap
+        const pu = iy ? iy.p : (ino ? 1 - ino.p : null);
+        if (pu != null && live) {
+          impl.push([px(pu), yy]);
+          const a = split, b = px(pu);
+          if (Math.abs(b - a) > 3) {
+            svg.appendChild(el('line', { x1: a, x2: b, y1: yy, y2: yy, stroke: 'var(--ink)', 'stroke-width': 1.1, opacity: 0.75 }));
+            const d = b > a ? -1 : 1;
+            svg.appendChild(el('path', { d: 'M' + b + ',' + yy + 'L' + (b + d * 4.5) + ',' + (yy - 3) + 'L' + (b + d * 4.5) + ',' + (yy + 3) + 'Z',
+                                         fill: 'var(--ink)', opacity: 0.75 }));
+          }
+        }
         ['yes', 'no'].forEach(side => {
           const x = held[side + '@' + r.strike];
           if (!x) return;
-          const seg = side === 'yes'
-            ? { x: P2.x0, w: Math.max(split - P2.x0, 3) } : { x: split, w: Math.max(P2.x1 - split, 3) };
+          const seg = side === 'yes' ? { x: P2.x0, w: Math.max(split - P2.x0, 3) } : { x: split, w: Math.max(P2.x1 - split, 3) };
           svg.appendChild(el('rect', { x: seg.x + 0.5, y: by - 1.5, width: Math.max(seg.w - 1, 2), height: bh + 3, rx: 2,
                                        fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2.2, 'pointer-events': 'none' }));
           const t = x.n + ' ct @ ' + fmc(x.i.price);
           const tw = t.length * 5.4 + 10;
           const cx2 = Math.min(Math.max(seg.x + seg.w / 2, P2.x0 + tw / 2), P2.x1 - tw / 2);
-          svg.appendChild(el('rect', { x: cx2 - tw / 2, y: yy - 6.5, width: tw, height: 13, rx: 6.5, fill: 'var(--panel)', opacity: 0.92, 'pointer-events': 'none' }));
+          svg.appendChild(el('rect', { x: cx2 - tw / 2, y: yy - 6.5, width: tw, height: 13, rx: 6.5, fill: 'var(--panel)', opacity: 0.93, 'pointer-events': 'none' }));
           svg.appendChild(txt(t, { x: cx2, y: yy + 3.2, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 700, fill: 'var(--ink)', 'pointer-events': 'none' }));
         });
-        // one hover band per row, with the whole story
-        const band = el('rect', { x: P2.x0, y: by - 2, width: P2.x1 - P2.x0, height: bh + 4, fill: 'transparent' });
-        bind(band, () => priceTip(r, R, held));
-        if (lad.productConid && (r.conidYes != null) && window.WXM && WXM.contractUrl) {
-          WXM.linkTo(band, WXM.contractUrl(lad.productConid, r.conidYes), 'Open ' + r.label + ' on IBKR');
+        const band2 = el('rect', { x: P2.x0, y: by - 2, width: P2.x1 - P2.x0, height: bh + 4, fill: 'transparent' });
+        bind(band2, () => priceTip(r, R, held));
+        if (lad.productConid && r.conidYes != null && window.WXM && WXM.contractUrl) {
+          WXM.linkTo(band2, WXM.contractUrl(lad.productConid, r.conidYes), 'Open ' + r.label + ' on IBKR');
         }
-        svg.appendChild(band);
+        svg.appendChild(band2);
       });
-      // a cents scale under the split bars
-      [0, 50, 100].forEach(c => {
-        svg.appendChild(txt(c + '¢', { x: P2.x0 + c * cw, y: H - Bm + 14, 'text-anchor': 'middle', class: 'ax' }));
-      });
+      // the user's implied ladder, as one curve through the arrow heads
+      if (impl.length > 1) {
+        impl.sort((a, b) => a[1] - b[1]);
+        svg.appendChild(el('path', { d: impl.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(''),
+                                     fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.6, 'stroke-dasharray': '4 2',
+                                     opacity: 0.8, 'pointer-events': 'none' }));
+      }
+      [0, 50, 100].forEach(c => svg.appendChild(txt(c + '¢', { x: px(c / 100), y: H - Bm + 15, 'text-anchor': 'middle', class: 'ax' })));
     }
 
-    // ---- panel 3: where the money goes, with the payout multiple on every bar
-    svg.appendChild(txt('WHERE THE ' + fm$(S.budget).replace(/\.00$/, '') + ' GOES — ' + scSel.name.toUpperCase(), { x: P3.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
-    svg.appendChild(txt('$ → contracts → payout multiple', { x: P3.x0, y: T - 16, class: 'ax' }));
+    // ---- 3: what each line ties up, and what it returns if it comes in
+    head(P3.x0, ['COLLATERAL AND PAYOUT AT', 'EACH STRIKE IF CORRECT'],
+         'one scale: the gap is the multiple');
     {
-      const spine = (P3.x0 + P3.x1) / 2;
-      const maxSpend = Math.max(1e-9, ...SCEN.map(s => R.scen[s.key].hold.reduce((a, x) => Math.max(a, x.spent), 0)));
-      const wOf = d => Math.min((P3.x1 - spine - 4), Math.max(2.5, d / maxSpend * (P3.x1 - spine - 8)));
-      svg.appendChild(el('line', { x1: spine, x2: spine, y1: T, y2: H - Bm, stroke: 'var(--rule)' }));
-      lad.rows.forEach(r => {
-        const yy = y(r.strike);
-        ['yes', 'no'].forEach(side => {
-          const x = held[side + '@' + r.strike];
-          const inst = R.instr.find(i => i.strike === r.strike && i.side === side);
-          const right = side === 'yes';
-          if (x) {
-            const w = wOf(x.spent);
-            const bar = el('rect', { x: right ? spine + 1 : spine - 1 - w, y: yy - Math.min(rowH * 0.36, 9), width: w, height: Math.min(rowH * 0.72, 18), rx: 2, fill: right ? 'var(--yes)' : 'var(--no)', opacity: 0.92, cursor: x.i.conid && lad.productConid ? 'pointer' : null });
-            bind(bar, () => barTip(x, R, unit));
-            if (x.i.conid && lad.productConid && window.WXM && WXM.contractUrl) {
-              WXM.linkTo(bar, WXM.contractUrl(lad.productConid, x.i.conid), 'Open ' + x.i.label + ' on IBKR');
-            }
-            svg.appendChild(bar);
-            /* Each label carries the whole arithmetic of its line: dollars in,
-               contracts bought, and the payout multiple those dollars come
-               back at if the line pays. The multiple IS the price seen from
-               the other end — 7 cents a contract is 14 times your money — and
-               printing it on every bar is the point of the page.
+      /* Both sides on the same dollar scale.
 
-               The text sits in the opposite half of the spine: the bar's own
-               half runs out of room exactly when the bar is worth reading,
-               and the other side's half at this strike is empty in every
-               uncrossed book, because buying both sides of one strike costs
-               more than the dollar it returns. */
-            const mult = x.n / Math.max(x.spent, 1e-9);
-            const label = fm$(x.spent).replace(/\.00$/, '') + ' → ' + x.n + ' ct → ' + fmx(mult);
-            const both = held['yes@' + r.strike] && held['no@' + r.strike];
-            const lx = right ? (both ? spine + 1 + w + 5 : spine - 6) : (both ? spine - 1 - w - 5 : spine + 6);
-            const anch = right ? (both ? 'start' : 'end') : (both ? 'end' : 'start');
-            svg.appendChild(txt(label, { x: lx, y: yy + 3.5, 'text-anchor': anch, 'font-size': 9.5, 'font-weight': 600, fill: right ? 'var(--yes)' : 'var(--no)', 'pointer-events': 'none' }));
-          } else if (inst) {
-            // buyable but not bought under this scenario: a tick, so the
-            // reader can still ask it questions
-            const t2 = el('rect', { x: right ? spine + 1 : spine - 4, y: yy - 3, width: 3, height: 6, fill: 'var(--rule)' });
-            bind(t2, () => instTip(inst, R, unit));
-            svg.appendChild(t2);
+         Scaled separately the two bars said nothing: a line that ties up two
+         dollars to return sixty looked much the same as one that ties up
+         twenty to return thirty. On one scale the payout bar is longer than
+         the collateral bar by exactly the multiple, which is the fact the
+         column exists to show. The spine sits left of centre because the
+         payout is always the longer of the two. */
+      const spine = P3.x0 + (P3.x1 - P3.x0) * 0.26;
+      const maxPay = Math.max(1e-9, ...SCEN.map(s2 => R.scen[s2.key].hold.reduce((a, x) => Math.max(a, x.n), 0)));
+      const maxCol = Math.max(1e-9, ...SCEN.map(s2 => R.scen[s2.key].hold.reduce((a, x) => Math.max(a, x.spent), 0)));
+      // one dollars-per-pixel that fits the widest bar on each side
+      const per = Math.min((spine - P3.x0 - 4) / maxCol, (P3.x1 - spine - 30) / maxPay);
+      const wL = d => Math.max(1.5, d * per);
+      const wR = d => Math.max(1.5, d * per);
+      svg.appendChild(el('line', { x1: spine, x2: spine, y1: T, y2: H - Bm, stroke: 'var(--rule)' }));
+      svg.appendChild(txt('◂ committed', { x: spine - 4, y: H - Bm + 15, 'text-anchor': 'end', class: 'ax', 'font-size': 9 }));
+      svg.appendChild(txt('returned ▸', { x: spine + 4, y: H - Bm + 15, class: 'ax', 'font-size': 9 }));
+      shown.forEach(r => {
+        ['yes', 'no'].forEach(side => {
+          const x = held[side + '@' + r.strike]; if (!x) return;
+          const yy = y(r.strike), bh = Math.min(rowH * 0.62, 14), by = yy - bh / 2;
+          const cw2 = wL(x.spent), pw = wR(x.n);
+          svg.appendChild(el('rect', { x: spine - cw2, y: by, width: cw2, height: bh, rx: 1.5, fill: 'var(--collat)' }));
+          svg.appendChild(el('rect', { x: spine, y: by, width: pw, height: bh, rx: 1.5, fill: 'var(--payout)' }));
+          const mult = x.n / Math.max(x.spent, 1e-9);
+          const lab = fmx(mult);
+          const lw = lab.length * 5.6 + 8;
+          const cx = Math.min(spine + pw + 4 + lw / 2, P3.x1 - lw / 2);
+          svg.appendChild(el('rect', { x: cx - lw / 2, y: yy - 6, width: lw, height: 12, rx: 6, fill: 'var(--panel)', opacity: 0.9, 'pointer-events': 'none' }));
+          svg.appendChild(txt(lab, { x: cx, y: yy + 3.2, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 700,
+                                     fill: 'var(--payout)', 'pointer-events': 'none' }));
+          const hit = el('rect', { x: spine - cw2, y: by - 2, width: cw2 + pw, height: bh + 4, fill: 'transparent',
+                                   cursor: x.i.conid && lad.productConid ? 'pointer' : null });
+          bind(hit, () => barTip(x, R, unit));
+          if (x.i.conid && lad.productConid && window.WXM && WXM.contractUrl) {
+            WXM.linkTo(hit, WXM.contractUrl(lad.productConid, x.i.conid), 'Open ' + x.i.label + ' on IBKR');
           }
+          svg.appendChild(hit);
         });
       });
+      svg.appendChild(txt(fm$(sel.spent).replace(/\.00$/, '') + ' in total', { x: P3.x0, y: H - Bm + 27, class: 'ax' }));
     }
 
-    // ---- panel 4: what the whole set pays, as a function of the value
-    svg.appendChild(txt('WHAT THE SET PAYS', { x: P4.x0, y: T - 28, class: 'ax', 'font-weight': 700 }));
-    svg.appendChild(txt('gross $, by where it lands', { x: P4.x0, y: T - 16, class: 'ax' }));
+    // ---- 4: the whole set, outcome by outcome
+    head(P4.x0, ['WHAT THE ENTIRE ALLOCATION PAYS', 'BY WHERE THE NUMBER LANDS'], 'gross dollars');
     {
-      const maxPay = Math.max(S.budget * 1.15, ...SCEN.map(s => {
-        const sc = R.scen[s.key];
+      const maxPay = Math.max(S.budget * 1.15, ...SCEN.map(s2 => {
+        const sc = R.scen[s2.key];
         return R.B.reduce((a, b) => Math.max(a, payoutAt(sc.hold, b.v)), 0);
       }));
       const xp = d => P4.x0 + Math.min(d / maxPay, 1) * (P4.x1 - P4.x0);
-      // round-dollar ticks: the largest 1/2/5-series step that gives a few
-      const dstep = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 25000, 50000, 100000]
-        .filter(st => maxPay / st >= 2 && maxPay / st <= 6).pop() || Math.ceil(maxPay / 4);
-      for (let d = dstep; d <= maxPay; d += dstep) {
+      const dt = ticks(0, maxPay, 3);
+      dt.vals.forEach(d => {
+        if (d <= 0) return;
         svg.appendChild(el('line', { x1: xp(d), x2: xp(d), y1: T, y2: H - Bm, class: 'grid' }));
-        svg.appendChild(txt('$' + d, { x: xp(d), y: H - Bm + 14, 'text-anchor': 'middle', class: 'ax' }));
-      }
-      /* One line for the money in: every scenario spends the whole amount (to
-         within coins), so right of this line a scenario is ahead and left of
-         it behind, and the three curves need no cost line each. */
-      svg.appendChild(el('line', { x1: xp(S.budget), x2: xp(S.budget), y1: T, y2: H - Bm, stroke: 'var(--ink)', 'stroke-dasharray': '4 3', opacity: 0.55 }));
-      const bx = xp(S.budget), bRight = bx > (P4.x0 + P4.x1) / 2;
-      svg.appendChild(txt('the ' + fm$(S.budget).replace(/\.00$/, '') + ' in', { x: bRight ? bx - 4 : bx + 4, y: T + 10, 'font-size': 9.5, fill: 'var(--muted)', 'text-anchor': bRight ? 'end' : 'start' }));
-      // thresholds where any payoff can change, inside the drawn domain
+        svg.appendChild(txt('$' + d.toFixed(dt.dp), { x: xp(d), y: H - Bm + 15, 'text-anchor': 'middle', class: 'ax' }));
+      });
+      /* One bar per outcome band, not a line.
+
+         What the set returns is a step: it is one number for every value
+         between two neighbouring thresholds and jumps at each of them. Drawn
+         as a bar per band that reads immediately; drawn as a line it invited
+         the eye to interpolate across jumps that cannot be interpolated. */
       const ts = Array.from(new Set(R.instr.map(i => i.thr))).sort((a, b) => a - b).filter(t => t > vLo && t < vHi);
       const edges = [vLo].concat(ts, [vHi]);
-      SCEN.forEach(s => {
-        const sc = R.scen[s.key];
+      for (let b = 0; b + 1 < edges.length; b++) {
+        const v0 = edges[b], v1 = edges[b + 1];
+        const pay = payoutAt(sel.hold, (v0 + v1) / 2);
+        const yTop = y(v1), hgt = Math.max(y(v0) - y(v1) - 1.4, 1.2);
+        svg.appendChild(el('rect', { x: P4.x0, y: yTop + 0.7, width: Math.max(xp(pay) - P4.x0, 0.6), height: hgt,
+                                     fill: scSel.col, opacity: 0.85 }));
+      }
+      SCEN.filter(s2 => s2.key !== scSel.key).forEach(s2 => {
+        const sc = R.scen[s2.key];
         if (!sc.hold.length) return;
-        const on = s.key === scSel.key;
         let d = '';
         for (let b = 0; b + 1 < edges.length; b++) {
           const v0 = edges[b], v1 = edges[b + 1];
           const pay = payoutAt(sc.hold, (v0 + v1) / 2);
           d += (b ? 'L' : 'M') + xp(pay).toFixed(1) + ',' + y(v0).toFixed(1) + 'L' + xp(pay).toFixed(1) + ',' + y(v1).toFixed(1);
         }
-        svg.appendChild(el('path', { d, fill: 'none', stroke: s.col, 'stroke-width': on ? 2.4 : 1.3, opacity: on ? 1 : 0.55, 'pointer-events': 'none' }));
+        svg.appendChild(el('path', { d, fill: 'none', stroke: s2.col, 'stroke-width': 1.2, opacity: 0.6, 'pointer-events': 'none' }));
       });
-      // hover: read all three at a value
-      const band = el('rect', { x: P4.x0, y: T, width: P4.x1 - P4.x0, height: H - T - Bm, fill: 'transparent' });
+      const bx = xp(S.budget), bRight = bx > (P4.x0 + P4.x1) / 2;
+      svg.appendChild(el('line', { x1: bx, x2: bx, y1: T, y2: H - Bm, stroke: 'var(--ink)', 'stroke-dasharray': '4 3', opacity: 0.6 }));
+      svg.appendChild(txt('the ' + fm$(S.budget).replace(/\.00$/, '') + ' committed', { x: bx, y: H - Bm + 27,
+                          'font-size': 9.5, fill: 'var(--muted)', 'text-anchor': 'middle' }));
+      const band3 = el('rect', { x: P4.x0, y: T, width: P4.x1 - P4.x0, height: H - T - Bm, fill: 'transparent' });
       let mark = null;
-      band.addEventListener('mousemove', ev => {
+      band3.addEventListener('mousemove', ev => {
         const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
         const q = pt.matrixTransform(svg.getScreenCTM().inverse());
         const v = vHi - (q.y - T) / (H - T - Bm) * (vHi - vLo);
         if (!mark) { mark = el('line', { x1: P4.x0, x2: P4.x1, stroke: 'var(--ink)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.5, 'pointer-events': 'none' }); svg.appendChild(mark); }
         mark.setAttribute('y1', q.y); mark.setAttribute('y2', q.y);
-        const gr = lad.grain === 'integer' ? Math.round(v) : Math.round(v * 10) / 10;
-        const rows = SCEN.map(s => {
-          const sc = R.scen[s.key];
+        const gr = lad.grain === 'integer' ? Math.round(v) : +v.toFixed(tk.dp);
+        const rows = SCEN.map(s2 => {
+          const sc = R.scen[s2.key];
           const pay = payoutAt(sc.hold, v);
-          return ['<span class="sw" style="background:' + s.col + '"></span>' + s.name,
+          return ['<span class="sw" style="background:' + s2.col + '"></span>' + s2.name,
                   fm$(pay) + ' (' + fmS(pay - sc.spent) + ' net)'];
         });
-        tip.show(ev, tip.rows('If the value lands at ' + fmv(gr, unit), rows,
-          'gross payout, and net of the money in'));
+        tip.show(ev, tip.rows('If the number lands at ' + fmv(gr, unit), rows, 'gross payout, and net of the capital committed'));
       });
-      band.addEventListener('mouseleave', () => { tip.hide(); if (mark) { mark.remove(); mark = null; } });
-      svg.insertBefore(band, svg.firstChild);
+      band3.addEventListener('mouseleave', () => { tip.hide(); if (mark) { mark.remove(); mark = null; } });
+      svg.insertBefore(band3, svg.firstChild);
     }
 
     host.appendChild(svg);
 
-    // ---- scenario summary, under the chart
     const chips = h('div', { class: 'allocChips' });
-    SCEN.forEach(s => {
-      const sc = R.scen[s.key], st = sc.stats;
-      const on = s.key === scSel.key;
+    SCEN.forEach(s2 => {
+      const sc = R.scen[s2.key], st = sc.stats;
+      const on = s2.key === scSel.key;
       const c = h('button', { class: 'allocChip' + (on ? ' on' : ''), type: 'button' }, [
-        h('b', { text: s.name, style: 'color:' + s.col }),
-        h('span', { text: s.blurb }),
-        h('span', { text: 'your expected value ' + fmS(st.evNet) }),
-        // signed, not assumed: a set can be ahead even in its worst interval
+        h('b', { text: s2.name, style: 'color:' + s2.col }),
+        h('span', { text: s2.blurb }),
+        h('span', { text: 'expected value under the curve ' + fmS(st.evNet) }),
         h('span', { text: 'worst ' + fmS(st.worstNet) + ' · best ' + fmS(st.bestNet) }),
       ]);
-      c.onclick = () => { S.scenKey = s.key; draw(); };
+      c.onclick = () => { S.scenKey = s2.key; draw(); };
       chips.appendChild(c);
     });
     host.appendChild(chips);
+
     const note = $('#allocNote');
     if (note) {
       const nct = sel.hold.reduce((a, x) => a + x.n, 0);
       let msg;
-      if (!R.instr.length) {
+      if (!R.all.length) {
         msg = 'Nothing on this ladder can be bought right now — no strike has a resting bid on the other side to buy against.';
+      } else if (!R.instr.length) {
+        msg = 'Every strike on this ladder sits outside the 5 to 95 percent window the calculator will allocate inside, so none is priced where a position could reliably be filled.';
       } else {
         msg = 'The ' + scSel.name.toLowerCase() + ' split buys ' + nct + (nct === 1 ? ' contract' : ' contracts') + ' across '
           + sel.hold.length + (sel.hold.length === 1 ? ' line' : ' lines') + ' for ' + fm$(sel.spent)
           + (sel.cash > 0.005 ? ' — the ' + fm$(sel.cash).replace('$0.', '') + '¢ left cannot buy a whole contract' : '')
-          + '. The expected values shown are under your curve, not anyone else’s.';
+          + '. Expected values are under the user’s own curve, not the market’s.';
+        if (R.skipped) {
+          msg += ' ' + R.skipped + ' of the ' + R.all.length + ' buyable sides are drawn faint and left out: the market puts them '
+            + 'outside 5 to 95 percent, where the book thins and a position could not reliably be filled.';
+        }
         if (R.cover < 0.995) {
-          msg += ' Your curve puts ' + fmp(1 - R.cover) + ' of its chance where nothing buyable pays — no split avoids losing there.';
+          msg += ' The curve puts ' + fmp(1 - R.cover) + ' of its chance where nothing allocated pays.';
         }
       }
       note.textContent = (lad.synthetic ? lad.sub + ' ' : '') + msg;
     }
+  }
+
+  /* The value at a given probability under the user's curve, by bisection —
+     the skewed shapes have no closed-form inverse and this is called a handful
+     of times per redraw. */
+  function quantile(q) {
+    const mu = S.value, band = Math.max(S.band, 1e-9);
+    let lo = mu - 6 * band, hi = mu + 6 * band;
+    for (let i = 0; i < 60; i++) {
+      const m = (lo + hi) / 2;
+      if (beliefCdf(m) < q) lo = m; else hi = m;
+    }
+    return (lo + hi) / 2;
   }
 
   // hover content
@@ -727,7 +876,7 @@ window.WXAlloc = (() => {
     if (iy) rows.push(['Buy Yes now at', fmc(iy.price) + ' · pays ' + fmx(1 / iy.cost)]);
     if (ino) rows.push(['Buy No now at', fmc(ino.price) + ' · pays ' + fmx(1 / ino.cost)]);
     if (!iy && !ino) rows.push(['No resting bids', 'neither side can be bought now']);
-    if (iy) rows.push(['Your chance Yes pays', fmp(iy.p)]);
+    if (iy) rows.push(['The user’s chance Yes pays', fmp(iy.p)]);
     const hy = held['yes@' + r.strike], hn = held['no@' + r.strike];
     if (hy) rows.push(['This split buys', hy.n + ' Yes for ' + fm$(hy.spent)]);
     if (hn) rows.push(['This split buys', hn.n + ' No for ' + fm$(hn.spent)]);
@@ -742,7 +891,7 @@ window.WXAlloc = (() => {
       ['Contracts', String(x.n)],
       ['Dollars in', fm$(x.spent)],
       ['Pays if it hits', fm$(x.n) + ' (' + fmx(x.n / Math.max(x.spent, 1e-9)) + ')'],
-      ['Your chance it pays', fmp(i.p)],
+      ['The user’s chance it pays', fmp(i.p)],
       ['Breaks even if the chance is', fmp(i.cost)],
     ], 'the multiple is the price read from the other end');
   }
@@ -751,7 +900,7 @@ window.WXAlloc = (() => {
     return tip.rows((yes ? 'Yes' : 'No') + ' · ' + i.label + ' — not in this split', [
       [yes ? 'Buy Yes now at' : 'Buy No now at', fmc(i.price)],
       ['Cost with the fee', fmc(i.cost) + ' · pays ' + fmx(1 / i.cost)],
-      ['Your chance it pays', fmp(i.p)],
+      ['The user’s chance it pays', fmp(i.p)],
       ['Breaks even if the chance is', fmp(i.cost)],
     ], 'another scenario may hold it; this one found better uses for the money');
   }
@@ -951,6 +1100,53 @@ window.WXAlloc = (() => {
     if (bu) bu.value = S.budget;
   }
 
+  /* The schematic: the same ladder, read three times.
+
+     It is the calculator's own shape — strikes down a vertical axis, Yes green
+     and No red — with everything the calculator adds taken away, so a reader
+     meets the one idea the whole page rests on before meeting any of the
+     machinery: on an overlapping ladder a single outcome settles every rung at
+     once, and which side of each rung pays is decided by where the number
+     lands relative to it. */
+  function schematic() {
+    const svg = $('#schematic'); if (!svg) return;
+    svg.innerHTML = '';
+    const STRIKES = [150, 140, 130, 120, 110];
+    const CASES = [100, 135, 155];
+    const W = 720, H = 290, T = 72, B = 252, L = 96, colW = 176, gap = 22;
+    const vLo = 95, vHi = 165;
+    const y = v => B - (v - vLo) / (vHi - vLo) * (B - T);
+
+    svg.appendChild(txt('One ladder, three outcomes', { x: 4, y: 18, 'font-size': 13, 'font-weight': 700, fill: 'var(--ink)' }));
+    svg.appendChild(txt('every rung settles at once; the outcome decides which side of each one pays',
+                        { x: 4, y: 33, class: 'ax' }));
+
+    STRIKES.forEach(k => {
+      svg.appendChild(txt('≥' + k + ' mph', { x: L - 10, y: y(k) + 3.5, 'text-anchor': 'end', class: 'ax', 'font-size': 10 }));
+      svg.appendChild(el('line', { x1: L, x2: L + 3 * colW + 2 * gap, y1: y(k), y2: y(k), class: 'grid' }));
+    });
+
+    CASES.forEach((v, ci) => {
+      const x0 = L + ci * (colW + gap), x1 = x0 + colW;
+      svg.appendChild(txt('the wind reaches ' + v + ' mph', { x: x0, y: T - 16, 'font-size': 10.5, 'font-weight': 700, fill: 'var(--ink)' }));
+      STRIKES.forEach(k => {
+        const paysYes = v >= k;
+        const yy = y(k), bh = 15;
+        svg.appendChild(el('rect', { x: x0, y: yy - bh / 2, width: colW, height: bh, rx: 2,
+                                     fill: paysYes ? 'var(--yes)' : 'var(--no)', opacity: 0.85 }));
+        svg.appendChild(txt(paysYes ? 'Yes pays' : 'No pays', { x: x0 + colW / 2, y: yy + 3.4, 'text-anchor': 'middle',
+                            'font-size': 9.5, 'font-weight': 600, fill: '#FFFFFF', 'pointer-events': 'none' }));
+      });
+      // where the number actually landed
+      const yv = y(v);
+      svg.appendChild(el('line', { x1: x0 - 6, x2: x1 + 6, y1: yv, y2: yv, stroke: 'var(--ink)', 'stroke-width': 2 }));
+      svg.appendChild(el('circle', { cx: x0 - 6, cy: yv, r: 3.4, fill: 'var(--ink)' }));
+      svg.appendChild(txt(v + ' mph', { x: x1 + 9, y: yv + 3.4, 'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
+    });
+    svg.appendChild(txt('The calculator below is this figure with prices on it, and a choice about where to put the money.',
+                        { x: 4, y: H - 12, class: 'ax' }));
+  }
+
   // ------------------------------------------------------------------- init
   function init() {
     tip = WXC.tooltip();
@@ -965,12 +1161,16 @@ window.WXAlloc = (() => {
       b.onchange = () => { const x = parseFloat(b.value); if (isFinite(x) && x > 0) { S.band = Math.max(grainStep(), snapFix(snap(x))); syncInputs(); draw(); } };
     }
     if (bu) bu.oninput = () => { const x = parseFloat(bu.value); if (isFinite(x) && x >= 1 && x <= 1e6) { S.budget = x; draw(); } };
+    const sh = $('#allocShape');
+    if (sh) { sh.value = S.shape; sh.onchange = () => { S.shape = sh.value; draw(); }; }
     const wrap = $('#allocWrap'), ctl = $('#allocCtl');
     if (wrap && ctl && WXC.expander) ctl.appendChild(WXC.expander(wrap, 'Expand the chart'));
+    schematic();
     loadPicker();
   }
 
   // pure pieces exposed for the verification harness, not for pages
-  const _math = { erf, Phi, pWin, instruments, bins, crra, fill, payoutAt, parseRow, impliedMedian, pays };
+  const _math = { erf, Phi, cdf, pdf, pWin, instruments, bins, crra, fill, payoutAt, parseRow,
+                  impliedMedian, pays, ticks, LIQUID_LO, LIQUID_HI };
   return { init, draw, _math, _state: S };
 })();
