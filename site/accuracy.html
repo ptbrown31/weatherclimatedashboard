@@ -11,7 +11,8 @@
 <body>
 <div class="wrap">
 <h1>Why prediction-market forecasts are accurate</h1>
-<p class="sub">The argument behind the daily standings. The standings themselves, and the record they are drawn from, are on the <a href="scorecard.html">scorecard</a>.</p>
+<p class="sub">The argument behind the daily standings, and the standings themselves. The day-by-day record they
+are drawn from is on the <a href="scorecard.html">scorecard</a>.</p>
 <div class="prose">
 <p>The standings published daily measure overall forecast accuracy across ForecastEx and eleven public forecast tools, averaged over a rolling 7-day window with a matched sample across every system.</p>
 <p>This constitutes <a href="https://www.interactivebrokers.com/campus/traders-insight/ibkr-climate-energy/prediction-markets-might-already-be-the-best-source-for-todays-weather-forecast/">ongoing evidence</a> that weather prediction markets like ForecastEx may be the most accurate short-range weather forecasts available, and the difference becomes greater as lead time decreases.</p>
@@ -24,6 +25,14 @@ end of the day it was made. Hover a point for the two errors and the number of c
 <div class="card"><svg id="accChart" viewBox="0 0 960 430"></svg></div>
 <div class="key" id="accKey"></div>
 <p class="cap" id="accCap"></p>
+
+<div class="secttl" style="margin-top:26px">STANDINGS OVER THE LAST SCORED WEEK</div>
+<p class="cap" style="margin-top:0">The same question asked of every tool at once: over the last week of scored
+days, how far was each one from the temperature the station actually recorded? Ranked best first, on a matched
+sample so every tool is judged on the same station-days. Hover a bar for its bias, its share within two degrees,
+and the same figures on the daily low.</p>
+<span id="scoreStatus"></span>
+<div id="standings"></div>
 
 <div class="prose" style="margin-top:26px">
 <p>Both systems are scored the same way, on the same days, against the same recorded high. The gap is small a
@@ -39,6 +48,7 @@ market can price an afternoon that is already half observed, and it does.</p>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
 <script src="js/accuracy.js"></script>
-<script>WXC.chrome('accuracy.html'); WXAccuracy.init();</script>
+<script src="js/scorecard.js"></script>
+<script>WXC.chrome('accuracy.html'); WXAccuracy.init(); WXScore.init();</script>
 </body>
 </html>

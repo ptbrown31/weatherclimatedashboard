@@ -339,6 +339,34 @@ window.WXAlloc = (() => {
 
   function sigma() { return Math.max(S.band / 2, 1e-6); }   // the band is two sigma
 
+  /* The resolution the contract settles on.
+
+     A daily temperature settles on a whole degree, so a value of 88.3 is not a
+     value the market can ever resolve to and typing one invites false
+     precision the ladder cannot honour. An integer-grained board therefore
+     steps in ones; a board that settles on a published figure with its own
+     decimals keeps a tenth of a strike interval, which is fine enough to sit
+     between strikes and coarse enough to type. */
+  function grainStep() {
+    const lad = S.ladder || {};
+    if (lad.grain === 'integer') return 1;
+    const ks = (lad.rows || []).map(r => r.strike).filter(v => isFinite(v)).sort((a, b) => a - b);
+    let gap = Infinity;
+    for (let i = 1; i < ks.length; i++) if (ks[i] - ks[i - 1] > 1e-9) gap = Math.min(gap, ks[i] - ks[i - 1]);
+    if (!isFinite(gap)) return 0.1;
+    // a round-ish tenth of the strike spacing
+    const raw = gap / 10;
+    const mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+    return [1, 2, 5, 10].map(f => f * mag).find(v => v >= raw * 0.999) || mag * 10;
+  }
+  const snap = v => { const st = grainStep(); return Math.round(v / st) * st; };
+  // the step decides how many decimals the box should show
+  const snapFix = v => {
+    const st = grainStep();
+    const dp = Math.max(0, Math.min(6, Math.ceil(-Math.log(st) / Math.LN10)));
+    return +v.toFixed(dp);
+  };
+
   function compute() {
     const fee = (window.WXM && WXM.feeCents ? WXM.feeCents() : 0.5) / 100;
     const instr = instruments(S.ladder, fee);
@@ -469,9 +497,11 @@ window.WXAlloc = (() => {
         const vAt = cy => vHi - (cy - yTop) * scale;
         const move = e => {
           const v = vAt(e.clientY);
-          if (k === 'mu') S.value = Math.round(v * 10) / 10;
+          // both land on the grid the contract settles on, so dragging cannot
+          // produce a value the market has no way of resolving to
+          if (k === 'mu') S.value = snapFix(snap(v));
           // the handle sits at the 95 percent edge, a full band from the centre
-          else S.band = Math.max(0.2, Math.round(Math.abs(v - S.value) * 10) / 10);
+          else S.band = Math.max(grainStep(), snapFix(snap(Math.abs(v - S.value))));
           syncInputs(); draw();
         };
         const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
@@ -865,7 +895,7 @@ window.WXAlloc = (() => {
         sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '. Click a row to open that contract on IBKR.',
         unit: celsius ? '°C' : '°F', grain: 'integer', rows, synthetic: false,
         productConid: ((doc.symbols || {})[it.side] || {}).productConid,
-        defaults: { value: imp != null ? Math.round(imp * 10) / 10 : null, band: celsius ? 2.5 : 4 },
+        defaults: { value: imp, band: celsius ? 3 : 4 },
       });
     }, (doc.city || doc.station) + ' — daily temperature');
   }
@@ -895,16 +925,18 @@ window.WXAlloc = (() => {
         title: name + ' — ' + it.text.replace(/ \(\d+ strikes\)/, ''),
         sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '.' + (productConid ? ' Click a row to open that contract on IBKR.' : ''),
         unit: '', grain: isCount ? 'integer' : 'continuous', rows: parsed, synthetic: false, productConid,
-        defaults: { value: imp != null ? Math.round(imp * 100) / 100 : null, band: Math.max(Math.round(span / 4 * 100) / 100, isCount ? 2 : 0.1) },
+        defaults: { value: imp, band: Math.max(span / 4, isCount ? 2 : 0.1) },
       });
     }, ($('#allocMarket').selectedOptions[0] || {}).text || id);
   }
 
   function setLadder(lad) {
     S.ladder = lad;
+    // the grain belongs to the ladder, so the defaults are rounded after it is
+    // in place rather than by each picker
     if (lad.defaults) {
-      if (lad.defaults.value != null) S.value = lad.defaults.value;
-      if (lad.defaults.band != null) S.band = lad.defaults.band;
+      if (lad.defaults.value != null) S.value = snapFix(snap(lad.defaults.value));
+      if (lad.defaults.band != null) S.band = Math.max(grainStep(), snapFix(snap(lad.defaults.band)));
     }
     const t = $('#allocTitle'); if (t) t.textContent = lad.title;
     const st = $('#allocAsof'); if (st) st.textContent = lad.sub || '';
@@ -913,8 +945,9 @@ window.WXAlloc = (() => {
 
   function syncInputs() {
     const v = $('#allocValue'), b = $('#allocBand'), bu = $('#allocBudget');
-    if (v) v.value = S.value;
-    if (b) b.value = S.band;
+    const st = grainStep();
+    if (v) { v.value = S.value; v.step = st; }
+    if (b) { b.value = S.band; b.step = st; b.min = st; }
     if (bu) bu.value = S.budget;
   }
 
@@ -922,8 +955,15 @@ window.WXAlloc = (() => {
   function init() {
     tip = WXC.tooltip();
     const v = $('#allocValue'), b = $('#allocBand'), bu = $('#allocBudget');
-    if (v) v.oninput = () => { const x = parseFloat(v.value); if (isFinite(x)) { S.value = x; draw(); } };
-    if (b) b.oninput = () => { const x = parseFloat(b.value); if (isFinite(x) && x > 0) { S.band = x; draw(); } };
+    if (v) {
+      v.oninput = () => { const x = parseFloat(v.value); if (isFinite(x)) { S.value = x; draw(); } };
+      // snapping on the way in would fight a reader typing 8 on the way to 88
+      v.onchange = () => { const x = parseFloat(v.value); if (isFinite(x)) { S.value = snapFix(snap(x)); syncInputs(); draw(); } };
+    }
+    if (b) {
+      b.oninput = () => { const x = parseFloat(b.value); if (isFinite(x) && x > 0) { S.band = x; draw(); } };
+      b.onchange = () => { const x = parseFloat(b.value); if (isFinite(x) && x > 0) { S.band = Math.max(grainStep(), snapFix(snap(x))); syncInputs(); draw(); } };
+    }
     if (bu) bu.oninput = () => { const x = parseFloat(bu.value); if (isFinite(x) && x >= 1 && x <= 1e6) { S.budget = x; draw(); } };
     const wrap = $('#allocWrap'), ctl = $('#allocCtl');
     if (wrap && ctl && WXC.expander) ctl.appendChild(WXC.expander(wrap, 'Expand the chart'));

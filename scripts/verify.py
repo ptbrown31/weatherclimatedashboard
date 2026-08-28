@@ -105,7 +105,7 @@ def run(no_build: bool) -> int:
                 errs = errors_of(page)
                 # ---- standalone pages
                 pages = [("index.html", "#map path", "map geometry"), ("city.html?station=KLAX", "#chart path", "city series"),
-                         ("hurricane.html", "#basin path", "basin geography"), ("scorecard.html", "#overall table", "scorecard table"),
+                         ("hurricane.html", "#basin path", "basin geography"), ("scorecard.html", "#standChart rect", "the standings bars"),
                          ("climate.html", "#panels svg path", "climate series"),
                          ("agriculture.html", "#panels svg path", "crop yield series"),
                          ("weather.html", "#panels svg path", "weather series"),
@@ -555,9 +555,15 @@ def run(no_build: bool) -> int:
                         and page.locator("a[href='faq.html#sources']").count() == 1,
                         about_txt[:70])
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1800)
-                chk.add(f"{scheme} scorecard: it is on the daily temperatures page",
-                        page.locator("#divsvg g").count() > 10 and page.locator("#standings table tr").count() > 2,
-                        f"rows={page.locator('#divsvg g').count()}")
+                chk.add(f"{scheme} scorecard: the figure is on the daily temperatures page",
+                        page.locator("#divsvg g").count() > 10, f"rows={page.locator('#divsvg g').count()}")
+                chk.add(f"{scheme} scorecard: the standings are not on it, and it says where they are",
+                        page.locator("#standings").count() == 0
+                        and page.locator("a[href='accuracy.html']").count() >= 1, "")
+                chk.add(f"{scheme} map: the dot key sits under the map it explains",
+                        page.evaluate("""() => { const m = document.querySelector('#map').getBoundingClientRect();
+                          const k = [...document.querySelectorAll('.wrap p.cap')].find(x => x.textContent.includes('running warmer'));
+                          return !!k && k.getBoundingClientRect().top - m.bottom < 140; }"""), "")
                 chk.add(f"{scheme} scorecard: the map keeps its own status strip",
                         page.locator("#pageStatus .status").count() >= 1, "")
                 chk.add(f"{scheme} roster: Colorado Springs is off the board",
@@ -1255,13 +1261,14 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} scorecard: a day still ahead keeps the consensus centre",
                         any(x == "consensus median" for x in ax2), str(ax2[:2]))
                 page.locator("#divControls button").first.click(); page.wait_for_timeout(400)
-                ns = page.eval_on_selector_all("#standings table tr td:nth-child(6)", "e=>e.map(x=>x.textContent)")
-                real = [x for x in ns if x and x != "\u2014"]
-                chk.add(f"{scheme} standings: every tool is ranked on the same sample",
-                        len(real) >= 3 and len(set(real)) == 1, str(ns))
+                page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(1600)
+                chk.add(f"{scheme} standings: they are on the accuracy page, beside the argument",
+                        page.locator("#standChart rect[data-key]").count() >= 4,
+                        str(page.locator("#standChart rect[data-key]").count()))
                 chk.add(f"{scheme} standings: the page says the sample is matched",
                         "Matched sample" in page.locator("#standings").inner_text(),
                         page.locator("#standings").inner_text()[:70])
+                page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1400)
                 # ---- the divergence figure: four views, ranking column and hover
                 fig_rows = page.locator("#divsvg g").count()
                 chk.add(f"{scheme} scorecard: divergence figure draws a row per station", fig_rows >= 20, f"rows={fig_rows}")
@@ -1294,17 +1301,19 @@ def run(no_build: bool) -> int:
                 page.locator("#divControls button").first.click(); page.wait_for_timeout(250)
                 col = page.locator("#divsvg text", has_text="Consensus error").count()
                 chk.add(f"{scheme} scorecard: the scored view ranks by consensus error", col == 1, f"header={col}")
-                srows = page.locator("#standings table tr").count()
-                chk.add(f"{scheme} scorecard: the standings rank every scored tool", srows >= 4, f"rows={srows}")
-                page.locator("#standings table tr").nth(1).locator("td").nth(2).hover(force=True); page.wait_for_timeout(150)
+                sbars = page.locator("#standChart rect[data-key]").count()
+                chk.add(f"{scheme} scorecard: the standings rank every scored tool as bars", sbars >= 4, f"bars={sbars}")
+                # ranked best first, so the bars must not shorten going down
+                widths = page.eval_on_selector_all("#standChart rect[data-key]", "e=>e.map(x=>+x.getAttribute('width'))")
+                chk.add(f"{scheme} scorecard: the standings bars run shortest first",
+                        all(widths[i] <= widths[i + 1] + 0.5 for i in range(len(widths) - 1)), str([round(w) for w in widths]))
+                page.locator("#standChart rect[data-key]").first.hover(force=True); page.wait_for_timeout(150)
                 t_sd = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hover: a standings row shows both sides' statistics", "MAE" in t_sd and "daily low" in t_sd, t_sd[:80])
-                page.locator("#overall td").nth(2).hover(force=True); page.wait_for_timeout(120)
-                t_ov = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hover: scorecard overall cell shows the source's statistics", "all stations" in t_ov and "MAE" in t_ov, t_ov[:80])
-                page.locator("#days td").nth(5).hover(force=True); page.wait_for_timeout(120)
-                t_day = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hover: scorecard day cell shows cycle and lead", "Cycle" in t_day and "Lead" in t_day, t_day[:80])
+                chk.add(f"{scheme} hover: a standings bar shows both sides' statistics", "MAE" in t_sd and "daily low" in t_sd, t_sd[:80])
+                chk.add(f"{scheme} scorecard: the skill tables are gone and the station record is pointed to",
+                        page.locator("#overall").count() == 0 and page.locator("#stations").count() == 0
+                        and page.locator("#days").count() == 0
+                        and "station’s own page" in page.locator(".wrap").inner_text(), "")
                 # ---- map hover: a station dot and a shading cell
                 page.goto(f"{srv.url}/index.html")
                 page.wait_for_timeout(900)

@@ -24,6 +24,26 @@ window.WXCityScore = (() => {
     { k: 'fx', name: 'ForecastEx implied', col: 'var(--accent)' },
   ];
   const DAYS = 7;
+  const TABLE_DAYS = 14;
+  /* The error columns get their own scale, and it is divergent.
+
+     A forecast that ran three degrees warm and one that ran three degrees cold
+     are opposite mistakes, and on the temperature ramp they were near enough
+     the same colour. Warm errors run red, cold errors blue, and zero is the
+     paper — so the sign is visible before the number is read. The scale is
+     fixed at five degrees rather than fitted to the table, so a column's
+     colour means the same thing on a calm week as on a wild one. */
+  const ERR_MAX = 5;
+  function errColor(v) {
+    if (v == null || !isFinite(v)) return null;
+    const t = Math.max(-1, Math.min(1, v / ERR_MAX));
+    const a = Math.abs(t);
+    // pale at zero, saturated at five degrees; the same warm/cool pair the
+    // rest of the site uses for a signed temperature difference
+    const c = t >= 0 ? [178, 24, 43] : [33, 102, 172];
+    const w = 0.10 + 0.62 * a;
+    return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + w.toFixed(3) + ')';
+  }
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const dlab = s => MON[+String(s).slice(5, 7) - 1] + ' ' + (+String(s).slice(8, 10));
   let tip = null;
@@ -186,7 +206,13 @@ window.WXCityScore = (() => {
       host.appendChild(h('p', { class: 'cap', text: 'No scored days for this station yet.' }));
       return;
     }
-    const days = st.days;
+    /* The last fortnight, not the whole record.
+
+       The table grows by a row a day and had no end; two weeks is as far back
+       as a reader asking "how has this station been running" is looking, and
+       it keeps the table on one screen. The chart above covers the last three
+       complete days; this covers the two weeks around them. */
+    const days = st.days.slice(0, TABLE_DAYS);
     // one temperature scale for the whole table, so a cell's colour means the
     // same thing in every column
     const all = [];
@@ -230,14 +256,17 @@ window.WXCityScore = (() => {
           if (i === 0) td.style.borderLeftColor = sr.col;
           const c = tempColor(x[vk], lo, hi); if (c) { td.style.background = c; td.style.color = '#14202b'; }
           tr.appendChild(td);
-          tr.appendChild(h('td', { class: 'num err', text: sgn(x[ek]) }));
+          const etd = h('td', { class: 'num err', text: sgn(x[ek]) });
+          const ec = errColor(x[ek]);
+          if (ec) { etd.style.background = ec; etd.style.color = 'var(--ink)'; }
+          tr.appendChild(etd);
         });
       });
       t.appendChild(tr);
     });
     host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
     host.appendChild(h('p', { class: 'cap',
-      text: 'The ' + days.length + ' scored day' + (days.length === 1 ? '' : 's') + ' at this station, in '
+      text: 'The last ' + days.length + ' scored day' + (days.length === 1 ? '' : 's') + ' at this station, in '
             + (st.unit || '°F') + '. Every tool is read at ONE moment: six in the evening, this station\u2019s own '
             + 'time, the day before. What differs is how stale each one\u2019s standing run was by then \u2014 hourly '
             + 'guidance half an hour, a four-times-daily model several \u2014 and the hours under each name are that '
@@ -245,7 +274,9 @@ window.WXCityScore = (() => {
             + 'artefact of the scoring. The market column is the last quote before the same moment. '
             + 'Every temperature is tinted on the same scale the national map uses, so the coldest reading in the '
             + 'table is the palest and the warmest the deepest. err is the forecast minus what was observed, so a '
-            + 'positive number is a forecast that ran warm. A dash is a day that tool was not archived for.' }));
+            + 'positive number is a forecast that ran warm; those columns carry their own scale, red for warm and '
+            + 'blue for cold against a five-degree miss, so the sign of an error reads before the number does. '
+            + 'A dash is a day that tool was not archived for.' }));
   }
 
   function init() { tip = WXC.tooltip(); }

@@ -24,6 +24,12 @@
 </div>
 <div class="card"><svg id="map" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="legend"></div>
+<p class="cap" style="margin:6px 0 0"><span class="chip" style="background:var(--warm)"></span>running warmer
+<span class="chip" style="background:var(--cool)"></span>running cooler &middot; grey means no listed contracts
+or no bids yet. Colour is the sign of the market-implied median minus the NWS forecast for the same day and
+size is the gap. The market has sat below the NWS forecast on highs most days so far, so most dots are usually
+blue and the size is what varies. On the last view colour is instead the sign of observed-so-far minus the NWS
+high issued for the day.</p>
 <div id="modeTitle" style="margin-top:8px"></div>
 <p class="sub">Each dot shows where the exchange&rsquo;s market-implied median sits against the National Weather
 Service forecast for the same day with a bias removed from the National Weather Service.</p>
@@ -49,31 +55,10 @@ behind it; click to pin the box.</p>
 <div class="key" id="divKey"></div>
 <p class="cap" id="divCap"></p>
 
-<div class="secttl">STANDINGS OVER THE LAST SCORED WEEK</div>
-<p class="cap" style="margin-top:0">Why a market price can be a forecast at all, and why it can beat the products it
-is built on: <a href="accuracy.html">the argument</a>. This page is the measured record behind it.</p>
-<div id="standings"></div>
-
-<div class="secttl">ACCUMULATED SKILL</div>
-<p class="cap" id="since"></p>
-<div id="overall"></div>
-<div class="secttl">BY STATION</div>
-<div class="card" style="padding:0"><div id="stations"></div></div>
-<p class="cap">NWS is the day/night forecast product; NBM is the National Blend of Models&rsquo; own daily max and
-min; GFS MOS is a single-model statistical product with no forecaster editing; LAMP is observation-updated
-hourly guidance with a 25-hour horizon. NBM is the guidance forecasters start from when editing the NWS
-grids, so those two are related, not independent. The ForecastEx line in the figure is the strike where the
-Yes price crosses 50&cent;, read from the last quote before local midnight; it is a market, not a forecast
-product, so it is drawn in the figure but left out of the skill statistics. The record begins the day this
-site&rsquo;s archive started; it grows by one day every day.</p>
+<p class="cap">How each tool has actually scored over the last week: <a href="accuracy.html">the standings</a>,
+on the accuracy page.</p>
 
 <div class="how">
-<div><h3>THE DOTS</h3><p>One dot per station. Colour is the sign of the market-implied median minus the NWS
-forecast for the same day and size is the gap; grey means no listed contracts or no bids yet. The market has
-sat below the NWS forecast on highs most days so far, so most dots are usually blue; the size is what varies.
-The last view is the exception: there colour is the sign of observed-so-far minus the NWS high issued for the
-day.</p>
-<p><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p></div>
 <div><h3>THE SHADING</h3><p>The pale field is the NWS forecast, cool blues to warm reds, interpolated between the
 listed stations. It is derived here, not an NWS product; the official field is the NDFD grid.</p></div>
 <div><h3>A LABEL</h3><p><b>Philadelphia 88&deg; (&minus;5)</b> reads: 88&deg;, five degrees below the reference.

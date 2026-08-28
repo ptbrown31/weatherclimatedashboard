@@ -185,10 +185,11 @@ window.WXScore = (() => {
 
   // ---------------------------------------------------------------- the figure
   function drawFigure() {
+    const host = $('#divergence'); if (!host) return;
     const v = VIEWS.find(x => x.key === view);
     const built = rows(v);
     const R = built.rows.slice();
-    const host = $('#divergence'); host.innerHTML = '';
+    host.innerHTML = '';
     const cap = $('#divCap');
     if (!R.length) {
       host.appendChild(h('p', { class: 'cap', text: v.when === 'past' ? 'No scored day yet.' : 'No forecasts for tomorrow yet.' }));
@@ -348,51 +349,80 @@ window.WXScore = (() => {
     const dates = Object.keys(seen).sort();
     return { rows: rowsOut, days: dates.length, from: dates[0], to: dates[dates.length - 1], dropped: dropped };
   }
+  /* The standings, as ranked bars.
+
+     This was a table of five columns and it read as a table: the reader had to
+     compare numbers down a column to see who was ahead. The daily letter draws
+     the same figures as horizontal bars ranked best first, which answers "who
+     is closest" before anything is read, and this is that figure. The other
+     columns did not vanish — bias, the share within two degrees, the sample
+     size — they moved into the box a bar hands over on hover. */
   function drawStandings() {
     const host = $('#standings'); if (!host) return;
     host.innerHTML = '';
     const st = standings();
-    if (!st.rows.length) { host.appendChild(h('p', { class: 'cap', text: 'No scored days yet.' })); return; }
-    const t = h('table');
-    t.appendChild(h('tr', {}, [h('th', { text: '' }), h('th', { text: 'Tool' }), h('th', { class: 'num', text: 'MAE, highs' }),
-      h('th', { class: 'num', text: 'bias' }), h('th', { class: 'num', text: '≤2°' }), h('th', { class: 'num', text: 'n' }),
-      h('th', { class: 'num', text: 'MAE, lows' })]));
-    st.rows.forEach((r, i) => {
-      const tr = h('tr', {}, [
-        h('td', { class: 'num', text: r.high ? String(i + 1) : '—' }),
-        h('td', {}, [h('span', { class: 'sw', style: 'background:' + r.s.col }), document.createTextNode(r.s.name)]),
-        h('td', { class: 'num', text: r.high ? degs(r.high.mae) : '—' }),
-        h('td', { class: 'num', text: r.high ? biasWord(r.high.bias).split(' ·')[0] : '—' }),
-        h('td', { class: 'num', text: r.high ? pct(r.high.within2) : '—' }),
-        h('td', { class: 'num', text: r.high ? String(r.high.n) : '—' }),
-        h('td', { class: 'num', text: r.low ? degs(r.low.mae) : '—' })]);
-      tr.dataset.key = r.s.k;
-      t.appendChild(tr);
+    const rows = st.rows.filter(r => r.high);
+    if (!rows.length) { host.appendChild(h('p', { class: 'cap', text: 'No scored days yet.' })); return; }
+
+    const W = 960, rowH = 34, T = 16, B = 44, L = 232, R = 906;
+    const H = T + rows.length * rowH + B;
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'ts', id: 'standChart' });
+    const max = Math.max(...rows.map(r => r.high.mae));
+    // a round upper bound, so the ticks land on readable numbers
+    const step = max > 6 ? 2 : max > 3 ? 1 : 0.5;
+    const top = Math.ceil(max / step) * step + step * 0.5;
+    const x = v => L + (v / top) * (R - L);
+
+    for (let v = 0; v <= top + 1e-9; v += step) {
+      svg.appendChild(el('line', { x1: x(v), x2: x(v), y1: T, y2: T + rows.length * rowH, class: 'grid' }));
+      svg.appendChild(txt(fmt(v), { x: x(v), y: T + rows.length * rowH + 16, 'text-anchor': 'middle', class: 'ax' }));
+    }
+    svg.appendChild(txt('Mean absolute error on the daily high, °F', { x: (L + R) / 2, y: H - 8,
+                                                                      'text-anchor': 'middle', class: 'ax' }));
+    /* Competition ranking on the printed numbers, so a tie reads as a tie.
+       Ranking by sort position said "second" about a dead heat. */
+    const shown = r => Math.round(r.high.mae * 100) / 100;
+    rows.forEach((r, i) => {
+      const y0 = T + i * rowH;
+      const rank = 1 + rows.filter(o => shown(o) < shown(r)).length;
+      const bh = 19, by = y0 + (rowH - bh) / 2;
+      const isFx = r.s.k === 'fx';
+      svg.appendChild(txt(rank + '.', { x: 26, y: by + 14, class: 'ax', 'font-weight': 700,
+                                        fill: isFx ? 'var(--accent)' : 'var(--muted)' }));
+      svg.appendChild(txt(r.s.name, { x: 46, y: by + 14, 'font-size': 12,
+                                      'font-weight': isFx ? 700 : 400,
+                                      fill: isFx ? 'var(--accent)' : 'var(--ink)' }));
+      const bar = el('rect', { x: L, y: by, width: Math.max(x(r.high.mae) - L, 1), height: bh, rx: 2,
+                               fill: isFx ? 'var(--accent)' : r.s.col, opacity: isFx ? 0.95 : 0.62 });
+      bar.dataset.key = r.s.k;
+      svg.appendChild(bar);
+      svg.appendChild(txt(degs(r.high.mae), { x: x(r.high.mae) + 6, y: by + 14, 'font-size': 11,
+                                              'font-weight': 600, fill: 'var(--ink)', 'pointer-events': 'none' }));
     });
-    bindTips(t, (k) => {
-      const r = st.rows.find(x => x.s.k === k); if (!r) return null;
-      return tip.rows(r.s.name + ' — the last ' + st.days + ' scored days',
-        (r.high ? statRows(r.high) : []).concat(r.low ? statRows(r.low, 'daily low ') : []),
-        r.s.k === 'fx' ? 'the exchange’s implied median, scored the same way as a forecast' : (S.sources || {})[r.s.k]);
+    // one listener for the figure, keyed by the bar under the pointer
+    svg.addEventListener('mousemove', e => {
+      const k = e.target && e.target.dataset && e.target.dataset.key;
+      if (!k) return tip.hide();
+      const r = rows.find(x2 => x2.s.k === k); if (!r) return tip.hide();
+      tip.show(e, tip.rows(r.s.name + ' — the last ' + st.days + ' scored days',
+        statRows(r.high).concat(r.low ? statRows(r.low, 'daily low ') : []),
+        r.s.k === 'fx' ? 'the exchange’s implied median, scored the same way as a forecast' : (S.sources || {})[r.s.k]));
     });
-    host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [t]));
-    const n = st.rows[0] && st.rows[0].high ? st.rows[0].high.n : 0;
-    host.appendChild(h('p', { class: 'cap', text: 'Matched sample: only station-days where every tool has a value are '
-      + 'counted, so n is the same for all of them — ' + n + ' station-days across ' + st.days + ' day'
-      + (st.days === 1 ? '' : 's') + '. Each archive lane started on a different date, so pooling every error a tool '
-      + 'happens to have would score some tools over far more days than others and then rank them against each other. '
-      + 'The window grows by a day every day.' }));
-    const lead = st.rows[0];
-    // the sources are not archived equally deeply, so the ranking is not
-    // like-for-like and the caption has to say so rather than let n speak alone
-    const ns = st.rows.filter(r => r.high).map(r => r.high.n);
+    svg.addEventListener('mouseleave', () => tip.hide());
+    host.appendChild(h('div', { class: 'card' }, [svg]));
+
+    const n = rows[0].high.n;
+    const lead = rows[0];
+    const ns = rows.map(r => r.high.n);
     const uneven = ns.length > 1 && Math.max(...ns) >= 2 * Math.min(...ns);
-    host.appendChild(h('p', { class: 'cap', text: 'Ranked by mean absolute error on the daily high over the ' + st.days +
-      ' scored days from ' + st.from + ' to ' + st.to + ', pooled across every station. ' +
-      (lead && lead.high ? lead.s.name + ' is closest at ' + degs(lead.high.mae) + '. ' : '') +
-      'Error is forecast minus observed, so a positive bias runs warm. ' +
-      (uneven ? 'The sources are not scored on the same days: the archive holds fewer cycles for some of them, so n differs by source and the ranking is not like-for-like. ' +
-        st.rows.filter(r => r.high).map(r => r.s.name + ' ' + r.high.n).join(', ') + '.' : '') }));
+    host.appendChild(h('p', { class: 'cap', text: 'Ranked by mean absolute error on the daily high over the ' + st.days
+      + ' scored day' + (st.days === 1 ? '' : 's') + ' from ' + st.from + ' to ' + st.to + ', pooled across every station. '
+      + lead.s.name + ' is closest at ' + degs(lead.high.mae) + '. Matched sample: only station-days where every tool has '
+      + 'a value are counted, so n is the same for all of them — ' + n + ' station-days. Each archive lane started on a '
+      + 'different date, so pooling every error a tool happens to have would score some tools over far more days than '
+      + 'others and then rank them against each other. Hover a bar for its bias, its share within two degrees, and the '
+      + 'same figures on the daily low. The window grows by a day every day.'
+      + (uneven ? ' The sources are not scored on the same days: ' + rows.map(r => r.s.name + ' ' + r.high.n).join(', ') + '.' : '') }));
   }
 
   // ------------------------------------------------------- the skill tables
@@ -500,7 +530,9 @@ window.WXScore = (() => {
     if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440)); }
     S = r.data; SUM = sres.data;
     const btns = {};
-    VIEWS.forEach(v => {
+    // the accuracy page carries the standings alone; the view buttons and the
+    // divergence figure belong to the daily temperatures page
+    if ($('#divControls')) VIEWS.forEach(v => {
       const b = h('button', { class: 'vbtn' + (v.key === view ? ' on' : ''), text: v.label });
       b.onclick = () => {
         view = v.key;
@@ -515,8 +547,9 @@ window.WXScore = (() => {
       $('#divControls').appendChild(b);
     });
     if (!S || !S.stations) {
-      $('#overall').textContent = 'No scorecard available yet.';
-      $('#divergence').textContent = '';
+      const ov = $('#overall'); if (ov) ov.textContent = 'No scorecard available yet.';
+      const sd = $('#standings'); if (sd) sd.textContent = 'No scorecard available yet.';
+      const dv = $('#divergence'); if (dv) dv.textContent = '';
       // with no scored day yet only the forward views have anything to draw
       if (SUM) {
         if (view !== 'thigh' && view !== 'tlow') view = 'thigh';
@@ -525,8 +558,13 @@ window.WXScore = (() => {
       }
       return;
     }
-    $('#since').textContent = 'Scored from ' + S.firstDay + ' (the day the archive started). ' + S.method + '.';
-    drawFigure(); drawStandings(); drawOverall(); drawStations();
+    const since = $('#since');
+    if (since) since.textContent = 'Scored from ' + S.firstDay + ' (the day the archive started). ' + S.method + '.';
+    // the divergence figure and the standings sit on different pages now, and
+    // the skill tables were dropped; each draws only where it has a host
+    drawFigure(); drawStandings();
+    if ($('#overall')) drawOverall();
+    if ($('#stations')) drawStations();
     cur = (location.hash || '').slice(1);
     if (!S.stations[cur]) cur = Object.keys(S.stations)[0];
     drawDays();
