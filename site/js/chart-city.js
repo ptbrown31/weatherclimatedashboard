@@ -106,7 +106,8 @@ window.WXCity = (() => {
       ['NBM high / low, tomorrow', c.nbmHighTomorrow != null ? WXC.deg(c.nbmHighTomorrow) + ' / ' + WXC.deg(c.nbmLowTomorrow) : null],
       ['Implied high (' + (WXM.live() ? 'ForecastEx' : 'placeholder') + ')', m ? (m.impliedHigh != null ? WXC.deg(m.impliedHigh) + gap(m.impliedHigh, c.nwsHighTomorrow) : (m.edgeHigh ? 'beyond the ladder (' + m.edgeHigh + ')' : impliedState(m))) : null],
       ['Implied low (' + (WXM.live() ? 'ForecastEx' : 'placeholder') + ')', m ? (m.impliedLow != null ? WXC.deg(m.impliedLow) + gap(m.impliedLow, c.nwsLowTomorrow) : (m.edgeLow ? 'beyond the ladder (' + m.edgeLow + ')' : impliedState(m))) : null],
-      ['NWS high issued for today', c.nwsIssuedHigh != null ? WXC.deg(c.nwsIssuedHigh) : (c.nwsHighToday != null ? WXC.deg(c.nwsHighToday) + ' (standing)' : null)],
+      ['NWS high issued for today', c.nwsIssuedHigh != null ? WXC.deg(c.nwsIssuedHigh) : null],
+      ['Expected high today', c.nwsHighToday != null ? WXC.deg(c.nwsHighToday) + (c.nwsHighTodayRunning ? ' (already recorded)' : '') : null],
       ['Observed so far today', c.obsHighSoFar != null ? WXC.deg(c.obsHighSoFar) + ' / ' + WXC.deg(c.obsLowSoFar) : null],
       ['Latest report', c.obsLatest && c.obsLatest.t ? (c.obsLatest.type || 'METAR') + ' ' + WXC.clock(Date.parse(c.obsLatest.t), c.tz) : null],
     ];
@@ -148,7 +149,10 @@ window.WXCity = (() => {
   }
   function dotValue(c) {
     if (WXM.on()) { const m = WXM.implied(c); return m ? m.divHigh : null; }
-    const ref = c.nwsIssuedHigh != null ? c.nwsIssuedHigh : c.nwsHighToday;
+    // only the issued forecast, which is what the title claims. The standing
+    // figure folds the observation into itself, so the difference would be zero
+    // by construction rather than a comparison.
+    const ref = c.nwsIssuedHigh;
     return (c.obsHighSoFar != null && ref != null) ? Math.round((c.obsHighSoFar - ref) * 10) / 10 : null;
   }
   function drawPick(base) {
