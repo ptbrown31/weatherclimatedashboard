@@ -160,7 +160,7 @@ window.WXAccuracy = (() => {
         + 'strike where the Yes price crosses 50 cents, because these contracts pay when the recorded high is '
         + 'strictly above the strike, so a market certain of 92 prices the 91 and 92 strikes a dollar apart and '
         + 'the crossing falls halfway between them. '
-        + 'Read the shaded end with care: a day\u2019s high usually happens in the afternoon, so within a few '
+        + 'In the shaded end the high has usually already happened, so within a few '
         + 'hours of midnight it has already been recorded and the market is pricing something that has happened '
         + 'rather than forecasting it. The market\u2019s error goes to nothing there and the gap reaches a hundred '
         + 'per cent, which is real but is not forecast skill. The part of this chart that compares two forecasts '

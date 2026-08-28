@@ -228,10 +228,10 @@ window.WXCityDays = (() => {
         + '<span>solid is the forecast high, dashed the low</span>';
     }
     if (cap) {
-      cap.textContent = 'The last ' + shown.length + ' complete days at this station, run together \u2014 today is '
-        + 'still running and belongs to the chart above. The trace is the hourly '
+      cap.textContent = 'The last ' + shown.length + ' complete days at this station, end to end. Today is '
+        + 'still running and is not included. The trace is the hourly '
         + 'METAR record, the same one settlement reads. The level lines are each source’s high and low for that '
-        + 'day as it stood at six in the evening the day before — one moment for every source and every day, so '
+        + 'day as it stood at six in the evening the day before, one moment for every source and every day, so '
         + 'the days can be compared with each other. The distance from a level line to the trace under it is that '
         + 'day’s error. Hover a level for the number.';
     }

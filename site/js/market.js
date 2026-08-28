@@ -31,7 +31,7 @@ window.WXM = (() => {
   }
   const on = () => mode() !== 'off';
   const live = () => mode() === 'live';
-  const PLACEHOLDER = 'placeholder, not a market value';
+  const PLACEHOLDER = 'placeholder value';
   const S = { station: null, snap: null, summary: null, groups: {} };
 
   // ---- loading (live only; the placeholder needs nothing)

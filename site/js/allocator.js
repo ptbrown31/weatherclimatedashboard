@@ -34,9 +34,9 @@ window.WXAlloc = (() => {
   /* gamma is relative risk aversion; 1/gamma is the equivalent Kelly fraction,
      so these three are quarter-Kelly, Kelly, and double-Kelly. */
   const SCEN = [
-    { key: 'conservative', name: 'Conservative', gamma: 4, col: 'var(--cool)', blurb: 'hedges widest — the smoothest payout' },
-    { key: 'middle', name: 'Middle', gamma: 1, col: 'var(--lamp)', blurb: 'growth-optimal — Kelly’s own rule' },
-    { key: 'aggressive', name: 'Aggressive', gamma: 0.5, col: 'var(--nbm)', blurb: 'concentrated — pays big only near the prediction' },
+    { key: 'conservative', name: 'Conservative', gamma: 4, col: 'var(--cool)', blurb: 'hedges widest, for the smoothest payout' },
+    { key: 'middle', name: 'Middle', gamma: 1, col: 'var(--lamp)', blurb: 'growth-optimal, Kelly’s own rule' },
+    { key: 'aggressive', name: 'Aggressive', gamma: 0.5, col: 'var(--nbm)', blurb: 'concentrated, paying big only near the prediction' },
   ];
   let tip = null;
 
@@ -359,8 +359,8 @@ window.WXAlloc = (() => {
       if (bid < ask) rows.push({ strike: k, label: 'Above ' + k, dir: 1, bid, ask, mid: (bid + ask) / 2 });
     }
     return {
-      title: 'A made-up daily-high ladder',
-      sub: 'Example prices, invented for teaching — they are not a market. Load a live ladder above to work on real prices.',
+      title: 'Made-up daily-high ladder',
+      sub: 'Example prices, invented for teaching. Load a live ladder above to work on real prices.',
       unit: '°F', grain: 'integer', rows, synthetic: true,
       defaults: { value: 88, band: 4 },
     };
@@ -858,10 +858,10 @@ window.WXAlloc = (() => {
       } else {
         msg = 'The ' + scSel.name.toLowerCase() + ' split buys ' + nct + (nct === 1 ? ' contract' : ' contracts') + ' across '
           + sel.hold.length + (sel.hold.length === 1 ? ' line' : ' lines') + ' for ' + fm$(sel.spent)
-          + (sel.cash > 0.005 ? ' — the ' + fm$(sel.cash).replace('$0.', '') + '¢ left cannot buy a whole contract' : '')
-          + '. Expected values are under the user’s own curve, not the market’s.';
+          + (sel.cash > 0.005 ? '. The ' + fm$(sel.cash).replace('$0.', '') + '¢ left cannot buy a whole contract' : '')
+          + '. Expected values are under the user’s own curve.';
         if (R.skipped) {
-          msg += ' ' + R.skipped + ' of the ' + R.all.length + ' buyable sides are drawn faint and left out: the market puts them '
+          msg += ' ' + R.skipped + ' of the ' + R.all.length + ' buyable sides are drawn faint and left out, because the market puts them '
             + 'outside 5 to 95 percent, where the book thins and a position could not reliably be filled.';
         }
         if (R.cover < 0.995) {

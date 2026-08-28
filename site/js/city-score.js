@@ -293,11 +293,10 @@ window.WXCityScore = (() => {
     host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
     host.appendChild(h('p', { class: 'cap',
       text: 'The last ' + days.length + ' scored day' + (days.length === 1 ? '' : 's') + ' at this station, in '
-            + (st.unit || '°F') + '. Every tool is read at ONE moment: six in the evening, this station\u2019s own '
-            + 'time, the day before. What differs is how stale each one\u2019s standing run was by then \u2014 hourly '
-            + 'guidance half an hour, a four-times-daily model several \u2014 and the hours under each name are that '
-            + 'run\u2019s distance from midnight. That is a real difference between the products rather than an '
-            + 'artefact of the scoring. The market column is the last quote before the same moment. '
+            + (st.unit || '°F') + '. Every tool is read at one moment, six in the evening, this station\u2019s own '
+            + 'time, the day before. What differs is how stale each one\u2019s standing run was by then. Hourly guidance '
+            + 'is half an hour old, a four-times-daily model several hours, and the hours under each name are that '
+            + 'run\u2019s distance from midnight. The market column is the last quote before the same moment. '
             + 'Every temperature is tinted on the same scale the national map uses, so the coldest reading in the '
             + 'table is the palest and the warmest the deepest. err is the forecast minus what was observed, so a '
             + 'positive number is a forecast that ran warm; those columns carry their own scale, red for warm and '

@@ -487,12 +487,12 @@ window.WXScore = (() => {
     const uneven = ns.length > 1 && Math.max(...ns) >= 2 * Math.min(...ns);
     host.appendChild(h('p', { class: 'cap', text: 'Ranked by mean absolute error on the daily high over the ' + st.days
       + ' scored day' + (st.days === 1 ? '' : 's') + ' from ' + st.from + ' to ' + st.to + ', pooled across every station. '
-      + lead.s.name + ' is closest at ' + degs(lead.high.mae) + '. Matched sample: only station-days where every tool has '
-      + 'a value are counted, so n is the same for all of them — ' + n + ' station-days. Each archive lane started on a '
-      + 'different date, so pooling every error a tool happens to have would score some tools over far more days than '
-      + 'others and then rank them against each other. Hover a bar for its bias, its share within two degrees, and the '
-      + 'same figures on the daily low. The window grows by a day every day.'
-      + (uneven ? ' The sources are not scored on the same days: ' + rows.map(r => r.s.name + ' ' + r.high.n).join(', ') + '.' : '') }));
+      + lead.s.name + ' is closest at ' + degs(lead.high.mae) + '. The sample is matched, so only station-days where '
+      + 'every tool has a value are counted and n is the same for all of them, ' + n + ' station-days. Each archive lane '
+      + 'started on a different date, so pooling every error a tool happens to have would score some tools over far more '
+      + 'days than others and then rank them against each other. Hover a bar for its bias, its share within two degrees, '
+      + 'and the same figures on the daily low. The window grows by a day every day.'
+      + (uneven ? ' The sources are not scored on the same days. ' + rows.map(r => r.s.name + ' ' + r.high.n).join(', ') + '.' : '') }));
   }
 
   // ------------------------------------------------------- the skill tables

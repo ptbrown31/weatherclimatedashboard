@@ -383,7 +383,7 @@ window.WXClimate = (() => {
         note.style.display = 'inline-block';
         note.textContent = 'A straight line fitted to the last ' + fc.windowYears + ' years of the record'
           + (fc.seasonal ? ', with the average seasonal cycle laid on top' : '')
-          + '. The shaded band is twice the scatter that fit leaves behind and does not widen: the model claims '
+          + '. The shaded band is twice the scatter that fit leaves behind and does not widen, because the model carries '
           + 'nothing beyond the recent line continued. The projection is fitted from the record and adds '
           + 'nothing to it.'
           + (fc.capped ? ' It stops short of the furthest strike.' : '');
@@ -488,7 +488,7 @@ window.WXClimate = (() => {
           ['Last 10 ' + MON[r.m] + 's', r.recent == null ? null : fmtV(r.recent) + ' ' + unitShort + ' (' + r.nRecent + ')'],
           ['Whole record', r.full == null ? null : fmtV(r.full) + ' ' + unitShort + ' (' + r.n + ')'],
           ['Latest observed', latestText]],
-          'the average this calendar month has been, carried forward. Not a forecast: it carries no information '
+          'the average this calendar month has been, carried forward. It carries no information '
           + 'about the weather in that month.'));
         return;
       }
@@ -570,8 +570,11 @@ window.WXClimate = (() => {
     const products = WXM.climateProducts(series, off);
     const byKey = {}; products.forEach(p => { byKey[p.seriesKey] = p; });
     PANELS.forEach(([k, title, unit]) => { if (series[k]) panel(host, k, title, unit, series[k], byKey[k], off, (D.sources || {})[k] || ''); });
-    const notes = Object.entries(D.notes || {}).map(([k, v]) => k + ': ' + v).join('; ');
-    $('#foot').textContent = 'Series: NCEI Climate at a Glance global land+ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? (WXM.live() ? ' Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price.' : ' Markers are placeholders, not market values.') : '');
+    // each note is a phrase about how one series reached the page, so it reads
+    // as a sentence once the series is named
+    const seriesName = k => (PANELS.find(p => p[0] === k) || [null, k])[1];
+    const notes = Object.entries(D.notes || {}).map(([k, v]) => seriesName(k) + ' is ' + v).join('. ');
+    $('#foot').textContent = 'Series from NCEI Climate at a Glance global land and ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? (WXM.live() ? ' Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price.' : ' Markers are placeholders, not market values.') : '');
   }
   return { init, panel, priceColor };
 })();

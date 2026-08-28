@@ -43,12 +43,12 @@ svg.ts{width:100%;height:auto;display:block}
 <h1>Position allocation calculator</h1>
 <p class="sub">A tool for understanding what a position spread across an exceedance ladder costs and what it pays
 back. It opens on a made-up example; the picker loads any live ladder on this site. Everything here is arithmetic
-on the numbers the user types and the exchange&rsquo;s public prices &mdash; the site adds no forecast of its own,
+on the numbers the user types and the exchange&rsquo;s public prices. The site adds no forecast of its own,
 and none of this is investment advice.</p>
 
 <div class="secttl" style="margin-top:22px">OVERLAPPING EXCEEDANCE LADDERS</div>
 <p class="sub" style="margin-top:0">For event contracts applied to variables on a continuum, ForecastEx typically
-lists a ladder of overlapping &mdash; that is, non-mutually-exclusive &mdash; exceedance values. In a live
+lists a ladder of overlapping, non-mutually-exclusive exceedance values. In a live
 hurricane wind contract, for example, the exceedance ladder might contain &ge;150, &ge;140, &ge;130, &ge;120 and
 &ge;110&nbsp;mph.</p>
 <p class="sub">If the wind reaches 100&nbsp;mph, all of the Nos pay out and none of the Yeses do. If it reaches
@@ -56,13 +56,13 @@ hurricane wind contract, for example, the exceedance ladder might contain &ge;15
 155&nbsp;mph, all of the Yeses pay out and none of the Nos do.</p>
 <div class="card" id="ladderFig"><svg id="schematic" viewBox="0 0 720 290"></svg></div>
 
-<div class="secttl" style="margin-top:24px">THE CALCULATOR</div>
+<div class="secttl" style="margin-top:24px">CALCULATOR</div>
 <p class="sub" style="margin-top:0">It helps users understand net payouts for different allocations of a position
 across these overlapping exceedance strike ladders, for both hypothetical market prices and actual live prices for
 the contracts of interest. It takes as input the user&rsquo;s prediction, a user-defined measure of uncertainty in
 that prediction, and the amount of capital they want to put up.</p>
 <p class="sub">By default the calculator uses a normal distribution to represent uncertainty. Skewed
-representations are also available, in either direction, for quantities whose misses are not symmetric &mdash; a
+representations are also available, in either direction, for quantities whose misses are not symmetric. A
 wind speed or a rainfall total with a long tail above, a crop yield with a long tail below. Both keep the
 prediction as the median and the stated span as the 95&nbsp;percent interval; what changes is how that span is
 divided between the two sides.</p>
@@ -72,7 +72,7 @@ mispriced relative to that distribution. In the second column the market&rsquo;s
 split, and an arrow runs from it to the value the user&rsquo;s curve implies, so the length of the arrow is the
 disagreement.</p>
 <p class="sub">Allocation is confined to strikes the market prices between 5 and 95&nbsp;percent. Outside that
-range the book thins out and a position sized against those prices could not reliably be filled &mdash; the payout
+range the book thins out and a position sized against those prices could not reliably be filled. The payout
 multiples that make deep strikes look attractive are the least attainable numbers on the board. Strikes outside
 the window stay drawn, faint, and take no capital.</p>
 
@@ -107,7 +107,7 @@ the window stay drawn, faint, and take no capital.</p>
 <div id="allocWrap" class="expandable"><div id="alloc"></div></div>
 <p class="cap" id="allocNote"></p>
 
-<div class="secttl" style="margin-top:24px">THE THREE ALLOCATIONS</div>
+<div class="secttl" style="margin-top:24px">ALLOCATION SCENARIOS</div>
 <p class="sub" style="margin-top:0">Even with a prediction and an uncertainty distribution fixed, the question
 remains how to allocate capital according to a risk appetite. A participant could take an aggressive strategy and
 place the entire position in the few contracts their distribution implies are most mispriced and which carry the
@@ -131,15 +131,15 @@ risk-averse one accepts the possibility of loss and concentrates capital on the 
 centre of the prediction. When the participant&rsquo;s implied fair values and the market&rsquo;s agree, no
 allocation split has an edge over another, and the differences between the scenarios are purely about payout
 smoothness.</p>
-<p class="sub">The whole amount is always committed: the calculator&rsquo;s only decision is where it goes, never
+<p class="sub">The whole amount is always committed, so the calculator&rsquo;s only decision is where it goes, never
 how much of it to hold back. Dollar shares become whole contracts by rounding down, and the loose change then buys
 one contract at a time, best first, until it cannot afford the cheapest thing left. Costs are what a buyer pays
-now &mdash; Yes at one dollar less the No bid, No at one dollar less the Yes bid, the per-side fee inside every
+now, Yes at one dollar less the No bid and No at one dollar less the Yes bid, with the per-side fee inside every
 figure. On quantities settled in whole units, &ldquo;above&nbsp;84&rdquo; is read as the settled figure rounding
 past it, so the working threshold sits half a unit beyond the strike, matching how the contracts settle.</p>
-<p class="sub">What this is not: a forecast, a recommendation, or a fair value. The probabilities belong to the
-user &mdash; the page only does the arithmetic that follows from them, and if those numbers are wrong the expected
-values shown are wrong with them.</p>
+<p class="sub">The probabilities belong to the user. The page does the arithmetic that follows from them, so if
+those numbers are wrong the expected values shown are wrong with them. Nothing here is a forecast, a
+recommendation or a fair value.</p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

@@ -365,7 +365,7 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
                           "points": doc["points"],
                           "source": "USDA Foreign Agricultural Service, Production Supply and Distribution",
                           "note": "World production over world area harvested, which is how the department derives "
-                                  "the world yield; the bulk file carries countries only. Years are the contract's: "
+                                  "the world yield; the bulk file carries countries only. Years follow the contract, so "
                                   "the marketing year the database labels 2025 is the 2026 contract, because the "
                                   "event question names the second year of the marketing year. A contract resolves "
                                   "on the first report after the marketing year ends, and surpassing a threshold "
