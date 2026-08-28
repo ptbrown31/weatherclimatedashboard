@@ -519,9 +519,12 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
     if by_kind["mav"]:
         parsed = gw.parse_mav_block(_read_gz(store, by_kind["mav"][-1]).decode("ascii", "replace"))
         nx = _levels_by_day(_extremes_by_day(parsed, tz), unit)
-        snap["mav"] = {"cycle": _iso(parsed["cycle"]), "rows": _hourly_rows(parsed, unit), "nx": nx,
+        mav_rows = _hourly_rows(parsed, unit)
+        rest_h, rest_l = _max_min_ahead(mav_rows, tz, day, now)
+        snap["mav"] = {"cycle": _iso(parsed["cycle"]), "rows": mav_rows, "nx": nx,
                        "highToday": nx.get(day, {}).get("max"), "lowToday": nx.get(day, {}).get("min"),
-                       "highTomorrow": nx.get(tmw, {}).get("max"), "lowTomorrow": nx.get(tmw, {}).get("min")}
+                       "highTomorrow": nx.get(tmw, {}).get("max"), "lowTomorrow": nx.get(tmw, {}).get("min"),
+                       "highRest": _u(rest_h, unit), "lowRest": _u(rest_l, unit)}
     # ---- as issued before the day began: the hourly trace from each source's
     #      last pre-day cycle, and the level for the day picked per extreme
     cut, ycut = _cutoff(mk["dayStart"]), _cutoff(mk["ydayStart"])
@@ -599,8 +602,10 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
                     # the shading has to agree with the dots drawn over it, and
                     # both are the day's extreme rather than the rest of it
                     seen = _obs_today(store, c["station"], f.get("day"))
-                    hi = _running_today(hi, n.get("highRest"), seen.get("high"), max)
-                    lo = _running_today(lo, n.get("lowRest"), seen.get("low"), min)
+                    if "highRest" in n:
+                        hi = _running_today(hi, n["highRest"], seen.get("high"), max)
+                    if "lowRest" in n:
+                        lo = _running_today(lo, n["lowRest"], seen.get("low"), min)
                 pts.append({**c, "hi": hi, "lo": lo})
                 if f.get(date_key):
                     for_dates[c["station"]] = f[date_key]
@@ -670,6 +675,12 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
             if fc_same:
                 for fld, obs_fld, rest_fld, pick in (("HighToday", "obsHighSoFar", "highRest", max),
                                                      ("LowToday", "obsLowSoFar", "lowRest", min)):
+                    # a source takes part only if it published a rest-of-day
+                    # figure. The key is present and null when the day has no
+                    # hours left, which is different from a source that never
+                    # reports one and whose figure must be left alone.
+                    if rest_fld not in src:
+                        continue
                     seen = row[obs_fld]
                     row[f"{k}{fld}"] = _running_today(row[f"{k}{fld}"], src.get(rest_fld), seen, pick)
                     # whether the day has already reached this figure, which is

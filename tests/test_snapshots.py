@@ -3,6 +3,7 @@ Tests for the daily-extreme parsers, day bucketing and the snapshot builders.
 Fixtures are cut from the 2026-08-21 bulletins. No network.
 """
 import datetime as dt
+import io
 import json
 import os
 import sys
@@ -132,6 +133,44 @@ class DayBucketing(unittest.TestCase):
         self.assertEqual(snapshots._max_min_ahead(rows, tz, "2026-08-28", early), (78.0, 59.0))
         late = snapshots._parse_iso("2026-08-29T04:00:00Z")
         self.assertEqual(snapshots._max_min_ahead(rows, tz, "2026-08-28", late), (None, None))
+
+    def test_a_source_without_a_rest_of_day_figure_is_left_alone(self):
+        """The fold rewrites a source's today figure only when that source
+        published a rest-of-day extreme. A missing key means the source does
+        not report one, which is not the same as a day with no hours left, and
+        treating the two alike replaced every figure with the observation."""
+        def fold(src, row, k):
+            for fld, obs_fld, rest_fld, pick in (("HighToday", "obsHighSoFar", "highRest", max),
+                                                 ("LowToday", "obsLowSoFar", "lowRest", min)):
+                if rest_fld not in src:
+                    continue
+                seen = row[obs_fld]
+                row[f"{k}{fld}"] = snapshots._running_today(row[f"{k}{fld}"], src.get(rest_fld), seen, pick)
+            return row
+
+        row = {"mavHighToday": 81.0, "mavLowToday": 57.0, "obsHighSoFar": 79.0, "obsLowSoFar": 59.0}
+        # no rest keys at all: the source's own figures survive untouched
+        self.assertEqual(fold({}, dict(row), "mav"),
+                         {"mavHighToday": 81.0, "mavLowToday": 57.0, "obsHighSoFar": 79.0, "obsLowSoFar": 59.0})
+        # keys present but null: the day has no hours left, so the record answers
+        out = fold({"highRest": None, "lowRest": None}, dict(row), "mav")
+        self.assertEqual((out["mavHighToday"], out["mavLowToday"]), (79.0, 59.0))
+        # keys present with values: the record and the hours ahead, as usual
+        out = fold({"highRest": 74.0, "lowRest": 74.0}, dict(row), "mav")
+        self.assertEqual((out["mavHighToday"], out["mavLowToday"]), (79.0, 59.0))
+
+    def test_every_source_that_folds_publishes_a_rest_of_day_figure(self):
+        """Whichever sources the builder gives a today figure to must also get
+        highRest and lowRest, or the fold silently skips them."""
+        import re
+        src = io.open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "pipeline", "snapshots.py"), encoding="utf-8").read()
+        body = src[src.index("def build_forecast_snapshot"):src.index("def forecast_job")]
+        for name in ("nws", "nbm", "lamp", "mav"):
+            block = body[body.index('# ---- ' + {"nws": "NWS", "nbm": "NBM", "lamp": "LAMP", "mav": "GFS MOS MAV"}[name]):]
+            block = block[:block.index("# ----", 8)] if "# ----" in block[8:] else block
+            self.assertIn("highRest", block, name + " publishes a today figure without a rest-of-day high")
+            self.assertIn("lowRest", block, name + " publishes a today figure without a rest-of-day low")
 
     def test_obs_today_only_answers_for_the_day_asked(self):
         class FakeStore(object):
