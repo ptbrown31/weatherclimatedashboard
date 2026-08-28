@@ -672,13 +672,20 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
             src = f.get(k) or {}
             for fld in ("highToday", "lowToday", "highTomorrow", "lowTomorrow"):
                 row[f"{k}{fld[0].upper()}{fld[1:]}"] = src.get(fld) if fc_same else None
-            if fc_same:
+            # Only the NWS figures become the day's running extreme, because
+            # those are the ones the map shades by and measures the market
+            # against, and that comparison needs the quantity the contract
+            # settles on. The other three stay each source's own forecast,
+            # which is what their names say. MAV in particular reports a day
+            # max and min on its N/X line while its trace is three-hourly, so
+            # a rest-of-day extreme read off that trace would miss the
+            # afternoon peak and quietly lower the model's number.
+            if fc_same and k == "nws":
                 for fld, obs_fld, rest_fld, pick in (("HighToday", "obsHighSoFar", "highRest", max),
                                                      ("LowToday", "obsLowSoFar", "lowRest", min)):
-                    # a source takes part only if it published a rest-of-day
-                    # figure. The key is present and null when the day has no
-                    # hours left, which is different from a source that never
-                    # reports one and whose figure must be left alone.
+                    # the key is present and null when the day has no hours
+                    # left, which is different from a source that never reports
+                    # one and whose figure must be left alone
                     if rest_fld not in src:
                         continue
                     seen = row[obs_fld]

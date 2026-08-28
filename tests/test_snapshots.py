@@ -134,11 +134,19 @@ class DayBucketing(unittest.TestCase):
         late = snapshots._parse_iso("2026-08-29T04:00:00Z")
         self.assertEqual(snapshots._max_min_ahead(rows, tz, "2026-08-28", late), (None, None))
 
+    def test_only_the_nws_figures_become_the_day_running_extreme(self):
+        """The map shades by the NWS figures and measures the market against
+        them, so those become the day's running extreme. The other three stay
+        each source's own forecast. Folding all four replaced every GFS MOS
+        figure on the board with the observation."""
+        src = io.open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                   "pipeline", "snapshots.py"), encoding="utf-8").read()
+        self.assertIn('if fc_same and k == "nws":', src)
+
     def test_a_source_without_a_rest_of_day_figure_is_left_alone(self):
-        """The fold rewrites a source's today figure only when that source
-        published a rest-of-day extreme. A missing key means the source does
-        not report one, which is not the same as a day with no hours left, and
-        treating the two alike replaced every figure with the observation."""
+        """The fold rewrites a today figure only where a rest-of-day extreme
+        was published. A missing key means the source does not report one,
+        which is not the same as a day with no hours left."""
         def fold(src, row, k):
             for fld, obs_fld, rest_fld, pick in (("HighToday", "obsHighSoFar", "highRest", max),
                                                  ("LowToday", "obsLowSoFar", "lowRest", min)):
@@ -160,8 +168,9 @@ class DayBucketing(unittest.TestCase):
         self.assertEqual((out["mavHighToday"], out["mavLowToday"]), (79.0, 59.0))
 
     def test_every_source_that_folds_publishes_a_rest_of_day_figure(self):
-        """Whichever sources the builder gives a today figure to must also get
-        highRest and lowRest, or the fold silently skips them."""
+        """Every source that publishes a today figure also publishes a
+        rest-of-day one, so a fold extended to another source later cannot
+        silently skip it and hand back the bare observation."""
         import re
         src = io.open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                    "pipeline", "snapshots.py"), encoding="utf-8").read()
