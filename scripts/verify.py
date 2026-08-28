@@ -989,7 +989,7 @@ def run(no_build: bool) -> int:
                         "higher or lower category does not qualify" in c4, c4[-120:])
                 keys = page.eval_on_selector_all("#cat4 svg.cpanel text", "e=>e.map(x=>x.textContent)")
                 chk.add(f"{scheme} cat4: both curves are named, with the climatology window",
-                        any("climatology, 19" in k for k in keys) and any("count market" in k for k in keys),
+                        any("climatology 19" in k for k in keys) and any("count market" in k for k in keys),
                         str([k for k in keys if "clim" in k or "count" in k]))
                 if page.locator("#cat4 svg.cpanel circle:not(.rdot)").count():
                     page.locator("#cat4 svg.cpanel circle:not(.rdot)").first.hover(force=True); page.wait_for_timeout(250)

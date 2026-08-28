@@ -49,7 +49,7 @@ window.WXAccuracy = (() => {
     for (let v = Math.ceil(xlo / 6) * 6; v <= xhi; v += 6) {
       svg.appendChild(txt(v + 'h', { x: x(v), y: B + 17, 'text-anchor': 'middle', class: 'ax' }));
     }
-    svg.appendChild(txt('Average error, °F', { x: 17, y: (T + B) / 2,
+    svg.appendChild(txt('Average error, °F  (lower is better)', { x: 17, y: (T + B) / 2,
       'text-anchor': 'middle', transform: `rotate(-90 17 ${(T + B) / 2})`, class: 'ax' }));
     svg.appendChild(txt('Hours before the end of the target day  →  settlement', { x: (L + R) / 2, y: B + 38,
       'text-anchor': 'middle', class: 'ax' }));
@@ -91,6 +91,24 @@ window.WXAccuracy = (() => {
     };
     line('nws'); line('fx');
 
+    /* Each series named on its own line.
+
+       The names were in a key under the figure, which is a look away from the
+       chart to learn which colour is which. The two lines are furthest apart
+       at the settlement end, so the labels sit there, each in its line's own
+       colour and nudged apart when the gap is too small to hold both. */
+    {
+      /* At the long-lead end, where both lines have room above and below and
+         no improvement figure is written. The right-hand end has neither. */
+      const first = pts[0];
+      if (first) {
+        svg.appendChild(txt('National Weather Service', { x: x(first.lead) + 6, y: y(first.nws) - 7,
+                            'font-size': 10.5, 'font-weight': 700, fill: NWS, 'pointer-events': 'none' }));
+        svg.appendChild(txt('ForecastEx implied', { x: x(first.lead) + 6, y: y(first.fx) + 14,
+                            'font-size': 10.5, 'font-weight': 700, fill: FX, 'pointer-events': 'none' }));
+      }
+    }
+
     // the improvement, called out every few hours rather than at every point:
     // labelled densely it becomes a texture instead of a number. A bin where the
     // market did worse is labelled the same way as one where it did better; the
@@ -124,11 +142,7 @@ window.WXAccuracy = (() => {
       svg.appendChild(band);
     });
 
-    if (key) {
-      key.innerHTML = '<span><i style="border-color:' + NWS + '"></i>National Weather Service station forecast</span>'
-        + '<span><i style="border-color:' + FX + '"></i>ForecastEx implied high</span>'
-        + '<span>lower is better</span>';
-    }
+    if (key) key.innerHTML = '';        // both series are named on the lines themselves
     if (cap) {
       const n = pts.reduce((m, p) => Math.max(m, p.cityDays), 0);
       cap.textContent = 'Every forecast either system published for ' + (d.cities || 0) + ' cities between '

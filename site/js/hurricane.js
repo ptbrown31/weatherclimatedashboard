@@ -444,13 +444,38 @@ window.WXHur = (() => {
       (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that part of the map shows storms only. ' : '') +
       (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for the Yes and No bids); clicking a shaded region opens that contract on the exchange; unshaded regions have no listed contract or no bids. ' : '') +
       'Scroll to zoom the map and drag to pan. During a live storm, clicking a red reference location opens its probability series below the map and keeps it there; clicking the same location again opens its wind contract. ' +
-      (vendorShown ? 'Red dots scale with the vendor’s probability of a gust above 80 mph at that reference location (' + ((RK && RK.attribution) || 'Powered by Reask') + '). ' : '');
+      (vendorShown ? 'The red dots are the vendor’s (' + ((RK && RK.attribution) || 'Powered by Reask') + '). ' : '');
     if (vendorShown) svg.appendChild(txt((RK && RK.attribution) || 'Powered by Reask', { x: W - 10, y: Hh - 10, 'text-anchor': 'end', 'font-size': 12, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl' }));
-    const key = $('#basinKey'); key.innerHTML = '';
+    /* The key, drawn on the map's own ground.
+
+       The shading ramp reads as a ramp, with its two ends named, so a colour
+       can be read straight off the map. Under it sit the two kinds of dot the
+       map draws, each shown at the size it is drawn. */
+    const key = $('#basinKey'); if (key) key.innerHTML = '';
     if (lf || vendorShown) {
-      const sw = lf ? [0.05, 0.25, 0.5, 0.75].map(p => '<span><i style="background:' + ramp(p) + ';border-color:' + ramp(p) + '"></i>' + Math.round(p * 100) + '¢</span>').join('') : '';
-      key.innerHTML = (lf ? '<span>Landfall contract, Yes price:</span>' + sw : '') + '<span><i style="border-color:var(--muted)"></i>reference location</span>' +
-        (vendorShown ? '<span><i style="border-color:rgba(192,57,43,.75)"></i>vendor P(gust &gt; 80 mph), ' + ((RK && RK.attribution) || 'Powered by Reask') + '</span>' : '');
+      const kg = el('g', { 'pointer-events': 'none' });
+      const bx = 16, by = Hh - 84, bw = 132;
+      kg.appendChild(el('rect', { x: bx - 8, y: by - 16, width: bw + 108, height: 76, rx: 5,
+                                  fill: 'var(--panel)', 'fill-opacity': .88, stroke: 'var(--line)', 'stroke-width': .8 }));
+      let yy = by;
+      if (lf) {
+        kg.appendChild(txt('Landfall contract, Yes price', { x: bx, y: yy - 3, 'font-size': 10, 'font-weight': 700, fill: 'var(--ink)' }));
+        for (let i = 0; i < 48; i++) {
+          kg.appendChild(el('rect', { x: bx + i * (bw / 48), y: yy + 2, width: bw / 48 + .6, height: 9,
+                                      fill: ramp(i / 47) }));
+        }
+        kg.appendChild(txt('0¢', { x: bx, y: yy + 22, 'font-size': 9, fill: 'var(--muted)' }));
+        kg.appendChild(txt('100¢', { x: bx + bw, y: yy + 22, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted)' }));
+        yy += 34;
+      }
+      kg.appendChild(el('circle', { cx: bx + 5, cy: yy + 2, r: 3.4, fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.4 }));
+      kg.appendChild(txt('a reference location', { x: bx + 14, y: yy + 5.5, 'font-size': 9.5, fill: 'var(--ink)' }));
+      if (vendorShown) {
+        yy += 14;
+        kg.appendChild(el('circle', { cx: bx + 5, cy: yy + 2, r: 4.6, fill: 'rgba(192,57,43,.55)', stroke: 'rgba(192,57,43,.9)', 'stroke-width': 1 }));
+        kg.appendChild(txt('sized by the chance of a gust over 80 mph', { x: bx + 14, y: yy + 5.5, 'font-size': 9.5, fill: 'var(--ink)' }));
+      }
+      svg.appendChild(kg);
     }
   }
 
@@ -463,11 +488,22 @@ window.WXHur = (() => {
     if (note) note.style.display = basin === 'AL' ? 'none' : '';
   }
 
+  // the same split the map uses: the Atlantic view is AL, the Pacific view is
+  // everything else, so a storm appears under the basin it is actually in
+  const stormsHere = () => ((H && H.storms) || []).filter(s => (basin === 'AL' ? s.basin === 'AL' : s.basin !== 'AL'));
+
+  /* The forecaster's reasoning, for the basin being looked at.
+
+     A reader on the Atlantic view is not asking about an East Pacific storm,
+     and the discussions are long enough that carrying both would bury the one
+     they came for. */
+  function drawDiscussion() {
+    if (window.WXDiscussion) WXDiscussion.drawStorms(stormsHere(), BASINS[basin].name);
+  }
+
   function drawStorms() {
     const list = $('#storms'); list.innerHTML = '';
-    // the same split the map uses: the Atlantic view is AL, the Pacific view is
-    // everything else, so a storm appears under the basin it is actually in
-    const here = (H.storms || []).filter(s => (basin === 'AL' ? s.basin === 'AL' : s.basin !== 'AL'));
+    const here = stormsHere();
     if (!here.length) {
       list.appendChild(h('p', { class: 'cap', text: 'No active storms in this basin at the last update.' }));
     }
@@ -621,8 +657,21 @@ window.WXHur = (() => {
         { class: 'rdot', cx: x(i).toFixed(1), cy: vy(i).toFixed(1), r: Math.min(2.6, gap / 4),
           fill: col, 'pointer-events': 'none' })));
     };
+    /* Each curve named where it ends.
+
+       Both run the width of the panel and finish well separated, the scaled
+       one always below the raw climatology, so the right-hand end holds the
+       names without a key underneath. */
+    const endLabel = (scale, col, nm) => {
+      const i = days.length - 1;
+      const v = cond(cum[days[i][0]] != null ? cum[days[i][0]] : cum['11-30']);
+      const yy = y(Math.min(1 - Math.pow(1 - v, scale), ymax));
+      svg.appendChild(txt(nm, { x: R - 4, y: yy - 5, 'text-anchor': 'end', 'font-size': 10,
+                                'font-weight': 700, fill: col, 'pointer-events': 'none' }));
+    };
     line(1, 'var(--cool)', null);
-    if (factor) line(factor, 'var(--warm)', '5 4');
+    endLabel(1, 'var(--cool)', 'climatology ' + cl.window[0] + '-' + cl.window[1]);
+    if (factor) { line(factor, 'var(--warm)', '5 4'); endLabel(factor, 'var(--warm)', 'scaled by the count market ×' + factor.toFixed(2)); }
     // today, where the whole remaining chance still sits
     svg.appendChild(el('line', { x1: L, x2: L, y1: T, y2: B, stroke: 'var(--muted)', 'stroke-dasharray': '4 3' }));
     svg.appendChild(txt('today', { x: L + 4, y: T + 10, class: 'ax' }));
@@ -637,6 +686,7 @@ window.WXHur = (() => {
     // only this season's dates belong on this season's remaining-window curve;
     // a contract for next year is a different question and stays in the ladder
     const thisYear = String((H.season || {}).year || now.getUTCFullYear());
+    let firstDot = null;
     (m.contracts || []).forEach(c => {
       const e = String(c.expiration || '');
       if (e.length < 8 || e.slice(0, 4) !== thisYear) return;
@@ -652,16 +702,14 @@ window.WXHur = (() => {
         ['Difference to climatology', ((c.mid - f) * 100 > 0 ? '+' : '') + ((c.mid - f) * 100).toFixed(1) + ' points'],
       ], 'the climatology is the share of past seasons whose first qualifying landfall fell in this window'));
       svg.appendChild(dot);
+      if (!firstDot) firstDot = { x: x(i), y: y(Math.min(c.mid, ymax)) };
     });
-    const key = [['var(--cool)', 'climatology, ' + cl.window[0] + '-' + cl.window[1]]];
-    if (factor) key.push(['var(--warm)', 'scaled by the count market (×' + factor.toFixed(2) + ')']);
-    key.push(['var(--accent)', 'the listed contracts']);
-    let kx = L;
-    key.forEach(([col, lab]) => {
-      svg.appendChild(el('line', { x1: kx, x2: kx + 14, y1: B + 34, y2: B + 34, stroke: col, 'stroke-width': 2 }));
-      svg.appendChild(txt(lab, { x: kx + 18, y: B + 37.5, class: 'ax', fill: col }));
-      kx += 30 + lab.length * 5.6;
-    });
+    // the curves carry their own names; only the dots still need one, and it
+    // goes on the first of them rather than in a row underneath
+    if (firstDot) {
+      svg.appendChild(txt('a listed contract', { x: firstDot.x, y: firstDot.y - 9, 'text-anchor': 'middle',
+                          'font-size': 10, 'font-weight': 700, fill: 'var(--accent)', 'pointer-events': 'none' }));
+    }
     return svg;
   }
   // where the count ladder crosses fifty cents, which is the market's median
@@ -916,23 +964,36 @@ window.WXHur = (() => {
       if (gw >= 26) svg.appendChild(txt(v + '¢' + (one ? '*' : ''), { x: px(0) + 3, y: yy + 3.5, class: 'ladtxt', 'pointer-events': 'none' }));
       if (px(100) - px(0) - gw >= 26) svg.appendChild(txt((100 - v) + '¢', { x: px(100) - 3, y: yy + 3.5, class: 'ladtxt', 'text-anchor': 'end', 'pointer-events': 'none' }));
     });
-    // where each pace finishes, marked on the ladder and named underneath it, so
-    // the labels cannot land on a bar's price
-    const marks = [];
+    /* Where each pace finishes, named on the line itself.
+
+       The names sat in a row under the panel, which meant matching a dash
+       pattern to a swatch. Each label now rides just above its own dashed
+       line at the left end of the ladder, where the bars are widest and no
+       price sits. Two lines close together are nudged apart. */
+    const paces = [];
     if (target != null) {
       svg.appendChild(el('line', { x1: RL, x2: RR, y1: y(target), y2: y(target), stroke: 'var(--cool)', 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
-      marks.push(['var(--cool)', (fcTarget != null ? esc(fc.label || 'forecast') : (month == null ? 'an average season' : 'an average ' + MONTHS[month])) + ' ' + (Math.round(target * 100) / 100)]);
+      paces.push([y(target), 'var(--cool)', (fcTarget != null ? esc(fc.label || 'forecast') : (month == null ? 'an average season' : 'an average ' + MONTHS[month])) + ' ' + (Math.round(target * 100) / 100)]);
     }
     if (fcTarget != null && climTarget != null && Math.abs(climTarget - fcTarget) > 0.05) {
       svg.appendChild(el('line', { x1: RL, x2: RR, y1: y(climTarget), y2: y(climTarget), stroke: 'var(--muted)', 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
-      marks.push(['var(--muted)', (month == null ? 'an average season' : 'an average ' + MONTHS[month]) + ' ' + (Math.round(climTarget * 100) / 100)]);
+      paces.push([y(climTarget), 'var(--muted)', (month == null ? 'an average season' : 'an average ' + MONTHS[month]) + ' ' + (Math.round(climTarget * 100) / 100)]);
     }
-    let mx = RL;
-    marks.forEach(([col, label]) => {
-      svg.appendChild(el('line', { x1: mx, x2: mx + 14, y1: B + 44, y2: B + 44, stroke: col, 'stroke-dasharray': '5 4' }));
-      const t = txt(label, { x: mx + 18, y: B + 47.5, class: 'ax', fill: col });
-      svg.appendChild(t);
-      mx += 26 + label.length * 5.4;
+    /* The ladder is bars edge to edge, so a label on the line needs its own
+       ground to sit on. A small panel-coloured chip riding just above each
+       dashed line keeps it legible without a key underneath. */
+    paces.sort((a, b) => a[0] - b[0]);
+    let lastY = -1e9;
+    paces.forEach(([yy, col, label]) => {
+      let ly = yy - 5;
+      if (ly - lastY < 13) ly = lastY + 13;
+      lastY = ly;
+      const w = label.length * 5.3 + 10;
+      const cx = Math.min(RR - 2, RL + 2 + w);
+      svg.appendChild(el('rect', { x: cx - w, y: ly - 8.5, width: w, height: 11.5, rx: 3,
+                                   fill: 'var(--panel)', 'fill-opacity': .93, 'pointer-events': 'none' }));
+      svg.appendChild(txt(label, { x: cx - 5, y: ly, 'text-anchor': 'end', 'font-size': 9.5,
+                                   'font-weight': 700, fill: col, 'pointer-events': 'none' }));
     });
     return svg;
   }
@@ -1094,11 +1155,11 @@ window.WXHur = (() => {
         basin = b;
         ['b1', 'b2'].forEach(x => $('#' + x).classList.remove('on'));
         $('#' + id).classList.add('on');
-        closeSitePanel(); resetView(); draw(); drawStorms(); basinSections();
+        closeSitePanel(); resetView(); draw(); drawStorms(); basinSections(); drawDiscussion();
       };
     });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); drawOthers(); basinSections();
-    if (window.WXDiscussion) WXDiscussion.drawStorms((H && H.storms) || []);
+    drawDiscussion();
     if (window.WXStorm) {
       WXStorm.init(tip);
       // the map's dots ask this module for a location's series, so the map is

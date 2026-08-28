@@ -223,6 +223,7 @@ window.WXScore = (() => {
     svg.appendChild(txt('Degrees from the station’s ' + cname + ' (°F)', { x: mid, y: T + R.length * ROW + 42, 'text-anchor': 'middle', class: 'axl' }));
     svg.appendChild(txt(v.when === 'past' ? 'Consensus error' : 'Spread', { x: 900, y: T - 32, 'text-anchor': 'end', class: 'axl', 'font-weight': 700 }));
 
+    let labelledEscape = false;
     R.forEach((r, i) => {
       const y = T + i * ROW + ROW / 2;
       const g = el('g');
@@ -249,10 +250,26 @@ window.WXScore = (() => {
           const dy = [0, -9, 9, -18, 18][Math.min(lvl, 4)];
           const c = el('circle', { cx: d.px, cy: y + dy, r: 5, fill: d.s.col, stroke: 'var(--panel)', 'stroke-width': 1 });
           g.appendChild(bind(c, () => dotTip(r, d.s, v), true));
+          /* The first row names every source on its own dot.
+
+             The names were swatches under the figure, which meant carrying a
+             colour in mind down to the chart. Only the top row is labelled;
+             the same colour then means the same source all the way down. */
+          if (i === 0) {
+            g.appendChild(txt(d.s.name, { x: d.px, y: y + dy - 9, 'text-anchor': 'middle', 'font-size': 9,
+                                          'font-weight': 700, fill: d.s.col, 'pointer-events': 'none' }));
+          }
         });
-      // what actually happened
+      // what the station recorded
       if (r.actual != null) {
         const ax = x(r.actual - r.centre), s = r.outside ? 8 : 6.5;
+        if (i === 0) g.appendChild(txt('observed', { x: ax, y: y - s - 5, 'text-anchor': 'middle', 'font-size': 9,
+                                       'font-weight': 700, fill: 'var(--obs)', 'pointer-events': 'none' }));
+        if (r.outside && !labelledEscape) {
+          labelledEscape = true;
+          g.appendChild(txt('outside every forecast', { x: ax, y: y + s + 11, 'text-anchor': 'middle', 'font-size': 9,
+                            'font-weight': 700, fill: 'var(--warm)', 'pointer-events': 'none' }));
+        }
         const dpath = 'M' + ax + ' ' + (y - s) + 'L' + (ax + s) + ' ' + y + 'L' + ax + ' ' + (y + s) + 'L' + (ax - s) + ' ' + y + 'Z';
         if (r.outside) g.appendChild(el('path', { d: dpath, fill: 'none', stroke: 'var(--warm)', 'stroke-width': 4, 'pointer-events': 'none' }));
         g.appendChild(bind(el('path', { d: dpath, fill: 'var(--obs)', stroke: 'var(--panel)', 'stroke-width': 1 }), () => actualTip(r, v), true));
@@ -267,14 +284,10 @@ window.WXScore = (() => {
 
     // title, legend and the notes the figure needs to be read honestly
     const label = dayLabel(built.day);
-    $('#divTitle').textContent = (v.when === 'past' ? 'What happened, ' : 'Where the forecasts disagree, ') + label +
-      ' — ' + (v.side === 'high' ? 'daily highs' : 'daily lows');
-    const key = $('#divKey'); key.innerHTML = '';
-    SERIES.forEach(s => key.appendChild(h('span', {}, [h('i', { style: 'background:' + s.col + ';border-color:' + s.col }), document.createTextNode(s.name)])));
-    if (v.when === 'past') {
-      key.appendChild(h('span', {}, [h('i', { style: 'background:var(--obs);border-color:var(--obs)' }), document.createTextNode('What happened')]));
-      key.appendChild(h('span', {}, [h('i', { style: 'background:var(--obs);border-color:var(--warm);border-width:3px' }), document.createTextNode('Outside every forecast')]));
-    }
+    $('#divTitle').textContent = (v.side === 'high' ? 'Daily highs, ' : 'Daily lows, ') + label +
+      (v.when === 'past' ? ', against what the stations recorded' : ', where the forecasts disagree');
+    // every mark names itself on the top row of the figure
+    const key = $('#divKey'); if (key) key.innerHTML = '';
     const gone = {};
     R.forEach(r => r.missing.forEach(k => { gone[k] = (gone[k] || 0) + 1; }));
     const esc = R.filter(r => r.outside);

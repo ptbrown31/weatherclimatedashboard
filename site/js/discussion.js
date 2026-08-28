@@ -55,14 +55,15 @@ window.WXDiscussion = (() => {
      each active system, which is the hurricane counterpart of the office
      discussion a city page carries. The storm snapshot holds it, so this only
      has to lay it out. */
-  function drawStorms(storms) {
+  function drawStorms(storms, basinName) {
     const host = $('#stormDiscussion'); if (!host) return;
     host.innerHTML = '';
+    const where = basinName ? ' in the ' + basinName : '';
     const withText = (storms || []).filter(s => s.discussion && s.discussion.text);
     if (!withText.length) {
       host.appendChild(h('p', { class: 'cap', text: (storms || []).length
-        ? 'No discussion has been issued for the active storms yet.'
-        : 'No active storms, so there is no discussion to carry.' }));
+        ? 'No discussion has been issued yet for the active storms' + where + '.'
+        : 'No active storms' + where + ', so there is no discussion to carry.' }));
       return;
     }
     withText.forEach(s => {
