@@ -236,6 +236,50 @@ class QuoteJob(unittest.TestCase):
         self.assertTrue(all(r.get("error") == "deadline" for r in rows))
 
 
+class QuoteCompleteness(unittest.TestCase):
+    """A pass that ran out of time keeps the previous ladders, so every snapshot
+    it leaves behind still carries a plausible as-of time. Reported as healthy,
+    that state was invisible; it is now its own source in the streak file."""
+    def setUp(self):
+        from pipeline import archive as arch
+        self.arch = arch
+        self.st = storage.LocalStorage(tempfile.mkdtemp())
+        self.now = dt.datetime(2026, 8, 28, 12, 0, tzinfo=dt.timezone.utc)
+
+    def health(self, complete, passes):
+        """`passes` consecutive passes, each complete or not, as the job records them."""
+        h = None
+        for i in range(passes):
+            h = self.arch.update_health(self.st, {
+                "exchange": {"ok": True},
+                "quotes-complete": {"ok": complete, "error": None if complete else "deadline cut 3 ladders short: KATL"},
+            }, self.now + dt.timedelta(minutes=10 * i), key=self.arch.MARKET_HEALTH_KEY)
+        return h
+
+    def test_a_complete_pass_raises_nothing(self):
+        self.assertEqual(self.arch.alarms_in(self.health(True, 12)), [])
+
+    def test_one_slow_pass_is_not_an_alarm(self):
+        # a single deadline is ordinary; alarming on it would cry wolf every
+        # time the exchange listed a few more contracts
+        self.assertEqual(self.arch.alarms_in(self.health(False, 1)), [])
+
+    def test_an_hour_of_incomplete_passes_is_an_alarm(self):
+        # FAIL_STREAK_ALARM passes at the quote job's ten-minute cadence
+        alarms = self.arch.alarms_in(self.health(False, self.arch.FAIL_STREAK_ALARM))
+        self.assertEqual(alarms, ["quotes-complete"])
+
+    def test_completeness_is_separate_from_reachability(self):
+        # the exchange answered every time; only the finishing failed
+        h = self.health(False, self.arch.FAIL_STREAK_ALARM)
+        self.assertEqual(h["exchange"]["fail_streak"], 0)
+        self.assertIn("deadline cut", h["quotes-complete"]["last_error"])
+
+    def test_a_finished_pass_clears_the_streak(self):
+        self.health(False, self.arch.FAIL_STREAK_ALARM)
+        self.assertEqual(self.arch.alarms_in(self.health(True, 1)), [])
+
+
 if __name__ == "__main__":
     unittest.main()
 

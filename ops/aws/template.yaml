@@ -248,6 +248,46 @@ Resources:
             CachedMethods: [GET, HEAD]
             Compress: true
             CachePolicyId: !Ref SnapshotCachePolicy
+          # The code and the geometry, on the same caching as the default
+          # behaviour but WITHOUT the index-rewrite function.
+          #
+          # That function exists to turn a directory URL into its index.html,
+          # which only a path with no extension can ever need. Attached to the
+          # default behaviour it ran on every file a page pulls — measured at
+          # 27 August 2026: 9.2 invocations per cold page view, of which
+          # exactly one, the HTML document, could do anything. The other eight
+          # spent the tightest free-tier allowance the distribution has (two
+          # million invocations a month) to no effect, capping the site near
+          # 217,000 views a month. Excluding these three prefixes takes it to
+          # one invocation per view; the binding limit becomes requests, near
+          # 625,000 views a month.
+          #
+          # Nothing else changes: same origin, same cache policy, same
+          # compression, and every one of these paths carries a file
+          # extension, so the function was a no-op on all of them anyway. The
+          # ?v= content stamp on the pages' references is for the browser's
+          # cache, not this one, which the deploy invalidates.
+          - PathPattern: "js/*"
+            TargetOriginId: site
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # managed CachingOptimized
+          - PathPattern: "css/*"
+            TargetOriginId: site
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # managed CachingOptimized
+          - PathPattern: "assets/*"
+            TargetOriginId: site
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # managed CachingOptimized
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 404

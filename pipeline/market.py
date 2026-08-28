@@ -326,10 +326,31 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
     stamp = now.strftime("%Y%m%d/%H%M%S")
     store.put(f"archive/market/{stamp}.json.gz",
               gzip.compress(json.dumps({"asof": _iso(now), "rows": archive_rows}, separators=(",", ":")).encode()), "application/gzip")
-    arch.update_health(store, {"exchange": {"ok": True}}, now, key=arch.MARKET_HEALTH_KEY)
+    """The pass reached the exchange, and separately: did it finish?
+
+    A pass the deadline cuts short keeps the previous ladders rather than
+    writing a half-read one, which is the right call — but every snapshot it
+    leaves behind still carries a plausible as-of time, so nothing downstream
+    can tell that the prices stopped moving. Reported as ok, that state was
+    invisible: the streak never advanced and no alarm could fire.
+
+    Completeness is therefore its own source. It stays distinguishable from
+    the exchange being unreachable, and it escalates on the same rule as any
+    other source — FAIL_STREAK_ALARM passes in a row, an hour at this job's
+    ten-minute cadence, so one slow pass is noise and an hour of them is not.
+    """
+    health = arch.update_health(store, {
+        "exchange": {"ok": True},
+        "quotes-complete": {
+            "ok": not partial_kept,
+            "error": (("deadline cut " + str(len(partial_kept)) + " ladder"
+                       + ("" if len(partial_kept) == 1 else "s") + " short: "
+                       + ", ".join(partial_kept[:8])) if partial_kept else None),
+        },
+    }, now, key=arch.MARKET_HEALTH_KEY)
     log(kind="market", step="written", stations=len(by_station), partialKept=partial_kept,
         groups={k: len(v) for k, v in groups.items()}, archiveRows=len(archive_rows))
-    return {"quoted": quoted, "failed": failed, "stations": len(by_station)}
+    return {"quoted": quoted, "failed": failed, "stations": len(by_station), "health": health}
 
 
 def quotes_pass(cfg: dict, store: Storage) -> int:
@@ -347,7 +368,10 @@ def quotes_pass(cfg: dict, store: Storage) -> int:
     errors = 0
     alarms: list = []
     try:
-        quotes_job(cfg, store, log, now)
+        res = quotes_job(cfg, store, log, now)
+        # a pass can succeed and still be behind: alarms are read from the
+        # streaks, not from whether this one raised
+        alarms = arch.alarms_in(res.get("health"))
     except Exception as e:  # noqa: BLE001 - recorded, counted toward the streak
         errors = 1
         log(kind="market", error=f"{type(e).__name__}: {e}")
