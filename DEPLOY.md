@@ -275,6 +275,33 @@ Read them with:
     python3 scripts/traffic.py                    the last two weeks
     python3 scripts/traffic.py --day 2026-08-23   one day in full
 
+### The daily report by mail
+
+The `report` job runs last in the daily chain, composes the series into plain
+text and posts it to the `<site>-reports` SNS topic. It is a separate topic from
+the alarms on purpose: a daily message on the alarm topic would train the reader
+to ignore alarm mail, and unsubscribing from one would silence the other. Both
+carry the `AlarmEmail` address.
+
+**AWS sends a confirmation mail when the topic is first created, and nothing is
+delivered until that link is clicked.** Check the state with:
+
+    aws sns list-subscriptions-by-topic \
+      --topic-arn "$(aws cloudformation describe-stacks --stack-name weather-tools-site \
+        --query "Stacks[0].Outputs[?OutputKey=='ReportTopicArn'].OutputValue" --output text)" \
+      --query "Subscriptions[].[Endpoint,SubscriptionArn]" --output text
+
+`PendingConfirmation` means the link has not been clicked yet.
+
+Send one on demand, which is also how to check the wiring after a change:
+
+    aws lambda invoke --function-name weather-tools-site-pipeline \
+      --cli-binary-format raw-in-base64-out --payload '{"job":"report"}' /tmp/r.json
+
+The message is written to `data/archive/_meta/report/traffic-latest.json` before
+it is sent, so a report that failed to send is still readable. A failed send is
+logged and does not fail the pass.
+
 A view is an HTML document request, not a request — a cold page view pulls about
 a dozen objects, so counting requests overstates readership roughly tenfold. A
 visitor is a distinct client address, which undercounts shared networks and
