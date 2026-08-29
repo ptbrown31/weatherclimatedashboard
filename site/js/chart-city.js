@@ -999,7 +999,8 @@ window.WXCity = (() => {
     onSelect = opts.onSelect || null;
     tip = WXC.tooltip();
     const sres = await WXD.get('summary.json');
-    try { locIndex = (await WXD.get('locator/index.json?v=2', 1440)).data;   // v=2: past a month-cached copy from before the regional frames } catch (e) { locIndex = null; }
+    // v=2: past a month-cached copy from before the regional frames
+    try { locIndex = (await WXD.get('locator/index.json?v=2', 1440)).data; } catch (e) { locIndex = null; }
     summary = sres.data || { cities: [], asof: null };
     if (opts.basemap) summary.base = opts.basemap;
     await WXM.loadSummary();                      // implied medians for the picker dots (live market layer only)
