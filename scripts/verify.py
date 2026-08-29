@@ -1337,6 +1337,23 @@ def run(no_build: bool) -> int:
                         bool(loc and loc["region"] and loc["dots"] >= 6 and loc["temps"] >= 3), str(loc)[:160])
                 chk.add(f"{scheme} locator: the resolving station is ringed and named as the one that settles",
                         bool(loc and loc["ring"] and "settles on" in loc["cap"]), str(loc and loc["cap"])[:120])
+                sst = page.evaluate("""() => {
+                  const svg = document.querySelector('#locator .locbox svg');
+                  if (!svg) return null;
+                  const lbl = [...svg.querySelectorAll('text')].some(t => /settlement station/.test(t.textContent));
+                  // the centre hit circle sits over the ring; hover it and read the tip
+                  const hits = [...svg.querySelectorAll("circle[fill='transparent']")];
+                  const centre = hits.find(c2 => +c2.getAttribute('r') >= 17);
+                  if (!centre) return { lbl, tip: null };
+                  centre.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 300, clientY: 300 }));
+                  const t = document.querySelector('#tip');
+                  return { lbl, tip: t ? t.innerText : null };
+                }""")
+                chk.add(f"{scheme} locator: the settlement station is labelled on the map",
+                        bool(sst and sst["lbl"]), str(sst and sst["lbl"]))
+                chk.add(f"{scheme} locator: hovering the settlement station reads its own report",
+                        bool(sst and sst["tip"] and "settlement station" in sst["tip"]
+                             and "Dewpoint" in sst["tip"]), str(sst and (sst["tip"] or ""))[:120])
                 page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
                 chk.add(f"{scheme} severe: the tornado reports lead the page",
                         page.evaluate("""() => {

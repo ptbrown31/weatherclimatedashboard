@@ -355,12 +355,34 @@ window.WXCity = (() => {
           svg.appendChild(hit);
         });
         // the resolving station over everything: the same model, ringed, its
-        // temperature the settlement-convention reading from its own record
+        // temperature the settlement-convention reading from its own record,
+        // and named on the map as the one that settles
         const selfN = Object.assign({}, ob.nearbySelf || {}, centreTemp != null ? { tempF: centreTemp } : {});
         svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 11, fill: 'none',
                                        stroke: 'var(--accent)', 'stroke-width': 2.4 }));
         model(svg, W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
         labels(W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
+        {
+          const lbl = c.station + ' \u00b7 settlement station';
+          const fs = 10.5, tw = lbl.length * fs * 0.6 + 12, ly = H2 / 2 + 24;
+          svg.appendChild(el('rect', { x: W2 / 2 - tw / 2, y: ly - fs, width: tw, height: fs + 6, rx: 5,
+                                       fill: 'var(--panel)', opacity: 0.92, stroke: 'var(--accent)',
+                                       'stroke-width': 1, 'pointer-events': 'none' }));
+          svg.appendChild(txt(lbl, { x: W2 / 2, y: ly + 2, 'text-anchor': 'middle', 'font-size': fs,
+                                     'font-weight': 700, fill: 'var(--accent)', 'pointer-events': 'none' }));
+          const selfHit = el('circle', { cx: W2 / 2, cy: H2 / 2, r: 18, fill: 'transparent' });
+          selfHit.addEventListener('mousemove', ev => {
+            const rows = [['Temperature', selfN.tempF != null ? WXC.deg(selfN.tempF) : '\u2014'],
+                          ['Dewpoint', selfN.dewF != null ? WXC.deg(selfN.dewF) : '\u2014'],
+                          ['Wind', wind(selfN) || 'calm'],
+                          ['Sky', selfN.cover ? (COVER_NAME[selfN.cover] || selfN.cover) : '\u2014'],
+                          ['Observed', ob.latest && ob.latest.t ? WXC.clockFull(Date.parse(ob.latest.t), c.tz) : '\u2014']];
+            tip.show(ev, tip.rows((c.city || c.station) + ' (' + c.station + ') \u00b7 settlement station', rows,
+                                  'the contract settles on this thermometer alone, decoded the way settlement reads it'));
+          });
+          selfHit.addEventListener('mouseleave', () => tip.hide());
+          svg.appendChild(selfHit);
+        }
         box.appendChild(svg);
       } else {
         // the image is centred on the station, so the marker is the middle of it
