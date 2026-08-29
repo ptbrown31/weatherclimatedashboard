@@ -44,6 +44,9 @@ KEY = "snapshots/locator/{sid}.png"
 INDEX_KEY = "snapshots/locator/index.json"
 # the picture never changes; the browser and the edge may hold it for a month
 CACHE = "public, max-age=2592000, stale-while-revalidate=2592000, stale-if-error=2592000"
+# the index is not the pictures: it grows a frame when one is added, and a
+# month-cached index hid the regional maps from every browser that held it
+INDEX_CACHE = "public, max-age=300, stale-while-revalidate=86400, stale-if-error=2592000"
 # about forty kilometres across: a station is usually at an airport well outside
 # the centre, and the question is where it sits relative to that centre, so the
 # frame has to hold both
@@ -136,7 +139,7 @@ def locator_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) ->
 
     store.put(INDEX_KEY, json.dumps({"schema": SCHEMA, "asof": _iso(now), "source": SOURCE,
                                      "service": SERVICE, "stations": index},
-                                    separators=(",", ":")).encode(), "application/json", CACHE)
+                                    separators=(",", ":")).encode(), "application/json", INDEX_CACHE)
     arch.LAST_STATUS = {"job": "locator", "errors": len(errors), "alarms": []}
     print(json.dumps({"kind": "locator", "stations": len(roster), "written": written,
                       "kept": skipped, "errors": errors[:5], "seconds": round(time.time() - t0, 1)}))
