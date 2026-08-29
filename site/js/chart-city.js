@@ -265,36 +265,52 @@ window.WXCity = (() => {
           if (n.wspd != null && n.wspd < 3) {
             g.appendChild(el('circle', { cx: x2, cy: y2, r: r + 2.5, fill: 'none', stroke: col, 'stroke-width': 1 }));
           } else if (n.wspd != null && n.wdir != null) {
+            /* The traditional barb, textbook proportions. The staff runs from
+               the sky circle toward the direction the wind comes from; the
+               feathers sit on the clockwise side at sixty degrees off the
+               staff, slanting outward, the first exactly at the tip; a
+               pennant is a solid flag whose base lies along the staff. A
+               lone half barb sits one space in from the tip so it cannot be
+               read as a full one. Every stroke is drawn twice, a pale halo
+               under the ink, which is what keeps a barb legible over roads
+               and contours. */
             const rad = n.wdir * Math.PI / 180;
             const ux = Math.sin(rad), uy = -Math.cos(rad);          // toward where the wind is FROM
-            const pxv = -uy, pyv = ux;                              // the clockwise side
-            const L = big ? 26 : 20;
-            const sx = x2 + ux * r, sy = y2 + uy * r;
-            const ex = x2 + ux * (r + L), ey = y2 + uy * (r + L);
-            g.appendChild(el('line', { x1: sx, y1: sy, x2: ex, y2: ey, stroke: col, 'stroke-width': 1.5 }));
+            const pxv = -uy, pyv = ux;                              // the clockwise side (NH convention)
+            const L = big ? 30 : 24;
+            const bl = big ? 11 : 9, gap = big ? 5.5 : 4.5;
+            const bx2 = 0.866 * pxv + 0.5 * ux, by3 = 0.866 * pyv + 0.5 * uy;   // sixty degrees off the staff
+            const at = d => [x2 + ux * (r + L - d), y2 + uy * (r + L - d)];
+            const seg = (x3, y3, x4, y4, wgt) => {
+              g.appendChild(el('line', { x1: x3, y1: y3, x2: x4, y2: y4, stroke: 'var(--panel)',
+                                         'stroke-width': wgt + 1.8, 'stroke-linecap': 'round', opacity: 0.9 }));
+              g.appendChild(el('line', { x1: x3, y1: y3, x2: x4, y2: y4, stroke: col, 'stroke-width': wgt }));
+            };
+            const [sx, sy] = [x2 + ux * r, y2 + uy * r];
+            const [ex, ey] = at(0);
+            seg(sx, sy, ex, ey, 1.6);
             let left = Math.round(n.wspd / 5) * 5, d0 = 0;
-            const step = big ? 5 : 4.2, bl = big ? 9 : 7;
             while (left >= 50) {
-              const bx = x2 + ux * (r + L - d0), by2 = y2 + uy * (r + L - d0);
-              const b2x = x2 + ux * (r + L - d0 - step * 1.4), b2y = y2 + uy * (r + L - d0 - step * 1.4);
-              g.appendChild(el('path', { d: 'M' + bx + ' ' + by2 + 'L' + (bx + pxv * bl) + ' ' + (by2 + pyv * bl)
-                                         + 'L' + b2x + ' ' + b2y + 'Z', fill: col }));
-              left -= 50; d0 += step * 1.6;
+              const [t1x, t1y] = at(d0), [t2x, t2y] = at(d0 + gap * 1.3);
+              const d = 'M' + t1x.toFixed(1) + ' ' + t1y.toFixed(1)
+                + 'L' + (t1x + bx2 * bl).toFixed(1) + ' ' + (t1y + by3 * bl).toFixed(1)
+                + 'L' + t2x.toFixed(1) + ' ' + t2y.toFixed(1) + 'Z';
+              g.appendChild(el('path', { d, fill: 'var(--panel)', stroke: 'var(--panel)', 'stroke-width': 1.8, opacity: 0.9 }));
+              g.appendChild(el('path', { d, fill: col }));
+              left -= 50; d0 += gap * 1.8;
             }
             while (left >= 10) {
-              const bx = x2 + ux * (r + L - d0), by2 = y2 + uy * (r + L - d0);
-              g.appendChild(el('line', { x1: bx, y1: by2, x2: bx + (pxv + ux * 0.45) * bl, y2: by2 + (pyv + uy * 0.45) * bl,
-                                         stroke: col, 'stroke-width': 1.5 }));
-              left -= 10; d0 += step;
+              const [t1x, t1y] = at(d0);
+              seg(t1x, t1y, t1x + bx2 * bl, t1y + by3 * bl, 1.6);
+              left -= 10; d0 += gap;
             }
             if (left >= 5) {
-              if (d0 === 0) d0 = step;                              // a lone half barb sits in from the tip
-              const bx = x2 + ux * (r + L - d0), by2 = y2 + uy * (r + L - d0);
-              g.appendChild(el('line', { x1: bx, y1: by2, x2: bx + (pxv + ux * 0.45) * bl * 0.55, y2: by2 + (pyv + uy * 0.45) * bl * 0.55,
-                                         stroke: col, 'stroke-width': 1.5 }));
+              if (d0 === 0) d0 = gap;                               // a lone half barb sits in from the tip
+              const [t1x, t1y] = at(d0);
+              seg(t1x, t1y, t1x + bx2 * bl * 0.55, t1y + by3 * bl * 0.55, 1.6);
             }
             if (n.wgst) {
-              g.appendChild(txt('G' + n.wgst, { x: ex + ux * 4, y: ey + uy * 4 + 3,
+              g.appendChild(txt('G' + n.wgst, { x: ex + ux * 7, y: ey + uy * 7 + 3,
                                                 'text-anchor': 'middle', 'font-size': big ? 9.5 : 8.5,
                                                 'font-weight': 700, fill: col, 'pointer-events': 'none' }));
             }
