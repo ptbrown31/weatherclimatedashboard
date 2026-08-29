@@ -51,7 +51,7 @@
     "hurricanes": 4,
     "majors": 1,
     "source": "Colorado State University Tropical Meteorology Project",
-    "label": "CSU, 8 Jul 2026"
+    "label": "CSU, 5 Aug 2026"
   },
   "_season_forecast_note": "A seasonal hurricane forecast is not a government product, so this is an owner's choice and is attributed wherever it is drawn. Empty values fall back to the climatological pace alone. Update the numbers and the label together when CSU revises.",
   "_exchange_fee_note": "Dollars per contract each side pays at execution, used only to state payout multiples net of fees. The exchange's FAQ words it as '$0.01 per contract, charged to each side'; the owner's published newsletter and reference code both compute 1/(price + 0.005). This follows the published convention and every multiple names the fee it used.",
