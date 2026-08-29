@@ -1319,6 +1319,11 @@ def run(no_build: bool) -> int:
                 }""")
                 chk.add(f"{scheme} severe: all three phenomena draw the history series",
                         sw["series"] >= 3, str(sw))
+                chk.add(f"{scheme} severe: the tornado reports lead the page",
+                        page.evaluate("""() => {
+                          const p = document.querySelector('#panels .panel');
+                          return p ? /tornado/i.test(p.textContent) : false;
+                        }""") is True, "")
                 chk.add(f"{scheme} severe: all three phenomena draw the month in progress",
                         sw["blocks"] == 3 and sw["envelopes"] >= 3 and sw["bigFig"], str(sw))
                 chk.add(f"{scheme} severe: the running month carries the market's ladder where one is listed",

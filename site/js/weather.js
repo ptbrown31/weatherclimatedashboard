@@ -18,6 +18,8 @@ window.WXWeather = (() => {
 
   function init() {
     return WXPanels.init('weather', {
+      // the severe-report counts lead, tornado first
+      first: ['SWTUS', 'SWHUS', 'SWWUS'],
       panel: { x0: X0, fmt, fmtAxis: fmt, fmtThreshold: fmt, thresholdSuffix: '',
                xLabel: 'Month', tightRight: true, clampZero: true, project: true },
       source: 'Series from the NOAA Climate at a Glance city time series and the US Drought Monitor.',

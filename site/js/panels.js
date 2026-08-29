@@ -110,7 +110,13 @@ window.WXPanels = (() => {
     const idxRes = await WXD.get(SERIES_INDEX, 1440);
     if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([listing, idxRes], 1440)); }
     const idx = idxRes.data || {};
-    const products = ((listing.data || {}).products) || [];
+    let products = ((listing.data || {}).products) || [];
+    // a category can name the products its readers come for; those lead in
+    // the given order and the rest keep the listing's own order
+    if (opts.first && opts.first.length) {
+      const rank = id => { const i = opts.first.indexOf(id); return i < 0 ? opts.first.length : i; };
+      products = products.slice().sort((a, b) => rank(a.id) - rank(b.id));
+    }
     if (!products.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No products are listed in this category yet.' }));
       return;
