@@ -32,6 +32,10 @@ svg.ts{width:100%;height:auto;display:block}
 #allocWrap.full #alloc{width:100%}
 #allocWrap.full svg.ts{width:100%;height:auto;max-height:calc(100vh - 46px)}
 #ladderFig{max-width:820px}
+/* display equations, hand-set; the site loads no maths library */
+p.eq{margin:8px 0 8px 30px;font-size:14.5px;line-height:1.6;letter-spacing:.01em}
+p.eq var{font-style:italic}
+p.eq sub,p.eq sup{font-size:11px}
 /* the prose runs wider here than elsewhere, so a four-column figure is not much
    wider than the paragraph explaining it */
 .wrap{max-width:1180px}
@@ -118,25 +122,61 @@ provides an aggressive strategy, a conservative strategy and a middle ground.</p
 <p class="sub">The formal basis is the <a href="https://www.princeton.edu/~wbialek/rome/refs/kelly_56.pdf">Kelly
 criterion</a> (Kelly, 1956). The calculator chooses the allocation that maximises the expected utility of the
 payout under the user&rsquo;s probability curve, computed jointly across the ladder rather than one strike at a
-time. The middle scenario uses the logarithm as the utility, which is Kelly&rsquo;s fully-invested form and has
-the property that when the prices already match the user&rsquo;s curve, the best allocation simply mirrors their
-own probabilities. The conservative and aggressive scenarios replace the logarithm with a more and a less
-risk-averse member of the same standard power-utility family; these are the fully-invested equivalents of
-quarter-Kelly and double-Kelly allocations, explained in
+time. The middle scenario uses the logarithm as the utility, which is Kelly&rsquo;s fully-invested form. At a
+single strike it splits the money between Yes and No in the user&rsquo;s own probabilities, whatever the prices;
+across the whole ladder it tilts toward the strikes the curve prices furthest above their cost. The conservative
+and aggressive scenarios replace the logarithm with a more and a less risk-averse member of the same
+power-utility family, which under the standard lognormal approximation correspond to quarter-Kelly and
+double-Kelly risk appetites, as set out in
 <a href="https://www.stat.berkeley.edu/~aldous/157/Papers/Good_Bad_Kelly.pdf">MacLean, Thorp &amp; Ziemba,
 <i>Good and bad properties of the Kelly criterion</i></a>.</p>
 <p class="sub">A more risk-averse utility is less tolerant of outcomes that pay nothing, so it is more prone to buy
 the cheaper contracts on both flanks, which produces a smoother payout curve in the fourth column. A less
 risk-averse one accepts the possibility of loss and concentrates capital on the best-priced strikes near the
 centre of the prediction. When the participant&rsquo;s implied fair values and the market&rsquo;s agree, no
-allocation split has an edge over another, and the differences between the scenarios are purely about payout
-smoothness.</p>
+allocation split has an expected edge over another before the fee, and the differences between the scenarios are
+purely about payout smoothness. With the fee inside every cost, a split that buys more contracts gives up more to
+fees, which the expected values on the scenario cards show.</p>
 <p class="sub">The whole amount is always committed, so the calculator&rsquo;s only decision is where it goes, never
 how much of it to hold back. Dollar shares become whole contracts by rounding down, and the loose change then buys
 one contract at a time, best first, until it cannot afford the cheapest thing left. Costs are what a buyer pays
 now, Yes at one dollar less the No bid and No at one dollar less the Yes bid, with the per-side fee inside every
 figure. On quantities settled in whole units, &ldquo;above&nbsp;84&rdquo; is read as the settled figure rounding
 past it, so the working threshold sits half a unit beyond the strike, matching how the contracts settle.</p>
+<div class="secttl" style="margin-top:24px">ALLOCATION ARITHMETIC</div>
+<p class="sub" style="margin-top:0">The inputs define a probability curve. The predicted value <var>m</var> is its
+median and the typed band <var>b</var> the half-width of its central 95&nbsp;percent interval, so the cumulative
+curve <var>F</var> satisfies <var>F</var>(<var>m</var>)&nbsp;=&nbsp;&frac12; and
+<var>F</var>(<var>m</var>+<var>b</var>)&nbsp;&minus;&nbsp;<var>F</var>(<var>m</var>&minus;<var>b</var>)&nbsp;=&nbsp;0.95
+for every shape. The symmetric shape is the normal distribution with &sigma;&nbsp;=&nbsp;<var>b</var>/1.96; the
+skewed shapes are shifted lognormals with the same median and the same 95&nbsp;percent span.</p>
+<p class="sub">Each buyable side becomes a probability and a cost. On a board settled in whole units, Yes on
+&ldquo;Above&nbsp;<var>K</var>&rdquo; pays when the settled figure exceeds <var>K</var>, which the curve prices
+at</p>
+<p class="eq"><var>p</var> = 1 &minus; <var>F</var>(<var>K</var> + &frac12;)</p>
+<p class="sub">and the matching No at 1&nbsp;&minus;&nbsp;<var>p</var>; Yes on
+&ldquo;Below&nbsp;<var>K</var>&rdquo; is priced at <var>F</var>(<var>K</var>&nbsp;&minus;&nbsp;&frac12;). The half
+unit is the settlement convention, since a true value of <var>K</var>.4 rounds to <var>K</var> and does not pay.
+The cost of a side is</p>
+<p class="eq"><var>c</var> = 1 &minus; (bid on the other side) + fee</p>
+<p class="sub">so a dollar on it buys 1/<var>c</var> contracts and returns 1/<var>c</var> dollars if it pays,
+which is the payout multiple printed in the third column.</p>
+<p class="sub">The thresholds cut the value axis into intervals, and between two neighbouring thresholds every
+contract&rsquo;s outcome is fixed, so those intervals are the complete outcome space. A split is a set of
+fractions <var>f<sub>j</sub></var>&nbsp;&ge;&nbsp;0 summing to&nbsp;1, one per buyable side. When the value lands
+in interval <var>s</var>, each dollar committed returns</p>
+<p class="eq"><var>x</var>(<var>s</var>) = &Sigma;<sub><var>j</var></sub> <var>f<sub>j</sub></var>
+<var>a<sub>j</sub></var>(<var>s</var>), &nbsp;where <var>a<sub>j</sub></var>(<var>s</var>) = 1/<var>c<sub>j</sub></var>
+if side <var>j</var> pays in <var>s</var> and 0 if it does not.</p>
+<p class="sub">Each scenario takes the split that maximises expected utility under the curve,</p>
+<p class="eq">maximise&nbsp; &Sigma;<sub><var>s</var></sub> <var>P</var>(<var>s</var>)&nbsp;<var>u</var>(<var>x</var>(<var>s</var>)),
+&nbsp;with <var>u</var>(<var>x</var>) = (<var>x</var><sup>1&minus;&gamma;</sup> &minus; 1) / (1 &minus; &gamma;)</p>
+<p class="sub">and <var>u</var>(<var>x</var>)&nbsp;=&nbsp;log&nbsp;<var>x</var> at &gamma;&nbsp;=&nbsp;1.
+Conservative sets &gamma;&nbsp;=&nbsp;4, Middle &gamma;&nbsp;=&nbsp;1 and Aggressive &gamma;&nbsp;=&nbsp;&frac12;.
+A larger &gamma; punishes intervals that pay little more heavily, so the split hedges with cheap contracts on both
+flanks; a smaller &gamma; tolerates them and concentrates on the strikes priced furthest below the curve. In every
+case the maximiser moves money toward outcomes the user&rsquo;s curve rates more likely than the prices imply, and
+1/&gamma; sets how hard it leans.</p>
 <p class="sub">The probabilities belong to the user. The page does the arithmetic that follows from them, so if
 those numbers are wrong the expected values shown are wrong with them. Nothing here is a forecast, a
 recommendation or a fair value.</p>

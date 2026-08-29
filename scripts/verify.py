@@ -1436,10 +1436,12 @@ def run(no_build: bool) -> int:
                 {strike: 0, side: 'yes', dir: 1, thr: 0, cost: 0.5, price: 0.5},
                 {strike: 0, side: 'no',  dir: 1, thr: 0, cost: 0.5, price: 0.5},
               ];
-              const B = M.bins(inst, 0.2533, 2);   // band 2 is sigma 1, so P(above) = 0.6
+              // the band is the half-width of the central 95 percent interval,
+              // so band 1.959964 is sigma 1 and P(above 0) at mu 0.2533 is 0.6
+              const B = M.bins(inst, 0.2533, 1.959964);
               return { g1: M.crra(inst, B, 1)[0], g4: M.crra(inst, B, 4)[0],
                        gH: M.crra(inst, B, 0.5)[0],
-                       one: M.crra([inst[0]], M.bins([inst[0]], 0.2533, 2), 1),
+                       one: M.crra([inst[0]], M.bins([inst[0]], 0.2533, 1.959964), 1),
                        phi: M.Phi(1.96) };
             }''')
             chk.add("allocator: the log split is Kelly's bet-your-beliefs",
@@ -1468,7 +1470,7 @@ def run(no_build: bool) -> int:
               const R = (() => { const M = WXAlloc._math; const S = WXAlloc._state;
                 const fee = WXM.feeCents() / 100;
                 const instr = M.instruments(S.ladder, fee);
-                const B = M.bins(instr, S.value, Math.max(S.band / 2, 1e-6));
+                const B = M.bins(instr, S.value, Math.max(S.band, 1e-6), S.shape);
                 return [4, 1, 0.5].map(g => {
                   const f = M.crra(instr, B, g);
                   const sc = M.fill(instr, f, S.budget, B, g);
@@ -1508,7 +1510,7 @@ def run(no_build: bool) -> int:
                 chk.add(f"allocator: the {name} shape keeps the prediction as its median",
                         abs(v["med"] - 0.5) < 0.002, f"{v['med']:.4f}")
                 chk.add(f"allocator: the {name} shape keeps the stated 95 percent span",
-                        abs((v["hi"] - v["lo"]) - 20) < 0.6, f"{v['hi'] - v['lo']:.2f}")
+                        abs((v["hi"] - v["lo"]) - 20) < 0.15, f"{v['hi'] - v['lo']:.2f}")
             chk.add("allocator: the skewed shapes put the long tail on the named side",
                     (shp["right"]["hi"] - 50) > 3 * (50 - shp["right"]["lo"])
                     and (50 - shp["left"]["lo"]) > 3 * (shp["left"]["hi"] - 50), "")
@@ -1544,6 +1546,34 @@ def run(no_build: bool) -> int:
             chk.add("allocator: the tornado count is filed under Weather, not Tropical Cyclones",
                     page.evaluate('''() => { const g = [...document.querySelectorAll('#allocMarket optgroup')]
                       .find(g => g.label.includes('Tropical')); return g && ![...g.children].some(o => o.value.includes('SWTUS')); }''') is True, "")
+            # ---- regressions the audit of 2026-08-28 fixed
+            m2 = page.evaluate('''() => {
+              const M = WXAlloc._math;
+              // a 2.5-step axis labels x.5 gridlines as x.5, never as x
+              const tk = M.ticks(0, 10, 4);
+              return { rt: tk.vals.every(v => Math.abs(v - parseFloat(v.toFixed(tk.dp))) < 1e-9),
+                       step: tk.vals.length > 1 ? +(tk.vals[1] - tk.vals[0]).toFixed(6) : 0 };
+            }''')
+            chk.add("allocator: axis labels equal the gridlines they sit on",
+                    m2["rt"] and abs(m2["step"] - 2.5) < 1e-6, str(m2))
+            wb = page.evaluate('''() => {
+              const M = WXAlloc._math, S = WXAlloc._state;
+              // a skewed curve's hard support bound rules out the high outcomes,
+              // but the market can settle there, so the chip's worst must count
+              // them rather than print a guaranteed profit
+              const fee = WXM.feeCents() / 100;
+              const instr = M.instruments(S.ladder, fee).filter(i => i.tradeable);
+              const B = M.bins(instr, 86, 2, 'left');
+              const f = M.crra(instr, B, 1);
+              const sc = M.fill(instr, f, 100, B, 1);
+              return M.scenarioStats(sc, B, instr).worstNet;
+            }''')
+            chk.add("allocator: the worst case covers outcomes the curve rules out",
+                    wb is not None and wb < -50, str(wb))
+            chk.add("allocator: the arithmetic section sets out the objective",
+                    page.locator("p.eq").count() >= 4
+                    and "ALLOCATION ARITHMETIC" in page.locator("body").inner_text(),
+                    f"eq blocks: {page.locator('p.eq').count()}")
             t = "\n".join(page.locator(".sub").all_inner_texts()).lower()
             chk.add("allocator: never says ask, sell or offer",
                     "ask" not in t.replace("asked", "") and "sell" not in t and " offer" not in t, "")

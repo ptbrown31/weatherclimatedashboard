@@ -1,8 +1,8 @@
 /* The position allocation calculator: one amount, spread across a strike ladder three
    ways.
 
-   A reader types two numbers — the value they expect, and how far off they
-   could be — and the page turns that into a normal curve, prices every strike's
+   A reader types the value they expect and how far off they could be, and
+   the page turns that into a curve, prices every strike's
    Yes and No against it, and splits a fixed amount across the ladder. The
    whole amount is always spent: the question the page answers is never how
    much to commit but where, and the three scenarios are three answers to
@@ -12,14 +12,14 @@
 
    The split maximises the expected utility of the payout under the reader's
    curve, with utility from the standard power family (constant relative risk
-   aversion). The middle scenario uses the logarithm — Kelly's growth-optimal
-   rule (Kelly 1956), in its original fully-invested form. Conservative uses a
+   aversion). The middle scenario uses the logarithm, Kelly's growth-optimal
+   rule (Kelly 1956) in its original fully-invested form. Conservative uses a
    much more risk-averse member (gamma 4), which behaves like quarter-Kelly:
    it hedges widely and its payout curve is smooth. Aggressive uses a less
    risk-averse member (gamma one half), the double-Kelly over-bettor: it
    concentrates near the reader's value and pays big only if the value lands
    close. The Kelly-fraction-to-power-utility correspondence is the standard
-   one (MacLean, Thorp and Ziemba). The payoff of a set of these contracts is
+   lognormal approximation (MacLean, Thorp and Ziemba). The payoff of a set of these contracts is
    constant between neighbouring strike thresholds, so the expected utility is
    computed exactly on those intervals rather than on a sampled grid.
 
@@ -55,21 +55,21 @@ window.WXAlloc = (() => {
      A normal curve says the prediction is as likely to be too low as too high
      and by the same amount. Plenty of the quantities on this exchange are not
      like that: a wind speed or a rainfall total has a long right tail, a crop
-     yield a long left one — the bad year is much worse than the good year is
-     good.
+     yield a long left one, where the bad year is much worse than the good
+     year is good.
 
      The skewed shapes keep both numbers the user gave. The median stays on the
      predicted value, and the 95 percent span stays the width they typed; what
      changes is how that span is divided, roughly three parts of it on the long
      side to one on the short. They are lognormal in shape but shifted, so they
-     work on a quantity that can go negative — a temperature in Fahrenheit —
-     which a bare lognormal cannot represent at all.
+     work on a quantity that can go negative, such as a temperature in
+     Fahrenheit, which a bare lognormal cannot represent at all.
 
        W = exp(sigma_log Z)          median 1, long right tail
        V = mu + dir k (W - 1)        median mu, k set by the 95 percent span
 
-     Everything downstream asks this file two questions — the chance the value
-     lands below a threshold, and the height of the curve at a point — so those
+     Everything downstream asks this file for the chance the value lands
+     below a threshold and for the height of the curve at a point, so those
      are the only two functions the shapes have to provide. */
   const SHAPES = { normal: 'Symmetric', right: 'Long tail above', left: 'Long tail below' };
   const SIGMA_LOG = 0.6;              // fixed skew: the long tail is about three times the short one
@@ -80,9 +80,11 @@ window.WXAlloc = (() => {
     return (2 * band) / w;
   }
 
-  /* P(value <= v) under the user's curve. */
+  /* P(value <= v) under the user's curve. The band is the central 95
+     percent interval for every shape, which is what the input label says, so
+     switching the shape never reinterprets the numbers already typed. */
   function cdf(v, mu, band, shape) {
-    const sg = Math.max(band / 2, 1e-9);
+    const sg = Math.max(band / Z95, 1e-9);
     if (shape !== 'right' && shape !== 'left') return Phi((v - mu) / sg);
     const dir = shape === 'right' ? 1 : -1;
     const k = shapeK(Math.max(band, 1e-9));
@@ -94,7 +96,7 @@ window.WXAlloc = (() => {
 
   /* The height of the curve at v, for drawing only. */
   function pdf(v, mu, band, shape) {
-    const sg = Math.max(band / 2, 1e-9);
+    const sg = Math.max(band / Z95, 1e-9);
     if (shape !== 'right' && shape !== 'left') {
       return Math.exp(-0.5 * Math.pow((v - mu) / sg, 2)) / (sg * Math.sqrt(2 * Math.PI));
     }
@@ -134,7 +136,7 @@ window.WXAlloc = (() => {
      sized here could not actually be filled at anything near the price shown,
      and the payout multiples that make those strikes look attractive are the
      least attainable numbers on the board. They stay drawn, faint, so the
-     shape of the whole ladder is still visible — they are simply not
+     shape of the whole ladder is still visible; they are simply not
      allocated to. */
   const LIQUID_LO = 0.05, LIQUID_HI = 0.95;
 
@@ -218,7 +220,7 @@ window.WXAlloc = (() => {
      Projected gradient with backtracking finds the neighbourhood; pairwise
      transfers polished by golden section finish the job, because adjacent
      strikes make near-equivalent instruments and gradient steps crawl along
-     the nearly flat ridge between them — stopping with the right objective
+     the nearly flat ridge between them, stopping with the right objective
      but the wrong split, a bar on the page the true optimum does not hold.
      On the simplex a single coordinate cannot move alone, so the polish
      moves money between pairs. Deterministic throughout. */
@@ -334,14 +336,27 @@ window.WXAlloc = (() => {
   // gross payout of a set of holdings at value v
   const payoutAt = (hold, v) => hold.reduce((a, x) => a + (pays(x.i, v) ? x.n : 0), 0);
 
-  function scenarioStats(sc, B) {
-    let ev = 0, worst = Infinity, bestv = -Infinity;
-    B.forEach(b => {
-      const p = payoutAt(sc.hold, b.v);
-      ev += b.mass * p;
+  /* Expected value under the user's curve; worst and best over every
+     outcome the ladder can settle to. The two use different outcome sets on
+     purpose. bins() drops intervals the curve gives no chance, which is right
+     for an expectation and for the optimiser, and wrong for a worst case,
+     because a curve saying an outcome cannot happen does not stop the market
+     settling there. A skewed curve's hard support bound made the old chip
+     print a guaranteed profit while the payout column drew a near-total loss
+     one band away. */
+  function scenarioStats(sc, B, instr) {
+    let ev = 0;
+    B.forEach(b => { ev += b.mass * payoutAt(sc.hold, b.v); });
+    let worst = Infinity, bestv = -Infinity;
+    const ts = Array.from(new Set(instr.map(i => i.thr))).sort((a, b) => a - b);
+    const edges = [-Infinity].concat(ts, [Infinity]);
+    for (let b = 0; b + 1 < edges.length; b++) {
+      const lo = edges[b], hi = edges[b + 1];
+      const v = !isFinite(lo) ? hi - 1 : (!isFinite(hi) ? lo + 1 : (lo + hi) / 2);
+      const p = payoutAt(sc.hold, v);
       worst = Math.min(worst, p); bestv = Math.max(bestv, p);
-    });
-    if (!B.length || !sc.hold.length) { worst = 0; bestv = 0; }
+    }
+    if (!instr.length || !sc.hold.length) { worst = 0; bestv = 0; }
     return { ev, worst, best: bestv, evNet: ev - sc.spent, worstNet: worst - sc.spent, bestNet: bestv - sc.spent };
   }
 
@@ -376,8 +391,8 @@ window.WXAlloc = (() => {
     if (dir == null || r.strike == null || !isFinite(r.strike)) return null;
     strike = +r.strike;
     // "At Least k" pays at k itself; "Above k" pays strictly beyond it. The
-    // strike keeps its printed value — rewriting it moved the row a gridline
-    // below its own label — and the threshold shift happens in instruments().
+    // strike keeps its printed value, because rewriting it moved the row a
+    // gridline below its own label; the threshold shift happens in instruments().
     const atLeast = /^at least\s/i.test(lab);
     return { strike, label: lab, dir, atLeast, bid: r.bid != null ? +r.bid : null, ask: r.ask != null ? +r.ask : null, mid: r.mid != null ? +r.mid : null,
              conidYes: r.conidYes != null ? r.conidYes : r.conid, conidNo: r.conidNo };
@@ -410,7 +425,7 @@ window.WXAlloc = (() => {
     pick: { kind: 'teaching' },
   };
 
-  function sigma() { return Math.max(S.band / 2, 1e-6); }   // the band is two sigma
+  function sigma() { return Math.max(S.band / Z95, 1e-6); }   // the band is the central 95 percent interval
   const beliefCdf = v => cdf(v, S.value, Math.max(S.band, 1e-9), S.shape);
   const beliefPdf = v => pdf(v, S.value, Math.max(S.band, 1e-9), S.shape);
 
@@ -461,7 +476,7 @@ window.WXAlloc = (() => {
     SCEN.forEach(sc => {
       const f = crra(instr, B, sc.gamma);
       const s = fill(instr, f, S.budget, B, sc.gamma);
-      s.stats = scenarioStats(s, B);
+      s.stats = scenarioStats(s, B, instr);
       scen[sc.key] = s;
     });
     return { all, instr, B, scen, fee, cover,
@@ -469,7 +484,15 @@ window.WXAlloc = (() => {
   }
 
   // ------------------------------------------------------------------- svg
-  const fm$ = v => '$' + (Math.round(v * 100) / 100).toFixed(2);
+  // line spends step in tenths of a cent (whole-cent price plus the half-cent
+  // fee), so a line holding an odd number of contracts ends in a half cent;
+  // rounding each line to whole cents made the printed lines re-add to more
+  // than the printed total
+  const fm$ = v => {
+    const r = Math.round(v * 1000) / 1000;
+    const w = Math.round(r * 100) / 100;
+    return '$' + (Math.abs(r - w) > 1e-9 ? r.toFixed(3) : w.toFixed(2));
+  };
   const fmS = v => (v < 0 ? '−' : '+') + fm$(Math.abs(v)).slice(1);   // signed, for net outcomes
   const fmc = v => {
     const c = Math.round(v * 1000) / 10;                  // costs carry the half-cent fee
@@ -494,9 +517,11 @@ window.WXAlloc = (() => {
     const step = [1, 2, 2.5, 5, 10].map(f => f * mag).find(v => v >= raw * 0.999) || mag * 10;
     const out = [];
     for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
-    // the fewest decimals that still tell every tick apart: deriving them from
-    // the step alone rounded a 2.5 step's middle tick onto its neighbour
+    // enough decimals that every printed label equals the value of its own
+    // gridline, then more if two labels still collide. Distinctness alone let
+    // a 2.5 step print x.5 gridlines as bare integers half a step away.
     let dp = 0;
+    while (dp < 6 && out.some(v => Math.abs(v - parseFloat(v.toFixed(dp))) > 1e-9)) dp++;
     while (dp < 6 && new Set(out.map(v => v.toFixed(dp))).size < out.length) dp++;
     return { vals: out, dp };
   }
@@ -519,8 +544,8 @@ window.WXAlloc = (() => {
     /* The value axis covers what is actually in play.
 
        It used to span every strike on the board plus the whole prediction,
-       which on a ladder like rice — strikes a hundredth apart, a prediction a
-       tenth wide — left the interesting part squeezed into a fifth of the
+       which on a ladder like rice, strikes a hundredth apart and a
+       prediction a tenth wide, left the interesting part squeezed into a fifth of the
        panel with the labels on top of one another. It now covers the strikes
        the calculator will trade and the middle of the curve, and only widens
        past that for strikes it is actually holding. */
@@ -607,7 +632,16 @@ window.WXAlloc = (() => {
         const move = e => {
           const v = vAt(e.clientY);
           if (k === 'mu') S.value = snapFix(snap(v));
-          else S.band = Math.max(grainStep(), snapFix(snap(Math.abs(v - S.value))));
+          else {
+            /* Invert through the same quantile the handle is drawn at. The
+               raw cursor distance is only the band when the curve is
+               symmetric; on a skewed shape the 97.5 percent quantile sits
+               half again past the band edge and the 2.5 percent well inside
+               it, and reading the distance as the band made the handle chase
+               or outrun the cursor. */
+            const qf = Math.abs(quantile(k === 'hi' ? 0.975 : 0.025) - S.value) / Math.max(S.band, 1e-9);
+            S.band = Math.max(grainStep(), snapFix(snap(Math.abs(v - S.value) / Math.max(qf, 1e-9))));
+          }
           syncInputs(); draw();
         };
         const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
@@ -769,6 +803,10 @@ window.WXAlloc = (() => {
       const per4 = Math.min((spine4 - P4.x0) / Math.max(Math.abs(worst), 1e-9),
                             (P4.x1 - spine4) / Math.max(bestv, 1e-9));
       const xp = d => spine4 + (d - 0) * per4;          // d is a NET amount
+      // the scale is fitted to the outcomes the curve allows; a band the curve
+      // rules out can net far below that, and its bar pins at the panel edge
+      // rather than painting across the column to the left
+      const xq = d => Math.max(P4.x0, Math.min(P4.x1, xp(d)));
       const dt = ticks(-Math.abs(worst), bestv, 4);
       dt.vals.forEach(d => {
         const x = xp(d);
@@ -792,7 +830,7 @@ window.WXAlloc = (() => {
         const v0 = edges[b], v1 = edges[b + 1];
         const net = netOf(sel.hold, (v0 + v1) / 2, sel.spent);
         const yTop = y(v1), hgt = Math.max(y(v0) - y(v1) - 1.4, 1.2);
-        const x = xp(net);
+        const x = xq(net);
         svg.appendChild(el('rect', { x: Math.min(spine4, x), y: yTop + 0.7, width: Math.max(Math.abs(x - spine4), 0.8),
                                      height: hgt, fill: net >= 0 ? scSel.col : 'var(--collat)', opacity: 0.85 }));
       }
@@ -803,7 +841,7 @@ window.WXAlloc = (() => {
         for (let b = 0; b + 1 < edges.length; b++) {
           const v0 = edges[b], v1 = edges[b + 1];
           const n = netOf(sc.hold, (v0 + v1) / 2, sc.spent);
-          d += (b ? 'L' : 'M') + xp(n).toFixed(1) + ',' + y(v0).toFixed(1) + 'L' + xp(n).toFixed(1) + ',' + y(v1).toFixed(1);
+          d += (b ? 'L' : 'M') + xq(n).toFixed(1) + ',' + y(v0).toFixed(1) + 'L' + xq(n).toFixed(1) + ',' + y(v1).toFixed(1);
         }
         svg.appendChild(el('path', { d, fill: 'none', stroke: s2.col, 'stroke-width': 1.2, opacity: 0.6, 'pointer-events': 'none' }));
       });
@@ -817,14 +855,19 @@ window.WXAlloc = (() => {
         const v = vHi - (q.y - T) / (H - T - Bm) * (vHi - vLo);
         if (!mark) { mark = el('line', { x1: P4.x0, x2: P4.x1, stroke: 'var(--ink)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.5, 'pointer-events': 'none' }); svg.appendChild(mark); }
         mark.setAttribute('y1', q.y); mark.setAttribute('y2', q.y);
+        /* The rows are priced at the value the title names. Pricing the raw
+           cursor position put the cursor and the title in different outcome
+           bands on ladders with strikes a hundredth apart, and a landing
+           exactly on a strike pays by the strict settlement reading. */
         const gr = lad.grain === 'integer' ? Math.round(v) : +v.toFixed(tk.dp);
         const rows = SCEN.map(s2 => {
           const sc = R.scen[s2.key];
-          const pay = payoutAt(sc.hold, v);
+          const pay = payoutAt(sc.hold, gr);
           return ['<span class="sw" style="background:' + s2.col + '"></span>' + s2.name,
                   fmS(pay - sc.spent) + ' net (' + fm$(pay) + ' back)'];
         });
-        tip.show(ev, tip.rows('If the number lands at ' + fmv(gr, unit), rows, 'against the capital committed'));
+        tip.show(ev, tip.rows('If the number lands at ' + (lad.grain === 'integer' ? String(gr) : gr.toFixed(tk.dp))
+                              + (unit ? ' ' + unit : ''), rows, 'against the capital committed'));
       });
       band3.addEventListener('mouseleave', () => { tip.hide(); if (mark) { mark.remove(); mark = null; } });
       svg.insertBefore(band3, svg.firstChild);
@@ -852,14 +895,14 @@ window.WXAlloc = (() => {
       const nct = sel.hold.reduce((a, x) => a + x.n, 0);
       let msg;
       if (!R.all.length) {
-        msg = 'Nothing on this ladder can be bought right now — no strike has a resting bid on the other side to buy against.';
+        msg = 'Nothing on this ladder can be bought right now, because no strike has a resting bid on the other side to buy against.';
       } else if (!R.instr.length) {
         msg = 'Every strike on this ladder sits outside the 5 to 95 percent window the calculator will allocate inside, so none is priced where a position could reliably be filled.';
       } else {
         msg = 'The ' + scSel.name.toLowerCase() + ' split buys ' + nct + (nct === 1 ? ' contract' : ' contracts') + ' across '
           + sel.hold.length + (sel.hold.length === 1 ? ' line' : ' lines') + ' for ' + fm$(sel.spent)
           + (sel.cash > 0.005 ? '. The ' + fm$(sel.cash).replace('$0.', '') + '¢ left cannot buy a whole contract' : '')
-          + '. Expected values are under the user’s own curve.';
+          + '. Expected values are under the user’s own curve; worst and best cover every outcome the ladder can settle to.';
         if (R.skipped) {
           msg += ' ' + R.skipped + ' of the ' + R.all.length + ' buyable sides are drawn faint and left out, because the market puts them '
             + 'outside 5 to 95 percent, where the book thins and a position could not reliably be filled.';
@@ -872,8 +915,8 @@ window.WXAlloc = (() => {
     }
   }
 
-  /* The value at a given probability under the user's curve, by bisection —
-     the skewed shapes have no closed-form inverse and this is called a handful
+  /* The value at a given probability under the user's curve, by bisection.
+     The skewed shapes have no closed-form inverse and this is called a handful
      of times per redraw. */
   function quantile(q) {
     const mu = S.value, band = Math.max(S.band, 1e-9);
@@ -932,7 +975,7 @@ window.WXAlloc = (() => {
   }
   function instTip(i, R, unit) {
     const yes = i.side === 'yes';
-    return tip.rows((yes ? 'Yes' : 'No') + ' · ' + i.label + ' — not in this split', [
+    return tip.rows((yes ? 'Yes' : 'No') + ' · ' + i.label + ' · not in this split', [
       [yes ? 'Buy Yes now at' : 'Buy No now at', fmc(i.price)],
       ['Cost with the fee', fmc(i.cost) + ' · pays ' + fmx(1 / i.cost)],
       ['The user’s chance it pays', fmp(i.p)],
@@ -952,7 +995,7 @@ window.WXAlloc = (() => {
       if (cities.length) {
         const g = h('optgroup', { label: 'Daily temperatures' });
         cities.sort((a, b) => (a.city || '').localeCompare(b.city || '')).forEach(c => {
-          g.appendChild(h('option', { value: 'city:' + c.station, text: (c.city || c.station) + ' — daily high / low' }));
+          g.appendChild(h('option', { value: 'city:' + c.station, text: (c.city || c.station) + ' · daily high / low' }));
         });
         sel.appendChild(g);
       }
@@ -1075,13 +1118,13 @@ window.WXAlloc = (() => {
       const impDoc = (((doc.implied || {})[it.day] || {})[it.side] || {}).value;
       const imp = impDoc != null ? impDoc : impliedMedian(rows);
       setLadder({
-        title: (doc.city || doc.station) + ' — daily ' + it.side + ', ' + it.day,
+        title: (doc.city || doc.station) + ' · daily ' + it.side + ', ' + it.day,
         sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '. Click a row to open that contract on IBKR.',
         unit: celsius ? '°C' : '°F', grain: 'integer', rows, synthetic: false,
         productConid: ((doc.symbols || {})[it.side] || {}).productConid,
         defaults: { value: imp, band: celsius ? 3 : 4 },
       });
-    }, (doc.city || doc.station) + ' — daily temperature');
+    }, (doc.city || doc.station) + ' · daily temperature');
   }
 
   function prodPicker(id, doc, productConid) {
@@ -1106,7 +1149,7 @@ window.WXAlloc = (() => {
       const imp = impliedMedian(parsed);
       const span = parsed.length ? parsed[parsed.length - 1].strike - parsed[0].strike : 4;
       setLadder({
-        title: name + ' — ' + it.text.replace(/ \(\d+ strikes\)/, ''),
+        title: name + ' · ' + it.text.replace(/ \(\d+ strikes\)/, ''),
         sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '.' + (productConid ? ' Click a row to open that contract on IBKR.' : ''),
         unit: '', grain: isCount ? 'integer' : 'continuous', rows: parsed, synthetic: false, productConid,
         defaults: { value: imp, band: Math.max(span / 4, isCount ? 2 : 0.1) },
@@ -1137,8 +1180,8 @@ window.WXAlloc = (() => {
 
   /* The schematic: the same ladder, read three times.
 
-     It is the calculator's own shape — strikes down a vertical axis, Yes green
-     and No red — with everything the calculator adds taken away, so a reader
+     It is the calculator's own shape, strikes down a vertical axis with Yes
+     green and No red, with everything the calculator adds taken away, so a reader
      meets the one idea the whole page rests on before meeting any of the
      machinery: on an overlapping ladder a single outcome settles every rung at
      once, and which side of each rung pays is decided by where the number
@@ -1205,7 +1248,7 @@ window.WXAlloc = (() => {
   }
 
   // pure pieces exposed for the verification harness, not for pages
-  const _math = { erf, Phi, cdf, pdf, pWin, instruments, bins, crra, fill, payoutAt, parseRow,
+  const _math = { erf, Phi, cdf, pdf, pWin, instruments, bins, crra, fill, payoutAt, scenarioStats, parseRow,
                   impliedMedian, pays, ticks, LIQUID_LO, LIQUID_HI };
   return { init, draw, _math, _state: S };
 })();
