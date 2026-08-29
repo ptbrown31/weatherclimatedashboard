@@ -233,29 +233,104 @@ window.WXCity = (() => {
         const wind = n => (n.wspd == null ? null
           : (n.wdir != null ? n.wdir + '\u00b0 at ' : '') + n.wspd + ' kt'
             + (n.wgst ? ', gusting ' + n.wgst : ''));
-        const chip = (x2, y2, t2, big, col) => {
-          const fs = big ? 15 : 11;
-          const tw = String(t2).length * fs * 0.62 + 8;
-          svg.appendChild(el('rect', { x: x2 - tw / 2, y: y2 - fs + 2, width: tw, height: fs + 4, rx: 4,
-                                       fill: 'var(--panel)', opacity: 0.88, 'pointer-events': 'none' }));
-          svg.appendChild(txt(t2, { x: x2, y: y2, 'text-anchor': 'middle', 'font-size': fs,
+        const COVER_FRAC = { CLR: 0, SKC: 0, CAVOK: 0, FEW: 0.25, SCT: 0.5, BKN: 0.75, OVC: 1, OVX: 1, VV: 1 };
+        const COVER_NAME = { CLR: 'clear', SKC: 'clear', CAVOK: 'clear', FEW: 'few clouds', SCT: 'scattered',
+                             BKN: 'broken', OVC: 'overcast', OVX: 'sky obscured', VV: 'sky obscured' };
+        /* The station-model glyph, the aviation convention throughout.
+
+           The circle is the sky: filled by the fraction of it the reported
+           cover code names, a wedge from twelve o'clock. The staff points
+           toward the direction the wind comes FROM (a north wind's staff
+           points up the map), a pennant is fifty knots, a full barb ten, a
+           half barb five, barbs on the clockwise side; a ringed circle with
+           no staff is calm. Temperature sits upper-left of the circle and
+           dewpoint lower-left, which is where seventy years of surface
+           charts put them. */
+        const model = (g, x2, y2, n, big, col) => {
+          const r = big ? 6.5 : 4.5;
+          const frac = n.cover != null ? COVER_FRAC[n.cover] : null;
+          g.appendChild(el('circle', { cx: x2, cy: y2, r, fill: 'var(--panel)', stroke: col,
+                                       'stroke-width': big ? 2 : 1.4 }));
+          if (frac != null && frac > 0) {
+            if (frac >= 1) {
+              g.appendChild(el('circle', { cx: x2, cy: y2, r: r - (big ? 1.6 : 1.1), fill: col }));
+            } else {
+              const a1 = -Math.PI / 2, a2 = a1 + frac * 2 * Math.PI, ri = r - (big ? 1.6 : 1.1);
+              g.appendChild(el('path', { d: 'M' + x2 + ' ' + y2
+                + 'L' + (x2 + ri * Math.cos(a1)).toFixed(1) + ' ' + (y2 + ri * Math.sin(a1)).toFixed(1)
+                + 'A' + ri + ' ' + ri + ' 0 ' + (frac > 0.5 ? 1 : 0) + ' 1 '
+                + (x2 + ri * Math.cos(a2)).toFixed(1) + ' ' + (y2 + ri * Math.sin(a2)).toFixed(1) + 'Z', fill: col }));
+            }
+          }
+          if (n.wspd != null && n.wspd < 3) {
+            g.appendChild(el('circle', { cx: x2, cy: y2, r: r + 2.5, fill: 'none', stroke: col, 'stroke-width': 1 }));
+          } else if (n.wspd != null && n.wdir != null) {
+            const rad = n.wdir * Math.PI / 180;
+            const ux = Math.sin(rad), uy = -Math.cos(rad);          // toward where the wind is FROM
+            const pxv = -uy, pyv = ux;                              // the clockwise side
+            const L = big ? 26 : 20;
+            const sx = x2 + ux * r, sy = y2 + uy * r;
+            const ex = x2 + ux * (r + L), ey = y2 + uy * (r + L);
+            g.appendChild(el('line', { x1: sx, y1: sy, x2: ex, y2: ey, stroke: col, 'stroke-width': 1.5 }));
+            let left = Math.round(n.wspd / 5) * 5, d0 = 0;
+            const step = big ? 5 : 4.2, bl = big ? 9 : 7;
+            while (left >= 50) {
+              const bx = x2 + ux * (r + L - d0), by2 = y2 + uy * (r + L - d0);
+              const b2x = x2 + ux * (r + L - d0 - step * 1.4), b2y = y2 + uy * (r + L - d0 - step * 1.4);
+              g.appendChild(el('path', { d: 'M' + bx + ' ' + by2 + 'L' + (bx + pxv * bl) + ' ' + (by2 + pyv * bl)
+                                         + 'L' + b2x + ' ' + b2y + 'Z', fill: col }));
+              left -= 50; d0 += step * 1.6;
+            }
+            while (left >= 10) {
+              const bx = x2 + ux * (r + L - d0), by2 = y2 + uy * (r + L - d0);
+              g.appendChild(el('line', { x1: bx, y1: by2, x2: bx + (pxv + ux * 0.45) * bl, y2: by2 + (pyv + uy * 0.45) * bl,
+                                         stroke: col, 'stroke-width': 1.5 }));
+              left -= 10; d0 += step;
+            }
+            if (left >= 5) {
+              if (d0 === 0) d0 = step;                              // a lone half barb sits in from the tip
+              const bx = x2 + ux * (r + L - d0), by2 = y2 + uy * (r + L - d0);
+              g.appendChild(el('line', { x1: bx, y1: by2, x2: bx + (pxv + ux * 0.45) * bl * 0.55, y2: by2 + (pyv + uy * 0.45) * bl * 0.55,
+                                         stroke: col, 'stroke-width': 1.5 }));
+            }
+            if (n.wgst) {
+              g.appendChild(txt('G' + n.wgst, { x: ex + ux * 4, y: ey + uy * 4 + 3,
+                                                'text-anchor': 'middle', 'font-size': big ? 9.5 : 8.5,
+                                                'font-weight': 700, fill: col, 'pointer-events': 'none' }));
+            }
+          }
+        };
+        const chip = (x2, y2, t2, big, col, anchor) => {
+          const fs = big ? 14 : 10.5;
+          const tw = String(t2).length * fs * 0.62 + 6;
+          const cx2 = anchor === 'end' ? x2 - tw / 2 : x2 + tw / 2;
+          svg.appendChild(el('rect', { x: cx2 - tw / 2, y: y2 - fs + 2, width: tw, height: fs + 4, rx: 4,
+                                       fill: 'var(--panel)', opacity: 0.85, 'pointer-events': 'none' }));
+          svg.appendChild(txt(t2, { x: cx2, y: y2, 'text-anchor': 'middle', 'font-size': fs,
                                     'font-weight': 700, fill: col, 'pointer-events': 'none' }));
+        };
+        const labels = (x2, y2, n, big, col) => {
+          const off = big ? 10 : 7.5;
+          if (n.tempF != null) chip(x2 - off, y2 - (big ? 8 : 6), Math.round(n.tempF) + '\u00b0', big, col, 'end');
+          if (n.dewF != null) chip(x2 - off, y2 + (big ? 16 : 13), Math.round(n.dewF) + '\u00b0', false, 'var(--muted)', 'end');
         };
         const placed = [];
         near.forEach(n => {
           const x2 = px(n.lon), y2 = py(n.lat);
           if (x2 < 8 || x2 > W2 - 8 || y2 < 10 || y2 > H2 - 6) return;
-          svg.appendChild(el('circle', { cx: x2, cy: y2, r: 3.5, fill: 'var(--ink)', stroke: 'var(--panel)', 'stroke-width': 1.2 }));
-          // a label only where it does not sit on another station's label
-          if (n.tempF != null && !placed.some(q => Math.abs(q[0] - x2) < 46 && Math.abs(q[1] - y2) < 18)) {
-            chip(x2, y2 - 9, Math.round(n.tempF) + '\u00b0', false, 'var(--ink)');
-            placed.push([x2, y2 - 9]);
+          model(svg, x2, y2, n, false, 'var(--ink)');
+          // temperature and dewpoint only where they do not sit on another
+          // station's; the glyph itself always draws
+          if (!placed.some(q => Math.abs(q[0] - x2) < 52 && Math.abs(q[1] - y2) < 26)) {
+            labels(x2, y2, n, false, 'var(--ink)');
+            placed.push([x2, y2]);
           }
-          const hit = el('circle', { cx: x2, cy: y2, r: 12, fill: 'transparent' });
+          const hit = el('circle', { cx: x2, cy: y2, r: 14, fill: 'transparent' });
           hit.addEventListener('mousemove', ev => {
             const rows = [['Temperature', n.tempF != null ? WXC.deg(n.tempF) : '\u2014'],
                           ['Dewpoint', n.dewF != null ? WXC.deg(n.dewF) : '\u2014'],
                           ['Wind', wind(n) || 'calm'],
+                          ['Sky', n.cover ? (COVER_NAME[n.cover] || n.cover) : '\u2014'],
                           ['Observed', n.t ? WXC.clockFull(Date.parse(n.t), c.tz) : '\u2014']];
             tip.show(ev, tip.rows(n.name + ' (' + n.id + ')', rows,
                                   'a nearby report for context; the contract settles on ' + c.station + ' alone'));
@@ -263,11 +338,13 @@ window.WXCity = (() => {
           hit.addEventListener('mouseleave', () => tip.hide());
           svg.appendChild(hit);
         });
-        // the resolving station over everything, ringed, its reading large
-        svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 8, fill: 'none',
-                                       stroke: 'var(--accent)', 'stroke-width': 2.6 }));
-        svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 3, fill: 'var(--accent)' }));
-        if (centreTemp != null) chip(W2 / 2, H2 / 2 - 14, Math.round(centreTemp) + '\u00b0', true, 'var(--accent)');
+        // the resolving station over everything: the same model, ringed, its
+        // temperature the settlement-convention reading from its own record
+        const selfN = Object.assign({}, ob.nearbySelf || {}, centreTemp != null ? { tempF: centreTemp } : {});
+        svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 11, fill: 'none',
+                                       stroke: 'var(--accent)', 'stroke-width': 2.4 }));
+        model(svg, W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
+        labels(W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
         box.appendChild(svg);
       } else {
         // the image is centred on the station, so the marker is the middle of it
@@ -291,8 +368,11 @@ window.WXCity = (() => {
       const capEl = h('div', { class: 'cap', style: 'margin:5px 0 0' });
       capEl.innerHTML = esc(bits.join(' \u00b7 ')) + ' \u00b7 about ' + across + ' km across.<br>'
         + (region ? 'The ringed station is the one the contract settles on; the others are the reporting fields '
-                    + 'around it, each with its current temperature. A city\u2019s temperature varies with land '
-                    + 'cover, distance from the centre, shade and water, so where each thermometer sits matters.'
+                    + 'around it, each drawn as a station model: temperature upper-left, dewpoint lower-left, '
+                    + 'the circle filled by cloud cover, and a wind barb pointing where the wind comes from, a '
+                    + 'half barb five knots, a full barb ten and a pennant fifty. A city\u2019s temperature varies '
+                    + 'with land cover, distance from the centre, shade and water, so where each thermometer sits '
+                    + 'matters.'
                   : 'The contract settles on this one station, and a city\u2019s temperature varies with land cover, '
                     + 'distance from the centre, shade and water, so where it sits matters.')
         + esc(asof) + ' Imagery: '

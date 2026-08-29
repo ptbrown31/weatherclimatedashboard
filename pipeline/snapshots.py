@@ -237,7 +237,10 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
     nearby_cfg = _load_nearby()
     nearby_obs: dict = {}
     if nearby_cfg.get("stations"):
-        ids = sorted({n["id"] for v in nearby_cfg["stations"].values() for n in v})
+        # the roster stations ride along, so each city's own station model
+        # (dewpoint, wind, cloud cover) comes from the same decoded pull
+        ids = sorted({n["id"] for v in nearby_cfg["stations"].values() for n in v}
+                     | set(nearby_cfg["stations"]))
         try:
             nearby_obs = gw.fetch_latest_metars(ids)
         except Exception as e:  # noqa: BLE001
@@ -292,11 +295,16 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
             near.append({"id": n["id"], "name": n["name"], "lat": n["lat"], "lon": n["lon"],
                          "t": _iso(dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc)),
                          "tempF": ob["tempF"], "dewF": ob["dewF"], "wdir": ob["wdir"],
-                         "wspd": ob["wspd"], "wgst": ob["wgst"], "src": ob["src"]})
+                         "wspd": ob["wspd"], "wgst": ob["wgst"], "cover": ob.get("cover"),
+                         "src": ob["src"]})
         if near:
             snap["nearby"] = near
             snap["nearbyFrame"] = {"halfWKm": nearby_cfg.get("frameHalfWKm"),
                                    "halfHKm": nearby_cfg.get("frameHalfHKm")}
+            self_ob = nearby_obs.get(sid)
+            if self_ob:
+                snap["nearbySelf"] = {k: self_ob.get(k) for k in
+                                      ("tempF", "dewF", "wdir", "wspd", "wgst", "cover")}
         store.put(f"snapshots/obs/{sid}.json", json.dumps(snap, separators=(",", ":")).encode(),
                   "application/json", SNAP_CACHE)
         summary_obs[sid] = {"today": snap["today"], "yesterday": snap["yesterday"], "latest": snap["latest"],

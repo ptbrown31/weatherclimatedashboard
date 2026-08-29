@@ -239,11 +239,19 @@ def fetch_latest_metars(stations: list[str]) -> dict[str, dict]:
         temp_c = ob["temp"] if TEMP_SOURCE == "remarks" else _body_temp_c(ob.get("rawOb", ""))
         if temp_c is None:
             continue
+        # the summary cover code the feed derives (CLR/FEW/SCT/BKN/OVC, or a
+        # vertical-visibility OVX); absent, the highest layer answers
+        cover = ob.get("cover")
+        if not cover:
+            rank = {"CLR": 0, "SKC": 0, "CAVOK": 0, "FEW": 1, "SCT": 2, "BKN": 3, "OVC": 4, "OVX": 4, "VV": 4}
+            layers = [str(c.get("cover")) for c in (ob.get("clouds") or []) if c.get("cover")]
+            cover = max(layers, key=lambda c: rank.get(c, -1)) if layers else None
         out[sid] = {
             "obsTime": ob["obsTime"],
             "tempF": round(c_to_f(temp_c), 1),
             "dewF": round(c_to_f(ob["dewp"]), 1) if ob.get("dewp") is not None else None,
             "wdir": ob.get("wdir"), "wspd": ob.get("wspd"), "wgst": ob.get("wgst"),
+            "cover": cover,
             "type": ob.get("metarType"), "src": ob.get("temp_source"),
         }
     return out
