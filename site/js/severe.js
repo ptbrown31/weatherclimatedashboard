@@ -58,7 +58,7 @@ window.WXSevere = (() => {
       if (sy < T - 2) return;
       svg.appendChild(el('line', { x1: L, x2: R, y1: sy, y2: sy, stroke: 'var(--ink)', opacity: 0.28, 'stroke-dasharray': '2 3' }));
       const q = priced && priced[String(c.spec || '') + '|' + String(c.strike)];
-      const yes = q && q.mid != null ? Math.round(q.mid * 100) + '¢' : null;
+      const yes = q && WXM.realMid(q) ? Math.round(q.mid * 100) + '¢' : null;
       const lab = c.label + (yes ? ' · ' + yes : '');
       if (lastLab == null || Math.abs(sy - lastLab) >= 10) {
         svg.appendChild(txt(lab, { x: R, y: sy - 3, 'text-anchor': 'end', 'font-size': 8.5, fill: 'var(--muted)' }));

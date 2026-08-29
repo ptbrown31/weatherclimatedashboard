@@ -284,7 +284,8 @@ window.WXCat = (() => {
       const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: k })]);
       rows.forEach(c => {
         const q = priced[String(c.spec || '') + '|' + String(c.strike)];
-        const yes = q && q.mid != null ? Math.round(q.mid * 100) : null;
+        // an empty book's widest-spread midpoint is not a price (WXM.realMid)
+        const yes = q && WXM.realMid(q) ? Math.round(q.mid * 100) : null;
         const one = q && q.mid != null && (q.bid == null || q.ask == null);
         const u = WXM.contractUrl(p.productConid, c.conidYes);
         const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
