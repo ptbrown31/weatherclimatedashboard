@@ -299,6 +299,64 @@ window.WXAlloc = (() => {
     return f;
   }
 
+  /* One side per strike, because the exchange nets opposing positions.
+
+     Holding Yes and No on the same contract is not a position: buying the
+     second side closes the first, and with the two buy-now costs summing
+     past a dollar the close is an immediate loss. The unconstrained
+     optimiser still reaches for the pair, because under full investment it
+     is the only riskless payout on the board and a risk-averse utility
+     will pay a negative yield for smoothness. So the constraint is real
+     and binds exactly where the model most wants to break it.
+
+     Solved by exclusion: run the optimiser, and while any strike holds
+     both sides, resolve the heaviest such pair by trying each side's
+     exclusion and keeping the better objective. Each resolution masks one
+     instrument for good, so at most one pass per strike. Spreads across
+     DIFFERENT strikes (Yes at K with No above it) stay legal, which is
+     what the exchange itself allows. */
+  const rowKey = i => i.strike + '|' + i.dir + '|' + (i.atLeast ? 1 : 0);
+  function crraExchange(instr, B, gamma) {
+    const U = gamma === 1 ? (x => Math.log(Math.max(x, XF)))
+      : (x => (Math.pow(Math.max(x, XF), 1 - gamma) - 1) / (1 - gamma));
+    const util = f => {
+      let s2 = 0;
+      B.forEach(b => {
+        let x = 0;
+        instr.forEach((i, j) => { if (f[j] && pays(i, b.v)) x += f[j] / i.cost; });
+        s2 += b.mass * U(x);
+      });
+      return s2;
+    };
+    const run = mask => {
+      const idx = [], sub = [];
+      instr.forEach((i, j) => { if (mask[j]) { idx.push(j); sub.push(i); } });
+      const fs = crra(sub, B, gamma);
+      const f = instr.map(() => 0);
+      fs.forEach((v, k2) => { f[idx[k2]] = v; });
+      return f;
+    };
+    const mask = instr.map(() => true);
+    for (let guard = 0; guard <= instr.length; guard++) {
+      const f = run(mask);
+      let worst = null, wsum = 0;
+      const seen = {};
+      instr.forEach((i, j) => {
+        const k2 = rowKey(i);
+        if (seen[k2] != null) {
+          const j0 = seen[k2];
+          if (f[j0] > XF && f[j] > XF && f[j0] + f[j] > wsum) { worst = [j0, j]; wsum = f[j0] + f[j]; }
+        } else seen[k2] = j;
+      });
+      if (!worst) return f;
+      const [ja, jb] = worst;
+      const fa = run(mask.map((m, j) => m && j !== ja));
+      const fb = run(mask.map((m, j) => m && j !== jb));
+      mask[util(fa) >= util(fb) ? ja : jb] = false;
+    }
+    return run(mask);
+  }
+
   /* Shares -> whole contracts, with the change reinvested.
 
      Flooring each line leaves coins, and the brief here is that the whole
@@ -320,6 +378,15 @@ window.WXAlloc = (() => {
       const base = score();
       for (let j = 0; j < instr.length; j++) {
         if (instr[j].cost > residual + 1e-9) continue;
+        // never the opposite side of a strike already held: the exchange
+        // would net the two, closing contracts at a combined cost past $1
+        const k2 = instr[j].strike + '|' + instr[j].dir + '|' + (instr[j].atLeast ? 1 : 0);
+        let clash = false;
+        for (let j2 = 0; j2 < instr.length; j2++) {
+          if (j2 !== j && n[j2] > 0 && instr[j2].side !== instr[j].side
+              && instr[j2].strike + '|' + instr[j2].dir + '|' + (instr[j2].atLeast ? 1 : 0) === k2) { clash = true; break; }
+        }
+        if (clash) continue;
         let s = 0;
         for (let bi = 0; bi < B.length; bi++) s += B[bi].mass * U(x[bi] + (pays(instr[j], B[bi].v) ? 1 / budget : 0));
         const gain = s - base;
@@ -474,7 +541,7 @@ window.WXAlloc = (() => {
     const cover = B.reduce((s, b) => s + (instr.some(i => pays(i, b.v)) ? b.mass : 0), 0);
     const scen = {};
     SCEN.forEach(sc => {
-      const f = crra(instr, B, sc.gamma);
+      const f = crraExchange(instr, B, sc.gamma);
       const s = fill(instr, f, S.budget, B, sc.gamma);
       s.stats = scenarioStats(s, B, instr);
       scen[sc.key] = s;
@@ -1251,7 +1318,7 @@ window.WXAlloc = (() => {
   }
 
   // pure pieces exposed for the verification harness, not for pages
-  const _math = { erf, Phi, cdf, pdf, pWin, instruments, bins, crra, fill, payoutAt, scenarioStats, parseRow,
+  const _math = { erf, Phi, cdf, pdf, pWin, instruments, bins, crra, crraExchange, fill, payoutAt, scenarioStats, parseRow,
                   impliedMedian, pays, ticks, LIQUID_LO, LIQUID_HI };
   return { init, draw, _math, _state: S };
 })();

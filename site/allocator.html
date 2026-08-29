@@ -137,7 +137,9 @@ centre of the prediction. When the participant&rsquo;s implied fair values and t
 allocation split has an expected edge over another before the fee, and the differences between the scenarios are
 purely about payout smoothness. With the fee inside every cost, a split that buys more contracts gives up more to
 fees, which the expected values on the scenario cards show.</p>
-<p class="sub">The whole amount is always committed, so the calculator&rsquo;s only decision is where it goes, never
+<p class="sub">No split holds Yes and No on the same strike. The exchange nets opposing positions, so buying the
+second side would close the first at a combined cost above a dollar; spreads across different strikes remain
+available. The whole amount is always committed, so the calculator&rsquo;s only decision is where it goes, never
 how much of it to hold back. Dollar shares become whole contracts by rounding down, and the loose change then buys
 one contract at a time, best first, until it cannot afford the cheapest thing left. Costs are what a buyer pays
 now, Yes at one dollar less the No bid and No at one dollar less the Yes bid, with the per-side fee inside every
@@ -170,7 +172,8 @@ in interval <var>s</var>, each dollar committed returns</p>
 if side <var>j</var> pays in <var>s</var> and 0 if it does not.</p>
 <p class="sub">Each scenario takes the split that maximises expected utility under the curve,</p>
 <p class="eq">maximise&nbsp; &Sigma;<sub><var>s</var></sub> <var>P</var>(<var>s</var>)&nbsp;<var>u</var>(<var>x</var>(<var>s</var>)),
-&nbsp;with <var>u</var>(<var>x</var>) = (<var>x</var><sup>1&minus;&gamma;</sup> &minus; 1) / (1 &minus; &gamma;)</p>
+&nbsp;with <var>u</var>(<var>x</var>) = (<var>x</var><sup>1&minus;&gamma;</sup> &minus; 1) / (1 &minus; &gamma;)
+&nbsp;and <var>f</var><sub>Yes</sub>(<var>K</var>)&nbsp;<var>f</var><sub>No</sub>(<var>K</var>) = 0 at every strike</p>
 <p class="sub">and <var>u</var>(<var>x</var>)&nbsp;=&nbsp;log&nbsp;<var>x</var> at &gamma;&nbsp;=&nbsp;1.
 Conservative sets &gamma;&nbsp;=&nbsp;4, Middle &gamma;&nbsp;=&nbsp;1 and Aggressive &gamma;&nbsp;=&nbsp;&frac12;.
 A larger &gamma; punishes intervals that pay little more heavily, so the split hedges with cheap contracts on both

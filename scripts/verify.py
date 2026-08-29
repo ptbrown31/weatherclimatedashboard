@@ -1626,6 +1626,30 @@ def run(no_build: bool) -> int:
             }''')
             chk.add("allocator: the worst case covers outcomes the curve rules out",
                     wb is not None and wb < -50, str(wb))
+            paired = page.evaluate("""() => {
+              // the exchange nets opposing positions, so no split may hold
+              // Yes and No on the same strike, under any shape or appetite
+              const M = WXAlloc._math, S = WXAlloc._state;
+              const fee = WXM.feeCents() / 100;
+              const out = [];
+              for (const shape of ['normal', 'left', 'right']) {
+                const instr = M.instruments(S.ladder, fee).filter(i => i.tradeable);
+                const B = M.bins(instr, S.value, Math.max(S.band, 1e-6), shape);
+                for (const g of [4, 1, 0.5]) {
+                  const f = M.crraExchange(instr, B, g);
+                  const sc = M.fill(instr, f, 100, B, g);
+                  const seen = {};
+                  sc.hold.forEach(x => {
+                    const k = x.i.strike + '|' + x.i.dir;
+                    if (seen[k] && seen[k] !== x.i.side) out.push(shape + ' g' + g + ' @' + x.i.strike);
+                    seen[k] = x.i.side;
+                  });
+                }
+              }
+              return out;
+            }""")
+            chk.add("allocator: no split holds both sides of one strike",
+                    paired == [], str(paired))
             chk.add("allocator: the arithmetic section sets out the objective",
                     page.locator("p.eq").count() >= 4
                     and "ALLOCATION ARITHMETIC" in page.locator("body").inner_text(),
