@@ -50,6 +50,7 @@ import datetime as dt
 import gzip
 import json
 import math
+import os
 import time
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
@@ -214,9 +215,33 @@ def load_obs_record(store: Storage, days: list) -> dict:
     return rows
 
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+NEARBY_PATH = os.path.join(ROOT, "config", "nearby_stations.json")
+
+
+def _load_nearby() -> dict:
+    """config/nearby_stations.json, or empty when the build has not made one."""
+    try:
+        with open(NEARBY_PATH) as fh:
+            return json.load(fh)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline=None) -> dict:
     stations = [c[0] for c in CITIES]
     roster = {c["station"]: c for c in basemap.load_roster()}
+
+    # the neighbouring fields' current readings, one bulk pull per pass; a
+    # failed pull costs the overlay a cycle, never the settlement record
+    nearby_cfg = _load_nearby()
+    nearby_obs: dict = {}
+    if nearby_cfg.get("stations"):
+        ids = sorted({n["id"] for v in nearby_cfg["stations"].values() for n in v})
+        try:
+            nearby_obs = gw.fetch_latest_metars(ids)
+        except Exception as e:  # noqa: BLE001
+            log(kind="obs-nearby", error=f"{type(e).__name__}: {e}")
 
     # 1. fresh pull, upserted into the archive's observation record. The
     #    window reaches back per station to the newest observation on record,
@@ -259,6 +284,19 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
             "latest": ({"t": record_end, "raw": latest.get("rawOb", ""), "type": latest.get("metarType"),
                         "src": latest.get("temp_source")} if latest else None),
         }
+        near = []
+        for n in (nearby_cfg.get("stations") or {}).get(sid, []):
+            ob = nearby_obs.get(n["id"])
+            if not ob:
+                continue
+            near.append({"id": n["id"], "name": n["name"], "lat": n["lat"], "lon": n["lon"],
+                         "t": _iso(dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc)),
+                         "tempF": ob["tempF"], "dewF": ob["dewF"], "wdir": ob["wdir"],
+                         "wspd": ob["wspd"], "wgst": ob["wgst"], "src": ob["src"]})
+        if near:
+            snap["nearby"] = near
+            snap["nearbyFrame"] = {"halfWKm": nearby_cfg.get("frameHalfWKm"),
+                                   "halfHKm": nearby_cfg.get("frameHalfHKm")}
         store.put(f"snapshots/obs/{sid}.json", json.dumps(snap, separators=(",", ":")).encode(),
                   "application/json", SNAP_CACHE)
         summary_obs[sid] = {"today": snap["today"], "yesterday": snap["yesterday"], "latest": snap["latest"],

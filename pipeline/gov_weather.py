@@ -218,6 +218,37 @@ def fetch_observations(stations: list[str], hours: int = 36) -> dict[str, list[d
     return out
 
 
+def fetch_latest_metars(stations: list[str]) -> dict[str, dict]:
+    """The newest observation per station, decoded for display.
+
+    The neighbour overlay on the city maps wants one current reading per
+    nearby field, not a history. The endpoint has no latest-only switch (it
+    rejects unknown parameters), so this asks for a ninety-minute window,
+    which always holds the last routine METAR, batched under the 400-row cap,
+    and keeps the newest row per station. Temperature follows the same decode
+    the site settles with: the remarks tenths where the report carries them.
+    """
+    out: dict[str, dict] = {}
+    for ob in fetch_observations_raw(stations, hours=2):
+        sid = ob.get("icaoId")
+        if not sid or ob.get("temp") is None:
+            continue
+        cur = out.get(sid)
+        if cur and cur["obsTime"] >= ob["obsTime"]:
+            continue
+        temp_c = ob["temp"] if TEMP_SOURCE == "remarks" else _body_temp_c(ob.get("rawOb", ""))
+        if temp_c is None:
+            continue
+        out[sid] = {
+            "obsTime": ob["obsTime"],
+            "tempF": round(c_to_f(temp_c), 1),
+            "dewF": round(c_to_f(ob["dewp"]), 1) if ob.get("dewp") is not None else None,
+            "wdir": ob.get("wdir"), "wspd": ob.get("wspd"), "wgst": ob.get("wgst"),
+            "type": ob.get("metarType"), "src": ob.get("temp_source"),
+        }
+    return out
+
+
 AWC_ROW_CAP = 400
 _T_GROUP = re.compile(r"(?:^|\s)T[01]\d{3}[01]\d{3}(?:\s|$)")
 

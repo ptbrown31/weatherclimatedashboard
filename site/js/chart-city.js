@@ -207,13 +207,72 @@ window.WXCity = (() => {
     // otherwise abroad would be worse than an outline that admits what it is
     const meta = (locIndex && (locIndex.stations || {})[c.station]) || null;
     if (meta) {
+      /* The live regional frame where the pipeline has one: the wider USGS
+         image with the current reading at every METAR field around the
+         resolving station, drawn from the obs snapshot. The base image is
+         static and public domain; only the numbers on it are live, and they
+         arrive through this site's own snapshots, never a live tile call. */
+      const ob = (snaps.ob && snaps.ob.data) || null;
+      const near = (ob && ob.nearby) || [];
+      const region = meta.region && near.length ? meta.region : null;
+      const m = region || meta;
       const box = h('div', { class: 'locbox' });
-      const img = h('img', { src: WXD.base() + '/snapshots/locator/' + c.station + '.png',
+      const img = h('img', { src: WXD.base() + '/snapshots/locator/' + c.station + (region ? '_region' : '') + '.png',
                              alt: 'Aerial and topographic map centred on ' + (c.city || c.station),
-                             loading: 'lazy', width: String(meta.w || 760), height: String(meta.h || 475) });
+                             loading: 'lazy', width: String(m.w || 760), height: String(m.h || 475) });
       box.appendChild(img);
-      // the image is centred on the station, so the marker is the middle of it
-      box.appendChild(h('span', { class: 'locpin' }));
+      if (region) {
+        const W2 = m.w, H2 = m.h;
+        const svg = el('svg', { viewBox: '0 0 ' + W2 + ' ' + H2,
+                                style: 'position:absolute;inset:0;width:100%;height:100%' });
+        const coslat = Math.cos(c.lat * Math.PI / 180);
+        const px = lon => W2 / 2 + ((lon - c.lon) * 111.320 * coslat) / m.halfWKm * (W2 / 2);
+        const py = lat => H2 / 2 - ((lat - c.lat) * 110.574) / m.halfHKm * (H2 / 2);
+        const rows0 = (ob && ob.rows) || [];
+        const centreTemp = rows0.length ? rows0[rows0.length - 1].tempF : null;
+        const wind = n => (n.wspd == null ? null
+          : (n.wdir != null ? n.wdir + '\u00b0 at ' : '') + n.wspd + ' kt'
+            + (n.wgst ? ', gusting ' + n.wgst : ''));
+        const chip = (x2, y2, t2, big, col) => {
+          const fs = big ? 15 : 11;
+          const tw = String(t2).length * fs * 0.62 + 8;
+          svg.appendChild(el('rect', { x: x2 - tw / 2, y: y2 - fs + 2, width: tw, height: fs + 4, rx: 4,
+                                       fill: 'var(--panel)', opacity: 0.88, 'pointer-events': 'none' }));
+          svg.appendChild(txt(t2, { x: x2, y: y2, 'text-anchor': 'middle', 'font-size': fs,
+                                    'font-weight': 700, fill: col, 'pointer-events': 'none' }));
+        };
+        const placed = [];
+        near.forEach(n => {
+          const x2 = px(n.lon), y2 = py(n.lat);
+          if (x2 < 8 || x2 > W2 - 8 || y2 < 10 || y2 > H2 - 6) return;
+          svg.appendChild(el('circle', { cx: x2, cy: y2, r: 3.5, fill: 'var(--ink)', stroke: 'var(--panel)', 'stroke-width': 1.2 }));
+          // a label only where it does not sit on another station's label
+          if (n.tempF != null && !placed.some(q => Math.abs(q[0] - x2) < 46 && Math.abs(q[1] - y2) < 18)) {
+            chip(x2, y2 - 9, Math.round(n.tempF) + '\u00b0', false, 'var(--ink)');
+            placed.push([x2, y2 - 9]);
+          }
+          const hit = el('circle', { cx: x2, cy: y2, r: 12, fill: 'transparent' });
+          hit.addEventListener('mousemove', ev => {
+            const rows = [['Temperature', n.tempF != null ? WXC.deg(n.tempF) : '\u2014'],
+                          ['Dewpoint', n.dewF != null ? WXC.deg(n.dewF) : '\u2014'],
+                          ['Wind', wind(n) || 'calm'],
+                          ['Observed', n.t ? WXC.clockFull(Date.parse(n.t), c.tz) : '\u2014']];
+            tip.show(ev, tip.rows(n.name + ' (' + n.id + ')', rows,
+                                  'a nearby report for context; the contract settles on ' + c.station + ' alone'));
+          });
+          hit.addEventListener('mouseleave', () => tip.hide());
+          svg.appendChild(hit);
+        });
+        // the resolving station over everything, ringed, its reading large
+        svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 8, fill: 'none',
+                                       stroke: 'var(--accent)', 'stroke-width': 2.6 }));
+        svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 3, fill: 'var(--accent)' }));
+        if (centreTemp != null) chip(W2 / 2, H2 / 2 - 14, Math.round(centreTemp) + '\u00b0', true, 'var(--accent)');
+        box.appendChild(svg);
+      } else {
+        // the image is centred on the station, so the marker is the middle of it
+        box.appendChild(h('span', { class: 'locpin' }));
+      }
       box.classList.add('expandable');
       host.appendChild(box);
       // twenty-four kilometres in a third of a column is a thumbnail; the same
@@ -221,16 +280,22 @@ window.WXCity = (() => {
       const bar = h('div', { class: 'bar', style: 'margin:6px 0 0' });
       bar.appendChild(WXC.expander(box, 'Expand map'));
       host.appendChild(bar);
-      const across = Math.round((meta.halfWKm || 12) * 2);
+      const across = Math.round((m.halfWKm || 12) * 2);
       const bits = [c.city, c.station];
       if (c.lat != null && c.lon != null) {
         bits.push(Math.abs(c.lat).toFixed(3) + '\u00b0' + (c.lat >= 0 ? 'N' : 'S') + ' '
                   + Math.abs(c.lon).toFixed(3) + '\u00b0' + (c.lon >= 0 ? 'E' : 'W'));
       }
+      const asof = region && snaps.ob && snaps.ob.asof
+        ? ' Readings as of ' + WXC.clockFull(snaps.ob.asof, c.tz) + ', from aviationweather.gov METARs through this site\u2019s own snapshots.' : '';
       const capEl = h('div', { class: 'cap', style: 'margin:5px 0 0' });
       capEl.innerHTML = esc(bits.join(' \u00b7 ')) + ' \u00b7 about ' + across + ' km across.<br>'
-        + 'The contract settles on this one station, and a city\u2019s temperature varies with land cover, '
-        + 'distance from the centre, shade and water \u2014 so where it sits matters. Imagery: '
+        + (region ? 'The ringed station is the one the contract settles on; the others are the reporting fields '
+                    + 'around it, each with its current temperature. A city\u2019s temperature varies with land '
+                    + 'cover, distance from the centre, shade and water, so where each thermometer sits matters.'
+                  : 'The contract settles on this one station, and a city\u2019s temperature varies with land cover, '
+                    + 'distance from the centre, shade and water, so where it sits matters.')
+        + esc(asof) + ' Imagery: '
         + '<a href="https://basemap.nationalmap.gov/" target="_blank" rel="noopener noreferrer">USGS The '
         + 'National Map</a>, a work of the United States government.';
       host.appendChild(capEl);
@@ -281,6 +346,7 @@ window.WXCity = (() => {
     const r = await WXD.getAll(keys);
     snaps = { fc: r[`forecast/${sid}.json`], ob: r[`obs/${sid}.json`], nm: r[`normals/${sid}.json`] || null,
               sub: r[`subhourly/${sid}.json`] || null };
+    drawLocator(c0);                             // again, now the obs snapshot can dress the map
     const mres = await WXM.load(sid);            // the station's quote snapshot (live market layer only)
     const st = $('#chartStatus');
     if (st) {

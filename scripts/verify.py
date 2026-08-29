@@ -1319,6 +1319,25 @@ def run(no_build: bool) -> int:
                 }""")
                 chk.add(f"{scheme} severe: all three phenomena draw the history series",
                         sw["series"] >= 3, str(sw))
+                # ---- the live station map: KSFO's sample carries a regional
+                #      frame and nearby readings, so the overlay must draw
+                page.goto(f"{srv.url}/city.html?station=KSFO"); page.wait_for_timeout(1800)
+                loc = page.evaluate("""() => {
+                  const box = document.querySelector('#locator .locbox');
+                  if (!box) return null;
+                  const img = box.querySelector('img');
+                  const svg = box.querySelector('svg');
+                  return { region: img && img.src.includes('_region'),
+                           dots: svg ? svg.querySelectorAll('circle').length : 0,
+                           temps: svg ? [...svg.querySelectorAll('text')].filter(t => /\u00b0/.test(t.textContent)).length : 0,
+                           ring: svg ? [...svg.querySelectorAll('circle')].some(c2 => c2.getAttribute('stroke') === 'var(--accent)') : false,
+                           cap: (document.querySelector('#locator .cap') || {}).textContent || '' };
+                }""")
+                chk.add(f"{scheme} locator: the regional frame carries the live overlay",
+                        bool(loc and loc["region"] and loc["dots"] >= 6 and loc["temps"] >= 3), str(loc)[:160])
+                chk.add(f"{scheme} locator: the resolving station is ringed and named as the one that settles",
+                        bool(loc and loc["ring"] and "settles on" in loc["cap"]), str(loc and loc["cap"])[:120])
+                page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
                 chk.add(f"{scheme} severe: the tornado reports lead the page",
                         page.evaluate("""() => {
                           const p = document.querySelector('#panels .panel');
