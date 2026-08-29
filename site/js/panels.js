@@ -122,6 +122,15 @@ window.WXPanels = (() => {
     for (const light of products) {
       const name = light.name || light.id;
       if (light.state !== 'listed') {
+        if (window.WXSevere && WXSevere.PRODUCTS[light.id]) {
+          const sevRes = await WXD.get('severe.json', 30);
+          if (sevRes.data && WXSevere.panel(host, { id: light.id, name },
+                                            null, null, sevRes.data,
+                                            'Not currently listed on the exchange; the counts it would settle on are below.')) {
+            unlisted++;
+            continue;
+          }
+        }
         host.appendChild(h('div', { class: 'panel' }, [
           h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: name }),
           h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: 'Not currently listed on the exchange.' }),
@@ -132,6 +141,16 @@ window.WXPanels = (() => {
       const key = (idx.products || {})[light.id];
       const [pRes, qRes] = await Promise.all([WXD.get(PROD(light.id), 1440), WXD.get(PRICE(light.id), 30)]);
       const prod = pRes.data || {};
+      // the SW count contracts settle on SPC's monthly report tables, which
+      // the severe job publishes, so they get a counting panel, not a ladder
+      if (window.WXSevere && WXSevere.PRODUCTS[light.id]) {
+        const sevRes = await WXD.get('severe.json', 30);
+        if (sevRes.data && WXSevere.panel(host, Object.assign({ id: light.id }, prod),
+                                          priceMap(qRes.data), qRes.data, sevRes.data)) {
+          drawn++;
+          continue;
+        }
+      }
       const sRes = key ? await WXD.get(SERIES(key), 1440) : null;
       const sr = sRes && sRes.data;
 

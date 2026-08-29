@@ -161,6 +161,20 @@ window.WXCat = (() => {
     const priced = {};
     ((pr && pr.rows) || []).forEach(r => { priced[String(r.spec || '') + '|' + String(r.strike)] = r; });
 
+    // the SW count contracts settle on SPC's monthly report tables; their
+    // page shows the counting, one chart per listed month, above the ladder
+    if (window.WXSevere && WXSevere.PRODUCTS[p.id]) {
+      try {
+        const sev = (await WXD.get('severe.json', 30)).data;
+        if (sev) {
+          const host2 = h('div');
+          $('#cBody').appendChild(h('div', { class: 'secttl', text: 'SETTLEMENT BASIS' }));
+          $('#cBody').appendChild(host2);
+          WXSevere.panel(host2, p, priced, pr, sev);
+        }
+      } catch (e) { /* the ladder below still stands */ }
+    }
+
     // the underlying, where one of the series lanes covers this product
     try {
       const idx = (await WXD.get(SERIES_INDEX, 1440)).data;

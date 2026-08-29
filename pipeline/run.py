@@ -44,7 +44,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report, severe
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -64,6 +64,7 @@ def _register():
     JOBS["subhourly"] = subhourly.subhourly_pass
     JOBS["locator"] = locator.locator_pass
     JOBS["catquotes"] = catquotes.catquotes_pass
+    JOBS["severe"] = severe.severe_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -92,7 +93,7 @@ def _register():
     # scorecard for the day just scored
     JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes", "subhourly")
     # report last, so it reads the day traffic has just counted
-    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "catalogue", "series", "discussion", "locator", "headline", "traffic", "report")
+    JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "severe", "catalogue", "series", "discussion", "locator", "headline", "traffic", "report")
     JOBS["market"] = chain("quotes", "reask", "headline")
     JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")
 

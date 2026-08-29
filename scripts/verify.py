@@ -622,6 +622,13 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} {what}: the page renders something",
                             len(page.locator("body").inner_text().strip()) > 40, path)
                 del errs[:]
+                # the SW contract page carries the counting chart above its ladder
+                page.goto(f"{srv.url}/contract.html?id=SWTUS"); page.wait_for_timeout(1500)
+                chk.add(f"{scheme} severe contract: the settlement basis chart is above the ladder",
+                        "SETTLEMENT BASIS" in page.locator("#cBody").inner_text()
+                        and page.locator("#cBody svg.ts").count() >= 3, str(page.locator("#cBody svg.ts").count()))
+                chk.add(f"{scheme} severe contract: no script errors", not errs, "; ".join(errs)[:300])
+                del errs[:]
                 # ---- the map opens on the board that is trading
                 #
                 # Before 5 pm Eastern the current day's contracts are the live
@@ -1287,6 +1294,23 @@ def run(no_build: bool) -> int:
                     "#panels svg circle[data-tip]", "e=>e.map(x=>x.getAttribute('aria-label')||'')")
                 chk.add(f"{scheme} weather: strikes are drawn, and linked to their contract",
                         len(w_tips) >= 20 and all(t for t in w_tips), f"markers={len(w_tips)}")
+                # ---- the SW severe-report count panels
+                sw = page.evaluate('''() => {
+                  const ps = [...document.querySelectorAll('#panels .panel')]
+                    .filter(p => /Monthly Tornados|Hailstorm|Windstorm/i.test(p.textContent));
+                  return { n: ps.length,
+                           charts: ps.reduce((a, p) => a + p.querySelectorAll('svg').length, 0),
+                           envelopes: ps.reduce((a, p) => a + p.querySelectorAll("path[fill='var(--accent)']").length, 0),
+                           settle: ps.every(p => /settles on/.test(p.textContent)),
+                           counts: ps.some(p => /reports so far|reports/.test(p.textContent)),
+                           probs: ps.some(p => /fair value|probability/i.test(p.textContent)) };
+                }''')
+                chk.add(f"{scheme} severe: all three SW products draw their counting panels",
+                        sw["n"] == 3 and sw["charts"] >= 3 and sw["envelopes"] >= 3, str(sw))
+                chk.add(f"{scheme} severe: the caption names the settlement number",
+                        sw["settle"] and sw["counts"], str(sw))
+                chk.add(f"{scheme} severe: no probability or fair value appears on the counting panels",
+                        not sw["probs"], "")
 
                 page.goto(f"{srv.url}/fossil-fuels.html"); page.wait_for_timeout(1200)
                 ff = page.locator("#panels .panel").count()
