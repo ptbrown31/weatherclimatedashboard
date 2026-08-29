@@ -80,7 +80,9 @@ def main() -> int:
                                  "p50": round(quantile(st, 0.50), 1),
                                  "p90": round(quantile(st, 0.90), 1), "max": st[-1]}}
         months[str(m)] = ml
-    doc = {"schema": 1, "yearsFrom": FIRST_YEAR, "yearsTo": last,
+    history = {str(y): {str(m): {ph: years[y]["month"][str(m)][ph] for ph in PHENOMENA}
+                        for m in range(1, 13)} for y in years}
+    doc = {"schema": 1, "yearsFrom": FIRST_YEAR, "yearsTo": last, "history": history,
            "source": "SPC Annual Preliminary Report Summary (ruf), climo/summary/{year}/ruf/NAT/NAT.json",
            "note": "day-of-month cumulative quantiles across the years, each year rescaled to its settlement month total",
            "months": months}

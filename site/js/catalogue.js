@@ -161,20 +161,6 @@ window.WXCat = (() => {
     const priced = {};
     ((pr && pr.rows) || []).forEach(r => { priced[String(r.spec || '') + '|' + String(r.strike)] = r; });
 
-    // the SW count contracts settle on SPC's monthly report tables; their
-    // page shows the counting, one chart per listed month, above the ladder
-    if (window.WXSevere && WXSevere.PRODUCTS[p.id]) {
-      try {
-        const sev = (await WXD.get('severe.json', 30)).data;
-        if (sev) {
-          const host2 = h('div');
-          $('#cBody').appendChild(h('div', { class: 'secttl', text: 'SETTLEMENT BASIS' }));
-          $('#cBody').appendChild(host2);
-          WXSevere.panel(host2, p, priced, pr, sev);
-        }
-      } catch (e) { /* the ladder below still stands */ }
-    }
-
     // the underlying, where one of the series lanes covers this product
     try {
       const idx = (await WXD.get(SERIES_INDEX, 1440)).data;
@@ -230,6 +216,20 @@ window.WXCat = (() => {
         }
       }
     } catch (e) { /* no series lane for this product; the ladder still stands */ }
+
+    // the SW count contracts add the month in progress under the history,
+    // the hurricane season shape at monthly scale
+    if (window.WXSevere && WXSevere.PRODUCTS[p.id]) {
+      try {
+        const sev = (await WXD.get('severe.json', 30)).data;
+        if (sev) {
+          const host3 = h('div');
+          $('#cBody').appendChild(h('div', { class: 'secttl', text: 'MONTH IN PROGRESS' }));
+          $('#cBody').appendChild(host3);
+          WXSevere.monthBlock(host3, p, priced, sev);
+        }
+      } catch (e) { /* the ladder below still stands */ }
+    }
 
     const url = WXM.contractUrl(p.productConid, ((p.contracts || [])[0] || {}).conidYes);
     const row = h('div', { class: 'bar', style: 'margin:0 0 10px' });
@@ -288,9 +288,12 @@ window.WXCat = (() => {
         const yes = q && WXM.realMid(q) ? Math.round(q.mid * 100) : null;
         const one = q && q.mid != null && (q.bid == null || q.ask == null);
         const u = WXM.contractUrl(p.productConid, c.conidYes);
+        // a row with no real price draws a hollow bar rather than a full red
+        // one, which read as No at a dollar
         const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
           h('span', { class: 'lk', text: c.label || String(c.strike) }),
-          h('span', { class: 'lb' }, [h('i', { style: 'width:' + (yes == null ? 0 : yes) + '%' })]),
+          h('span', { class: 'lb', style: yes == null ? 'background:transparent;border:1px dashed var(--rule)' : null },
+            [h('i', { style: 'width:' + (yes == null ? 0 : yes) + '%' })]),
           h('span', { class: 'lv' + (unquoted ? ' dim' : ''),
                       text: unquoted ? '—'
                         : (yes != null ? yes + '¢' + (one ? '*' : '')

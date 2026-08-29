@@ -429,10 +429,15 @@ def run(no_build: bool) -> int:
                 page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
                 fam = page.locator("#panels .panel").count()
                 off = page.locator("#panels .panel", has_text="Not currently listed").count()
+                # 36 panels: 31 plain products, plus the three severe month
+                # blocks, plus the two unlisted severe history panels. The two
+                # unlisted severe products say so in a note above their history
+                # rather than in a bare not-listed panel.
+                sev_notes = page.locator("#panels .psub", has_text="the series it would settle on").count()
                 chk.add(f"{scheme} catalogue: the category shows every product in the family",
-                        fam == 33 and off == 23, f"panels={fam} not-listed={off}")
+                        fam == 36 and off == 21, f"panels={fam} not-listed={off}")
                 chk.add(f"{scheme} catalogue: unlisted products say so rather than vanishing",
-                        off == 23, str(off))
+                        off == 21 and sev_notes == 2, f"off={off} severe-notes={sev_notes}")
                 page.goto(f"{srv.url}/contract.html?id=OP"); page.wait_for_timeout(900)
                 body = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} catalogue: a contract page shows its ladder and says no price is published",
@@ -622,11 +627,14 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} {what}: the page renders something",
                             len(page.locator("body").inner_text().strip()) > 40, path)
                 del errs[:]
-                # the SW contract page carries the counting chart above its ladder
+                # the SW contract page: history under SETTLEMENT BASIS, then the
+                # month in progress, then the classic ladder listing
                 page.goto(f"{srv.url}/contract.html?id=SWTUS"); page.wait_for_timeout(1500)
-                chk.add(f"{scheme} severe contract: the settlement basis chart is above the ladder",
-                        "SETTLEMENT BASIS" in page.locator("#cBody").inner_text()
-                        and page.locator("#cBody svg.ts").count() >= 3, str(page.locator("#cBody svg.ts").count()))
+                cb = page.locator("#cBody").inner_text()
+                chk.add(f"{scheme} severe contract: history then the month in progress",
+                        "SETTLEMENT BASIS" in cb and "MONTH IN PROGRESS" in cb
+                        and cb.index("SETTLEMENT BASIS") < cb.index("MONTH IN PROGRESS")
+                        and page.locator("#cBody svg").count() >= 3, str(page.locator("#cBody svg").count()))
                 chk.add(f"{scheme} severe contract: no script errors", not errs, "; ".join(errs)[:300])
                 del errs[:]
                 # ---- the map opens on the board that is trading
@@ -1294,22 +1302,30 @@ def run(no_build: bool) -> int:
                     "#panels svg circle[data-tip]", "e=>e.map(x=>x.getAttribute('aria-label')||'')")
                 chk.add(f"{scheme} weather: strikes are drawn, and linked to their contract",
                         len(w_tips) >= 20 and all(t for t in w_tips), f"markers={len(w_tips)}")
-                # ---- the SW severe-report count panels
-                sw = page.evaluate('''() => {
-                  const ps = [...document.querySelectorAll('#panels .panel')]
-                    .filter(p => /Monthly Tornados|Hailstorm|Windstorm/i.test(p.textContent));
-                  return { n: ps.length,
-                           charts: ps.reduce((a, p) => a + p.querySelectorAll('svg').length, 0),
-                           envelopes: ps.reduce((a, p) => a + p.querySelectorAll("path[fill='var(--accent)']").length, 0),
-                           settle: ps.every(p => /settles on/.test(p.textContent)),
-                           counts: ps.some(p => /reports so far|reports/.test(p.textContent)),
-                           probs: ps.some(p => /fair value|probability/i.test(p.textContent)) };
-                }''')
-                chk.add(f"{scheme} severe: all three SW products draw their counting panels",
-                        sw["n"] == 3 and sw["charts"] >= 3 and sw["envelopes"] >= 3, str(sw))
+                # ---- the SW severe displays: the history as a series panel and
+                #      the month in progress in the hurricane shape, for all
+                #      three phenomena, listed or not
+                sw = page.evaluate("""() => {
+                  const t = document.querySelector('#panels').innerText;
+                  const blocks = [...document.querySelectorAll('#panels .panel')]
+                    .filter(p => /in progress/.test(p.textContent) && /report count/.test(p.textContent));
+                  return { series: (t.match(/US monthly (tornado|severe-wind|severe-hail) reports/g) || []).length,
+                           blocks: blocks.length,
+                           envelopes: blocks.reduce((a, p) => a + p.querySelectorAll("path[fill='var(--accent)']").length, 0),
+                           settle: blocks.every(p => /settles on/.test(p.textContent)),
+                           bigFig: blocks.some(p => /so far/.test(p.textContent)),
+                           ladder: blocks.some(p => /market.s ladder/i.test(p.textContent)),
+                           probs: blocks.some(p => /fair value|probability/i.test(p.textContent)) };
+                }""")
+                chk.add(f"{scheme} severe: all three phenomena draw the history series",
+                        sw["series"] >= 3, str(sw))
+                chk.add(f"{scheme} severe: all three phenomena draw the month in progress",
+                        sw["blocks"] == 3 and sw["envelopes"] >= 3 and sw["bigFig"], str(sw))
+                chk.add(f"{scheme} severe: the running month carries the market's ladder where one is listed",
+                        sw["ladder"], str(sw))
                 chk.add(f"{scheme} severe: the caption names the settlement number",
-                        sw["settle"] and sw["counts"], str(sw))
-                chk.add(f"{scheme} severe: no probability or fair value appears on the counting panels",
+                        sw["settle"], str(sw))
+                chk.add(f"{scheme} severe: no probability or fair value appears on the count blocks",
                         not sw["probs"], "")
                 # a covered link is a broken promise: the element under the
                 # centre of a strike link rect must be the rect itself

@@ -1,19 +1,19 @@
-/* The SW severe-weather count panels.
+/* The running-month block for the SW severe-weather count contracts.
 
    SWTUS, SWWUS and SWHUS settle on the month's national count of tornado,
    severe-wind and severe-hail storm reports in the SPC preliminary summary.
-   Each listed expiration month gets one small chart: the climatological
-   envelope of the day-of-month cumulative count (2005-2025, tenth to ninetieth
-   percentile band with the median), the running month's own cumulative line,
-   and the listed strikes as horizontal marks a reader can price the month
-   against. The month-table total, the number the contract settles on, is
-   printed in the chart's corner; the daily line is SPC's separate daily
-   tabulation and the caption says so.
+   Their long history is a series like any other and the series lane draws it;
+   this module adds the month in progress, in the same shape as the hurricane
+   season panels. On the left, the count so far as a big figure over the
+   month's cumulative line, against the climatological median ("an average
+   month") and a faint tenth-to-ninetieth envelope, with the pace the count
+   implies. On the right, the market's ladder for the running month, Yes
+   green against No red, with the average month and the count so far marked
+   at their levels.
 
-   Data in: snapshots/severe.json (the severe job) and the catalogue product
-   doc for strikes and conids. Prices, where the book has any, come through
-   the same priced map the ladders use. Nothing here computes a probability;
-   the envelope is counting on public data. */
+   Data in: snapshots/severe.json and the catalogue product doc. Prices come
+   through the same priced map the ladders use, and a placeholder book shows
+   no price (WXM.realMid). Nothing here computes a probability. */
 window.WXSevere = (() => {
   const { el, txt, h, $ } = WXC;
   const PRODUCTS = { SWTUS: 'torn', SWWUS: 'wind', SWHUS: 'hail' };
@@ -23,79 +23,69 @@ window.WXSevere = (() => {
   let tip = null;
 
   const daysIn = (y, m) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const fmtN = v => (v >= 1000 ? (Math.round(v / 100) / 10).toLocaleString() + 'k' : String(Math.round(v)));
 
-  /* One month's chart: envelope, running line, strikes. */
-  function monthChart(ph, y, m, sev, strikes, priced, prod) {
+  /* The left chart: the month so far against an average month. */
+  function monthChart(ph, y, m, sev) {
     const climo = ((sev.climo || {}).months || {})[String(m)];
     const env = climo && climo[ph] && climo[ph].env;
     if (!env) return null;
+    const totals = climo[ph].totals;
     const yearBlock = (sev.years || {})[String(y)] || {};
     const total = ((yearBlock.months || {})[String(m)] || {})[ph];
     const cum = ((yearBlock.daily || {})[String(m)] || {})[ph] || null;
     const nd = daysIn(y, m);
+    const day = cum ? cum.length : 0;
 
-    const W = 320, H = 250, L = 44, R = 310, T = 26, B = 218;
-    const hi = Math.max(env.p90[nd - 1] * 1.12, total || 0, ...(cum || [0]),
-                        ...strikes.map(s => s.strike * 1.06), 1);
+    const W = 620, H = 300, L = 46, R = 600, T = 34, B = 260;
+    const hi = Math.max(env.p90[nd - 1], totals.p90, total || 0, 1) * 1.1;
     const x = d => L + (d - 1) / (nd - 1) * (R - L);
     const yy = v => B - Math.min(v, hi) / hi * (B - T);
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'ts' });
 
-    // the envelope band and its median
+    // envelope, faint, and the average month as a dashed curve
     let dUp = '', dDn = '';
-    for (let d = 1; d <= nd; d++) { dUp += (d > 1 ? 'L' : 'M') + x(d).toFixed(1) + ',' + yy(env.p90[d - 1]).toFixed(1); }
-    for (let d = nd; d >= 1; d--) { dDn += 'L' + x(d).toFixed(1) + ',' + yy(env.p10[d - 1]).toFixed(1); }
-    svg.appendChild(el('path', { d: dUp + dDn + 'Z', fill: 'var(--accent)', opacity: 0.12 }));
+    for (let d = 1; d <= nd; d++) dUp += (d > 1 ? 'L' : 'M') + x(d).toFixed(1) + ',' + yy(env.p90[d - 1]).toFixed(1);
+    for (let d = nd; d >= 1; d--) dDn += 'L' + x(d).toFixed(1) + ',' + yy(env.p10[d - 1]).toFixed(1);
+    svg.appendChild(el('path', { d: dUp + dDn + 'Z', fill: 'var(--accent)', opacity: 0.09, 'pointer-events': 'none' }));
     svg.appendChild(el('path', { d: env.p50.slice(0, nd).map((v, i) => (i ? 'L' : 'M') + x(i + 1).toFixed(1) + ',' + yy(v).toFixed(1)).join(''),
-                                 fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.2, 'stroke-dasharray': '4 3' }));
+                                 fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.3, 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
+    svg.appendChild(txt('an average month', { x: R - 4, y: yy(env.p50[nd - 1]) - 6, 'text-anchor': 'end',
+                                              'font-size': 10, fill: 'var(--muted)' }));
 
-    // the strikes, each a horizontal mark. Every line is drawn; labels thin
-    // when neighbouring strikes sit closer than a label is tall, and the
-    // chart hover names the nearest strike so a thinned line keeps an identity
-    let lastLab = null;
-    strikes.sort((a, b) => b.strike - a.strike).forEach(c => {
-      const sy = yy(c.strike);
-      if (sy < T - 2) return;
-      svg.appendChild(el('line', { x1: L, x2: R, y1: sy, y2: sy, stroke: 'var(--ink)', opacity: 0.28, 'stroke-dasharray': '2 3' }));
-      const q = priced && priced[String(c.spec || '') + '|' + String(c.strike)];
-      const yes = q && WXM.realMid(q) ? Math.round(q.mid * 100) + '¢' : null;
-      const lab = c.label + (yes ? ' · ' + yes : '');
-      if (lastLab == null || Math.abs(sy - lastLab) >= 10) {
-        svg.appendChild(txt(lab, { x: R, y: sy - 3, 'text-anchor': 'end', 'font-size': 8.5, fill: 'var(--muted)' }));
-        lastLab = sy;
-      }
-      if (prod && prod.productConid && c.conidYes != null && window.WXM && WXM.contractUrl) {
-        const hit = el('rect', { x: L, y: sy - 8, width: R - L, height: 10, fill: 'transparent' });
-        WXM.linkTo(hit, WXM.contractUrl(prod.productConid, c.conidYes), 'Open ' + c.label + ' on IBKR');
-        svg.appendChild(hit);
-      }
-    });
-
-    // the running month, a step line on the daily tabulation
+    // today, then the month's own line over everything
+    if (day > 0 && day < nd) {
+      svg.appendChild(el('line', { x1: x(day), x2: x(day), y1: T, y2: B, stroke: 'var(--muted)',
+                                   'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0.7 }));
+      svg.appendChild(txt('today', { x: x(day) + 4, y: T + 10, 'font-size': 9.5, fill: 'var(--muted)' }));
+    }
     if (cum && cum.length) {
-      const dline = cum.map((v, i) => (i ? 'L' : 'M') + x(i + 1).toFixed(1) + ',' + yy(v).toFixed(1)).join('');
-      svg.appendChild(el('path', { d: dline, fill: 'none', stroke: 'var(--obs)', 'stroke-width': 2 }));
-      const lastD = cum.length, lastV = cum[lastD - 1];
-      svg.appendChild(el('circle', { cx: x(lastD), cy: yy(lastV), r: 3, fill: 'var(--obs)' }));
+      svg.appendChild(el('path', { d: cum.map((v, i) => (i ? 'L' : 'M') + x(i + 1).toFixed(1) + ',' + yy(v).toFixed(1)).join(''),
+                                   fill: 'none', stroke: 'var(--ink)', 'stroke-width': 2.2, 'pointer-events': 'none' }));
+      svg.appendChild(el('circle', { cx: x(cum.length), cy: yy(cum[cum.length - 1]), r: 3.5, fill: 'var(--ink)' }));
     }
 
-    // the settlement number so far, top left, always the month table's value;
-    // a month that has not started yet has nothing to print
-    if (total != null && cum && cum.length) {
-      svg.appendChild(txt(String(total) + ' reports' + (cum.length < nd ? ' so far' : ''),
-                          { x: L, y: T - 8, 'font-size': 10.5, 'font-weight': 700, fill: 'var(--obs)' }));
+    // the big figure and the pace it implies, hurricane-panel style
+    if (total != null && day > 0) {
+      svg.appendChild(txt(String(total), { x: L + 10, y: T + 26, 'font-size': 30, 'font-weight': 700, fill: 'var(--accent)' }));
+      svg.appendChild(txt('so far', { x: L + 12, y: T + 40, 'font-size': 10.5, fill: 'var(--muted)' }));
+      const base = env.p50[Math.min(day, nd) - 1];
+      if (base > 0 && day < nd) {
+        const implied = total / base * totals.p50;
+        svg.appendChild(txt('pace implied by today: ' + fmtN(implied) + ' (an average month ' + fmtN(totals.p50) + ')',
+                            { x: L + 12, y: T + 54, 'font-size': 10, fill: 'var(--muted)' }));
+      }
     }
-    // axis
-    [0.5, 1].forEach(f => {
-      const v = Math.round(hi * f);
-      svg.appendChild(txt(String(v), { x: L - 4, y: yy(v) + 3, 'text-anchor': 'end', class: 'ax', 'font-size': 8.5 }));
+
+    // axes
+    const step = hi > 4000 ? 2000 : hi > 1500 ? 500 : hi > 400 ? 200 : hi > 150 ? 50 : hi > 40 ? 20 : 10;
+    for (let v = step; v <= hi; v += step) {
+      svg.appendChild(txt(fmtN(v), { x: L - 4, y: yy(v) + 3, 'text-anchor': 'end', class: 'ax', 'font-size': 9 }));
       svg.appendChild(el('line', { x1: L, x2: R, y1: yy(v), y2: yy(v), class: 'grid' }));
-    });
-    [1, 10, 20, nd].forEach(d => svg.appendChild(txt(String(d), { x: x(d), y: B + 12, 'text-anchor': 'middle', class: 'ax', 'font-size': 8.5 })));
+    }
+    [1, 10, 20, nd].forEach(d => svg.appendChild(txt(String(d), { x: x(d), y: B + 13, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 })));
+    svg.appendChild(txt('day of the month', { x: (L + R) / 2, y: H - 4, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
 
-    /* The hover listens on the svg itself so the strike link rects stay on
-       top and clickable; a covering band ate every click while the caption
-       promised the strikes open on IBKR. */
     svg.addEventListener('mousemove', ev => {
       const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
       const q2 = pt.matrixTransform(svg.getScreenCTM().inverse());
@@ -105,67 +95,134 @@ window.WXSevere = (() => {
       if (cum && d <= cum.length) rows.push(['Count so far (daily tabulation)', String(cum[d - 1])]);
       rows.push(['Median through this day, 2005-2025', String(Math.round(env.p50[d - 1]))]);
       rows.push(['Envelope', Math.round(env.p10[d - 1]) + ' to ' + Math.round(env.p90[d - 1])]);
-      if (strikes.length) {
-        const v = hi * (B - q2.y) / (B - T);
-        const near = strikes.reduce((a, c) => (Math.abs(c.strike - v) < Math.abs(a.strike - v) ? c : a), strikes[0]);
-        const q3 = priced && priced[String(near.spec || '') + '|' + String(near.strike)];
-        rows.push(['Nearest strike', near.label + (q3 && WXM.realMid(q3) ? ' · ' + Math.round(q3.mid * 100) + '¢' : '')]);
-      }
       if (!tip) tip = WXC.tooltip();
       tip.show(ev, tip.rows(MONTHS[m - 1] + ' ' + y + ' · ' + PH_NAME[ph] + ' reports', rows,
                             'the month table, not this daily line, is the settlement number'));
     });
     svg.addEventListener('mouseleave', () => { if (tip) tip.hide(); });
-
-    const wrap = h('div', { style: 'flex:1 1 300px;min-width:260px' });
-    wrap.appendChild(h('div', { class: 'cap', style: 'font-weight:700;margin:0 0 2px', text: MONTHS[m - 1] + ' ' + y }));
-    wrap.appendChild(svg);
-    return wrap;
+    return svg;
   }
 
-  /* The whole panel for one product: one chart per listed expiration month,
-     or the running month alone when nothing is listed. */
-  function panel(host, prod, priced, pr, sev, note) {
+  /* The right side: the market's ladder for the running month. */
+  function ladderChart(ph, y, m, strikes, priced, prod, sev) {
+    const climo = ((sev.climo || {}).months || {})[String(m)] || {};
+    const totals = climo[ph] && climo[ph].totals;
+    const total = (((sev.years || {})[String(y)] || {}).months || {})[String(m)] || {};
+    const C = total[ph];
+    const rows = strikes.slice().sort((a, b) => b.strike - a.strike);
+    if (!rows.length) return null;
+
+    const W = 420, T = 26, rowH = 26, LX = 8, RX = 386;
+    const H = T + rows.length * rowH + 34;
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'ts' });
+    const px = q => LX + Math.max(0, Math.min(1, q)) * (RX - LX);
+    svg.appendChild(txt('The market’s ladder', { x: LX, y: 13, 'font-size': 11.5, 'font-weight': 700, fill: 'var(--navy)' }));
+
+    rows.forEach((c, i) => {
+      const yTop = T + i * rowH, bh = rowH - 8, by = yTop + 3;
+      const q = priced && priced[String(c.spec || '') + '|' + String(c.strike)];
+      const real = q && WXM.realMid(q);
+      if (real) {
+        const split = px(q.mid);
+        svg.appendChild(el('rect', { x: LX, y: by, width: Math.max(split - LX, 1), height: bh, rx: 2, fill: 'var(--yes)', opacity: 0.85 }));
+        svg.appendChild(el('rect', { x: split, y: by, width: Math.max(RX - split, 1), height: bh, rx: 2, fill: 'var(--no)', opacity: 0.85 }));
+        const yesC = Math.round(q.mid * 100), noC = 100 - yesC;
+        svg.appendChild(txt(yesC + '¢', { x: Math.max(split - 4, LX + 22), y: by + bh / 2 + 3.5, 'text-anchor': 'end',
+                                          'font-size': 10, 'font-weight': 700, fill: '#fff' }));
+        svg.appendChild(txt(noC + '¢', { x: RX - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end',
+                                         'font-size': 10, 'font-weight': 700, fill: '#fff' }));
+      } else {
+        svg.appendChild(el('rect', { x: LX, y: by, width: RX - LX, height: bh, rx: 2, fill: 'none',
+                                     stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
+        svg.appendChild(txt('no price', { x: RX - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end',
+                                          'font-size': 9.5, fill: 'var(--muted)' }));
+      }
+      svg.appendChild(txt(c.label, { x: LX + 4, y: by + bh / 2 + 3.5, 'font-size': 10,
+                                     'font-weight': 700, fill: real ? '#fff' : 'var(--ink)' }));
+      const hit = el('rect', { x: LX, y: yTop, width: RX - LX, height: rowH, fill: 'transparent',
+                               cursor: prod && prod.productConid && c.conidYes != null ? 'pointer' : null });
+      if (prod && prod.productConid && c.conidYes != null && window.WXM && WXM.contractUrl) {
+        WXM.linkTo(hit, WXM.contractUrl(prod.productConid, c.conidYes), 'Open ' + c.label + ' on IBKR');
+      }
+      svg.appendChild(hit);
+    });
+
+    /* Level markers between the rows they bracket, the hurricane convention:
+       the average month dashed, the count so far solid. */
+    const yOf = v => {
+      let i = rows.findIndex(c => v > c.strike);      // first row the level sits above
+      if (i < 0) i = rows.length;
+      return T + i * rowH - 1.5;
+    };
+    /* Two markers often share a gap, the count having passed every strike
+       being the common case, so markers at one level share one line and lay
+       their chips side by side instead of on top of each other. */
+    const marks = [];
+    if (C != null && C > 0) marks.push({ v: C, label: 'so far', dash: null });
+    if (totals) marks.push({ v: totals.p50, label: 'an average month', dash: '5 4' });
+    const groups = {};
+    marks.forEach(mk => { (groups[yOf(mk.v)] = groups[yOf(mk.v)] || []).push(mk); });
+    Object.entries(groups).forEach(([mys, g]) => {
+      const my = +mys;
+      const attrs = { x1: LX, x2: RX, y1: my, y2: my, stroke: 'var(--ink)', 'stroke-width': 1.2, opacity: 0.85 };
+      if (g.every(mk => mk.dash)) attrs['stroke-dasharray'] = g[0].dash;
+      svg.appendChild(el('line', attrs));
+      let cx = LX + 12;
+      g.forEach(mk => {
+        const t2 = mk.label + ' ' + fmtN(mk.v);
+        const tw = t2.length * 5.6 + 10;
+        svg.appendChild(el('rect', { x: cx, y: my - 7, width: tw, height: 14, rx: 7, fill: 'var(--panel)', opacity: 0.95 }));
+        svg.appendChild(txt(t2, { x: cx + 5, y: my + 3.5, 'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
+        cx += tw + 6;
+      });
+    });
+
+    [0, 25, 50, 75, 100].forEach(cc => {
+      svg.appendChild(txt(String(cc), { x: px(cc / 100), y: T + rows.length * rowH + 14, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
+    });
+    svg.appendChild(txt('Yes green, No red · ¢', { x: (LX + RX) / 2, y: H - 4, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
+    return svg;
+  }
+
+  /* The block: the running month's chart and ladder side by side. */
+  function monthBlock(host, prod, priced, sev, note) {
     const ph = PRODUCTS[prod.id];
     if (!ph || !sev) return false;
-    const div = h('div', { class: 'panel' });
-    div.appendChild(h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: prod.name || prod.id }));
-    if (note) div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: note }));
+    const now = new Date();
+    const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+    const chart = monthChart(ph, y, m, sev);
+    if (!chart) return false;
 
-    // the listed months, from the contracts; the running month when none
-    const byMonth = {};
-    (prod.contracts || []).forEach(c => {
+    const strikes = (prod.contracts || []).filter(c => {
       const mm = /^(\d{4})\.(\d{1,2})$/.exec(String(c.spec || ''));
-      if (mm) (byMonth[mm[1] + '-' + mm[2].padStart(2, '0')] = byMonth[mm[1] + '-' + mm[2].padStart(2, '0')] || []).push(c);
+      return mm && +mm[1] === y && +mm[2] === m;
     });
-    let keys = Object.keys(byMonth).sort();
-    if (!keys.length) {
-      const now = new Date(), key = now.getUTCFullYear() + '-' + String(now.getUTCMonth() + 1).padStart(2, '0');
-      keys = [key]; byMonth[key] = [];
-    }
-    const row = h('div', { style: 'display:flex;gap:14px;flex-wrap:wrap' });
-    let drawn = 0;
-    keys.forEach(k => {
-      const c = monthChart(ph, +k.slice(0, 4), +k.slice(5, 7), sev, byMonth[k], priced, prod);
-      if (c) { row.appendChild(c); drawn++; }
-    });
-    if (!drawn) return false;
+    const div = h('div', { class: 'panel' });
+    div.appendChild(h('div', { class: 'cap', style: 'font-weight:700;margin:0 0 4px',
+                               text: MONTHS[m - 1] + ' ' + y + ' in progress' }));
+    if (note) div.appendChild(h('div', { class: 'psub cap', style: 'margin:2px 2px 6px', text: note }));
+    const row = h('div', { style: 'display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start' });
+    row.appendChild(h('div', { style: 'flex:3 1 460px;min-width:320px' }, [chart]));
+    const lad = ladderChart(ph, y, m, strikes, priced, prod, sev);
+    if (lad) row.appendChild(h('div', { style: 'flex:2 1 300px;min-width:260px' }, [lad]));
+    else row.appendChild(h('div', { style: 'flex:2 1 300px;min-width:260px' }, [
+      h('p', { class: 'cap', text: 'No ladder is listed for the running month.' })]));
     div.appendChild(row);
-    const anyStrikes = keys.some(k => (byMonth[k] || []).length);
+    if (lad && WXM.on() && WXM.live()) {
+      div.appendChild(h('p', { class: 'cap', style: 'margin:4px 2px 0' }, [
+        h('a', { href: 'allocator.html?m=' + prod.id, text: 'Size a position on this ladder in the position allocation calculator →' })]));
+    }
     div.appendChild(h('p', { class: 'cap', style: 'margin:6px 2px 0',
-      text: 'Shaded band and dashed line are the tenth-to-ninetieth percentile envelope and median of the '
+      text: 'The dashed curve and the faint band are the median and tenth-to-ninetieth percentile envelope of the '
         + 'day-of-month cumulative ' + PH_NAME[ph] + ' report count, '
         + ((sev.climo || {}).yearsFrom || '') + ' to ' + ((sev.climo || {}).yearsTo || '')
-        + ', from the SPC preliminary summary. The solid line is this month’s daily tabulation and the '
-        + 'corner figure is the month table, which is the count the contract settles on; the two are separate '
-        + 'SPC products and can differ by a few percent.'
-        + (anyStrikes ? ' Dotted horizontals are the listed strikes'
-            + (WXM.on() && WXM.live() ? ', with the Yes price midpoint where the book has bids; click one to open it on IBKR.' : '.')
-          : '')
+        + ', from the SPC preliminary summary. The solid line is this month’s daily tabulation and the large figure '
+        + 'is the month table, which is the count the contract settles on; the two are separate SPC products and '
+        + 'can differ by a few percent.'
         + (sev.staleSince ? ' The feed has not updated since ' + sev.staleSince.slice(0, 10) + '.' : '') }));
     host.appendChild(div);
     return true;
   }
 
-  return { PRODUCTS, panel };
+  return { PRODUCTS, monthBlock };
 })();

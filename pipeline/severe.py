@@ -60,6 +60,52 @@ def year_block(doc: dict) -> dict:
     return {"months": months, "daily": daily, "through": through}
 
 
+SERIES_KEYS = {"SWTUS": ("severe-tornado", "torn", "US monthly tornado reports"),
+               "SWWUS": ("severe-wind", "wind", "US monthly severe-wind reports"),
+               "SWHUS": ("severe-hail", "hail", "US monthly severe-hail reports")}
+
+
+def monthly_series(store: Storage, now: dt.datetime) -> dict:
+    """The three monthly report-count series, for the series lane.
+
+    History comes from the bundled climatology's per-year month totals;
+    completed months of the current year come from the severe snapshot the
+    same daily chain wrote moments earlier. A month still in progress is not
+    a point, because a part-month total would plot as a collapse; the running
+    month is the count panel's job."""
+    with open(CLIMO_PATH) as fh:
+        climo = json.load(fh)
+    snap_raw = store.get("snapshots/severe.json")
+    snap = json.loads(snap_raw) if snap_raw else {}
+    today = now.date()
+    out = {}
+    for pid, (key, ph, title) in SERIES_KEYS.items():
+        pts = []
+        for y_str, months in sorted((climo.get("history") or {}).items()):
+            for m in range(1, 13):
+                v = (months.get(str(m)) or {}).get(ph)
+                if v is not None:
+                    pts.append([f"{int(y_str):04d}{m:02d}", v])
+        for y_str, block in sorted((snap.get("years") or {}).items()):
+            y = int(y_str)
+            if y <= climo.get("yearsTo", 0):
+                continue
+            for m in range(1, 13):
+                last_day = dt.date(y + (m == 12), (m % 12) + 1, 1) - dt.timedelta(days=1)
+                if today <= last_day:
+                    continue                     # the month is still running
+                v = (block.get("months") or {}).get(str(m), {}).get(ph)
+                if v is not None:
+                    pts.append([f"{y:04d}{m:02d}", v])
+        out[key] = {"key": key, "products": [pid], "title": title, "units": "reports",
+                    "points": pts,
+                    "source": "SPC Annual Preliminary Report Summary (Preliminary source)",
+                    "note": "Each point is the month table's preliminary report count, the number the contract "
+                            "settles on; the first count published after the month ends governs and later "
+                            "revisions do not. Surpassing a strike means strictly greater than it."}
+    return out
+
+
 def severe_pass(cfg: dict, store: Storage) -> int:
     gw.set_user_agent(cfg.get("user_agent", ""))
     now = dt.datetime.now(dt.timezone.utc)

@@ -122,14 +122,28 @@ window.WXPanels = (() => {
     for (const light of products) {
       const name = light.name || light.id;
       if (light.state !== 'listed') {
+        // an unlisted SW product still shows the history and the month in
+        // progress, since the counts it would settle on are public either way
         if (window.WXSevere && WXSevere.PRODUCTS[light.id]) {
-          const sevRes = await WXD.get('severe.json', 30);
-          if (sevRes.data && WXSevere.panel(host, { id: light.id, name },
-                                            null, null, sevRes.data,
-                                            'Not currently listed on the exchange; the counts it would settle on are below.')) {
-            unlisted++;
-            continue;
+          const key2 = (idx.products || {})[light.id];
+          const [pRes2, sevRes, sRes2] = await Promise.all([
+            WXD.get(PROD(light.id), 1440), WXD.get('severe.json', 30),
+            key2 ? WXD.get(SERIES(key2), 1440) : Promise.resolve(null)]);
+          const prod2 = pRes2.data || {};
+          const sr2 = sRes2 && sRes2.data;
+          let any = false;
+          if (sr2 && (sr2.points || []).length) {
+            host.appendChild(h('div', { class: 'psub cap', style: 'margin:0 2px 4px',
+              text: (prod2.name || name) + ' is not currently listed on the exchange; the series it would settle on is below.' }));
+            const ser2 = sr2.points.map(q => [xOfPeriod(q[0]), q[1]]).filter(q => q[0] != null && q[1] != null);
+            WXClimate.panel(host, key2, sr2.title || name, sr2.units || '', ser2,
+                            { id: light.id, name: prod2.name || name, productConid: prod2.productConid, contracts: [] },
+                            0, sr2.source || '', Object.assign({ markerRadius: 'auto', trendNote: 'byYear' }, opts.panel || {}));
+            any = true;
           }
+          if (sevRes.data && WXSevere.monthBlock(host, Object.assign({ id: light.id, name }, prod2),
+                                                 null, sevRes.data)) any = true;
+          if (any) { unlisted++; continue; }
         }
         host.appendChild(h('div', { class: 'panel' }, [
           h('div', { style: 'font-size:14px;font-weight:700;color:var(--navy)', text: name }),
@@ -141,16 +155,6 @@ window.WXPanels = (() => {
       const key = (idx.products || {})[light.id];
       const [pRes, qRes] = await Promise.all([WXD.get(PROD(light.id), 1440), WXD.get(PRICE(light.id), 30)]);
       const prod = pRes.data || {};
-      // the SW count contracts settle on SPC's monthly report tables, which
-      // the severe job publishes, so they get a counting panel, not a ladder
-      if (window.WXSevere && WXSevere.PRODUCTS[light.id]) {
-        const sevRes = await WXD.get('severe.json', 30);
-        if (sevRes.data && WXSevere.panel(host, Object.assign({ id: light.id }, prod),
-                                          priceMap(qRes.data), qRes.data, sevRes.data)) {
-          drawn++;
-          continue;
-        }
-      }
       const sRes = key ? await WXD.get(SERIES(key), 1440) : null;
       const sr = sRes && sRes.data;
 
@@ -162,6 +166,13 @@ window.WXPanels = (() => {
         WXClimate.panel(host, key, sr.title || product.name, sr.units || '', ser, product, 0,
                         sr.source || '', Object.assign({ markerRadius: 'auto', trendNote: 'byYear' }, opts.panel || {}));
         if (sr.note && notes.indexOf(sr.note) < 0) notes.push(sr.note);
+        // the SW count contracts get the month in progress under the history,
+        // the hurricane season shape at monthly scale
+        if (window.WXSevere && WXSevere.PRODUCTS[light.id]) {
+          const sevRes = await WXD.get('severe.json', 30);
+          if (sevRes.data) WXSevere.monthBlock(host, Object.assign({ id: light.id }, prod),
+                                               priceMap(qRes.data), sevRes.data);
+        }
         drawn++;
         continue;
       }

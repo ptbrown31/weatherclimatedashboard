@@ -385,6 +385,16 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
         except Exception as e:  # noqa: BLE001
             errors.append(f"USDR: {type(e).__name__}: {e}")
 
+    # ---- the severe-weather monthly report counts, composed from the severe
+    #      job's snapshot and its bundled history rather than fetched again
+    if not deadline.over(10):
+        try:
+            from . import severe as sv
+            for key, doc in sv.monthly_series(store, now).items():
+                put(key, doc)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"severe: {type(e).__name__}: {e}")
+
     # ---- the energy series, which need a key and are skipped without one
     if not deadline.over(40):
         if not en.api_key(cfg):
@@ -405,6 +415,9 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
     for pid, (key, _) in CROPS.items():
         products[pid] = key
     products["USDR"] = "drought-us"
+    from . import severe as _sv
+    for pid, (key, _, _) in _sv.SERIES_KEYS.items():
+        products[pid] = key
     products.update(en.product_keys())
     # only advertise a series that this pass actually wrote or that already
     # exists, so a page never fetches a key that is not there
