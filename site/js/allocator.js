@@ -484,16 +484,19 @@ window.WXAlloc = (() => {
   }
 
   // ------------------------------------------------------------------- svg
-  // line spends step in tenths of a cent (whole-cent price plus the half-cent
-  // fee), so a line holding an odd number of contracts ends in a half cent;
-  // rounding each line to whole cents made the printed lines re-add to more
-  // than the printed total
-  const fm$ = v => {
+  /* Whole cents on the chips, the note and the figure labels; the exact
+     tenth-cent figures live in the hovers. Line spends step in tenths of a
+     cent (whole-cent price plus the half-cent fee), so a line holding an odd
+     number of contracts ends in a half cent, and the hover is where those
+     lines have to re-add to their total exactly. */
+  const fm$ = v => '$' + (Math.round(v * 100) / 100).toFixed(2);
+  const fmE$ = v => {
     const r = Math.round(v * 1000) / 1000;
     const w = Math.round(r * 100) / 100;
     return '$' + (Math.abs(r - w) > 1e-9 ? r.toFixed(3) : w.toFixed(2));
   };
   const fmS = v => (v < 0 ? '−' : '+') + fm$(Math.abs(v)).slice(1);   // signed, for net outcomes
+  const fmES = v => (v < 0 ? '−' : '+') + fmE$(Math.abs(v)).slice(1);
   const fmc = v => {
     const c = Math.round(v * 1000) / 10;                  // costs carry the half-cent fee
     return (c % 1 ? c.toFixed(1) : String(c)) + '¢';
@@ -864,7 +867,7 @@ window.WXAlloc = (() => {
           const sc = R.scen[s2.key];
           const pay = payoutAt(sc.hold, gr);
           return ['<span class="sw" style="background:' + s2.col + '"></span>' + s2.name,
-                  fmS(pay - sc.spent) + ' net (' + fm$(pay) + ' back)'];
+                  fmES(pay - sc.spent) + ' net (' + fm$(pay) + ' back)'];
         });
         tip.show(ev, tip.rows('If the number lands at ' + (lad.grain === 'integer' ? String(gr) : gr.toFixed(tk.dp))
                               + (unit ? ' ' + unit : ''), rows, 'against the capital committed'));
@@ -946,12 +949,12 @@ window.WXAlloc = (() => {
     if (iy) {
       rows.push([(hy ? TICK : '') + 'Buy Yes now at', fmc(iy.price) + ' \u00b7 pays ' + fmx(1 / iy.cost)]);
       rows.push(['User\u2019s implied fair Yes', fmc(iy.p)]);
-      if (hy) rows.push(['This split buys', hy.n + ' Yes for ' + fm$(hy.spent)]);
+      if (hy) rows.push(['This split buys', hy.n + ' Yes for ' + fmE$(hy.spent)]);
     }
     if (ino) {
       rows.push([(hn ? TICK : '') + 'Buy No now at', fmc(ino.price) + ' \u00b7 pays ' + fmx(1 / ino.cost)]);
       rows.push(['User\u2019s implied fair No', fmc(ino.p)]);
-      if (hn) rows.push(['This split buys', hn.n + ' No for ' + fm$(hn.spent)]);
+      if (hn) rows.push(['This split buys', hn.n + ' No for ' + fmE$(hn.spent)]);
     }
     if (!iy && !ino) rows.push(['No resting bids', 'neither side can be bought now']);
     const foot = (iy && !iy.tradeable) || (ino && !ino.tradeable)
@@ -967,7 +970,7 @@ window.WXAlloc = (() => {
       [yes ? 'Buy Yes now at' : 'Buy No now at', fmc(i.price)],
       ['Cost with the fee', fmc(i.cost)],
       ['Contracts', String(x.n)],
-      ['Dollars in', fm$(x.spent)],
+      ['Dollars in', fmE$(x.spent)],
       ['Pays if it hits', fm$(x.n) + ' (' + fmx(x.n / Math.max(x.spent, 1e-9)) + ')'],
       ['The user’s chance it pays', fmp(i.p)],
       ['Breaks even if the chance is', fmp(i.cost)],
