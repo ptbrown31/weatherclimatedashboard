@@ -1311,6 +1311,17 @@ def run(no_build: bool) -> int:
                         sw["settle"] and sw["counts"], str(sw))
                 chk.add(f"{scheme} severe: no probability or fair value appears on the counting panels",
                         not sw["probs"], "")
+                # a covered link is a broken promise: the element under the
+                # centre of a strike link rect must be the rect itself
+                hit = page.evaluate('''() => {
+                  const r = document.querySelector('#panels svg [data-contract-url]');
+                  if (!r) return 'none';
+                  const b = r.getBoundingClientRect();
+                  const e = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+                  return e && (e === r || e.closest('[data-contract-url]') === r) ? 'clickable' : 'covered';
+                }''')
+                chk.add(f"{scheme} severe: strike links are clickable, not covered",
+                        hit in ("clickable", "none"), hit)
 
                 page.goto(f"{srv.url}/fossil-fuels.html"); page.wait_for_timeout(1200)
                 ff = page.locator("#panels .panel").count()

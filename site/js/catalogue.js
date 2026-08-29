@@ -291,7 +291,10 @@ window.WXCat = (() => {
         const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
           h('span', { class: 'lk', text: c.label || String(c.strike) }),
           h('span', { class: 'lb' }, [h('i', { style: 'width:' + (yes == null ? 0 : yes) + '%' })]),
-          h('span', { class: 'lv' + (unquoted ? ' dim' : ''), text: unquoted ? '—' : (yes == null ? 'no bids' : yes + '¢' + (one ? '*' : '')) }),
+          h('span', { class: 'lv' + (unquoted ? ' dim' : ''),
+                      text: unquoted ? '—'
+                        : (yes != null ? yes + '¢' + (one ? '*' : '')
+                          : (q && q.mid != null ? 'no price' : 'no bids')) }),
         ]);
         const noBid = q && q.ask != null ? 100 - Math.round(q.ask * 100) : null;
         bind(bar, () => tip.rows((p.name || p.id) + ' — ' + (c.label || c.strike), [

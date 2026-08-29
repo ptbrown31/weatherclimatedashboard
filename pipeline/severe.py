@@ -20,6 +20,7 @@ import json
 import os
 import time
 
+from . import archive as arch
 from . import gov_weather as gw
 from .storage import Storage
 
@@ -78,18 +79,31 @@ def severe_pass(cfg: dict, store: Storage) -> int:
     except Exception as e:  # noqa: BLE001
         climo = {}
         errors.append(f"climo: {type(e).__name__}: {e}")
+    # Any year this pass could not fetch is carried from the previous
+    # snapshot, fresh fetches winning. December settles in early January, so
+    # the first pass of a new year must not drop the old year's block while
+    # its contract is still open, and a current-year outage beside a
+    # successful next-year fetch must not clobber the preserved block either.
+    prev_raw = store.get("snapshots/severe.json")
+    prev = json.loads(prev_raw) if prev_raw else {}
+    carried = []
+    for y, block in (prev.get("years") or {}).items():
+        if y not in years and int(y) >= now.year - 1:
+            years[y] = block
+            carried.append(y)
     if not years:
-        # keep the previous snapshot rather than publishing nothing
-        prev = store.get("snapshots/severe.json")
+        # nothing fetched and nothing to carry: keep the previous snapshot
         if prev:
-            snap = json.loads(prev)
-            snap["error"] = "; ".join(errors)
-            snap["staleSince"] = snap.get("staleSince") or _iso(now)
-            store.put("snapshots/severe.json", json.dumps(snap, separators=(",", ":")).encode(),
+            prev["errors"] = errors
+            prev["staleSince"] = prev.get("staleSince") or _iso(now)
+            store.put("snapshots/severe.json", json.dumps(prev, separators=(",", ":")).encode(),
                       "application/json", SNAP_CACHE)
+        arch.LAST_STATUS = {"job": "severe", "errors": len(errors), "alarms": ["severe"]}
         print(json.dumps({"kind": "severe", "written": False, "errors": errors,
                           "seconds": round(time.time() - t0, 1)}))
         return 1
+    if str(now.year) in carried:
+        errors.append(f"{now.year}: served from the previous snapshot")
     snap = {"schema": SCHEMA, "asof": _iso(now), "written": _iso(now),
             "source": "SPC Annual Preliminary Report Summary (Preliminary source); "
                       "the month totals are what the SW contracts settle on",
@@ -97,10 +111,15 @@ def severe_pass(cfg: dict, store: Storage) -> int:
             "climo": {"yearsFrom": climo.get("yearsFrom"), "yearsTo": climo.get("yearsTo"),
                       "months": climo.get("months", {})},
             "errors": errors}
+    if str(now.year) in carried:
+        snap["staleSince"] = prev.get("staleSince") or _iso(now)
     store.put("snapshots/severe.json", json.dumps(snap, separators=(",", ":")).encode(),
               "application/json", SNAP_CACHE)
+    # a missing climatology bundle is a packaging regression, alarmed by name
+    alarms = ["severe-climo"] if not climo else (["severe"] if str(now.year) in carried else [])
+    arch.LAST_STATUS = {"job": "severe", "errors": len(errors), "alarms": alarms}
     cur = years.get(str(now.year), {})
-    print(json.dumps({"kind": "severe", "written": True,
+    print(json.dumps({"kind": "severe", "written": True, "carried": carried,
                       "months": {m: v for m, v in (cur.get("through") or {}).items()},
                       "errors": errors, "seconds": round(time.time() - t0, 1)}))
     return 0

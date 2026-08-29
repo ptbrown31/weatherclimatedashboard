@@ -78,5 +78,61 @@ class SampleSnapshot(unittest.TestCase):
                 self.assertEqual(len(cum[ph]), b["through"][m])
 
 
+class YearCarry(unittest.TestCase):
+    """The pass carries any year it could not fetch from the previous
+    snapshot, so December's block survives the New Year while its contract
+    settles, and a current-year outage cannot be clobbered by a successful
+    next-year fetch."""
+
+    class Store:
+        def __init__(self, prev):
+            self.d = {"snapshots/severe.json": json.dumps(prev).encode()} if prev else {}
+
+        def get(self, k):
+            return self.d.get(k)
+
+        def put(self, k, body, *a):
+            self.d[k] = body
+
+    def run_pass(self, fetches, prev, year=2027):
+        import datetime as dt
+        from unittest import mock
+        store = self.Store(prev)
+        def fake_fetch(url):
+            y = url.split("/")[-4]
+            if y in fetches:
+                return json.dumps(fetches[y]).encode()
+            raise RuntimeError("404")
+        class FakeDate(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(year, 1, 2, 12, tzinfo=tz)
+        with mock.patch.object(severe.gw, "_fetch", side_effect=fake_fetch), \
+             mock.patch.object(severe.dt, "datetime", FakeDate):
+            rc = severe.severe_pass({"user_agent": "t"}, store)
+        raw = store.d.get("snapshots/severe.json")
+        return rc, (json.loads(raw) if raw else None)
+
+    def test_december_survives_the_new_year(self):
+        prev = {"schema": 1, "years": {"2026": {"months": {"12": {"torn": 40}}, "daily": {}, "through": {}}}}
+        rc, snap = self.run_pass({"2027": DOC}, prev)
+        self.assertEqual(rc, 0)
+        self.assertIn("2026", snap["years"])          # December still open
+        self.assertIn("2027", snap["years"])          # the fresh fetch won its slot
+        self.assertEqual(snap["years"]["2026"]["months"]["12"]["torn"], 40)
+
+    def test_current_year_outage_is_carried_and_marked(self):
+        prev = {"schema": 1, "years": {"2027": {"months": {"1": {"torn": 7}}, "daily": {}, "through": {}}}}
+        rc, snap = self.run_pass({}, prev)
+        self.assertEqual(rc, 0)
+        self.assertEqual(snap["years"]["2027"]["months"]["1"]["torn"], 7)
+        self.assertTrue(any("previous snapshot" in e for e in snap["errors"]))
+        self.assertIn("staleSince", snap)
+
+    def test_nothing_fetched_and_nothing_to_carry_returns_one(self):
+        rc, snap = self.run_pass({}, None)
+        self.assertEqual(rc, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -321,13 +321,14 @@ window.WXM = (() => {
     return { asof: g.asof, stale: S.groups.hurricane.stale, source: S.groups.hurricane.source, markets: g.markets || [] };
   }
 
-  /* A book showing 1c bid against 99c ask is an empty book, not a 50c price:
-     the midpoint of the widest possible spread says nothing. A mid counts as
-     a price only when at least one side carries a real resting bid. */
+  /* A book showing a 1c bid against a 99c ask is an empty book, not a 50c
+     price: the midpoint of the widest possible spread says nothing. The test
+     needs both sides present at the extremes, because a lone 1c bid with no
+     opposite side is a one-sided book with a real resting bid, which the
+     ladders have always shown as a one-sided price. */
   function realMid(r) {
     if (!r || r.mid == null) return false;
-    const bid = r.bid != null ? r.bid : 0, ask = r.ask != null ? r.ask : 1;
-    return !(bid <= 0.011 && ask >= 0.989);
+    return !(r.bid != null && r.ask != null && r.bid <= 0.011 && r.ask >= 0.989);
   }
 
   return { realMid, mode, on, live, load, loadSummary, loadGroup, implied, ladder, pricePath, climateProducts, hurricaneMarkets, label,

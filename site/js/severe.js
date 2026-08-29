@@ -51,7 +51,7 @@ window.WXSevere = (() => {
 
     // the strikes, each a horizontal mark. Every line is drawn; labels thin
     // when neighbouring strikes sit closer than a label is tall, and the
-    // hover names each strike exactly
+    // chart hover names the nearest strike so a thinned line keeps an identity
     let lastLab = null;
     strikes.sort((a, b) => b.strike - a.strike).forEach(c => {
       const sy = yy(c.strike);
@@ -93,21 +93,29 @@ window.WXSevere = (() => {
     });
     [1, 10, 20, nd].forEach(d => svg.appendChild(txt(String(d), { x: x(d), y: B + 12, 'text-anchor': 'middle', class: 'ax', 'font-size': 8.5 })));
 
-    const band = el('rect', { x: L, y: T, width: R - L, height: B - T, fill: 'transparent' });
-    band.addEventListener('mousemove', ev => {
+    /* The hover listens on the svg itself so the strike link rects stay on
+       top and clickable; a covering band ate every click while the caption
+       promised the strikes open on IBKR. */
+    svg.addEventListener('mousemove', ev => {
       const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
       const q2 = pt.matrixTransform(svg.getScreenCTM().inverse());
+      if (q2.x < L || q2.x > R || q2.y < T || q2.y > B) { if (tip) tip.hide(); return; }
       const d = Math.max(1, Math.min(nd, Math.round(1 + (q2.x - L) / (R - L) * (nd - 1))));
       const rows = [['Day of month', String(d)]];
       if (cum && d <= cum.length) rows.push(['Count so far (daily tabulation)', String(cum[d - 1])]);
       rows.push(['Median through this day, 2005-2025', String(Math.round(env.p50[d - 1]))]);
       rows.push(['Envelope', Math.round(env.p10[d - 1]) + ' to ' + Math.round(env.p90[d - 1])]);
+      if (strikes.length) {
+        const v = hi * (B - q2.y) / (B - T);
+        const near = strikes.reduce((a, c) => (Math.abs(c.strike - v) < Math.abs(a.strike - v) ? c : a), strikes[0]);
+        const q3 = priced && priced[String(near.spec || '') + '|' + String(near.strike)];
+        rows.push(['Nearest strike', near.label + (q3 && WXM.realMid(q3) ? ' · ' + Math.round(q3.mid * 100) + '¢' : '')]);
+      }
       if (!tip) tip = WXC.tooltip();
       tip.show(ev, tip.rows(MONTHS[m - 1] + ' ' + y + ' · ' + PH_NAME[ph] + ' reports', rows,
                             'the month table, not this daily line, is the settlement number'));
     });
-    band.addEventListener('mouseleave', () => { if (tip) tip.hide(); });
-    svg.appendChild(band);
+    svg.addEventListener('mouseleave', () => { if (tip) tip.hide(); });
 
     const wrap = h('div', { style: 'flex:1 1 300px;min-width:260px' });
     wrap.appendChild(h('div', { class: 'cap', style: 'font-weight:700;margin:0 0 2px', text: MONTHS[m - 1] + ' ' + y }));
@@ -143,14 +151,18 @@ window.WXSevere = (() => {
     });
     if (!drawn) return false;
     div.appendChild(row);
+    const anyStrikes = keys.some(k => (byMonth[k] || []).length);
     div.appendChild(h('p', { class: 'cap', style: 'margin:6px 2px 0',
       text: 'Shaded band and dashed line are the tenth-to-ninetieth percentile envelope and median of the '
         + 'day-of-month cumulative ' + PH_NAME[ph] + ' report count, '
         + ((sev.climo || {}).yearsFrom || '') + ' to ' + ((sev.climo || {}).yearsTo || '')
         + ', from the SPC preliminary summary. The solid line is this month’s daily tabulation and the '
         + 'corner figure is the month table, which is the count the contract settles on; the two are separate '
-        + 'SPC products and can differ by a few percent. Dotted horizontals are the listed strikes'
-        + (WXM.on() && WXM.live() ? ', with the Yes price midpoint where the book has bids; click one to open it on IBKR.' : '.') }));
+        + 'SPC products and can differ by a few percent.'
+        + (anyStrikes ? ' Dotted horizontals are the listed strikes'
+            + (WXM.on() && WXM.live() ? ', with the Yes price midpoint where the book has bids; click one to open it on IBKR.' : '.')
+          : '')
+        + (sev.staleSince ? ' The feed has not updated since ' + sev.staleSince.slice(0, 10) + '.' : '') }));
     host.appendChild(div);
     return true;
   }
