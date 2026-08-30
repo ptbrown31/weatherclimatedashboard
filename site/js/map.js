@@ -129,7 +129,6 @@ window.WXMap = (() => {
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const isoDate = s => { if (!s || s.length < 10) return ''; return MON[+s.slice(5, 7) - 1] + ' ' + (+s.slice(8, 10)); };
   const dg = v => (v == null ? '—' : deg(v));
-  const pair = (a, b) => (a == null && b == null ? null : dg(a) + ' / ' + dg(b));
   const gap = d => (d == null ? '' : ' (' + (d > 0 ? '+' + d : d < 0 ? '−' + Math.abs(d) : '0') + '°)');
   const srcTag = s => (s === 'tgroup' ? 'tenths' : s === 'body' ? 'whole degrees' : null);
   const FIELD_FOOT = 'inverse-distance interpolation of the listed stations’ NWS forecasts; not an NWS product';
@@ -146,53 +145,105 @@ window.WXMap = (() => {
     return STATE_TEXT[m.state] || 'no bids yet';
   }
 
+  /* When a board lists. US daily contracts for a local day are listed at noon
+     Eastern the day before, which the snapshot stamps on the day it belongs
+     to; the day-ahead board therefore lists a day later than the marker the
+     current day carries. */
+  function listingTime(mk, when) {
+    if (!mk.listed) return null;
+    const t = Date.parse(mk.listed);
+    if (!isFinite(t)) return null;
+    return when === 'tomorrow' ? t + 86400000 : t;
+  }
+  function countdown(ms) {
+    const left = ms - Date.now();
+    if (left <= 0) return null;
+    const h = Math.floor(left / 3600000), m = Math.round((left % 3600000) / 60000);
+    if (h >= 1) return h + 'h ' + String(m).padStart(2, '0') + 'm from now';
+    return Math.max(1, Math.round(left / 60000)) + ' min from now';
+  }
+
+  /* One dot, read for the board on screen.
+
+     The tooltip used to carry both days and both sides at once, twelve rows
+     of which two answered the question the reader was asking. It now shows
+     the side and the day the buttons select, and nothing else.
+
+     The exchange's own number leads, because that is the thing being traded
+     and the reason to be on this page; the forecasts that inform it follow as
+     supporting rows. Where the board has not listed yet there is no implied
+     value to show, so its place is taken by when the contracts list and how
+     long that is from now. */
   function dotTip(c) {
     const mk = c.markers || {};
-    const m = WXM.on() ? WXM.implied(c) : null;
-    const tag = WXM.live() ? 'ForecastEx' : 'placeholder';
-    const tomorrow = [
-      ['NWS high / low tomorrow', dg(c.nwsHighTomorrow) + ' / ' + dg(c.nwsLowTomorrow)],
-      ['NBM high / low tomorrow', pair(c.nbmHighTomorrow, c.nbmLowTomorrow)],
-      ['GFS MOS high / low tomorrow', pair(c.mavHighTomorrow, c.mavLowTomorrow)],
-      WXM.on() ? ['Implied high (' + tag + ')', impliedText(m, m && m.impliedHigh, m && m.divHigh, m && m.edgeHigh)] : null,
-      WXM.on() ? ['Implied low (' + tag + ')', impliedText(m, m && m.impliedLow, m && m.divLow, m && m.edgeLow)] : null,
-    ];
-    const sh = srcTag(c.obsHighSrc), sl = srcTag(c.obsLowSrc);
-    const obsTag = sh || sl ? ' <span class="tk">(' + (sh === sl || !sl ? sh : !sh ? sl : sh + ' / ' + sl) + ')</span>' : '';
-    let latest = null;
-    if (c.obsLatest && c.obsLatest.t) {
-      const ms = Date.parse(c.obsLatest.t), day = WXC.dateShort(ms, c.tz);
-      latest = (day !== isoDate(mk.day) ? day + ' ' : '') + WXC.clockFull(ms, c.tz) + (c.obsLatest.type ? ' ' + c.obsLatest.type : '');
-    }
-    // "expected" is the day's extreme as it now stands: what the station has
-    // recorded so far, taken with the forecast for the hours still ahead. The
-    // standing forecast on its own speaks only for the rest of the day and
-    // reads far too warm on the low side once the morning has set it.
-    const expTag = run => run ? ' <span class="tk">(already recorded)</span>' : '';
-    const today = [
-      ['Expected high today', dg(c.nwsHighToday) + expTag(c.nwsHighTodayRunning)],
-      ['Expected low today', dg(c.nwsLowToday) + expTag(c.nwsLowTodayRunning)],
-      c.nwsIssuedHigh != null ? ['NWS high issued for today', deg(c.nwsIssuedHigh)] : null,
-      c.nwsIssuedLow != null ? ['NWS low issued for today', deg(c.nwsIssuedLow)] : null,
-      ['Observed high / low so far', (c.obsHighSoFar == null && c.obsLowSoFar == null) ? '—' : dg(c.obsHighSoFar) + ' / ' + dg(c.obsLowSoFar) + obsTag],
-      ['Latest METAR', latest],
-    ];
-    // what this dot's colour and size are actually encoding, with the raw gap
-    // beside it so the centring never hides the underlying number
     const M = MODES[mode];
+    const today = M.when === 'today';
+    const low = mode === 'lo' || mode === 'loT';
+    const side = low ? 'low' : 'high';
+    const m = WXM.on() ? WXM.implied(c, today ? 'today' : undefined) : null;
+    const tag = WXM.live() ? 'ForecastEx' : 'placeholder';
+    const dayIso = today ? mk.day : mk.tomorrow;
+
+    // ---- the exchange first
+    const iv = m && (low ? m.impliedLow : m.impliedHigh);
+    const idiv = m && (low ? m.divLow : m.divHigh);
+    const iedge = m && (low ? m.edgeLow : m.edgeHigh);
+    const lead = [];
+    if (WXM.on()) {
+      lead.push(['<b>Implied ' + side + ' (' + tag + ')</b>',
+                 '<b>' + impliedText(m, iv, idiv, iedge) + '</b>']);
+      if (iv == null) {
+        const lt = listingTime(mk, M.when);
+        if (lt) {
+          const cd = countdown(lt);
+          lead.push(['Contracts list', WXC.clockFull(lt, c.tz) + ' ' + WXC.dateShort(lt, c.tz)]);
+          if (cd) lead.push(['That is', cd]);
+        }
+      }
+    }
+
+    // ---- the forecasts behind it, this side and this day only
+    const support = today
+      ? [['Expected ' + side + ' today',
+          dg(low ? c.nwsLowToday : c.nwsHighToday)
+            + ((low ? c.nwsLowTodayRunning : c.nwsHighTodayRunning) ? ' <span class="tk">(already recorded)</span>' : '')],
+         ['NWS ' + side + ' issued for today', low ? dg(c.nwsIssuedLow) : dg(c.nwsIssuedHigh)],
+         ['Observed ' + side + ' so far', obsSoFar(c, low)],
+         ['Latest METAR', latestOb(c, mk)]]
+      : [['NWS ' + side, dg(low ? c.nwsLowTomorrow : c.nwsHighTomorrow)],
+         ['Blend of Models', dg(low ? c.nbmLowTomorrow : c.nbmHighTomorrow)],
+         ['GFS MOS', dg(low ? c.mavLowTomorrow : c.mavHighTomorrow)]];
+
+    // ---- what the dot itself is encoding
     const raw = M.div(c);
     const centred = M.centred && gapN >= MIN_FOR_BASE && raw != null;
     const sgn = x => (x > 0 ? '+' : '') + x.toFixed(1) + '°';
     const enc = centred ? [
-      ['<b>On this map</b>', (M.when === 'today' ? 'today' : 'tomorrow') + '’s ' + (mode === 'lo' || mode === 'loT' ? 'lows' : 'highs')],
-      [M.when === 'today' ? 'Gap to expected' : 'Gap to NWS', sgn(raw)],
+      [today ? 'Gap to expected' : 'Gap to NWS', sgn(raw)],
       ['The board’s typical gap', sgn(gapBase) + ' (median of ' + gapN + ')'],
       ['This station, against that', sgn(raw - gapBase) + (Math.abs(raw - gapBase) < 0.5 ? ', about typical' : (raw > gapBase ? ', warmer than typical' : ', cooler than typical'))],
     ] : [];
-    return tip.rows(c.city + ' (' + c.station + ') — tomorrow ' + isoDate(mk.tomorrow), tomorrow) +
-      tip.rows('<span class="tk" style="display:block;margin-top:5px">Today · ' + isoDate(mk.day) + '</span>', today) +
-      (enc.length ? tip.rows('<span class="tk" style="display:block;margin-top:5px">Dot encoding</span>', enc, 'click → city chart')
-                  : tip.rows('', [], 'click → city chart'));
+
+    const head = c.city + ' (' + c.station + ') · ' + (today ? 'today' : 'tomorrow') + '’s ' + side
+               + (dayIso ? ' ' + isoDate(dayIso) : '');
+    return tip.rows(head, lead)
+      + tip.rows('<span class="tk" style="display:block;margin-top:5px">Forecasts</span>', support)
+      + (enc.length ? tip.rows('<span class="tk" style="display:block;margin-top:5px">Dot encoding</span>', enc, 'click → city chart')
+                    : tip.rows('', [], 'click → city chart'));
+  }
+
+  // the observed extreme so far on the side being shown, with its decode
+  function obsSoFar(c, low) {
+    const v = low ? c.obsLowSoFar : c.obsHighSoFar;
+    if (v == null) return '—';
+    const t = srcTag(low ? c.obsLowSrc : c.obsHighSrc);
+    return deg(v) + (t ? ' <span class="tk">(' + t + ')</span>' : '');
+  }
+  function latestOb(c, mk) {
+    if (!(c.obsLatest && c.obsLatest.t)) return null;
+    const ms = Date.parse(c.obsLatest.t), day = WXC.dateShort(ms, c.tz);
+    return (day !== isoDate(mk.day) ? day + ' ' : '') + WXC.clockFull(ms, c.tz)
+         + (c.obsLatest.type ? ' ' + c.obsLatest.type : '');
   }
 
   // one cell of the shading: the interpolated NWS level under the pointer
@@ -362,5 +413,8 @@ window.WXMap = (() => {
     // the international stations are labelled on the world canvas itself, so
     // there is no list under it any more
   }
-  return { init };
+  // the listing clock is exposed the way allocator.js exposes its maths, so
+  // the gate can check a countdown against a time it chooses rather than
+  // whatever the bundled sample happens to carry
+  return { init, _listingTime: listingTime, _countdown: countdown };
 })();

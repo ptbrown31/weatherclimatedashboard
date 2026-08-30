@@ -705,8 +705,49 @@ def run(no_build: bool) -> int:
                 page.locator("#m3").click(); page.wait_for_timeout(400)
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_lo = page.locator("#tip").inner_text()
+                # ---- the tooltip carries one side of one day, exchange first
+                tt = page.evaluate("""() => {
+                  const read = () => {
+                    const g = document.querySelector('#map g.dot');
+                    g.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true}));
+                    g.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: 400, clientY: 300}));
+                    return document.querySelector('#tip').innerText;
+                  };
+                  const out = {};
+                  document.querySelector('#m1').click(); out.todayHigh = read();
+                  document.querySelector('#m3').click(); out.todayLow = read();
+                  document.querySelector('#m2').click(); out.tomorrowHigh = read();
+                  // the unlisted board: the exchange row gives way to a listing time
+                  const orig = WXM.implied;
+                  WXM.implied = () => ({state: 'tomorrow-unlisted', impliedHigh: null, impliedLow: null,
+                                        divHigh: null, divLow: null});
+                  document.querySelector('#m2').click();
+                  out.unlisted = read();
+                  WXM.implied = orig; document.querySelector('#m2').click();
+                  // the clock itself, against a time we choose
+                  const mk = {listed: new Date(Date.now() - 86400000 + 3 * 3600000 + 25 * 60000).toISOString()};
+                  out.cdFuture = WXMap._countdown(WXMap._listingTime(mk, 'tomorrow'));
+                  out.cdPast = WXMap._countdown(Date.now() - 60000);
+                  return out;
+                }""")
+                chk.add(f"{scheme} map tip: the exchange's number leads",
+                        tt["todayHigh"].split("\n")[1].startswith("Implied high"), tt["todayHigh"][:90])
+                chk.add(f"{scheme} map tip: only the side and day the buttons select",
+                        "low" not in tt["todayHigh"].lower().replace("Implied high", "")
+                        and "tomorrow" not in tt["todayHigh"].lower().split("Dot encoding")[0].replace("today", "")
+                        and "high" not in tt["todayLow"].lower().replace("Implied low", "").split("Dot encoding")[0],
+                        tt["todayLow"][:110])
+                chk.add(f"{scheme} map tip: tomorrow shows the day-ahead forecasts, not today's record",
+                        "Blend of Models" in tt["tomorrowHigh"] and "Observed" not in tt["tomorrowHigh"],
+                        tt["tomorrowHigh"][:110])
+                chk.add(f"{scheme} map tip: an unlisted board says when the contracts list",
+                        "not listed yet" in tt["unlisted"] and "Contracts list" in tt["unlisted"],
+                        tt["unlisted"][:130])
+                chk.add(f"{scheme} map tip: the countdown counts down, and stops at zero",
+                        tt["cdFuture"] is not None and "h " in tt["cdFuture"] and tt["cdPast"] is None,
+                        f"future={tt['cdFuture']} past={tt['cdPast']}")
                 chk.add(f"{scheme} map: today's lows name both the expected low and what has been recorded",
-                        "Expected low today" in t_lo and "Observed high / low so far" in t_lo, t_lo[:200])
+                        "Expected low today" in t_lo and "Observed low so far" in t_lo, t_lo[:200])
                 page.locator("#m1").click(); page.wait_for_timeout(400)
                 # observed-versus-issued is not a market gap and keeps the plain sign
                 chk.add(f"{scheme} map: the observed-versus-issued view is gone",
@@ -1486,7 +1527,12 @@ def run(no_build: bool) -> int:
                 page.wait_for_timeout(900)
                 page.locator("#map g.dot").nth(2).hover(force=True); page.wait_for_timeout(120)
                 t_md = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hover: map dot shows tomorrow's forecasts and today so far", "tomorrow" in t_md and "Observed" in t_md, t_md[:80])
+                # the tooltip carries the board on screen and nothing else: the
+                # default view is today's highs, so today's record belongs and
+                # the day-ahead forecasts do not
+                chk.add(f"{scheme} hover: map dot shows the board on screen, not both days",
+                        "today" in t_md and "Observed high so far" in t_md
+                        and "Blend of Models" not in t_md, t_md[:110])
                 wdots = page.locator("#mapW g.dot").count()
                 chk.add(f"{scheme} map: the international stations sit on a world canvas below", wdots >= 10, f"dots={wdots}")
                 # the reference field is interpolated for tomorrow only, so the
