@@ -58,6 +58,13 @@ SIZE = (760, 475)
 REGION_HALF_W_KM = 35.0
 REGION_HALF_H_KM = 25.0
 REGION_SIZE = (760, 543)
+# The images are fetched at twice the size they are drawn at. The service
+# renders the same cartography either way, so this is straight supersampling:
+# on any screen with more than one device pixel per CSS pixel the map stops
+# looking soft, which on a page of hand-drawn vector charts is the one element
+# that read as low quality. Logical dimensions below are what the overlay's
+# coordinate transform uses and they do not change.
+SCALE = 2
 REGION_KEY = "snapshots/locator/{sid}_region.png"
 SOURCE = "USGS The National Map: US Topo (public domain)"
 
@@ -82,7 +89,8 @@ def fetch_image(lat: float, lon: float, timeout: int = 60,
                 half_w: float = HALF_W_KM, half_h: float = HALF_H_KM,
                 size: tuple = SIZE) -> bytes:
     q = {"bbox": bbox(lat, lon, half_w, half_h), "bboxSR": "4326", "imageSR": "3857",
-         "size": f"{size[0]},{size[1]}", "format": "png", "transparent": "false", "f": "image"}
+         "size": f"{size[0] * SCALE},{size[1] * SCALE}", "dpi": str(96 * SCALE),
+         "format": "png", "transparent": "false", "f": "image"}
     url = SERVICE + "?" + urllib.parse.urlencode(q)
     req = urllib.request.Request(url, headers={"Accept": "image/png"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -111,6 +119,10 @@ def locator_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) ->
             break
         have = prev.get(sid)
         entry = dict(have) if have else None
+        # a station whose picture predates a resolution change is refetched
+        if have and have.get("scale") != SCALE:
+            have = None
+            entry = None
         if not (have and store.get(KEY.format(sid=sid))):
             try:
                 png = getter(c["lat"], c["lon"])
@@ -119,20 +131,22 @@ def locator_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) ->
                 continue
             store.put(KEY.format(sid=sid), png, "image/png", CACHE)
             entry = {"w": SIZE[0], "h": SIZE[1], "halfWKm": HALF_W_KM, "halfHKm": HALF_H_KM,
-                     "lat": c["lat"], "lon": c["lon"], "bytes": len(png), "written": _iso(now)}
+                     "lat": c["lat"], "lon": c["lon"], "bytes": len(png), "scale": SCALE,
+                     "written": _iso(now)}
             written += 1
         else:
             skipped += 1
         # the regional frame, same one-time semantics, wide enough for the
         # neighbouring stations the live overlay draws
-        if not (entry.get("region") and store.get(REGION_KEY.format(sid=sid))):
+        if not (entry.get("region") and entry["region"].get("scale") == SCALE
+                and store.get(REGION_KEY.format(sid=sid))):
             try:
                 rpng = getter(c["lat"], c["lon"], half_w=REGION_HALF_W_KM,
                               half_h=REGION_HALF_H_KM, size=REGION_SIZE)
                 store.put(REGION_KEY.format(sid=sid), rpng, "image/png", CACHE)
                 entry["region"] = {"w": REGION_SIZE[0], "h": REGION_SIZE[1],
                                    "halfWKm": REGION_HALF_W_KM, "halfHKm": REGION_HALF_H_KM,
-                                   "bytes": len(rpng), "written": _iso(now)}
+                                   "bytes": len(rpng), "scale": SCALE, "written": _iso(now)}
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{sid} region: {type(e).__name__}")
         index[sid] = entry

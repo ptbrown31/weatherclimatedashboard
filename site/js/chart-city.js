@@ -250,14 +250,20 @@ window.WXCity = (() => {
            no staff is calm. Temperature sits upper-left of the circle and
            dewpoint lower-left, which is where seventy years of surface
            charts put them. */
+        /* A soft pad of the page's own background, laid down before anything
+           else. Topographic imagery is busy at this scale and a bare circle
+           disappears into the roads; the pad is what lifts a station off the
+           map. It is separate from the glyph because the drawing happens in
+           passes: pads, then the numbers, then the glyphs and their barbs,
+           so a staff crosses a neighbour's temperature rather than hiding
+           under it. */
+        const RAD = big => (big ? 7.5 : 5.5);
+        const pad = (g, x2, y2, big) => g.appendChild(el('circle', {
+          cx: x2, cy: y2, r: RAD(big) + (big ? 4 : 3), fill: 'var(--panel)',
+          opacity: 0.55, 'pointer-events': 'none' }));
         const model = (g, x2, y2, n, big, col) => {
-          const r = big ? 7.5 : 5.5;
+          const r = RAD(big);
           const frac = n.cover != null ? COVER_FRAC[n.cover] : null;
-          // a soft pad of the page's own background under the glyph. Topographic
-          // imagery is busy at this scale and a bare circle disappears into the
-          // roads; the pad is what lifts every station off the map
-          g.appendChild(el('circle', { cx: x2, cy: y2, r: r + (big ? 4 : 3), fill: 'var(--panel)',
-                                       opacity: 0.55, 'pointer-events': 'none' }));
           g.appendChild(el('circle', { cx: x2, cy: y2, r, fill: 'var(--panel)', stroke: col,
                                        'stroke-width': big ? 2.2 : 1.7 }));
           if (frac != null && frac > 0) {
@@ -340,17 +346,33 @@ window.WXCity = (() => {
           if (n.tempF != null) chip(x2 - off, y2 - (big ? 8 : 6), Math.round(n.tempF) + '\u00b0', big, col, 'end', g);
           if (n.dewF != null) chip(x2 - off, y2 + (big ? 17 : 14), Math.round(n.dewF) + '\u00b0', false, 'var(--muted)', 'end', g);
         };
-        const placed = [];
-        near.forEach(n => {
-          const x2 = px(n.lon), y2 = py(n.lat);
-          if (x2 < 8 || x2 > W2 - 8 || y2 < 10 || y2 > H2 - 6) return;
-          model(svg, x2, y2, n, false, 'var(--ink)');
-          // temperature and dewpoint only where they do not sit on another
-          // station's; the glyph itself always draws
-          if (!placed.some(q => Math.abs(q[0] - x2) < 52 && Math.abs(q[1] - y2) < 26)) {
-            labels(svg, x2, y2, n, false, 'var(--ink)');
-            placed.push([x2, y2]);
-          }
+        const CX = W2 / 2, CY = H2 / 2;
+        const selfN = Object.assign({}, ob.nearbySelf || {}, centreTemp != null ? { tempF: centreTemp } : {});
+        const vis = near.map(n => ({ n, x: px(n.lon), y: py(n.lat) }))
+          .filter(q => q.x >= 8 && q.x <= W2 - 8 && q.y >= 10 && q.y <= H2 - 6);
+
+        // pass one: every pad, so no glyph lands on a neighbour's backing
+        vis.forEach(q => pad(svg, q.x, q.y, false));
+        pad(svg, CX, CY, true);
+
+        // pass two: the numbers. Temperature and dewpoint are drawn only where
+        // they do not sit on another station's; the glyph itself always draws
+        const placed = [[CX, CY]];
+        vis.forEach(q => {
+          if (placed.some(z => Math.abs(z[0] - q.x) < 52 && Math.abs(z[1] - q.y) < 26)) return;
+          labels(svg, q.x, q.y, q.n, false, 'var(--ink)');
+          placed.push([q.x, q.y]);
+        });
+        labels(svg, CX, CY, selfN, true, 'var(--accent)');
+
+        // pass three: the glyphs and their barbs, over every number on the map
+        vis.forEach(q => model(svg, q.x, q.y, q.n, false, 'var(--ink)'));
+        svg.appendChild(el('circle', { cx: CX, cy: CY, r: 11, fill: 'none',
+                                       stroke: 'var(--accent)', 'stroke-width': 2.4 }));
+        model(svg, CX, CY, selfN, true, 'var(--accent)');
+
+        // pass four: the hover targets, last so nothing drawn later steals them
+        vis.forEach(({ n, x: x2, y: y2 }) => {
           const hit = el('circle', { cx: x2, cy: y2, r: 14, fill: 'transparent' });
           hit.addEventListener('mousemove', ev => {
             const rows = [['Temperature', n.tempF != null ? WXC.deg(n.tempF) : '\u2014'],
@@ -364,14 +386,6 @@ window.WXCity = (() => {
           hit.addEventListener('mouseleave', () => tip.hide());
           svg.appendChild(hit);
         });
-        // the resolving station over everything: the same model, ringed, its
-        // temperature the settlement-convention reading from its own record,
-        // and named on the map as the one that settles
-        const selfN = Object.assign({}, ob.nearbySelf || {}, centreTemp != null ? { tempF: centreTemp } : {});
-        svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 11, fill: 'none',
-                                       stroke: 'var(--accent)', 'stroke-width': 2.4 }));
-        model(svg, W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
-        labels(svg, W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
         {
           /* The label goes on whichever side of the station the wind barb is
              not using. The staff points toward the direction the wind comes
@@ -405,9 +419,9 @@ window.WXCity = (() => {
            cannot describe a glyph the map does not use. It goes in whichever
            corner holds fewest stations, measured rather than guessed. */
         {
-          const KW = 244, KH = 212, pad = 10;
-          const corners = [[pad, pad], [W2 - KW - pad, pad],
-                           [pad, H2 - KH - pad], [W2 - KW - pad, H2 - KH - pad]];
+          const KW = 244, KH = 212, inset = 10;
+          const corners = [[inset, inset], [W2 - KW - inset, inset],
+                           [inset, H2 - KH - inset], [W2 - KW - inset, H2 - KH - inset]];
           const pts = near.map(n => [px(n.lon), py(n.lat)]).concat([[W2 / 2, H2 / 2]]);
           const cost = ([kx, ky]) => pts.reduce((a, [qx, qy]) =>
             a + (qx > kx - 24 && qx < kx + KW + 24 && qy > ky - 24 && qy < ky + KH + 24 ? 1 : 0), 0);
@@ -424,10 +438,11 @@ window.WXCity = (() => {
              blows from the north-east so its staff leaves up and to the
              right, clear of the temperature and dewpoint that sit to the
              left of every glyph. */
-          const CX = 122, CY = 58;
+          const EX = 122, EY = 58;
           const ex = { tempF: 68, dewF: 55, cover: 'BKN', wdir: 45, wspd: 15 };
-          model(g, CX, CY, ex, false, 'var(--ink)');
-          labels(g, CX, CY, ex, false, 'var(--ink)');
+          pad(g, EX, EY, false);
+          labels(g, EX, EY, ex, false, 'var(--ink)');
+          model(g, EX, EY, ex, false, 'var(--ink)');
           const leader = (x1, y1, x2b, y2b) => g.appendChild(el('line', {
             x1, y1, x2: x2b, y2: y2b, stroke: 'var(--rule)', 'stroke-width': 0.8 }));
           leader(64, 49, 90, 49); lab('Temperature', 8, 52);
@@ -440,6 +455,7 @@ window.WXCity = (() => {
           [['CLR', 'clear'], ['FEW', 'few'], ['SCT', 'sct'], ['BKN', 'bkn'], ['OVC', 'ovc']]
             .forEach(([code, name], i) => {
               const cx2 = 26 + i * 47;
+              pad(g, cx2, 130, false);
               model(g, cx2, 130, { cover: code }, false, 'var(--ink)');
               lab(name, cx2, 147, 8, 'var(--muted)', 'middle');
             });
@@ -449,6 +465,7 @@ window.WXCity = (() => {
           [[0, 'calm'], [5, '5'], [10, '10'], [15, '15'], [50, '50'], [65, '65']]
             .forEach(([kt, name], i) => {
               const cx2 = 24 + i * 39;
+              pad(g, cx2, 186, false);
               model(g, cx2, 186, { cover: 'CLR', wdir: 270, wspd: kt }, false, 'var(--ink)');
               lab(name, cx2, 204, 8, 'var(--muted)', 'middle');
             });

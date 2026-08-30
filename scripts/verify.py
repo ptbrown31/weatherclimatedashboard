@@ -1431,6 +1431,27 @@ def run(no_build: bool) -> int:
                            covered, barbs: barb.length,
                            labelOnBarb: box ? barb.some(l => hits(l, box)) : null };
                 }""")
+                zo = page.evaluate("""() => {
+                  const svg = document.querySelector('#locator svg.locov');
+                  const img = document.querySelector('#locator .locstack img');
+                  if (!svg || !img) return null;
+                  const els = [...svg.children];
+                  // a temperature chip is a rounded rect; a barb stroke is a line
+                  const chip = els.findIndex(e => e.tagName === 'rect' && e.getAttribute('rx') === '4');
+                  const line = els.findIndex(e => e.tagName === 'line');
+                  // the logical width the overlay's coordinate transform uses
+                  const logical = svg.getAttribute('viewBox').split(' ').map(Number)[2];
+                  return { chip, line, over: chip >= 0 && line > chip,
+                           natural: img.naturalWidth, logical,
+                           supersample: logical ? img.naturalWidth / logical : 0 };
+                }""")
+                chk.add(f"{scheme} locator: the barbs draw over the numbers, not under them",
+                        bool(zo and zo["over"]), str(zo and {k: zo[k] for k in ('chip', 'line')}))
+                # the source carries twice the logical size, so the map stays
+                # sharp on a display with more than one device pixel per CSS one
+                chk.add(f"{scheme} locator: the image is fetched at twice the size it is drawn at",
+                        bool(zo and zo["supersample"] >= 1.99),
+                        str(zo and {"natural": zo["natural"], "logical": zo["logical"]}))
                 chk.add(f"{scheme} locator: the key explains the glyph, the cover and the barbs",
                         bool(geom and geom["hasKey"]
                              and "SKY COVER" in geom["keyText"] and "WIND, KNOTS" in geom["keyText"]
