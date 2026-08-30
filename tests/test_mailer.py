@@ -143,5 +143,53 @@ class Delivery(unittest.TestCase):
             self.assertFalse(handler._deliver("s", "b", "report"))
 
 
+class AlarmRelay(unittest.TestCase):
+    """A CloudWatch alarm arrives as an SNS event and leaves as mail."""
+
+    EVENT = {"Records": [{"Sns": {
+        "Subject": "ALARM: pipeline-silent", "Timestamp": "2026-08-30T10:00:00Z",
+        "Message": json.dumps({
+            "AlarmName": "weather-tools-site-pipeline-silent",
+            "NewStateValue": "ALARM",
+            "NewStateReason": "Threshold Crossed: no datapoints",
+            "AlarmDescription": "No pipeline invocations in an hour.",
+            "StateChangeTime": "2026-08-30T10:00:00.000+0000"})}}]}
+
+    def test_an_sns_event_is_relayed_and_never_runs_a_job(self):
+        sent = []
+        with mock.patch.object(handler, "_deliver", lambda s, b, k: sent.append((s, b)) or True), \
+             mock.patch.object(handler, "_register", side_effect=AssertionError("must not run a job")):
+            out = handler.lambda_handler(self.EVENT, None)
+        self.assertEqual(out, {"relayed": 1, "records": 1})
+        subject, body = sent[0]
+        self.assertIn("pipeline-silent", subject)
+        self.assertIn("ALARM", subject)
+        self.assertIn("no datapoints", body)
+        self.assertIn("No pipeline invocations in an hour.", body)
+
+    def test_a_failed_delivery_does_not_raise(self):
+        # raising would mark the invocation an error, which is the metric the
+        # error alarm watches, so the relay would keep re-alarming itself
+        def boom(*a):
+            raise RuntimeError("smtp down")
+        with mock.patch.object(handler, "_deliver", boom):
+            out = handler.lambda_handler(self.EVENT, None)
+        self.assertEqual(out, {"relayed": 0, "records": 1})
+
+    def test_a_message_that_is_not_json_still_mails(self):
+        ev = {"Records": [{"Sns": {"Subject": "ALARM: something", "Message": "plain text reason",
+                                   "Timestamp": "2026-08-30T10:00:00Z"}}]}
+        sent = []
+        with mock.patch.object(handler, "_deliver", lambda s, b, k: sent.append((s, b)) or True):
+            out = handler.lambda_handler(ev, None)
+        self.assertEqual(out["relayed"], 1)
+        self.assertIn("plain text reason", sent[0][1])
+
+    def test_a_job_event_is_untouched_by_the_relay(self):
+        with mock.patch.object(handler, "_register", side_effect=RuntimeError("job path reached")):
+            with self.assertRaises(RuntimeError):
+                handler.lambda_handler({"job": "obs"}, None)
+
+
 if __name__ == "__main__":
     unittest.main()

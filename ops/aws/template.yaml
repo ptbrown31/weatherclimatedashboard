@@ -499,6 +499,25 @@ Resources:
       TopicArn: !Ref AlarmTopic
       Protocol: email
       Endpoint: !Ref AlarmEmail
+  # The CloudWatch alarms publish here, and the pipeline function subscribes so
+  # they go out as mail by whatever carrier is configured. Without this the
+  # alarms reach only an email subscription, which has to be confirmed and can
+  # be silenced by anything that crawls the unsubscribe link. It also covers
+  # the schedules stopping: SNS invokes the function on a different path from
+  # the schedules, so an alarm still gets out when nothing else is running.
+  AlarmRelaySubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: lambda
+      Endpoint: !GetAtt Pipeline.Arn
+  AlarmRelayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt Pipeline.Arn
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref AlarmTopic
   # A daily report on the alarm topic would train the reader to ignore alarm
   # mail, and unsubscribing from one would silence the other. They are separate
   # topics carrying the same address.

@@ -31,6 +31,12 @@ CloudWatch, when every request in a pass failed OR when any enabled source
 has failed for FAIL_STREAK_ALARM passes in a row (health.json). A source
 that quietly fails every pass while the rest succeed is exactly the failure
 that is otherwise invisible.
+
+The same function is also subscribed to the alarm topic, so a CloudWatch
+alarm arrives here as an SNS event and goes out as mail. That covers the one
+failure the pipeline cannot report on its own: the schedules stopping, where
+nothing runs to notice that nothing ran. An SNS invocation is a different
+path from the schedules, so it still fires when they do not.
 """
 from __future__ import annotations
 import json
@@ -121,7 +127,44 @@ def _send_alarm(store, job: str, alarms: list, archive) -> None:
         print(json.dumps({"kind": "alarm", "sent": False, "error": f"{type(e).__name__}: {e}"}))
 
 
+def _relay_alarm(event) -> dict:
+    """Mail a CloudWatch alarm that arrived over SNS.
+
+    Nothing in here may raise. A raise would mark this invocation as an
+    error, which is the metric the error alarm watches, so a failing relay
+    would keep re-alarming itself; CloudWatch would hold it to one message
+    per state change, but the loop is pointless and this path is not worth
+    failing for.
+    """
+    sent, seen = 0, 0
+    for rec in (event.get("Records") or []):
+        sns = rec.get("Sns") or {}
+        seen += 1
+        try:
+            body = json.loads(sns.get("Message") or "{}")
+        except ValueError:
+            body = {}
+        name = body.get("AlarmName") or sns.get("Subject") or "pipeline alarm"
+        state = body.get("NewStateValue") or "ALARM"
+        reason = body.get("NewStateReason") or (sns.get("Message") or "")
+        when = body.get("StateChangeTime") or sns.get("Timestamp") or ""
+        text = (f"{name} is {state}.\n\n{reason}\n\n"
+                f"{body.get('AlarmDescription') or ''}\n\n"
+                f"State changed {when}.\n"
+                "The pipeline's own log is in CloudWatch under the pipeline function.\n")
+        try:
+            if _deliver(f"Weather tools alarm: {name} {state}", text, "alarm-relay"):
+                sent += 1
+        except Exception as e:  # noqa: BLE001 - never raise out of the relay
+            print(json.dumps({"kind": "alarm-relay", "sent": False,
+                              "error": f"{type(e).__name__}: {e}"}))
+    return {"relayed": sent, "records": seen}
+
+
 def lambda_handler(event, context):
+    # a CloudWatch alarm reaches this function as an SNS event, not a job
+    if isinstance(event, dict) and event.get("Records"):
+        return _relay_alarm(event)
     _register()
     job = (event or {}).get("job", "half-hourly")
     if job not in JOBS:
