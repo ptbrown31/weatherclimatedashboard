@@ -483,6 +483,38 @@ window.WXCity = (() => {
       const bar = h('div', { class: 'bar', style: 'margin:6px 0 0' });
       bar.appendChild(WXC.expander(box, 'Expand map'));
       host.appendChild(bar);
+
+      /* How big the map is when the window is given to it.
+
+         Fitting the picture inside the window is the obvious rule and the wrong
+         one here. The column is already wide enough to hold the map at close to
+         its natural size, so the fit is bound by height, and on a window shorter
+         than about 790 usable pixels it lands under the width the map already
+         had. Expand then made the map smaller, which is what it looked like.
+
+         So the fit is floored at the width the map has in the column, and the
+         box scrolls when the floor wins. Nothing may exceed the width available,
+         which is the one bound that cannot be traded away. The wrapper is what
+         gets sized, not the image, because the overlay is inset on the wrapper
+         and reads its coordinates from it. */
+      const AR = (m.w || 760) / (m.h || 475);
+      let restW = box.clientWidth;
+      const fit = () => {
+        if (!box.classList.contains('full')) {
+          restW = box.clientWidth || restW;
+          stack.style.width = stack.style.height = '';
+          return;
+        }
+        const cs = getComputedStyle(box);
+        const availW = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const availH = box.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+        const w = Math.min(availW, Math.max(availH * AR, restW));
+        stack.style.width = Math.round(w) + 'px';
+        stack.style.height = Math.round(w / AR) + 'px';
+      };
+      // the expander raises a resize on the way both in and out
+      window.addEventListener('resize', fit);
+      fit();
       const across = Math.round((m.halfWKm || 12) * 2);
       const bits = [c.city, c.station];
       if (c.lat != null && c.lon != null) {

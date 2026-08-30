@@ -315,9 +315,16 @@ svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);borde
    it stays registered with the image when the box grows to the window */
 .locstack{position:relative;display:block;line-height:0}
 .locstack img{width:100%;height:auto;display:block}
-.expandable.full .locstack{display:block;max-width:100%}
-.expandable.full .locstack img{width:auto;max-width:100%;height:auto;max-height:calc(100vh - 46px)}
-.expandable.full svg.locov{width:100%;height:100%;max-width:none;max-height:none}
+/* Expanded, the wrapper is sized in script and the image fills it. The generic
+   full-window rule above fits a chart inside the window, which for this image
+   is height-bound, and the map is already as wide as the column, so on a short
+   window it came out smaller than it started. chart-city.js does the fit and
+   floors it at the size the map already had; safe centring keeps the top of an
+   overflowing map reachable, falling back to the plain centring above. */
+.expandable.full .locstack{display:block;margin:auto}
+.expandable.full .locstack img,.expandable.full svg.locov{
+  width:100%;height:100%;max-width:none;max-height:none}
+.locbox.full{padding:10px;align-items:safe center;justify-content:safe center}
 .locbox .locpin{position:absolute;left:50%;top:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;
   border-radius:50%;border:2.5px solid #fff;background:var(--accent);
   box-shadow:0 0 0 1.5px rgba(0,0,0,.55),0 1px 4px rgba(0,0,0,.45)}

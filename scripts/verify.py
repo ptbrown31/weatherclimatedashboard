@@ -1476,6 +1476,28 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} locator: hovering the settlement station reads its own report",
                         bool(sst and sst["tip"] and "settlement station" in sst["tip"]
                              and "Dewpoint" in sst["tip"]), str(sst and (sst["tip"] or ""))[:120])
+                # expanding must never shrink the map. The map is already as wide
+                # as the column, so a fit-to-window rule loses to the column on any
+                # short window, and the overlay has to stay on the image
+                ex = page.evaluate("""() => {
+                  const img = document.querySelector('#locator .locstack img');
+                  const btn = [...document.querySelectorAll('button')]
+                    .find(b => b.textContent.trim() === 'Expand map');
+                  if (!img || !btn) return null;
+                  const box = img.closest('.locbox');
+                  const meas = () => { const r = img.getBoundingClientRect(),
+                                             s = box.querySelector('svg.locov').getBoundingClientRect();
+                    return { w: r.width, h: r.height,
+                             on: Math.abs(r.width - s.width) < 1 && Math.abs(r.height - s.height) < 1 }; };
+                  const a = meas(); btn.click(); const b = meas(); btn.click(); const c = meas();
+                  return { collapsed: a.w, expanded: b.w, closed: c.w, aligned: b.on,
+                           grew: b.w >= a.w - 0.5, restored: Math.abs(c.w - a.w) < 1 };
+                }""")
+                chk.add(f"{scheme} locator: expanding the map never makes it smaller",
+                        bool(ex and ex["grew"] and ex["restored"]),
+                        str(ex and {k: round(ex[k]) for k in ('collapsed', 'expanded', 'closed')}))
+                chk.add(f"{scheme} locator: the overlay stays on the image when expanded",
+                        bool(ex and ex["aligned"]), str(ex and ex["aligned"]))
                 page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
                 chk.add(f"{scheme} severe: the tornado reports lead the page",
                         page.evaluate("""() => {
