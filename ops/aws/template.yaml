@@ -456,7 +456,13 @@ Resources:
     Type: AWS::SNS::Topic
     Properties:
       TopicName: !Sub "${SiteName}-alarms"
-  AlarmSubscription:
+  # An email subscription that is never confirmed is deleted by SNS after the
+  # confirmation window, and the deleted record lingers as a tombstone that a
+  # plain re-subscribe will not replace: the call returns "pending
+  # confirmation" and no subscription appears. Recreating the resource under a
+  # new logical id is what actually gets a fresh confirmation sent. Renamed
+  # 2026-08-30 after the original went unconfirmed and expired.
+  AlarmSubscriptionV2:
     Type: AWS::SNS::Subscription
     Condition: HasAlarmEmail
     Properties:
