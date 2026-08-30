@@ -581,6 +581,17 @@ def run(no_build: bool) -> int:
                         and "as issued" not in about_txt.lower()
                         and page.locator("a[href='faq.html']").count() >= 1,
                         about_txt[:70])
+                # the author's own links and address, and the standing disclosure,
+                # which is the one thing on the page a reader may need to act on
+                chk.add(f"{scheme} about: the author's writing and a way to reach him",
+                        page.locator("a[href^='mailto:']").count() == 1
+                        and page.locator("a[href*='interactivebrokers.com/campus/author']").count() == 1
+                        and page.locator("a[href*='x.com/']").count() == 1,
+                        f"mailto={page.locator('a[href^=\"mailto:\"]').count()}")
+                chk.add(f"{scheme} about: the affiliation disclosure still renders",
+                        "Interactive Brokers" in page.locator("#disclosureTop").inner_text()
+                        and len(page.locator("#marketNote").inner_text()) > 40,
+                        page.locator("#disclosureTop").inner_text()[:60])
                 page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(700)
                 faq_t2 = page.locator(".wrap").inner_text()
                 chk.add(f"{scheme} faq: it opens on how prediction markets work, with both primers",

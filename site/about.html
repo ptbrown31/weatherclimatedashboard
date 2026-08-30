@@ -13,29 +13,19 @@
 <h1>About this site</h1>
 <p class="sub" id="disclosureTop"></p>
 
-<h2>Site</h2>
-<p>Live displays built on public data for the markets Interactive Brokers lists on weather, climate and natural
-disasters. Each page pairs the market&rsquo;s own prices with the public record the contract settles on, so a
-reader can see what the market is saying and what the underlying data has done, side by side. The pages cover
-daily temperatures at the contract stations, tropical cyclones, longer-run climate series, and the agriculture
-and energy quantities the exchange lists.</p>
-<p>Nothing here is a forecast of the site&rsquo;s own. Where a projection is drawn it is fitted from the record
-shown beside it and says so. Prices are the exchange&rsquo;s, with the time they were read.</p>
-<p>The <a href="faq.html">FAQ</a> covers the forecast systems, the data sources and how the daily temperature
-contracts settle. Sources are listed there in full.</p>
+<p>This site provides information related to the prediction markets ForecastEx lists for weather, climate,
+and energy.</p>
 
-<h2>Freshness</h2>
-<p id="fresh">Observations and contract prices refresh every 10 minutes and forecasts every 30. Each page shows the time of the data it
-is drawing. If the data feed falls behind, the page says so and keeps showing the last data it has; if the
-feed cannot be reached at all, the page shows the last data this browser saved, labelled as such.</p>
+<p>The <a href="faq.html">FAQ</a> covers much more information, primarily focused on the daily temperature
+markets.</p>
 
-<h2>Affiliation</h2>
-<p id="disclosure"></p>
-<p id="marketNote"></p>
 <h2>About the author</h2>
-<p>Patrick T. Brown is the Head of Climate Analytics at Interactive Brokers, where his work focuses on the
-information discovery and risk-transfer applications of prediction markets in weather, climate, and natural
-disasters.</p>
+<p>Patrick T. Brown is the Head of Climate Analytics at Trend Analytics, LLC (a subsidiary of Interactive
+Brokers).</p>
+
+<p>His work focuses on the information discovery and risk-transfer applications of prediction markets in
+weather, climate, and natural disasters.</p>
+
 <p>He holds a PhD in Earth and Climate Science from Duke University, a master&rsquo;s degree in Meteorology and
 Climate Science from San Jose State University, and a bachelor&rsquo;s degree in atmospheric and oceanic sciences
 from the University of Wisconsin, Madison. He is an adjunct faculty member (lecturer) in the Energy Policy and
@@ -46,15 +36,25 @@ NOAA&rsquo;s GFDL at Princeton University. He has published scientific papers in
 appeared in <i>The New York Times</i>, <i>The Wall Street Journal</i>, <i>The Economist</i>, CNBC, CNN, The BBC,
 <i>The Washington Post</i>, NPR, <i>Newsweek</i>, <i>The Guardian</i>, <i>The Atlantic</i>,
 <i>Foreign Policy</i>, and <i>The Los Angeles Times</i>, among other venues.</p>
+
+<p>Articles written by Patrick related to this site can be found at
+<a href="https://www.interactivebrokers.com/campus/author/patrick1brown/">interactivebrokers.com/campus/author/patrick1brown</a></p>
+
+<p>Other content written by Patrick related to this site can be found at
+<a href="https://x.com/PatrickTBrown31">x.com/PatrickTBrown31</a></p>
+
+<p>Contact Patrick for questions about the site or further inquiries at
+<a href="mailto:pabrown@interactivebrokers.com">pabrown@interactivebrokers.com</a></p>
+
+<p class="tk" id="marketNote"></p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script>
 WXC.chrome('about.html');
-document.getElementById('disclosure').textContent = (window.WX && WX.disclosure) || '';
 document.getElementById('disclosureTop').textContent = (window.WX && WX.disclosure) || '';
 document.getElementById('marketNote').textContent = (window.WX && WX.market === 'live')
-  ? 'Contract prices on this site are read from the exchange\u2019s public market-data endpoints on a ten-minute cycle and shown with the time they were read; they are the exchange\u2019s published bids, not a bid or a solicitation to trade by this site, and can be stale. Nothing here is investment advice.'
+  ? 'Contract prices on this site are read from the exchange’s public market-data endpoints on a ten-minute cycle and shown with the time they were read; they are the exchange’s published bids, not a bid or a solicitation to trade by this site, and can be stale. Nothing here is investment advice.'
   : 'This site shows no live market prices. Where market elements appear they are labelled placeholders that exist to show layout, not values.';
 </script>
 </body>
