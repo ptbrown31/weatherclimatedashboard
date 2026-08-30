@@ -36,6 +36,31 @@ Parameters:
     Type: Number
     Default: 30
     Description: How long raw CDN access logs are kept. The daily traffic summary is derived from them and kept indefinitely, so this only bounds re-reading a past day.
+  SmtpUser:
+    Type: String
+    Default: ""
+    Description: >
+      Mail account the pipeline sends the daily report and health alarms from, and to.
+      SNS email is delivered from an address that lands in spam, and its unsubscribe link
+      needs no authentication, so any provider that crawls URLs can silence it. Mail from
+      the reader's own address has neither problem. Leave empty to fall back to the SNS topic.
+  SmtpPassword:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      App password for SmtpUser, never the account password, and never committed: pass it
+      on the deploy command line or from an environment file the repository ignores.
+  SmtpHost:
+    Type: String
+    Default: smtp.gmail.com
+  SmtpPort:
+    Type: String
+    Default: "587"
+  MailTo:
+    Type: String
+    Default: ""
+    Description: Comma separated recipients; defaults to SmtpUser.
   EiaApiKey:
     Type: String
     Default: ""
@@ -369,6 +394,11 @@ Resources:
           WX_EIA_API_KEY: !Ref EiaApiKey
           WX_REASK_BASE_URL: !Ref ReaskBaseUrl
           WX_REPORT_TOPIC_ARN: !Ref ReportTopic
+          WX_SMTP_HOST: !Ref SmtpHost
+          WX_SMTP_PORT: !Ref SmtpPort
+          WX_SMTP_USER: !Ref SmtpUser
+          WX_SMTP_PASSWORD: !Ref SmtpPassword
+          WX_MAIL_TO: !Ref MailTo
           WX_TRAFFIC_LOG_BUCKET: !Ref LogBucket
           WX_TRAFFIC_LOG_PREFIX: cf
       # placeholder body; DEPLOY.md replaces it with dist/lambda.zip

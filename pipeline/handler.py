@@ -10,9 +10,11 @@ the function (set in ops/aws/template.yaml), never as code.
     event = {"job": "obs"}              # every 10 minutes
 
 A pass may also compose a report (see report.py). The generic code writes it
-to the archive and leaves it in archive.LAST_REPORT; this file posts it to the
-SNS topic named by WX_REPORT_TOPIC_ARN, which is the only place the pipeline
-knows how mail is delivered here.
+to the archive and leaves it in archive.LAST_REPORT; this file delivers it,
+which is the only place the pipeline knows how mail goes out here. Delivery
+is SMTP when the WX_SMTP_* variables are set (see mailer.py for why that is
+the carrier), and the SNS topic named by WX_REPORT_TOPIC_ARN otherwise, so a
+deployment without mail credentials behaves as it did before.
 
 Sizing, from measurements on 2026-08-21 and the review of them: a pass
 streams two ~30 MB NBM bulletins plus LAMP and MAV; streamed, memory stays
@@ -38,26 +40,85 @@ from . import config, storage
 from .run import JOBS, _register
 
 
-def _send_report(archive) -> None:
-    """Post a report the pass composed, where the site is deployed.
+ALARM_MIN_GAP_H = 6            # a failing source must not mail on every pass
+ALARM_STATE_KEY = "archive/_meta/alarm/last_mail.json"
 
-    The generic code decides what the message says and writes it to the
-    archive; this is the only part that knows it goes to an SNS topic. A
-    delivery that fails is logged and swallowed: a report is not worth failing
-    a pass that already did its work, and the message is on the archive either
-    way.
+
+def _deliver(subject: str, body: str, kind: str) -> bool:
+    """One message out, by whichever carrier is configured.
+
+    SMTP first, because it reaches an inbox; the SNS topic second, so a
+    deployment with no mail credentials keeps whatever delivery it had. A
+    failure is logged and swallowed by the caller: mail is never worth
+    failing a pass that already did its work, and the message is on the
+    archive either way.
     """
+    from . import mailer
+    if mailer.configured():
+        mailer.send(subject, body)
+        print(json.dumps({"kind": kind, "sent": True, "via": "smtp", "subject": subject}))
+        return True
+    arn = os.environ.get("WX_REPORT_TOPIC_ARN", "")
+    if not arn:
+        return False
+    import boto3
+    boto3.client("sns").publish(TopicArn=arn, Subject=subject[:100], Message=body)
+    print(json.dumps({"kind": kind, "sent": True, "via": "sns", "subject": subject}))
+    return True
+
+
+def _send_report(archive) -> None:
+    """Send a report the pass composed, where the site is deployed."""
     msg = getattr(archive, "LAST_REPORT", None)
     archive.LAST_REPORT = {}
-    arn = os.environ.get("WX_REPORT_TOPIC_ARN", "")
-    if not msg or not arn:
+    if not msg:
         return
     try:
-        import boto3
-        boto3.client("sns").publish(TopicArn=arn, Subject=msg["subject"][:100], Message=msg["body"])
-        print(json.dumps({"kind": "report", "sent": True, "subject": msg["subject"]}))
+        _deliver(msg["subject"], msg["body"], "report")
     except Exception as e:  # noqa: BLE001 - the pass itself already succeeded
         print(json.dumps({"kind": "report", "sent": False, "error": f"{type(e).__name__}: {e}"}))
+
+
+def _send_alarm(store, job: str, alarms: list, archive) -> None:
+    """Mail a health alarm, at most once every ALARM_MIN_GAP_H per alarm set.
+
+    The obs pass runs every ten minutes, so a source that fails all day would
+    otherwise send a hundred and forty messages and teach the reader to
+    ignore the channel. The gap is keyed on the set of failing sources, so a
+    NEW source failing mails immediately rather than waiting out the gap left
+    by an existing one. This is a supplement, not a replacement: the handler
+    still raises, so the CloudWatch alarm on the error metric fires as it
+    always did.
+    """
+    import datetime as dt
+    from . import mailer
+    if not alarms or not mailer.configured():
+        return
+    key = ",".join(sorted(alarms))
+    now = dt.datetime.now(dt.timezone.utc)
+    try:
+        raw = store.get(ALARM_STATE_KEY)
+        state = json.loads(raw) if raw else {}
+    except Exception:  # noqa: BLE001
+        state = {}
+    last = state.get(key)
+    if last:
+        try:
+            age_h = (now - dt.datetime.fromisoformat(last.replace("Z", "+00:00"))).total_seconds() / 3600
+            if age_h < ALARM_MIN_GAP_H:
+                return
+        except (TypeError, ValueError):
+            pass
+    body = (f"{job}: source(s) failing for {archive.FAIL_STREAK_ALARM}+ passes in a row.\n\n"
+            + "".join(f"  {a}\n" for a in sorted(alarms))
+            + f"\nSeen {now.isoformat(timespec='seconds').replace('+00:00', 'Z')}.\n"
+            "The pass itself is logged in CloudWatch under the pipeline function.\n")
+    try:
+        _deliver(f"Weather tools alarm: {key}", body, "alarm")
+        state[key] = now.isoformat(timespec="seconds").replace("+00:00", "Z")
+        store.put(ALARM_STATE_KEY, json.dumps(state, separators=(",", ":")).encode(), "application/json")
+    except Exception as e:  # noqa: BLE001 - the raise below still reaches CloudWatch
+        print(json.dumps({"kind": "alarm", "sent": False, "error": f"{type(e).__name__}: {e}"}))
 
 
 def lambda_handler(event, context):
@@ -73,6 +134,7 @@ def lambda_handler(event, context):
     from . import archive
     _send_report(archive)
     alarms = (archive.LAST_STATUS or {}).get("alarms") or []
+    _send_alarm(store, job, alarms, archive)
     if status:
         raise RuntimeError(f"{job}: every request in the pass failed")
     if alarms:

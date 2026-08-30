@@ -66,6 +66,13 @@ phase_stack() {
   [ -n "${REASK_API_KEY:-}" ] && vendor_params+=("ReaskApiKey=$REASK_API_KEY")
   # the energy series need an EIA key; same treatment, never echoed
   [ -n "${EIA_API_KEY:-}" ] && vendor_params+=("EiaApiKey=$EIA_API_KEY")
+  # the mail account the report and alarms go out from, same treatment: passing
+  # an empty value would reset a credential a previous deploy had set
+  [ -n "${SMTP_USER:-}" ] && vendor_params+=("SmtpUser=$SMTP_USER")
+  [ -n "${SMTP_PASSWORD:-}" ] && vendor_params+=("SmtpPassword=$SMTP_PASSWORD")
+  [ -n "${SMTP_HOST:-}" ] && vendor_params+=("SmtpHost=$SMTP_HOST")
+  [ -n "${SMTP_PORT:-}" ] && vendor_params+=("SmtpPort=$SMTP_PORT")
+  [ -n "${MAIL_TO:-}" ] && vendor_params+=("MailTo=$MAIL_TO")
   say "deploying stack $STACK in $REGION (this takes 5-15 minutes: CloudFront is slow to create)"
   [ ${#vendor_params[@]} -ge 2 ] && say "optional credentials passed through: ${#vendor_params[@]} (values not shown)"
   aws cloudformation deploy \
@@ -82,7 +89,11 @@ phase_stack() {
       "${vendor_params[@]}"
   say "outputs"
   aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs" --output table
-  [ -n "$ALARM_EMAIL" ] && echo "Confirm the SNS subscription email from AWS, or the alarms go nowhere."
+  if [ -n "${SMTP_USER:-}" ]; then
+    echo "Mail goes out over SMTP as $SMTP_USER; nothing to confirm."
+  elif [ -n "$ALARM_EMAIL" ]; then
+    echo "Confirm the SNS subscription email from AWS, or the alarms go nowhere."
+  fi
   true
 }
 
