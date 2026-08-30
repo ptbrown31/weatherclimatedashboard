@@ -217,14 +217,18 @@ window.WXCity = (() => {
       const region = meta.region && near.length ? meta.region : null;
       const m = region || meta;
       const box = h('div', { class: 'locbox' });
+      // image and overlay share a wrapper that shrink-wraps the image, so the
+      // two stay registered when the box grows to the window on expand
+      const stack = h('div', { class: 'locstack' });
       const img = h('img', { src: WXD.base() + '/snapshots/locator/' + c.station + (region ? '_region' : '') + '.png',
                              alt: 'Aerial and topographic map centred on ' + (c.city || c.station),
                              loading: 'lazy', width: String(m.w || 760), height: String(m.h || 475) });
-      box.appendChild(img);
+      stack.appendChild(img);
+      box.appendChild(stack);
       if (region) {
         const W2 = m.w, H2 = m.h;
-        const svg = el('svg', { viewBox: '0 0 ' + W2 + ' ' + H2,
-                                style: 'position:absolute;inset:0;width:100%;height:100%' });
+        const svg = el('svg', { viewBox: '0 0 ' + W2 + ' ' + H2, class: 'locov',
+                                style: 'position:absolute;inset:0' });
         const coslat = Math.cos(c.lat * Math.PI / 180);
         const px = lon => W2 / 2 + ((lon - c.lon) * 111.320 * coslat) / m.halfWKm * (W2 / 2);
         const py = lat => H2 / 2 - ((lat - c.lat) * 110.574) / m.halfHKm * (H2 / 2);
@@ -247,10 +251,15 @@ window.WXCity = (() => {
            dewpoint lower-left, which is where seventy years of surface
            charts put them. */
         const model = (g, x2, y2, n, big, col) => {
-          const r = big ? 6.5 : 4.5;
+          const r = big ? 7.5 : 5.5;
           const frac = n.cover != null ? COVER_FRAC[n.cover] : null;
+          // a soft pad of the page's own background under the glyph. Topographic
+          // imagery is busy at this scale and a bare circle disappears into the
+          // roads; the pad is what lifts every station off the map
+          g.appendChild(el('circle', { cx: x2, cy: y2, r: r + (big ? 4 : 3), fill: 'var(--panel)',
+                                       opacity: 0.55, 'pointer-events': 'none' }));
           g.appendChild(el('circle', { cx: x2, cy: y2, r, fill: 'var(--panel)', stroke: col,
-                                       'stroke-width': big ? 2 : 1.4 }));
+                                       'stroke-width': big ? 2.2 : 1.7 }));
           if (frac != null && frac > 0) {
             if (frac >= 1) {
               g.appendChild(el('circle', { cx: x2, cy: y2, r: r - (big ? 1.6 : 1.1), fill: col }));
@@ -316,19 +325,20 @@ window.WXCity = (() => {
             }
           }
         };
-        const chip = (x2, y2, t2, big, col, anchor) => {
+        const chip = (x2, y2, t2, big, col, anchor, g) => {
+          const host2 = g || svg;
           const fs = big ? 14 : 10.5;
           const tw = String(t2).length * fs * 0.62 + 6;
           const cx2 = anchor === 'end' ? x2 - tw / 2 : x2 + tw / 2;
-          svg.appendChild(el('rect', { x: cx2 - tw / 2, y: y2 - fs + 2, width: tw, height: fs + 4, rx: 4,
-                                       fill: 'var(--panel)', opacity: 0.85, 'pointer-events': 'none' }));
-          svg.appendChild(txt(t2, { x: cx2, y: y2, 'text-anchor': 'middle', 'font-size': fs,
-                                    'font-weight': 700, fill: col, 'pointer-events': 'none' }));
+          host2.appendChild(el('rect', { x: cx2 - tw / 2, y: y2 - fs + 2, width: tw, height: fs + 4, rx: 4,
+                                         fill: 'var(--panel)', opacity: 0.92, 'pointer-events': 'none' }));
+          host2.appendChild(txt(t2, { x: cx2, y: y2, 'text-anchor': 'middle', 'font-size': fs,
+                                      'font-weight': 700, fill: col, 'pointer-events': 'none' }));
         };
-        const labels = (x2, y2, n, big, col) => {
-          const off = big ? 10 : 7.5;
-          if (n.tempF != null) chip(x2 - off, y2 - (big ? 8 : 6), Math.round(n.tempF) + '\u00b0', big, col, 'end');
-          if (n.dewF != null) chip(x2 - off, y2 + (big ? 16 : 13), Math.round(n.dewF) + '\u00b0', false, 'var(--muted)', 'end');
+        const labels = (g, x2, y2, n, big, col) => {
+          const off = big ? 11 : 8.5;
+          if (n.tempF != null) chip(x2 - off, y2 - (big ? 8 : 6), Math.round(n.tempF) + '\u00b0', big, col, 'end', g);
+          if (n.dewF != null) chip(x2 - off, y2 + (big ? 17 : 14), Math.round(n.dewF) + '\u00b0', false, 'var(--muted)', 'end', g);
         };
         const placed = [];
         near.forEach(n => {
@@ -338,7 +348,7 @@ window.WXCity = (() => {
           // temperature and dewpoint only where they do not sit on another
           // station's; the glyph itself always draws
           if (!placed.some(q => Math.abs(q[0] - x2) < 52 && Math.abs(q[1] - y2) < 26)) {
-            labels(x2, y2, n, false, 'var(--ink)');
+            labels(svg, x2, y2, n, false, 'var(--ink)');
             placed.push([x2, y2]);
           }
           const hit = el('circle', { cx: x2, cy: y2, r: 14, fill: 'transparent' });
@@ -361,10 +371,17 @@ window.WXCity = (() => {
         svg.appendChild(el('circle', { cx: W2 / 2, cy: H2 / 2, r: 11, fill: 'none',
                                        stroke: 'var(--accent)', 'stroke-width': 2.4 }));
         model(svg, W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
-        labels(W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
+        labels(svg, W2 / 2, H2 / 2, selfN, true, 'var(--accent)');
         {
+          /* The label goes on whichever side of the station the wind barb is
+             not using. The staff points toward the direction the wind comes
+             from, so a southerly puts it below the glyph and a chip sitting
+             there would cover the thing it is meant to explain. */
           const lbl = c.station + ' \u00b7 settlement station';
-          const fs = 10.5, tw = lbl.length * fs * 0.6 + 12, ly = H2 / 2 + 24;
+          const fs = 10.5, tw = lbl.length * fs * 0.6 + 12;
+          const wd = selfN.wdir, ws = selfN.wspd;
+          const barbDown = ws != null && ws >= 3 && wd != null && -Math.cos(wd * Math.PI / 180) > 0.2;
+          const ly = barbDown ? H2 / 2 - 34 : H2 / 2 + 46;
           svg.appendChild(el('rect', { x: W2 / 2 - tw / 2, y: ly - fs, width: tw, height: fs + 6, rx: 5,
                                        fill: 'var(--panel)', opacity: 0.92, stroke: 'var(--accent)',
                                        'stroke-width': 1, 'pointer-events': 'none' }));
@@ -383,10 +400,64 @@ window.WXCity = (() => {
           selfHit.addEventListener('mouseleave', () => tip.hide());
           svg.appendChild(selfHit);
         }
-        box.appendChild(svg);
+
+        /* The key, drawn by the same model() that draws the stations, so it
+           cannot describe a glyph the map does not use. It goes in whichever
+           corner holds fewest stations, measured rather than guessed. */
+        {
+          const KW = 244, KH = 212, pad = 10;
+          const corners = [[pad, pad], [W2 - KW - pad, pad],
+                           [pad, H2 - KH - pad], [W2 - KW - pad, H2 - KH - pad]];
+          const pts = near.map(n => [px(n.lon), py(n.lat)]).concat([[W2 / 2, H2 / 2]]);
+          const cost = ([kx, ky]) => pts.reduce((a, [qx, qy]) =>
+            a + (qx > kx - 24 && qx < kx + KW + 24 && qy > ky - 24 && qy < ky + KH + 24 ? 1 : 0), 0);
+          const [KX, KY] = corners.reduce((a, b) => (cost(b) < cost(a) ? b : a), corners[0]);
+          const g = el('g', { transform: 'translate(' + KX + ',' + KY + ')', 'pointer-events': 'none' });
+          g.appendChild(el('rect', { x: 0, y: 0, width: KW, height: KH, rx: 7, fill: 'var(--panel)',
+                                     opacity: 0.93, stroke: 'var(--rule)', 'stroke-width': 1 }));
+          const lab = (t2, x3, y3, size, col2, anchor) => g.appendChild(
+            txt(t2, { x: x3, y: y3, 'font-size': size || 8.5, fill: col2 || 'var(--muted)',
+                      'text-anchor': anchor || 'start' }));
+          lab('STATION MODEL', 10, 15, 9.5, 'var(--navy)');
+
+          /* One worked station, its parts named to either side. The example
+             blows from the north-east so its staff leaves up and to the
+             right, clear of the temperature and dewpoint that sit to the
+             left of every glyph. */
+          const CX = 122, CY = 58;
+          const ex = { tempF: 68, dewF: 55, cover: 'BKN', wdir: 45, wspd: 15 };
+          model(g, CX, CY, ex, false, 'var(--ink)');
+          labels(g, CX, CY, ex, false, 'var(--ink)');
+          const leader = (x1, y1, x2b, y2b) => g.appendChild(el('line', {
+            x1, y1, x2: x2b, y2: y2b, stroke: 'var(--rule)', 'stroke-width': 0.8 }));
+          leader(64, 49, 90, 49); lab('Temperature', 8, 52);
+          leader(52, 70, 90, 70); lab('Dew point', 8, 73);
+          leader(146, 41, 182, 37); lab('Wind, from', 236, 39, 8.5, null, 'end');
+          leader(130, 65, 188, 78); lab('Sky cover', 236, 81, 8.5, null, 'end');
+
+          // the cover fills, every step the reports carry
+          lab('SKY COVER', 10, 112, 9.5, 'var(--navy)');
+          [['CLR', 'clear'], ['FEW', 'few'], ['SCT', 'sct'], ['BKN', 'bkn'], ['OVC', 'ovc']]
+            .forEach(([code, name], i) => {
+              const cx2 = 26 + i * 47;
+              model(g, cx2, 130, { cover: code }, false, 'var(--ink)');
+              lab(name, cx2, 147, 8, 'var(--muted)', 'middle');
+            });
+
+          // and the barbs, at the quantities they are built from
+          lab('WIND, KNOTS', 10, 168, 9.5, 'var(--navy)');
+          [[0, 'calm'], [5, '5'], [10, '10'], [15, '15'], [50, '50'], [65, '65']]
+            .forEach(([kt, name], i) => {
+              const cx2 = 24 + i * 39;
+              model(g, cx2, 186, { cover: 'CLR', wdir: 270, wspd: kt }, false, 'var(--ink)');
+              lab(name, cx2, 204, 8, 'var(--muted)', 'middle');
+            });
+          svg.appendChild(g);
+        }
+        stack.appendChild(svg);
       } else {
         // the image is centred on the station, so the marker is the middle of it
-        box.appendChild(h('span', { class: 'locpin' }));
+        stack.appendChild(h('span', { class: 'locpin' }));
       }
       box.classList.add('expandable');
       host.appendChild(box);

@@ -1392,6 +1392,55 @@ def run(no_build: bool) -> int:
                 }""")
                 chk.add(f"{scheme} locator: the settlement station is labelled on the map",
                         bool(sst and sst["lbl"]), str(sst and sst["lbl"]))
+                geom = page.evaluate("""() => {
+                  const svg = document.querySelector('#locator .locbox svg.locov');
+                  if (!svg) return null;
+                  const num = (e, a) => parseFloat(e.getAttribute(a));
+                  // the settlement label is the only accent-stroked rect
+                  const lab = [...svg.querySelectorAll('rect')]
+                    .find(r => r.getAttribute('stroke') === 'var(--accent)');
+                  const box = lab ? {x: num(lab,'x'), y: num(lab,'y'),
+                                     w: num(lab,'width'), h: num(lab,'height')} : null;
+                  const vb = svg.getAttribute('viewBox').split(' ').map(Number);
+                  const cx = vb[2] / 2, cy = vb[3] / 2;
+                  // the centre station's barb strokes: accent-coloured lines near it
+                  const barb = [...svg.querySelectorAll('line')]
+                    .filter(l => l.getAttribute('stroke') === 'var(--accent)')
+                    .map(l => ({x1: num(l,'x1'), y1: num(l,'y1'), x2: num(l,'x2'), y2: num(l,'y2')}))
+                    .filter(l => Math.hypot(l.x1 - cx, l.y1 - cy) < 60);
+                  const hits = (l, b) => {
+                    const lo = {x: Math.min(l.x1,l.x2), y: Math.min(l.y1,l.y2),
+                                X: Math.max(l.x1,l.x2), Y: Math.max(l.y1,l.y2)};
+                    return !(lo.X < b.x || lo.x > b.x + b.w || lo.Y < b.y || lo.y > b.y + b.h);
+                  };
+                  // the key, and the stations it must not sit on
+                  const key = [...svg.querySelectorAll('g[transform]')]
+                    .find(g2 => /STATION MODEL/.test(g2.textContent));
+                  let keyBox = null;
+                  if (key) {
+                    const m2 = /translate\(([-\d.]+),([-\d.]+)\)/.exec(key.getAttribute('transform'));
+                    const r2 = key.querySelector('rect');
+                    if (m2 && r2) keyBox = {x: +m2[1], y: +m2[2], w: num(r2,'width'), h: num(r2,'height')};
+                  }
+                  const stations = [...svg.querySelectorAll("circle[fill='transparent']")]
+                    .map(c2 => ({x: num(c2,'cx'), y: num(c2,'cy')}));
+                  const covered = keyBox ? stations.filter(st =>
+                    st.x > keyBox.x && st.x < keyBox.x + keyBox.w &&
+                    st.y > keyBox.y && st.y < keyBox.y + keyBox.h).length : -1;
+                  return { hasKey: !!keyBox, keyText: key ? key.textContent : '',
+                           covered, barbs: barb.length,
+                           labelOnBarb: box ? barb.some(l => hits(l, box)) : null };
+                }""")
+                chk.add(f"{scheme} locator: the key explains the glyph, the cover and the barbs",
+                        bool(geom and geom["hasKey"]
+                             and "SKY COVER" in geom["keyText"] and "WIND, KNOTS" in geom["keyText"]
+                             and "Dew point" in geom["keyText"] and "Wind, from" in geom["keyText"]),
+                        str(geom and geom["keyText"])[:110])
+                chk.add(f"{scheme} locator: the key sits where it covers no station",
+                        geom is not None and geom["covered"] == 0, str(geom and geom["covered"]))
+                chk.add(f"{scheme} locator: the settlement label clears its own wind barb",
+                        geom is not None and geom["labelOnBarb"] is False,
+                        f"barbs={geom and geom['barbs']} onBarb={geom and geom['labelOnBarb']}")
                 chk.add(f"{scheme} locator: hovering the settlement station reads its own report",
                         bool(sst and sst["tip"] and "settlement station" in sst["tip"]
                              and "Dewpoint" in sst["tip"]), str(sst and (sst["tip"] or ""))[:120])
