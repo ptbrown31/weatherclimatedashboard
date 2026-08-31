@@ -1552,10 +1552,20 @@ def run(no_build: bool) -> int:
                   const yday = dots();
                   const cap = (document.querySelector('#advCap') || {}).textContent || '';
                   document.querySelector('#advToday').click();
+                  // the chart's day-ahead button carries the panels with it
+                  document.querySelector('#dayTomorrow').click();
+                  await new Promise(r => setTimeout(r, 400));
+                  const tmwSynced = document.querySelector('#advTmw').classList.contains('on')
+                    && ((document.querySelector('#advCap') || {}).textContent || '').indexOf('day-ahead') >= 0
+                    && !!svg();
+                  document.querySelector('#dayToday').click();
+                  await new Promise(r => setTimeout(r, 300));
+                  const toolDots = [...svg().querySelectorAll('circle')]
+                    .filter(c2 => c2.getAttribute('fill') === 'var(--nws)').length;
                   const disc = document.querySelector('.advrow #discussion');
                   const cardW = document.querySelector('#advCard').getBoundingClientRect().width;
                   const chartW = document.querySelector('#chartCard').getBoundingClientRect().width;
-                  return { nws: texts.indexOf('Weather Service') >= 0,
+                  return { nws: texts.indexOf('Weather Service') >= 0, tmwSynced, toolDots,
                            temps: texts.filter(t => t === 'TEMPERATURE').length,
                            mph: texts.some(t => / mph$/.test(t)),
                            styles: [...dashes].sort(),
@@ -1581,6 +1591,10 @@ def run(no_build: bool) -> int:
                         str(av and av["styles"]))
                 chk.add(f"{scheme} advanced: the caption names issuance times, not the bare word",
                         bool(av and av["issuedTimes"]), "")
+                chk.add(f"{scheme} advanced: the chart's day-ahead button carries the panels with it",
+                        bool(av and av["tmwSynced"]), str(av and av["tmwSynced"]))
+                chk.add(f"{scheme} advanced: every line carries dots at its own readings",
+                        bool(av and av["toolDots"] >= 10), str(av and av["toolDots"]))
                 # the column is the temperature panel's share of the page, with
                 # the forecast discussion in what the ladders use above (on a
                 # window wide enough to hold the row)

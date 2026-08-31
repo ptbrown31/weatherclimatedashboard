@@ -49,18 +49,24 @@ window.WXAdv = (function () {
   const G = { W: 610, C: [{ x0: 52, x1: 610 }], panelH: 118, gap: 34, barbRow: 21 };
 
   const P2 = s => Date.parse(s);
-  const reading = () => (day === 'today' ? adv.current : adv.yesterday);
+  // tomorrow reads the same newest cycles as today, which is what the main
+  // chart's day-ahead view draws; only the postmortem switches to the
+  // anchored ones
+  const reading = () => (day === 'yesterday' ? adv.yesterday : adv.current);
   const context = () => (day === 'today' ? adv.yesterday : null);
 
   /* The same window the main chart shows: noon the day before through the end
-     of the contract day. The postmortem keeps the shape, shifted back a day,
-     so the two views are read the same way. */
+     of the contract day. The day-ahead and postmortem views keep the shape,
+     shifted a day either way, so the three are read the same way. */
   function span() {
-    const mk = adv.markers, DAY = 86400000;
-    return day === 'today' ? [P2(mk.winStart), P2(mk.dayEnd)]
-                           : [P2(mk.winStart) - DAY, P2(mk.dayStart)];
+    const mk = adv.markers, lead = P2(mk.dayStart) - P2(mk.winStart);
+    if (day === 'tomorrow') return [P2(mk.dayEnd) - lead, P2(mk.dayEnd) + 86400000];
+    if (day === 'yesterday') return [P2(mk.ydayStart) - lead, P2(mk.dayStart)];
+    return [P2(mk.winStart), P2(mk.dayEnd)];
   }
-  const dayStart = () => (day === 'today' ? P2(adv.markers.dayStart) : P2(adv.markers.ydayStart));
+  const dayStart = () => (day === 'tomorrow' ? P2(adv.markers.dayEnd)
+                          : day === 'yesterday' ? P2(adv.markers.ydayStart)
+                          : P2(adv.markers.dayStart));
 
   const stampMs = st => {
     const m = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)/.exec(st || '');
@@ -128,6 +134,8 @@ window.WXAdv = (function () {
       if (pts.length < 2) return;
       svg.appendChild(el('path', { d: path(pts, false), fill: 'none', stroke: t.col,
                                    'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: 0.7 }));
+      pts.forEach(q => svg.appendChild(el('circle', { cx: X(q.t), cy: Y(q.v), r: 1.2,
+                                                      fill: t.col, opacity: 0.6 })));
     });
     TOOLS.forEach(t => {
       const src = reading()[t.k];
@@ -137,6 +145,10 @@ window.WXAdv = (function () {
                   'stroke-width': t.w, opacity: t.op };
       if (t.dash) a['stroke-dasharray'] = t.dash;
       svg.appendChild(el('path', a));
+      // a dot at every reading, so each line shows its own cadence: hourly
+      // tools every hour, the 3-hourly ones every third
+      pts.forEach(q => svg.appendChild(el('circle', { cx: X(q.t), cy: Y(q.v), r: 1.6,
+                                                      fill: t.col, opacity: t.op })));
     });
     const O = rowsIn(ob.rows, s, obsGet);
     if (O.length > 1) {
@@ -308,6 +320,10 @@ window.WXAdv = (function () {
         ? 'Each tool’s newest standing cycle under the station’s own METAR reports, over the same window as the '
           + 'chart above. The dim dashed lines before the day boundary are the cycles that stood at six the evening '
           + 'before, so the hours already scored keep their forecast. '
+        : day === 'tomorrow'
+        ? 'The day-ahead board, from the same newest standing cycles the chart above draws. LAMP reaches only '
+          + 'twenty-five hours, so its line ends where its horizon does, and the observed line grows in from the '
+          + 'left as the day arrives. '
         : 'The postmortem reads each tool as it stood at six the evening before, the same moment the standings judge, '
           + 'under what the station then recorded. ')
       + 'Temperature, dewpoint and wind compare directly; wind speed reads in mph while the barbs keep the knot '
@@ -336,15 +352,25 @@ window.WXAdv = (function () {
     if (!host) return;
     const xh = $('#advExpand'), card = $('#advCard');
     if (xh && card && !xh.childElementCount) xh.appendChild(WXC.expander(card, 'Expand'));
-    ['advToday', 'advYday'].forEach(id => {
+    const DAYS = { advToday: 'today', advTmw: 'tomorrow', advYday: 'yesterday' };
+    Object.entries(DAYS).forEach(([id, d]) => {
       const b = $('#' + id); if (!b) return;
-      b.onclick = () => {
-        day = id === 'advToday' ? 'today' : 'yesterday';
-        $('#advToday').classList.toggle('on', day === 'today');
-        $('#advYday').classList.toggle('on', day === 'yesterday');
-        draw();
-      };
+      b.onclick = () => setDay(d);
     });
+    /* The chart's own day buttons carry these panels with them, so switching
+       the page to the day-ahead board switches everything on it. Listeners,
+       not onclick, so the chart keeps its own handler. */
+    [['dayToday', 'today'], ['dayTomorrow', 'tomorrow'], ['dayBoth', 'today']].forEach(([id, d]) => {
+      const b = $('#' + id); if (!b) return;
+      b.addEventListener('click', () => setDay(d));
+    });
+  }
+
+  function setDay(d) {
+    day = d;
+    Object.entries({ advToday: 'today', advTmw: 'tomorrow', advYday: 'yesterday' })
+      .forEach(([id, dd]) => { const b = $('#' + id); if (b) b.classList.toggle('on', dd === day); });
+    draw();
   }
 
   /* The page tells this module which station it is on. The panels are part
