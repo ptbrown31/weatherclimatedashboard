@@ -105,6 +105,12 @@ def forecast_for_day(store: Storage, by_kind: dict, source: str, c: dict, tz, da
     cut = anchor.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     kind = {"nws": "daily", "nbm": "nbs", "mav": "mav", "lamp": "lamp"}[source]
     lv = sn.pick_levels(store, kind, by_kind.get(kind, []), cut, c, tz, day.isoformat(), max_lead_h=MAX_LEAD_H)
+    if lv["highToday"] is None and lv["lowToday"] is None and kind in ("mav", "lamp"):
+        # days before this site archived the bulletin: the level records filled
+        # from an archive of the same bulletins stand in, and the row says so.
+        # Second, never first, so a day this site captured is always its own.
+        lv = sn.pick_levels(store, kind + "x", by_kind.get(kind + "x", []), cut, c, tz,
+                            day.isoformat(), max_lead_h=MAX_LEAD_H)
     from_hourly = False
     if lv["highToday"] is None and lv["lowToday"] is None and source == "nbm":
         # days before the short-range bulletin was archived: the hourly
@@ -119,6 +125,8 @@ def forecast_for_day(store: Storage, by_kind: dict, source: str, c: dict, tz, da
            "cycleLow": lv["levelCycleLow"], "lead": lead}
     if from_hourly or lv.get("fromHourly"):
         out["fromHourly"] = True
+    if lv.get("backfill"):
+        out["backfill"] = lv["backfill"]
     return out
 
 
@@ -225,7 +233,8 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
         # the scorecard reaches back to the first observed day, so its listing
         # window is the record's age (bounded by the 30-day backfill horizon)
         hours = int((now - dt.datetime.combine(first, dt.time(0), tzinfo=dt.timezone.utc)).total_seconds() / 3600) + 48
-        by_kind = {k: sn.list_recent(store, sid, k, now, hours) for k in ("daily", "nbs", "nbh", "mav", "lamp")}
+        by_kind = {k: sn.list_recent(store, sid, k, now, hours)
+                   for k in ("daily", "nbs", "nbh", "mav", "lamp", "mavx", "lampx")}
         days = []
         for diso, o in sorted(obs.items()):
             d = dt.date.fromisoformat(diso)
@@ -236,6 +245,8 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
                     row[s] = {"high": f["high"], "low": f["low"], "cycle": f["cycle"], "lead": f["lead"],
                               "errHigh": round(f["high"] - o["high"], 1) if f["high"] is not None else None,
                               "errLow": round(f["low"] - o["low"], 1) if f["low"] is not None else None}
+                    if f.get("backfill"):
+                        row[s]["backfill"] = f["backfill"]
             mk = market_levels(store, c, tz, d, mcache)
             if mk:
                 row["fx"] = {"high": mk.get("high"), "low": mk.get("low"), "asof": mk.get("asof"),

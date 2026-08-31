@@ -381,7 +381,7 @@ window.WXScore = (() => {
   // absolute error on the daily high. The exchange's implied median is ranked
   // alongside the forecasts here, because the question the table answers is
   // which of them has been closest, and that is arithmetic on published numbers.
-  const WINDOW = 7;
+  const WINDOW = 14;
   // The standings are a matched sample: only station-days where every tool has
   // a value count, and each side is matched on its own.
   //
@@ -491,7 +491,9 @@ window.WXScore = (() => {
       + 'every tool has a value are counted and n is the same for all of them, ' + n + ' station-days. Each archive lane '
       + 'started on a different date, so pooling every error a tool happens to have would score some tools over far more '
       + 'days than others and then rank them against each other. Hover a bar for its bias, its share within two degrees, '
-      + 'and the same figures on the daily low. The window grows by a day every day.'
+      + 'and the same figures on the daily low. On days before this site\u2019s own archive of them begins, '
+      + 'the GFS MOS and LAMP levels come from Iowa State University\u2019s archive of the same National '
+      + 'Weather Service bulletins, and the scored-days table marks those rows.'
       + (uneven ? ' The sources are not scored on the same days. ' + rows.map(r => r.s.name + ' ' + r.high.n).join(', ') + '.' : '') }));
   }
 
@@ -583,6 +585,7 @@ window.WXScore = (() => {
         ['Forecast high / observed / error', degs(f.high) + ' / ' + degs(d.obsHigh) + ' / ' + signed(f.errHigh)],
         ['Forecast low / observed / error', degs(f.low) + ' / ' + degs(d.obsLow) + ' / ' + signed(f.errLow)],
         ['Cycle', cycleText(f.cycle)], ['Lead', f.lead != null ? f.lead + ' h to local midnight' : null], ['METARs scored', d.n],
+        ['Level from', f.backfill ? 'the ' + f.backfill + ' archive of this bulletin (pre-dates this site’s own)' : null],
       ], (S.sources || {})[src]);
     });
     host.appendChild(t);

@@ -452,6 +452,14 @@ def _levels_from_key(store: Storage, kind: str, key: str, c: dict, tz, day: str)
     if kind == "daily":
         hi, lo = _official_hi_lo(_nws_daily_rows(json.loads(raw)), tz)
         return {"high": _u(hi.get(day), c["unit"]), "low": _u(lo.get(day), c["unit"])}
+    if kind.endswith("x"):
+        # a level record filled from an archive of the same bulletins, for days
+        # before this site captured them. The day mapping was done when it was
+        # written, by the functions below, so there is nothing to parse here
+        b = json.loads(raw)
+        lv = (b.get("days") or {}).get(day) or {}
+        return {"high": _u(lv.get("high"), c["unit"]), "low": _u(lv.get("low"), c["unit"]),
+                "backfill": b.get("source") or True}
     text = raw.decode("ascii", "replace")
     if kind in ("nbs", "mav"):
         parsed = gw.parse_nbs_block(text) if kind == "nbs" else gw.parse_mav_block(text)
@@ -492,8 +500,12 @@ def pick_levels(store: Storage, kind: str, keys: list, cutoff_stamp: str, c: dic
             out["fromHourly"] = True
         if out["highToday"] is None and lv.get("high") is not None:
             out["highToday"], out["levelCycleHigh"] = lv["high"], _stamp_of(key)
+            if lv.get("backfill"):
+                out["backfill"] = lv["backfill"]
         if out["lowToday"] is None and lv.get("low") is not None:
             out["lowToday"], out["levelCycleLow"] = lv["low"], _stamp_of(key)
+            if lv.get("backfill"):
+                out["backfill"] = lv["backfill"]
         if out["highToday"] is not None and out["lowToday"] is not None:
             break
     return out

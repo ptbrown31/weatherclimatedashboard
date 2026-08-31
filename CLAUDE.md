@@ -25,7 +25,12 @@ this one has to stay up and stay fresh on its own.
   credential from the environment, and shows the vendor's numbers as published under its mark; and the
   seasonal hurricane forecast total in `season_forecast` (Colorado State University, owner's decision
   2026-08-23), which is attributed wherever it is drawn and falls back to the climatological pace when
-  empty. The hurricane count panels draw both paces so the forecast is never the only line shown.
+  empty. The hurricane count panels draw both paces so the forecast is never the only line shown; and
+  Iowa State University's IEM archive (`pipeline/iem.py`, owner's decision 2026-08-31), used ONLY to
+  backfill GFS MOS and LAMP levels for days before this site's own bulletin archive begins — the
+  content is the NWS's own guidance, IEM is where the old cycles are kept, every backfilled level
+  names its source, the scorecard prefers this site's own capture wherever one exists, and the pages
+  mark rows scored from a backfilled level.
 - **Observations come from aviationweather.gov METAR, not api.weather.gov.** api.weather.gov also
   serves the five-minute ASOS stream, and a daily maximum over five-minute data lands at or above one
   over hourly METARs. The contracts settle on METARs. The reasoning is in `pipeline/gov_weather.py`.
