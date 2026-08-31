@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>City chart</title>
+<title>Daily temperature by station</title>
+<meta name="description" content="Daily high and low temperature at one contract station, with the forecasts, the observed record and the exchange's prices for the same day.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -68,7 +69,7 @@ that moment.</p>
 <script>
 WXC.chrome('city.html'); WXCityScore.init(); WXCityDays.init();
 // the calculator opens on this station's board, freshest day first
-(function () { const st = new URLSearchParams(location.search).get('station');
+(function () { const st = new URLSearchParams(location.search).get('station') || window.WX_STATION;
   const a = document.getElementById('allocLink');
   if (a && st) a.href = 'allocator.html?m=city:' + encodeURIComponent(st); })();
 Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),

@@ -568,7 +568,25 @@ window.WXCity = (() => {
 
   async function select(sid, push) {
     cur = sid; checked = new Set();
-    if (push !== false) { const u = new URL(location.href); u.searchParams.set('station', sid); history.replaceState(null, '', u); }
+    /* Keep the address on the station being shown.
+
+       Each station has its own page, so picking another one from the map below
+       moves the address to that station's page rather than hanging a query on
+       this one. The drawing has already been redone, so there is nothing to
+       fetch, and a reload or a copied link lands on the page that carries that
+       station's own title and description. The query form still works for
+       anything that already links to it. */
+    if (push !== false) {
+      const c0 = summary.cities.find(x => x.station === sid);
+      if (window.WX_STATION && c0) history.replaceState(null, '', WXC.cityHref(c0));
+      else { const u = new URL(location.href); u.searchParams.set('station', sid); history.replaceState(null, '', u); }
+      /* The shared city page shows whichever station was asked for, which is
+         the same page as that station's own. Point the canonical at that one
+         so the two are not counted as separate. Only a page the build gave a
+         canonical to gets one here; the embed has none and wants none. */
+      const ln = document.querySelector('link[rel="canonical"]');
+      if (ln && !window.WX_STATION && c0) ln.href = new URL(WXC.cityHref(c0), location.href).href;
+    }
     if (onSelect) onSelect(sid);
     // the station's own record, below the chart; it loads on its own so a slow
     // scorecard never holds up the chart the page is for
@@ -1243,7 +1261,8 @@ window.WXCity = (() => {
     if (opts.basemap) summary.base = opts.basemap;
     await WXM.loadSummary();                      // implied medians for the picker dots (live market layer only)
     const st = $('#pageStatus'); if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([sres], 10)); }
-    const want = opts.station || WXC.param('station') || WXC.param('city') || 'KLAX';
+    // a station page names its own station, so there is no query to read
+    const want = opts.station || WXC.param('station') || WXC.param('city') || window.WX_STATION || 'KLAX';
     const svg = $('#' + svgId);
     hover(svg);
     const xh = $('#chartExpand'), card = $('#chartCard');

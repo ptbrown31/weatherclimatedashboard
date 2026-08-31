@@ -548,7 +548,7 @@ window.WXScore = (() => {
       const hi = {}; ORDER.forEach(s => { hi[s] = (st.summary[s] || {}).high; });
       return [st.city + ' (' + sid + ')', hi, () => {
         if ($('#days')) { cur = sid; drawDays(); location.hash = sid; }
-        else location.href = 'city.html?station=' + encodeURIComponent(sid);
+        else location.href = WXC.cityHref({ city: st.city, station: sid });
       }, sid];
     });
     const t = table('Daily high, by station', rowsIn);

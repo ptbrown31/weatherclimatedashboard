@@ -280,5 +280,17 @@ window.WXC = (() => {
 
   const param = k => new URLSearchParams(location.search).get(k);
   const deg = v => (v == null ? '--' : (Math.round(v * 10) / 10).toFixed(v % 1 ? 1 : 0) + '°');
-  return { el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander };
+  /* A station's own page.
+
+     Every station used to share one address with a station query on the end,
+     so thirty-seven different places were one page as far as anything outside
+     the browser could tell. Each has its own file now, and this builds the
+     name of it. scripts/build.py names the files by the same rule and
+     tests/test_build.py holds the two to one table. */
+  function cityHref(c) {
+    const city = String((c && c.city) || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return city + '-' + String((c && c.station) || '').toLowerCase() + '.html';
+  }
+
+  return { el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref };
 })();

@@ -13,9 +13,39 @@ from scripts import scrub    # noqa: E402
 
 class ScrubTrackedFiles(unittest.TestCase):
     def test_no_forbidden_strings(self):
-        builtin, ext = scrub.needles(require_external=False)
-        hits, skipped = scrub.scan(scrub.tracked_files(), builtin + ext)
+        builtin, ext, allowed = scrub.needles(require_external=False)
+        hits, skipped = scrub.scan(scrub.tracked_files(), builtin + ext, allowed)
         self.assertEqual(hits, [], "forbidden strings in tracked files:\n" + "\n".join(hits[:20]))
+
+    def test_an_exception_covers_only_the_string_it_names(self):
+        """A published string is allowed; the needle it excepts still bites.
+
+        The risk in an exception mechanism is that it widens, so this holds it
+        to the line: allowing one address at a domain must leave every other
+        address at that domain caught.
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            f = os.path.join(d, "page.html")
+            with open(f, "w") as fh:
+                fh.write("mail ok@example.com here\nmail secret@example.com here\n")
+            hits, _ = scrub.scan([f], ["@example.com"], ["ok@example.com"])
+            self.assertEqual(len(hits), 1, hits)
+            self.assertIn("secret@example.com", hits[0])
+
+    def test_a_bang_line_is_an_exception_not_a_needle(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".scrub", delete=False) as fh:
+            fh.write("# comment\nreal-needle\n!published-string\n")
+            path = fh.name
+        try:
+            old, scrub.EXTERNAL = scrub.EXTERNAL, path
+            builtin, ext, allowed = scrub.needles()
+        finally:
+            scrub.EXTERNAL = old
+            os.unlink(path)
+        self.assertEqual(ext, ["real-needle"])
+        self.assertEqual(allowed, ["published-string"])
 
     def test_vendor_slots_empty(self):
         self.assertEqual(scrub.config_slots(), [])

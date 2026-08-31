@@ -333,7 +333,7 @@ window.WXMap = (() => {
       placed.push([X - r, Y - r, X + r, Y + r]);
       g.onmousemove = e => tip.show(e, dotTip(c));
       g.onmouseleave = () => tip.hide();
-      g.onclick = () => { location.href = 'city.html?station=' + c.station; };
+      g.onclick = () => { location.href = WXC.cityHref(c); };
       svg.appendChild(g);
     });
     rows.forEach(c => {

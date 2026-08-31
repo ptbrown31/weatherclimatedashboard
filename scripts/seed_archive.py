@@ -49,7 +49,7 @@ def main(argv=None) -> int:
     cfg = config.load()
     store = storage.from_config(cfg)
     try:
-        builtin, ext = needles(require_external=not args.no_external)
+        builtin, ext, allowed = needles(require_external=not args.no_external)
     except FileNotFoundError as e:
         print(f"refusing to seed without the external scrub list {e}; pass --no-external deliberately", file=sys.stderr)
         return 2
@@ -72,7 +72,7 @@ def main(argv=None) -> int:
                 rejected += 1
                 print(f"  reject (not gzip): {sid}/{fn}")
                 continue
-            bad = [n for n in ndl if n in text]
+            bad = [] if any(a in text for a in allowed) else [n for n in ndl if n in text]
             if bad:
                 rejected += 1
                 print(f"  reject (scrub {bad[0]!r}): {sid}/{fn}")

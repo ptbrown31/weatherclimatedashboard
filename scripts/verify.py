@@ -1498,6 +1498,71 @@ def run(no_build: bool) -> int:
                         str(ex and {k: round(ex[k]) for k in ('collapsed', 'expanded', 'closed')}))
                 chk.add(f"{scheme} locator: the overlay stays on the image when expanded",
                         bool(ex and ex["aligned"]), str(ex and ex["aligned"]))
+                # a station's own page: the thing a search result and a shared
+                # link point at, which has to say which station it is before any
+                # script has run and still draw that station's chart
+                page.goto(f"{srv.url}/san-francisco-ksfo.html"); page.wait_for_timeout(1600)
+                sp = page.evaluate("""() => {
+                  const g = (sel, a) => { const e = document.querySelector(sel); return e ? e.getAttribute(a) : null; };
+                  return { title: document.title,
+                           h1: (document.querySelector('h1') || {}).textContent || '',
+                           desc: g('meta[name="description"]', 'content'),
+                           canon: g('link[rel="canonical"]', 'href'),
+                           ogTitle: g('meta[property="og:title"]', 'content'),
+                           ogImage: g('meta[property="og:image"]', 'content'),
+                           card: g('meta[name="twitter:card"]', 'content'),
+                           station: window.WX_STATION,
+                           series: document.querySelectorAll('#chart path').length,
+                           alloc: (document.querySelector('#allocLink') || {}).getAttribute
+                                  ? document.querySelector('#allocLink').getAttribute('href') : null,
+                           url: location.pathname };
+                }""")
+                chk.add(f"{scheme} station page: it names its station and draws that station's chart",
+                        bool(sp and sp["station"] == "KSFO" and "KSFO" in sp["title"]
+                             and "San Francisco" in sp["title"] and sp["series"] >= 2),
+                        str(sp and {k: sp[k] for k in ('title', 'station', 'series')})[:130])
+                chk.add(f"{scheme} station page: a crawler reads a heading without running the chart",
+                        bool(sp and "San Francisco" in sp["h1"] and "KSFO" in sp["h1"]), str(sp and sp["h1"]))
+                chk.add(f"{scheme} station page: it carries the description and card a shared link shows",
+                        # the chart rewrites document.title with the date once it
+                        # draws, so the card is checked against the tag, not that
+                        bool(sp and sp["desc"] and "KSFO" in sp["desc"]
+                             and sp["ogTitle"] and "San Francisco" in sp["ogTitle"] and "KSFO" in sp["ogTitle"]
+                             and sp["canon"] and sp["canon"].endswith("/san-francisco-ksfo.html")
+                             and sp["ogImage"] and sp["ogImage"].endswith("KSFO_region.png")
+                             and sp["card"] == "summary_large_image"),
+                        str(sp and {k: sp[k] for k in ('canon', 'card')})[:130])
+                chk.add(f"{scheme} station page: the calculator opens on this station",
+                        bool(sp and sp["alloc"] and sp["alloc"].endswith("city:KSFO")), str(sp and sp["alloc"]))
+                # every station the board carries has to have a page to link to,
+                # built by the same rule the browser uses to write the link
+                page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1500)
+                links = page.evaluate("""async () => {
+                  const r = await fetch('data/snapshots/summary.json').then(x => x.json()).catch(() => null);
+                  const cities = (r && (r.cities || (r.data && r.data.cities))) || [];
+                  const out = [];
+                  for (const c of cities) {
+                    const href = WXC.cityHref(c);
+                    const ok = await fetch(href, { method: 'GET' }).then(x => x.ok).catch(() => false);
+                    out.push([c.station, href, ok]);
+                  }
+                  return out;
+                }""")
+                nopage = [l for l in (links or []) if not l[2]]
+                chk.add(f"{scheme} station pages: every station on the board has one",
+                        bool(links) and not nopage, f"n={len(links or [])} missing={nopage[:3]}")
+                idx = page.evaluate("""async () => {
+                  const t = await fetch('sitemap.xml').then(r => r.ok ? r.text() : '').catch(() => '');
+                  const rb = await fetch('robots.txt').then(r => r.ok ? r.text() : '').catch(() => '');
+                  return { urls: (t.match(/<loc>/g) || []).length, hasStation: t.indexOf('san-francisco-ksfo') >= 0,
+                           noCity: t.indexOf('/city.html') < 0, robots: rb };
+                }""")
+                chk.add(f"{scheme} sitemap: it indexes every page and every station",
+                        bool(idx and idx["urls"] >= 50 and idx["hasStation"] and idx["noCity"]),
+                        str(idx and {k: idx[k] for k in ('urls', 'hasStation', 'noCity')}))
+                chk.add(f"{scheme} robots: crawlers are allowed and told where the index is",
+                        bool(idx and "Allow: /" in idx["robots"] and "sitemap.xml" in idx["robots"]),
+                        str(idx and idx["robots"])[:80])
                 page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
                 chk.add(f"{scheme} severe: the tornado reports lead the page",
                         page.evaluate("""() => {

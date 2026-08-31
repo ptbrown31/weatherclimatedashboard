@@ -22,7 +22,7 @@ window.WXArtMap = (() => {
     const us = sum.cities.filter(c => c.onConus && c.px != null);
     const placed = [];
     us.forEach(c => {
-      const a = el('a', { href: 'city.html?station=' + encodeURIComponent(c.station) });
+      const a = el('a', { href: WXC.cityHref(c) });
       a.appendChild(el('circle', { cx: c.px, cy: c.py, r: 4.2, fill: 'var(--accent)',
                                    stroke: 'var(--panel)', 'stroke-width': 1.2 }));
       svg.appendChild(a);

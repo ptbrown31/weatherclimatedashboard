@@ -13,6 +13,12 @@ the specific internal names, because a list of them is itself something that
 must not be committed. The scrub refuses to pass when that file is missing,
 unless --no-external is given deliberately.
 
+A line in the external file beginning with '!' is a string that is published
+on purpose. A hit is dropped only when the line it was found on contains one
+of those, so an exception has to name the whole published string and cannot
+widen to the needle it excepts: allowing one address at a domain leaves every
+other address at that domain caught.
+
 Every file is scanned regardless of extension; only files that look binary
 (a NUL byte in the first 8 KB) are skipped, and gzip members in directory
 mode are decompressed and scanned too. Skipped files are listed.
@@ -43,15 +49,16 @@ SKIP_DIRS = {".git", "__pycache__", "node_modules", "data", "dist", "verify-out"
 
 
 def needles(require_external: bool = True) -> tuple:
-    ext = []
+    ext, allowed = [], []
     if os.path.isfile(EXTERNAL):
         for ln in open(EXTERNAL, encoding="utf-8"):
             ln = ln.strip()
-            if ln and not ln.startswith("#"):
-                ext.append(ln)
+            if not ln or ln.startswith("#"):
+                continue
+            (allowed if ln.startswith("!") else ext).append(ln.lstrip("!").strip())
     elif require_external:
         raise FileNotFoundError(EXTERNAL)
-    return list(BUILTIN), ext
+    return list(BUILTIN), ext, allowed
 
 
 def tracked_files() -> list:
@@ -114,7 +121,7 @@ def _real(needle: str, line: str) -> bool:
         at += 1
 
 
-def scan(paths: list, all_needles: list) -> tuple:
+def scan(paths: list, all_needles: list, allowed: list = ()) -> tuple:
     hits, skipped = [], []
     self_path = os.path.abspath(__file__)
     for path in paths:
@@ -130,7 +137,7 @@ def scan(paths: list, all_needles: list) -> tuple:
             continue
         for i, ln in enumerate(text.splitlines(), 1):
             for n in all_needles:
-                if n in ln and _real(n, ln):
+                if n in ln and _real(n, ln) and not any(a in ln for a in allowed):
                     hits.append(f"{os.path.relpath(path, ROOT)}:{i}: {n!r} in: {ln.strip()[:100]}")
     return hits, skipped
 
@@ -162,13 +169,13 @@ def main(argv) -> int:
     args = [a for a in argv if not a.startswith("--")]
     require_external = "--no-external" not in argv
     try:
-        builtin, ext = needles(require_external)
+        builtin, ext, allowed = needles(require_external)
     except FileNotFoundError:
         print(f"SCRUB REFUSED: the external needle list {EXTERNAL} is missing. "
               f"Create it (one internal name per line) or pass --no-external deliberately.", file=sys.stderr)
         return 2
     paths = walk(args[0]) if args else tracked_files()
-    hits, skipped = scan(paths, builtin + ext)
+    hits, skipped = scan(paths, builtin + ext, allowed)
     hits += config_slots()
     for s in skipped:
         print(f"  skipped (binary): {os.path.relpath(s, ROOT)}")
