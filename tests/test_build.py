@@ -127,7 +127,7 @@ class StationPage(unittest.TestCase):
     def test_it_names_its_own_station_before_any_script_runs(self):
         out = self.page()
         self.assertIn("<title>San Francisco daily temperature market (KSFO)</title>", out)
-        self.assertIn('<h1 id="cityTitle">San Francisco (KSFO)</h1>', out)
+        self.assertTrue(re.search(r'<h1 id="cityTitle"[^>]*>San Francisco \(KSFO\)</h1>', out))
         self.assertIn('window.WX_STATION = "KSFO"', out)
         self.assertEqual(out.count('<meta name="description"'), 1)
         self.assertIn("San Francisco (KSFO)", build.meta_of(out, "description"))

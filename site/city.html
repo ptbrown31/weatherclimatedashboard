@@ -11,7 +11,15 @@
 </head>
 <body>
 <div class="wrap">
-<h1 id="cityTitle">&nbsp;</h1>
+<div class="secttl">STATION PICKER</div>
+<div class="pickwrap">
+  <div><div class="pickttl" id="pickTitle">United States. Dot colour and size show observed so far against the NWS high issued for the day</div>
+  <svg id="pick" viewBox="0 0 960 600"></svg></div>
+  <div><div class="pickttl">International stations and Honolulu</div>
+  <svg id="pickW" viewBox="0 60 960 320"></svg></div>
+</div>
+
+<h1 id="cityTitle" style="margin-top:18px">&nbsp;</h1>
 
 <div class="card expandable" id="chartCard"><svg id="chart" viewBox="0 0 960 390"></svg></div>
 <div class="bar">
@@ -19,7 +27,6 @@
   <button id="dayTomorrow">Tomorrow</button>
   <button id="dayBoth">Both days</button>
   <button id="ydayBtn">Overlay yesterday</button>
-  <button id="advBtn">Advanced mode</button>
   <span id="chartExpand"></span>
   <span id="chartStatus"></span>
 </div>
@@ -28,7 +35,7 @@ markets &rarr;</a> &middot; <a id="allocLink" href="allocator.html">Size a posit
 calculator &rarr;</a></p>
 
 <div id="advSection" hidden>
-<div class="secttl" style="margin-top:22px">UPSTREAM OF TEMPERATURE</div>
+<div class="secttl" style="margin-top:22px">ADDITIONAL VARIABLES</div>
 <p class="cap" style="margin-top:0">A temperature forecast is the end of a chain that runs through moisture, cloud
 and wind, and these panels show the chain directly. Each tool&rsquo;s hourly temperature, dewpoint, sky cover and
 wind is drawn under the station&rsquo;s own METAR readings, so whether the day is following the forecast&rsquo;s
@@ -40,23 +47,18 @@ reached.</p>
   <button id="advYday">Yesterday, the postmortem</button>
   <span id="advExpand"></span>
 </div>
-<div class="card expandable" id="advCard"><div id="advPanels"></div></div>
+<div class="advrow">
+  <div class="card expandable" id="advCard"><div id="advPanels"></div></div>
+  <div class="advside">
+    <div class="secttl">NWS FORECAST DISCUSSION</div>
+    <div id="discussion"></div>
+  </div>
+</div>
 <p class="cap" id="advCap"></p>
 </div>
 
 <div class="secttl" style="margin-top:22px">STATION LOCATION</div>
 <div id="locator"></div>
-
-<div class="secttl" style="margin-top:22px">NATIONAL WEATHER SERVICE FORECAST DISCUSSION</div>
-<div id="discussion"></div>
-
-<div class="secttl" style="margin-top:22px">STATION PICKER</div>
-<div class="pickwrap">
-  <div><div class="pickttl" id="pickTitle">United States. Dot colour and size show observed so far against the NWS high issued for the day</div>
-  <svg id="pick" viewBox="0 0 960 600"></svg></div>
-  <div><div class="pickttl">International stations and Honolulu</div>
-  <svg id="pickW" viewBox="0 60 960 320"></svg></div>
-</div>
 
 <div class="secttl" style="margin-top:22px">LAST WEEK AT THIS STATION</div>
 <p class="cap" style="margin-top:0">Each day of the past week, then the last three complete days of it hour by

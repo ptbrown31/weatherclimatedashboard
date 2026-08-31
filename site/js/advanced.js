@@ -42,10 +42,11 @@ window.WXAdv = (function () {
   let adv = null, ob = null, sid = null, tz = null, unit = 'F';
   let day = 'today', host = null, tip = null;
 
-  /* Geometry. Two columns inside one 960-wide figure, kept near the height
-     the single column had, so halving the width is what makes the vertical
-     variation legible rather than the panels shrinking with it. */
-  const G = { W: 960, C: [{ x0: 46, x1: 468 }, { x0: 546, x1: 952 }], panelH: 132, gap: 34, barbRow: 21 };
+  /* Geometry. One column whose viewBox is 610 wide with the plot from 52 to
+     610, the exact frame the main chart's temperature panel uses, and whose
+     card is sized to the same share of the page, so the time axis here sits
+     directly under the one above it at the same scale. */
+  const G = { W: 610, C: [{ x0: 52, x1: 610 }], panelH: 118, gap: 34, barbRow: 21 };
 
   const P2 = s => Date.parse(s);
   const reading = () => (day === 'today' ? adv.current : adv.yesterday);
@@ -125,22 +126,20 @@ window.WXAdv = (function () {
       if (!ctx[t.k]) return;
       const pts = rowsIn(ctx[t.k].rows, s, get).filter(q => q.t <= dayStart());
       if (pts.length < 2) return;
-      svg.appendChild(el('path', { d: path(pts, opts && opts.step), fill: 'none', stroke: t.col,
+      svg.appendChild(el('path', { d: path(pts, false), fill: 'none', stroke: t.col,
                                    'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: 0.7 }));
     });
     TOOLS.forEach(t => {
       const src = reading()[t.k];
       const pts = src ? rowsIn(src.rows, s, get) : [];
       if (pts.length < 2) return;
-      // a categorical tool draws in steps, so it never claims a smooth
-      // evolution its bulletin does not publish
-      const a = { d: path(pts, opts && opts.step), fill: 'none', stroke: t.col,
+      const a = { d: path(pts, false), fill: 'none', stroke: t.col,
                   'stroke-width': t.w, opacity: t.op };
       if (t.dash) a['stroke-dasharray'] = t.dash;
       svg.appendChild(el('path', a));
     });
     const O = rowsIn(ob.rows, s, obsGet);
-    if (!(opts && opts.dotsOnly) && O.length > 1) {
+    if (O.length > 1) {
       svg.appendChild(el('path', { d: path(O, false), fill: 'none', stroke: 'var(--obs)', 'stroke-width': 2 }));
     }
     O.forEach(q => svg.appendChild(el('circle', { cx: X(q.t), cy: Y(q.v), r: 1.9, fill: 'var(--obs)' })));
@@ -250,7 +249,7 @@ window.WXAdv = (function () {
         : (r.temp != null ? WXC.deg(r.temp) : '—') + ' · '
           + (r.dew != null ? WXC.deg(r.dew) : '—') + ' · '
           + (r.sky != null ? r.sky + '%' + (r.cover ? ' ' + r.cover : '') : '—') + ' · '
-          + (r.wspd != null ? (r.wdir != null ? Math.round(r.wdir) + '° at ' : '') + Math.round(r.wspd) + ' kt' : '—'));
+          + (r.wspd != null ? (r.wdir != null ? Math.round(r.wdir) + '° at ' : '') + Math.round(r.wspd * 1.15078) + ' mph' : '—'));
       const pack = rows => { const q = near(rows); return q && { temp: q.r.tempF, dew: q.r.dewF, sky: q.r.sky != null ? q.r.sky : OBS_PCT[q.r.cover], cover: q.r.cover, wdir: q.r.wdir, wspd: q.r.wspd }; };
       const lines = [['Observed (METAR)', fmtRow(pack(ob.rows))]]
         .concat(TOOLS.map(t => { const src = reading()[t.k]; return [t.name, fmtRow(src && pack(src.rows))]; }));
@@ -262,42 +261,44 @@ window.WXAdv = (function () {
     svg.addEventListener('mouseleave', () => { rule.setAttribute('visibility', 'hidden'); tip.hide(); });
   }
 
+  // published wind is knots; the panel reads in miles per hour
+  const MPH = 1.15078;
+
   function draw() {
     if (!host || !adv || !ob) return;
     host.innerHTML = '';
     const s = span();
     const [tLo, tHi] = range(r => r.tempF, r => r.tempF, s, 10);
     const [dLo, dHi] = range(r => r.dewF, r => r.dewF, s, 8);
-    const [, spdHi] = range(r => r.wspd, r => r.wspd, s, 12, 0);
-    const colH = 14 + 3 * (G.panelH + G.gap);
-    const H = colH + 20;
+    const mph = r => (r.wspd != null ? r.wspd * MPH : null);
+    const [, spdHi] = range(mph, mph, s, 14, 0);
+    const col = G.C[0];
+    let H = 32 + 4 * (G.panelH + G.gap) + (1 + TOOLS.length) * G.barbRow + 8 + 26;
     const svg = el('svg', { viewBox: '0 0 ' + G.W + ' ' + H, class: 'ts' });
 
     // who is which colour and dash, once, along the top
-    let lx = G.W - 8;
+    let lx = G.W - 2;
     [{ name: 'Observed (METAR)', col: 'var(--obs)', dash: null, w: 2 }].concat(TOOLS.slice().reverse()).forEach(t => {
-      svg.appendChild(txt(t.name, { x: lx, y: 10, 'text-anchor': 'end', 'font-size': 10, fill: t.col }));
-      lx -= t.name.length * 5.6 + 32;
-      const a = { x1: lx + 4, y1: 6.5, x2: lx + 26, y2: 6.5, stroke: t.col, 'stroke-width': t.w };
+      svg.appendChild(txt(t.name, { x: lx, y: 10, 'text-anchor': 'end', 'font-size': 9.5, fill: t.col }));
+      lx -= t.name.length * 5.3 + 30;
+      const a = { x1: lx + 4, y1: 6.5, x2: lx + 24, y2: 6.5, stroke: t.col, 'stroke-width': t.w };
       if (t.dash) a['stroke-dasharray'] = t.dash;
       svg.appendChild(el('line', a));
     });
 
     const deg = v => WXC.deg(v);
-    const c1 = G.C[0], c2 = G.C[1];
     let y = 32;
-    seriesPanel(svg, c1, y, s, 'Temperature', r => r.tempF, r => r.tempF, tLo, tHi, deg);
-    seriesPanel(svg, c2, y, s, 'Temperature', r => r.tempF, r => r.tempF, tLo, tHi, deg);
+    seriesPanel(svg, col, y, s, 'Temperature', r => r.tempF, r => r.tempF, tLo, tHi, deg);
     y += G.panelH + G.gap;
-    seriesPanel(svg, c1, y, s, 'Sky cover', r => r.sky, r => OBS_PCT[r.cover], 0, 100, v => v + '%',
-                { step: true, dotsOnly: true });
-    seriesPanel(svg, c2, y, s, 'Wind speed', r => r.wspd, r => r.wspd, 0, spdHi, v => v + ' kt');
+    seriesPanel(svg, col, y, s, 'Sky cover', r => r.sky, r => OBS_PCT[r.cover], 0, 100, v => v + '%');
     y += G.panelH + G.gap;
-    seriesPanel(svg, c1, y, s, 'Dewpoint', r => r.dewF, r => r.dewF, dLo, dHi, deg);
-    const bh = barbPanel(svg, c2, y, s);
-    hourLabels(svg, c1, y + G.panelH + 14, s);
-    hourLabels(svg, c2, Math.max(y + bh + 14, y + G.panelH + 14), s);
-    hover(svg, s, y + G.panelH);
+    seriesPanel(svg, col, y, s, 'Dewpoint', r => r.dewF, r => r.dewF, dLo, dHi, deg);
+    y += G.panelH + G.gap;
+    seriesPanel(svg, col, y, s, 'Wind speed', mph, mph, 0, spdHi, v => Math.round(v) + ' mph');
+    y += G.panelH + G.gap;
+    const bh = barbPanel(svg, col, y, s);
+    hourLabels(svg, col, y + bh + 14, s);
+    hover(svg, s, y + bh);
     host.appendChild(svg);
 
     const src = reading();
@@ -309,9 +310,11 @@ window.WXAdv = (function () {
           + 'before, so the hours already scored keep their forecast. '
         : 'The postmortem reads each tool as it stood at six the evening before, the same moment the standings judge, '
           + 'under what the station then recorded. ')
-      + 'Temperature, dewpoint and wind compare directly; sky cover is percent where a tool publishes percent, the '
-      + 'band midpoint of its published code (FEW 19%, SCT 44%, BKN 75%, OVC 100%) where it publishes a code, and '
-      + 'the Weather Service’s own sky wording mapped to the same bands. Issued ' + cyc + ', station time.';
+      + 'Temperature, dewpoint and wind compare directly; wind speed reads in mph while the barbs keep the knot '
+      + 'convention they are defined in, a half barb five, a full barb ten, a pennant fifty. Sky cover is percent '
+      + 'where a tool publishes percent, the band midpoint of its published code (FEW 19%, SCT 44%, BKN 75%, '
+      + 'OVC 100%) where it publishes a code, and the Weather Service’s own sky wording mapped to the same bands. '
+      + 'Issued ' + cyc + ', station time.';
   }
 
   async function load() {
@@ -330,20 +333,9 @@ window.WXAdv = (function () {
   function init() {
     tip = WXC.tooltip();
     host = $('#advPanels');
-    const btn = $('#advBtn'), sect = $('#advSection');
-    if (!btn || !host) return;
+    if (!host) return;
     const xh = $('#advExpand'), card = $('#advCard');
     if (xh && card && !xh.childElementCount) xh.appendChild(WXC.expander(card, 'Expand'));
-    btn.onclick = async () => {
-      if (!sid) return;
-      const on = btn.classList.toggle('on');
-      sect.hidden = !on;
-      if (on && !adv) {
-        const ok = await load();
-        if (!ok) { btn.classList.remove('on'); btn.disabled = true; btn.title = 'No bulletin elements archived for this station.'; }
-      }
-      if (on && adv) sect.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    };
     ['advToday', 'advYday'].forEach(id => {
       const b = $('#' + id); if (!b) return;
       b.onclick = () => {
@@ -355,14 +347,15 @@ window.WXAdv = (function () {
     });
   }
 
-  // the page tells this module which station it is on; a change resets the data
+  /* The page tells this module which station it is on. The panels are part
+     of the page now, not a mode: they load and draw on their own, and the
+     section stays hidden only where the archive has no bulletins to draw,
+     which is every station abroad. */
   function station(s, zone) {
     if (s === sid) return;
     sid = s; tz = zone || tz; adv = ob = null;
-    const btn = $('#advBtn'), sect = $('#advSection');
-    if (btn && btn.classList.contains('on')) { btn.classList.remove('on'); }
-    if (btn) { btn.disabled = false; btn.title = ''; }
-    if (sect) sect.hidden = true;
+    const sect = $('#advSection');
+    load().then(ok => { if (sect) sect.hidden = !ok; }).catch(() => { if (sect) sect.hidden = true; });
   }
 
   return { init, station };

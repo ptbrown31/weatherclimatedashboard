@@ -345,3 +345,13 @@ svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);borde
   padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--panel);
   color:var(--ink);cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18)}
 .fullclose:hover{border-color:var(--accent);color:var(--accent)}
+
+/* the additional-variables row: the panel column is exactly as wide as the
+   temperature panel above it (the market layout draws that panel from 52 to
+   610 of a 960 viewBox), and the forecast discussion fills what the strike
+   ladders used, so the page's two readings sit side by side */
+.advrow{display:flex;gap:16px;align-items:flex-start}
+.advrow #advCard{flex:0 0 63.5%;min-width:0}
+.advrow .advside{flex:1;min-width:0}
+.advrow .advside .secttl{margin-top:2px}
+@media (max-width:900px){.advrow{flex-direction:column}.advrow #advCard{flex:1 1 100%;width:100%}}

@@ -169,9 +169,13 @@ def station_page(tpl: str, c: dict, cfg: dict) -> str:
     out = re.sub(r"<title>.*?</title>", "<title>%s</title>" % title, tpl, count=1, flags=re.S)
     out = re.sub(r'<meta name="description" content="[^"]*">',
                  '<meta name="description" content="%s">' % desc, out, count=1)
-    # the heading a crawler reads; the chart replaces it with the dated one
-    out = out.replace('<h1 id="cityTitle">&nbsp;</h1>',
-                      '<h1 id="cityTitle">%s (%s)</h1>' % (city, icao), 1)
+    # the heading a crawler reads; the chart replaces it with the dated one.
+    # By pattern, not exact string, so a styling change on the h1 cannot
+    # silently stop the heading being injected
+    out, n = re.subn(r'(<h1 id="cityTitle"[^>]*>)[^<]*(</h1>)',
+                     r'\g<1>%s (%s)\g<2>' % (city, icao), out, count=1)
+    if not n:
+        raise ValueError("city.html has no cityTitle h1 to fill")
     # which station this page is, for a page that has no query string to read
     out = out.replace("<script src=\"config.js\">",
                       "<script>window.WX_STATION = %s;</script>\n<script src=\"config.js\">"

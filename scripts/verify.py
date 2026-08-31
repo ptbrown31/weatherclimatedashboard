@@ -366,11 +366,11 @@ def run(no_build: bool) -> int:
                 dcap = page.locator("#cityDaysCap").inner_text()
                 chk.add(f"{scheme} three days: the pinned moment is stated",
                         "six in the evening the day before" in dcap, dcap[:110])
-                # the chart the page is for comes first, and opens to the window
+                # the picker leads the page (owner's call 2026-08-31), then the chart
                 order = [o for o in page.eval_on_selector_all(".wrap > *", "e=>e.map(x=>x.id||x.className||x.tagName)")
                          if o != "site"]
-                chk.add(f"{scheme} city page: the series is at the top, above the picker",
-                        order.index("chartCard") < order.index("pickwrap"), str(order[:6]))
+                chk.add(f"{scheme} city page: the picker is at the top, above the series",
+                        order.index("pickwrap") < order.index("chartCard"), str(order[:6]))
                 page.locator("#chartExpand .zb.ex").click(); page.wait_for_timeout(700)
                 bx = page.locator("#chartCard.full").bounding_box()
                 chk.add(f"{scheme} city page: the series opens to fill the window",
@@ -1534,61 +1534,60 @@ def run(no_build: bool) -> int:
                         str(sp and {k: sp[k] for k in ('canon', 'card')})[:130])
                 chk.add(f"{scheme} station page: the calculator opens on this station",
                         bool(sp and sp["alloc"] and sp["alloc"].endswith("city:KSFO")), str(sp and sp["alloc"]))
-                # the advanced panels: hidden until asked for, then the upstream
-                # variables drawn as tools under obs, both days
+                # the additional-variables panels are part of the page: drawn
+                # without a click, single column at the temperature panel's own
+                # frame, the discussion beside them, both days one toggle apart
                 av = page.evaluate("""async () => {
-                  const btn = document.querySelector('#advBtn'), sect = document.querySelector('#advSection');
-                  if (!btn || !sect) return null;
-                  const before = sect.hidden;
-                  btn.click();
-                  await new Promise(r => setTimeout(r, 1200));
-                  const svg = document.querySelector('#advPanels svg');
-                  const today = svg ? { paths: svg.querySelectorAll('path').length,
-                                        dots: svg.querySelectorAll('circle').length } : null;
+                  const sect = document.querySelector('#advSection');
+                  if (!sect || sect.hidden) return null;
+                  const svg = () => document.querySelector('#advPanels svg');
+                  if (!svg()) return null;
+                  const texts = [...svg().querySelectorAll('text')].map(t => t.textContent);
+                  const dots = () => svg().querySelectorAll('circle').length;
+                  const before = dots();
+                  const dashes = new Set([...svg().querySelectorAll('path')]
+                    .map(pp => pp.getAttribute('stroke-dasharray')).filter(Boolean));
                   document.querySelector('#advYday').click();
-                  await new Promise(r => setTimeout(r, 300));
-                  const svg2 = document.querySelector('#advPanels svg');
-                  const yday = svg2 ? { dots: svg2.querySelectorAll('circle').length } : null;
+                  await new Promise(r => setTimeout(r, 400));
+                  const yday = dots();
                   const cap = (document.querySelector('#advCap') || {}).textContent || '';
-                  btn.click();
-                  return { hiddenBefore: before, today, yday,
-                           anchored: cap.indexOf('six the evening before') >= 0 && cap.indexOf('Issued ') >= 0,
-                           hiddenAfter: sect.hidden };
-                }""")
-                chk.add(f"{scheme} advanced: hidden until asked, panels draw for both days",
-                        bool(av and av["hiddenBefore"] and av["hiddenAfter"]
-                             and av["today"] and av["today"]["paths"] >= 3
-                             and av["yday"] and av["yday"]["dots"] > (av["today"]["dots"] or 0)),
-                        str(av and {k: av[k] for k in ('hiddenBefore', 'today', 'yday')})[:120])
-                chk.add(f"{scheme} advanced: the postmortem says it reads the anchored cycle",
-                        bool(av and av["anchored"]), str(av and av["anchored"]))
-                # the panels carry the Weather Service alongside the guidance
-                # tools, temperature leads both columns, and the labels name
-                # issuance times rather than the bare word
-                av2 = page.evaluate("""async () => {
-                  const btn = document.querySelector('#advBtn');
-                  btn.click();
-                  await new Promise(r => setTimeout(r, 700));
-                  const svg = document.querySelector('#advPanels svg');
-                  const texts = svg ? [...svg.querySelectorAll('text')].map(t => t.textContent) : [];
-                  const cap = (document.querySelector('#advCap') || {}).textContent || '';
-                  const dashes = svg ? new Set([...svg.querySelectorAll('path')]
-                    .map(pp => pp.getAttribute('stroke-dasharray')).filter(Boolean)) : new Set();
-                  btn.click();
+                  document.querySelector('#advToday').click();
+                  const disc = document.querySelector('.advrow #discussion');
+                  const cardW = document.querySelector('#advCard').getBoundingClientRect().width;
+                  const chartW = document.querySelector('#chartCard').getBoundingClientRect().width;
                   return { nws: texts.indexOf('Weather Service') >= 0,
                            temps: texts.filter(t => t === 'TEMPERATURE').length,
+                           mph: texts.some(t => / mph$/.test(t)),
                            styles: [...dashes].sort(),
-                           issuedTimes: /Issued .*Weather Service \d/.test(cap) || /Weather Service \d/.test(cap) };
+                           today: before, yday,
+                           anchored: cap.indexOf('six the evening before') >= 0 && cap.indexOf('Issued ') >= 0,
+                           issuedTimes: /Weather Service \d/.test(cap),
+                           discBeside: !!disc,
+                           share: cardW / chartW };
                 }""")
+                chk.add(f"{scheme} advanced: the panels draw without a click, both days one toggle apart",
+                        bool(av and av["today"] > 0 and av["yday"] > av["today"]),
+                        str(av and {k: av[k] for k in ('today', 'yday')}))
+                chk.add(f"{scheme} advanced: the postmortem says it reads the anchored cycle",
+                        bool(av and av["anchored"]), str(av and av["anchored"]))
                 chk.add(f"{scheme} advanced: the Weather Service draws with the guidance tools",
-                        bool(av2 and av2["nws"]), str(av2 and av2["nws"]))
-                chk.add(f"{scheme} advanced: temperature leads both columns",
-                        bool(av2 and av2["temps"] == 2), str(av2 and av2["temps"]))
+                        bool(av and av["nws"]), str(av and av["nws"]))
+                chk.add(f"{scheme} advanced: temperature appears once, at the top",
+                        bool(av and av["temps"] == 1), str(av and av["temps"]))
+                chk.add(f"{scheme} advanced: wind speed reads in mph",
+                        bool(av and av["mph"]), "")
                 chk.add(f"{scheme} advanced: the tools keep the main chart's line styles",
-                        bool(av2 and "5 4" in av2["styles"] and "1 3" in av2["styles"]),
-                        str(av2 and av2["styles"]))
+                        bool(av and "5 4" in av["styles"] and "1 3" in av["styles"]),
+                        str(av and av["styles"]))
                 chk.add(f"{scheme} advanced: the caption names issuance times, not the bare word",
-                        bool(av2 and av2["issuedTimes"]), "")
+                        bool(av and av["issuedTimes"]), "")
+                # the column is the temperature panel's share of the page, with
+                # the forecast discussion in what the ladders use above (on a
+                # window wide enough to hold the row)
+                chk.add(f"{scheme} advanced: the discussion sits beside the column",
+                        bool(av and av["discBeside"]
+                             and (page.viewport_size["width"] <= 900 or 0.60 < av["share"] < 0.67)),
+                        str(av and round(av["share"], 3)))
                 # the main chart's lead-in hours keep the forecast that stood
                 # for them, and its level labels say when each was issued
                 mc = page.evaluate("""() => {
