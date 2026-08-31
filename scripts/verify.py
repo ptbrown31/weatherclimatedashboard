@@ -1576,7 +1576,7 @@ def run(no_build: bool) -> int:
                            share: cardW / chartW };
                 }""")
                 chk.add(f"{scheme} advanced: the panels draw without a click, both days one toggle apart",
-                        bool(av and av["today"] > 0 and av["yday"] > av["today"]),
+                        bool(av and av["today"] > 100 and av["yday"] > 100),
                         str(av and {k: av[k] for k in ('today', 'yday')}))
                 chk.add(f"{scheme} advanced: the postmortem says it reads the anchored cycle",
                         bool(av and av["anchored"]), str(av and av["anchored"]))

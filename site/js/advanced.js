@@ -125,12 +125,15 @@ window.WXAdv = (function () {
       return step ? ('L' + X(q.t).toFixed(1) + ' ' + Y(pts[i - 1].v).toFixed(1) + 'L' + X(q.t).toFixed(1) + ' ' + Y(q.v).toFixed(1))
                   : ('L' + X(q.t).toFixed(1) + ' ' + Y(q.v).toFixed(1));
     }).join('');
-    // the hours before the contract day, from the cycles that stood at six the
-    // evening before: dashed and dim, the way the main chart draws as-issued
+    /* The cycles that stood at six the evening before, dashed and dim under
+       the standing lines, across the whole window, the way the main chart
+       carries its as-issued lines. Clipped at midnight these left every tool
+       a hole from midnight until its newest cycle begins, which read as the
+       lines being broken while the observed line above sailed through. */
     const ctx = context();
     if (ctx) TOOLS.forEach(t => {
       if (!ctx[t.k]) return;
-      const pts = rowsIn(ctx[t.k].rows, s, get).filter(q => q.t <= dayStart());
+      const pts = rowsIn(ctx[t.k].rows, s, get);
       if (pts.length < 2) return;
       svg.appendChild(el('path', { d: path(pts, false), fill: 'none', stroke: t.col,
                                    'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: 0.7 }));
@@ -160,16 +163,17 @@ window.WXAdv = (function () {
   /* One wind barb, the same convention the station map teaches: the staff
      points toward where the wind comes from, half barb five knots, full ten,
      pennant fifty. Small, because a row of them is a time series. */
-  function barb(svg, x, y, wdir, wspd, col) {
+  function barb(svg, x, y, wdir, wspd, col, op) {
     if (wspd == null) return;
     if (wspd < 3 || wdir == null) {
-      svg.appendChild(el('circle', { cx: x, cy: y, r: 2.6, fill: 'none', stroke: col, 'stroke-width': 1 }));
+      svg.appendChild(el('circle', { cx: x, cy: y, r: 2.6, fill: 'none', stroke: col,
+                                     'stroke-width': 1, opacity: op || 1 }));
       return;
     }
     const L = 13, a = (wdir - 90) * Math.PI / 180;
     const ux = Math.cos(a), uy = Math.sin(a);
     const px = -uy, py = ux;
-    const g = el('g', { stroke: col, 'stroke-width': 1.1, fill: col });
+    const g = el('g', { stroke: col, 'stroke-width': 1.1, fill: col, opacity: op || 1 });
     g.appendChild(el('line', { x1: x, y1: y, x2: x + ux * L, y2: y + uy * L }));
     let left = Math.round(wspd / 5) * 5, at = 1.0;
     const stepBack = 3.2 / L;
@@ -193,11 +197,15 @@ window.WXAdv = (function () {
 
   function barbPanel(svg, col, y0, s) {
     const wget = r => (r.wspd != null ? { wdir: r.wdir, wspd: r.wspd } : null);
-    const rows = [{ name: 'OBS', col: 'var(--obs)', pts: rowsIn(ob.rows, s, wget) }]
+    const ctx = context();
+    const rows = [{ name: 'OBS', col: 'var(--obs)', pts: rowsIn(ob.rows, s, wget), ctxPts: [] }]
       .concat(TOOLS.map(t => {
         const src = reading()[t.k];
         return { name: { nws: 'NWS', nbm: 'NBM', lamp: 'LAMP', mav: 'MOS' }[t.k], col: t.col,
-                 pts: src ? rowsIn(src.rows, s, wget) : [] };
+                 pts: src ? rowsIn(src.rows, s, wget) : [],
+                 // a mark the newest cycle has not reached takes the anchored
+                 // cycle's barb, dimmed, so the row is whole like the lines
+                 ctxPts: ctx && ctx[t.k] ? rowsIn(ctx[t.k].rows, s, wget) : [] };
       }));
     svg.appendChild(txt('WIND, FROM', { x: col.x0, y: y0 - 5, class: 'axl',
                                         'font-size': 10, 'letter-spacing': '0.06em' }));
@@ -212,11 +220,17 @@ window.WXAdv = (function () {
       // reading to each mark, so an hourly tool and a 3-hourly one land on
       // the same grid
       const HR3 = 3 * 3600000;
-      for (let t = Math.ceil(s[0] / HR3) * HR3; t <= s[1]; t += HR3) {
+      const nearest = (pts, t) => {
         let best = null;
-        row.pts.forEach(q => { if (best == null || Math.abs(q.t - t) < Math.abs(best.t - t)) best = q; });
-        if (!best || Math.abs(best.t - t) > 5400000) continue;
-        barb(svg, col.x0 + (t - s[0]) / (s[1] - s[0]) * (col.x1 - col.x0), y, best.v.wdir, best.v.wspd, row.col);
+        pts.forEach(q => { if (best == null || Math.abs(q.t - t) < Math.abs(best.t - t)) best = q; });
+        return best && Math.abs(best.t - t) <= 5400000 ? best : null;
+      };
+      for (let t = Math.ceil(s[0] / HR3) * HR3; t <= s[1]; t += HR3) {
+        const x = col.x0 + (t - s[0]) / (s[1] - s[0]) * (col.x1 - col.x0);
+        const cur = nearest(row.pts, t);
+        if (cur) { barb(svg, x, y, cur.v.wdir, cur.v.wspd, row.col); continue; }
+        const held = nearest(row.ctxPts, t);
+        if (held) barb(svg, x, y, held.v.wdir, held.v.wspd, row.col, 0.55);
       }
     });
     return bh;
@@ -319,8 +333,9 @@ window.WXAdv = (function () {
     $('#advCap').textContent =
       (day === 'today'
         ? 'Each tool’s newest standing cycle under the station’s own METAR reports, over the same window as the '
-          + 'chart above. The dim dashed lines before the day boundary are the cycles that stood at six the evening '
-          + 'before, so the hours already scored keep their forecast. '
+          + 'chart above. The dim dashed lines are the cycles that stood at six the evening before, carried across '
+          + 'the whole window so the hours a morning cycle has not reached still show the forecast that stood for '
+          + 'them; dimmed barbs are read the same way. '
         : day === 'tomorrow'
         ? 'The day-ahead board, from the same newest standing cycles the chart above draws. LAMP reaches only '
           + 'twenty-five hours, so its line ends where its horizon does, and the observed line grows in from the '
