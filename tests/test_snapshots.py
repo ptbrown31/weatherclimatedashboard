@@ -265,3 +265,47 @@ class FieldAndRoster(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WxElements(unittest.TestCase):
+    """The upstream-variable parsing behind the advanced panels."""
+
+    LAMP = """\
+ KSFO   GFS LAMP GUIDANCE   8/23/2026  1030 UTC
+ UTC  11 12 13
+ TMP  57 57 56
+ DPT  55 55 54
+ CLD  BK BK OV
+ WDR  30 30 30
+ WSP  11 10  8
+"""
+
+    def test_lamp_elements_with_categorical_cover(self):
+        p = gw.parse_wx_block(self.LAMP, "lamp")
+        r = p["rows"][0]
+        self.assertEqual(r["dew_f"], 55.0)
+        self.assertEqual(r["cover"], "BK")
+        self.assertEqual(r["sky_pct"], 75)          # the band midpoint for broken
+        self.assertEqual(r["wdir"], 300)            # published in tens of degrees
+        self.assertEqual(r["wspd"], 11.0)
+        self.assertEqual(p["rows"][2]["cover"], "OV")
+        self.assertEqual(p["rows"][2]["sky_pct"], 100)
+
+    def test_nbm_sky_is_percent_and_cover_is_none(self):
+        block = ("KSFO    NBM V4.1 NBH GUIDANCE    8/23/2026  1000 UTC\n"
+                 " UTC  11 12 13\n"
+                 " TMP  57 57 56\n"
+                 " DPT  55 55 55\n"
+                 " SKY  64 64 69\n"
+                 " WDR  27 26 26\n"
+                 " WSP   6  6  5\n")
+        p = gw.parse_wx_block(block, "nbh")
+        r = p["rows"][0]
+        self.assertEqual(r["sky_pct"], 64)
+        self.assertIsNone(r["cover"])
+        self.assertEqual(r["wdir"], 270)
+
+    def test_a_blank_cell_is_a_gap_not_a_shift(self):
+        block = self.LAMP.replace(" DPT  55 55 54", " DPT  55    54")
+        p = gw.parse_wx_block(block, "lamp")
+        self.assertEqual([r["dew_f"] for r in p["rows"]], [55.0, None, 54.0])

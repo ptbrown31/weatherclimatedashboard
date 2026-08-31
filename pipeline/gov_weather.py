@@ -757,6 +757,70 @@ parse_nbh_block = parse_hourly_block
 parse_lamp_block = parse_hourly_block
 
 
+# The categorical sky-cover codes the MOS families print, in oktas of the
+# celestial dome, mapped to the midpoint of each code's range in percent so a
+# categorical tool can share an axis with a percent one. The bands are the
+# aviation ones: FEW is 1-2 oktas, SCT 3-4, BKN 5-7, OVC 8.
+CLD_PCT = {"CL": 0, "FW": 19, "SC": 44, "BK": 75, "OV": 100}
+
+# the element rows each bulletin family carries, beyond the temperature the
+# rest of the pipeline already reads. SKY is percent; CLD is categorical.
+WX_ELEMENTS = {"nbh": ("TMP", "DPT", "SKY", "WDR", "WSP"),
+               "nbs": ("TMP", "DPT", "SKY", "WDR", "WSP"),
+               "lamp": ("TMP", "DPT", "CLD", "WDR", "WSP"),
+               "mav": ("TMP", "DPT", "CLD", "WDR", "WSP")}
+
+
+def parse_wx_block(block: str, family: str) -> dict:
+    """
+    The upstream-of-temperature elements of one station block: dewpoint, sky
+    cover, wind direction and speed, hour by hour.
+
+        -> {"cycle": datetime, "rows": [{"time", "dew_f", "sky_pct", "cover",
+                                         "wdir", "wspd"}]}
+
+    Rows are emitted for every hour the block's clock row carries, with None
+    where a cell is blank, so a gap is visible instead of closed up. WDR is
+    published in tens of degrees and is returned in degrees. The categorical
+    CLD codes are returned as published in `cover`, with `sky_pct` carrying the
+    band midpoint from CLD_PCT; the NBM families publish SKY in percent
+    directly and their `cover` is None.
+    """
+    hour_label = "HR" if family == "mav" else "UTC"
+    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{2})(\d{2}) UTC", block)
+    if not m:
+        raise ValueError("bulletin block has no cycle header")
+    mo, da, yr, hh, mi = map(int, m.groups())
+    cycle = dt.datetime(yr, mo, da, hh, mi, tzinfo=dt.timezone.utc)
+    n = _hour_row_width(block, hour_label)
+    if not n:
+        raise ValueError(f"bulletin block has no {hour_label} row")
+    cols = parse_columns(block, (hour_label,) + WX_ELEMENTS[family], n)
+    # the categorical row is text, which parse_columns turns to None; re-slice it
+    covers = [None] * n
+    if "CLD" in WX_ELEMENTS[family]:
+        for line in block.splitlines():
+            if line[:4].strip() == "CLD":
+                covers = [(line[5 + 3 * i: 8 + 3 * i].strip() or None) for i in range(n)]
+                break
+    times = column_times(cycle, cols.get(hour_label, []))
+    get = lambda lab, i: (cols.get(lab) or [None] * n)[i]
+    rows = []
+    for i, t in enumerate(times):
+        if t is None:
+            continue
+        cover = covers[i]
+        sky = get("SKY", i)
+        rows.append({"time": t,
+                     "temp_f": float(get("TMP", i)) if get("TMP", i) is not None else None,
+                     "dew_f": float(get("DPT", i)) if get("DPT", i) is not None else None,
+                     "sky_pct": sky if sky is not None else CLD_PCT.get(cover),
+                     "cover": cover,
+                     "wdir": get("WDR", i) * 10 if get("WDR", i) is not None else None,
+                     "wspd": float(get("WSP", i)) if get("WSP", i) is not None else None})
+    return {"cycle": cycle, "rows": rows}
+
+
 def bulletin_cycle(block: str) -> dt.datetime:
     m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})\s+(\d{2})(\d{2}) UTC", block)
     if not m:

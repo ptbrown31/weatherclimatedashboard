@@ -184,8 +184,20 @@ def decode_rows(raw_rows: list, tz) -> list:
         if temp_c is None:
             continue
         t = dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc)
-        out.append({"t": _iso(t), "tempF": round(gw.c_to_f(temp_c), 1), "tempC": round(float(temp_c), 1),
-                    "type": ob.get("metarType"), "src": ob.get("temp_source")})
+        row = {"t": _iso(t), "tempF": round(gw.c_to_f(temp_c), 1), "tempC": round(float(temp_c), 1),
+               "type": ob.get("metarType"), "src": ob.get("temp_source")}
+        # the upstream elements, as the report carries them, for the advanced
+        # panels: dewpoint, wind, and the highest cloud-cover code of the
+        # report's layers. wdir is None for calm and for VRB
+        if ob.get("dewp") is not None:
+            row["dewF"] = round(gw.c_to_f(ob["dewp"]), 1)
+        if isinstance(ob.get("wdir"), int):
+            row["wdir"] = ob["wdir"]
+        if ob.get("wspd") is not None:
+            row["wspd"] = ob["wspd"]
+        if ob.get("cover"):
+            row["cover"] = ob["cover"]
+        out.append(row)
     out.sort(key=lambda r: r["t"])
     return out
 
@@ -603,6 +615,71 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
     return snap
 
 
+def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Optional[dict]:
+    """The upstream-of-temperature elements, tool by tool, for the advanced
+    panels on the city page: dewpoint, sky cover, wind direction and speed,
+    hourly, from the same archived bulletins the temperature lanes read.
+
+    Two readings of each tool. `current` is the newest standing cycle, the one
+    a reader tracks the day against. `yesterday` is the cycle that stood at
+    six in the evening before yesterday, the scorecard's anchor, so the
+    postmortem judges exactly the forecast the standings judged and not a
+    later run that had seen part of the day.
+
+    The blend's hourly bulletin reaches 25 hours; past its end the 3-hourly
+    short-range bulletin of the same cycle family carries the line onward, and
+    each row keeps its cadence so the join is visible. None when no tool has
+    a block for this station, which is every station abroad.
+    """
+    sid, tz = c["station"], ZoneInfo(c["tz"])
+    mk = day_markers(c, now)
+    yday = dt.date.fromisoformat(mk["yesterday"])
+    anchor = (dt.datetime.combine(yday, dt.time(0), tzinfo=tz)
+              - dt.timedelta(hours=6)).astimezone(dt.timezone.utc)
+    by_kind = {k: list_recent(store, sid, k, now) for k in ("nbh", "nbs", "lamp", "mav")}
+
+    def wx(kind: str, key: str) -> Optional[dict]:
+        try:
+            parsed = gw.parse_wx_block(_read_gz(store, key).decode("ascii", "replace"), kind)
+        except (ValueError, AttributeError, OSError):
+            return None
+        rows = [{"t": _iso(r["time"]), "tempF": r["temp_f"], "dewF": r["dew_f"], "sky": r["sky_pct"],
+                 "cover": r["cover"], "wdir": r["wdir"], "wspd": r["wspd"]} for r in parsed["rows"]
+                if r["temp_f"] is not None or r["dew_f"] is not None
+                or r["sky_pct"] is not None or r["wspd"] is not None]
+        return {"cycle": _stamp_of(key), "rows": rows} if rows else None
+
+    def newest(kind: str, cut: Optional[dt.datetime] = None) -> Optional[dict]:
+        keys = by_kind.get(kind) or []
+        if cut is not None:
+            stamp = cut.strftime("%Y%m%dT%H%M%SZ")
+            keys = [k for k in keys if _norm_stamp(_stamp_of(k)) <= _norm_stamp(stamp)]
+        return wx(kind, keys[-1]) if keys else None
+
+    def nbm(cut: Optional[dt.datetime] = None) -> Optional[dict]:
+        hour, three = newest("nbh", cut), newest("nbs", cut)
+        if not (hour or three):
+            return None
+        base = hour or three
+        if hour and three:
+            end = hour["rows"][-1]["t"]
+            base = {"cycle": hour["cycle"], "nbsCycle": three["cycle"],
+                    "rows": hour["rows"] + [r for r in three["rows"] if r["t"] > end]}
+        return base
+
+    def reading(cut: Optional[dt.datetime] = None) -> dict:
+        return {"nbm": nbm(cut), "lamp": newest("lamp", cut), "mav": newest("mav", cut)}
+
+    cur, yd = reading(), reading(anchor)
+    if not any(cur.values()) and not any(yd.values()):
+        return None
+    return {"schema": SCHEMA, "station": sid, "city": c["city"], "unit": c["unit"], "tz": c["tz"],
+            "asof": _iso(now), "written": _iso(now), "markers": mk,
+            "anchor": _iso(anchor), "current": cur, "yesterday": yd,
+            "coverPct": gw.CLD_PCT,
+            "source": "NBM, LAMP and GFS MOS bulletins from this site's own archive"}
+
+
 def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline=None) -> dict:
     roster = basemap.load_roster()
     grid = basemap.load_field_grid()
@@ -629,6 +706,15 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
             continue
         store.put(key, json.dumps(snap, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
         written += 1
+        # the advanced panels' elements, from the same listings; a failure
+        # costs the advanced view a cycle, never the chart
+        try:
+            adv = build_advanced_snapshot(store, c, now)
+            if adv:
+                store.put(f"snapshots/advanced/{sid}.json",
+                          json.dumps(adv, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+        except Exception as e:  # noqa: BLE001
+            log(station=sid, kind="advanced", error=f"{type(e).__name__}: {e}")
         fc = {"day": snap["markers"]["day"], "tomorrow": snap["markers"]["tomorrow"]}
         for k in ("nws", "nbm", "lamp", "mav"):
             s = snap[k] or {}

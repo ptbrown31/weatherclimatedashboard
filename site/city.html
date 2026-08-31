@@ -19,12 +19,30 @@
   <button id="dayTomorrow">Tomorrow</button>
   <button id="dayBoth">Both days</button>
   <button id="ydayBtn">Overlay yesterday</button>
+  <button id="advBtn">Advanced mode</button>
   <span id="chartExpand"></span>
   <span id="chartStatus"></span>
 </div>
 <p class="cap" style="margin:2px 0 0"><a href="daily-temperature-markets.html">More information on these
 markets &rarr;</a> &middot; <a id="allocLink" href="allocator.html">Size a position with the position allocation
 calculator &rarr;</a></p>
+
+<div id="advSection" hidden>
+<div class="secttl" style="margin-top:22px">UPSTREAM OF TEMPERATURE</div>
+<p class="cap" style="margin-top:0">A temperature forecast is the end of a chain that runs through moisture, cloud
+and wind, and these panels show the chain directly. Each tool&rsquo;s hourly temperature, dewpoint, sky cover and
+wind is drawn under the station&rsquo;s own METAR readings, so whether the day is following the forecast&rsquo;s
+physical script can be read before the temperature settles it. Heating running ahead under clearer skies than
+forecast argues the high is underestimated; persistent low cloud and an onshore breeze argue it will not be
+reached.</p>
+<div class="bar">
+  <button id="advToday" class="on">Today</button>
+  <button id="advYday">Yesterday, the postmortem</button>
+  <span id="advExpand"></span>
+</div>
+<div class="card expandable" id="advCard"><div id="advPanels"></div></div>
+<p class="cap" id="advCap"></p>
+</div>
 
 <div class="secttl" style="margin-top:22px">STATION LOCATION</div>
 <div id="locator"></div>
@@ -66,15 +84,18 @@ that moment.</p>
 <script src="js/city-score.js"></script>
 <script src="js/city-days.js"></script>
 <script src="js/discussion.js"></script>
+<script src="js/advanced.js"></script>
 <script>
 WXC.chrome('city.html'); WXCityScore.init(); WXCityDays.init();
 // the calculator opens on this station's board, freshest day first
 (function () { const st = new URLSearchParams(location.search).get('station') || window.WX_STATION;
   const a = document.getElementById('allocLink');
   if (a && st) a.href = 'allocator.html?m=city:' + encodeURIComponent(st); })();
+WXAdv.init();
 Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
              fetch('assets/world.json').then(r => r.json()).catch(() => null)])
-  .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null }));
+  .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null,
+                                   onSelect: s => WXAdv.station(s) }));
 </script>
 </body>
 </html>

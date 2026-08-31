@@ -1534,6 +1534,34 @@ def run(no_build: bool) -> int:
                         str(sp and {k: sp[k] for k in ('canon', 'card')})[:130])
                 chk.add(f"{scheme} station page: the calculator opens on this station",
                         bool(sp and sp["alloc"] and sp["alloc"].endswith("city:KSFO")), str(sp and sp["alloc"]))
+                # the advanced panels: hidden until asked for, then the upstream
+                # variables drawn as tools under obs, both days
+                av = page.evaluate("""async () => {
+                  const btn = document.querySelector('#advBtn'), sect = document.querySelector('#advSection');
+                  if (!btn || !sect) return null;
+                  const before = sect.hidden;
+                  btn.click();
+                  await new Promise(r => setTimeout(r, 1200));
+                  const svg = document.querySelector('#advPanels svg');
+                  const today = svg ? { paths: svg.querySelectorAll('path').length,
+                                        dots: svg.querySelectorAll('circle').length } : null;
+                  document.querySelector('#advYday').click();
+                  await new Promise(r => setTimeout(r, 300));
+                  const svg2 = document.querySelector('#advPanels svg');
+                  const yday = svg2 ? { dots: svg2.querySelectorAll('circle').length } : null;
+                  const cap = (document.querySelector('#advCap') || {}).textContent || '';
+                  btn.click();
+                  return { hiddenBefore: before, today, yday,
+                           anchored: cap.indexOf('six the evening before') >= 0 && cap.indexOf('Cycles ') >= 0,
+                           hiddenAfter: sect.hidden };
+                }""")
+                chk.add(f"{scheme} advanced: hidden until asked, panels draw for both days",
+                        bool(av and av["hiddenBefore"] and av["hiddenAfter"]
+                             and av["today"] and av["today"]["paths"] >= 3
+                             and av["yday"] and av["yday"]["dots"] > (av["today"]["dots"] or 0)),
+                        str(av and {k: av[k] for k in ('hiddenBefore', 'today', 'yday')})[:120])
+                chk.add(f"{scheme} advanced: the postmortem says it reads the anchored cycle",
+                        bool(av and av["anchored"]), str(av and av["anchored"]))
                 # every station the board carries has to have a page to link to,
                 # built by the same rule the browser uses to write the link
                 page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1500)
