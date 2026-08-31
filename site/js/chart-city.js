@@ -833,7 +833,7 @@ window.WXCity = (() => {
       'tomorrow’s midnight': 'the day-ahead contract day begins (station local time)',
       'tomorrow’s sunrise': 'the same solar approximation carried forward one day',
       'tomorrow’s sunset': 'the same solar approximation carried forward one day',
-                        'day end': 'the contract day ends; the settlement value is the extreme through here', listed: 'when the exchange listed this day’s contracts (the record’s first quote)' };
+                        'day end': 'the contract day ends; the settlement value is the extreme through here', listed: 'when the exchange lists this day’s contracts (its schedule as measured from the quote record)' };
     marks.forEach(([lb, t, col, dash]) => {
       if (t == null || t < w0 || t > d1) return;
       const a = { x1: x(t), x2: x(t), y1: S.T, y2: S.B, stroke: col, 'stroke-width': lb === 'midnight' ? 1.1 : 0.9 };

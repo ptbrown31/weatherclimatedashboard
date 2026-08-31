@@ -162,11 +162,24 @@ def day_markers(city: dict, now: dt.datetime) -> dict:
            "winStart": _iso(win_start), "dayStart": _iso(day_start), "dayEnd": _iso(day_end),
            "ydayStart": _iso(yday_start),
            "sunrise": _iso(sr) if sr else None, "sunset": _iso(ss) if ss else None}
-    # US daily contracts for local day D list at noon Eastern the day before;
-    # a marker for the market overlay, drawn only when the overlay is on. The
-    # convention for the non-US listings is not confirmed, so it is omitted there.
+    # When the exchange lists local day D's board, a marker for the market
+    # overlay. Measured from first-quote times in this site's own capture
+    # (10-minute cadence): through the 8/27 target every US city listed at
+    # noon Eastern the day before; from the 8/28 target the boards open about
+    # two hours earlier, US cities by 10:30 am Eastern, the Canadian three by
+    # 11:10 am Eastern, and the European pair unchanged by 22:40Z the evening
+    # before. North America is anchored to the Eastern clock, which is how the
+    # noon convention behaved; the European anchor zone is unconfirmed and
+    # carried in UTC. Each time is the top of its sampling band, so a board
+    # can be open up to ten minutes before the marker.
+    prev = D - dt.timedelta(days=1)
+    et = ZoneInfo("America/New_York")
     if city.get("unit") == "F":
-        out["listed"] = _iso(dt.datetime.combine(D - dt.timedelta(days=1), dt.time(12), tzinfo=ZoneInfo("America/New_York")))
+        out["listed"] = _iso(dt.datetime.combine(prev, dt.time(10, 30), tzinfo=et))
+    elif city["station"].startswith("CY"):
+        out["listed"] = _iso(dt.datetime.combine(prev, dt.time(11, 10), tzinfo=et))
+    elif city["station"] in ("EDDF", "LFPG"):
+        out["listed"] = _iso(dt.datetime.combine(prev, dt.time(22, 40), tzinfo=dt.timezone.utc))
     return out
 
 

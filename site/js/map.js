@@ -145,10 +145,11 @@ window.WXMap = (() => {
     return STATE_TEXT[m.state] || 'no bids yet';
   }
 
-  /* When a board lists. US daily contracts for a local day are listed at noon
-     Eastern the day before, which the snapshot stamps on the day it belongs
-     to; the day-ahead board therefore lists a day later than the marker the
-     current day carries. */
+  /* When a board lists. The snapshot stamps each day with the exchange's
+     measured listing schedule (since the 8/28 target, about 10:30 am Eastern
+     the day before for US cities); the day-ahead board therefore lists a day
+     later than the marker the current day carries. The stamp is the top of a
+     ten-minute sampling band, so the board can be open slightly before it. */
   function listingTime(mk, when) {
     if (!mk.listed) return null;
     const t = Date.parse(mk.listed);
@@ -196,7 +197,7 @@ window.WXMap = (() => {
         const lt = listingTime(mk, M.when);
         if (lt) {
           const cd = countdown(lt);
-          lead.push(['Contracts list', WXC.clockFull(lt, c.tz) + ' ' + WXC.dateShort(lt, c.tz)]);
+          lead.push(['Contracts list by', WXC.clockFull(lt, c.tz) + ' ' + WXC.dateShort(lt, c.tz)]);
           if (cd) lead.push(['That is', cd]);
         }
       }

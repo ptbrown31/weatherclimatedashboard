@@ -82,12 +82,24 @@ class DayBucketing(unittest.TestCase):
         self.assertEqual(mk["dayStart"], "2026-08-21T07:00:00Z")
         self.assertEqual(mk["dayEnd"], "2026-08-22T07:00:00Z")
         self.assertEqual(mk["winStart"], "2026-08-20T19:00:00Z")
-        self.assertEqual(mk["listed"], "2026-08-20T16:00:00Z")      # noon Eastern the day before
+        # 10:30 am Eastern the day before, the schedule measured since the
+        # 8/28 target (the exchange moved from noon on 2026-08-27)
+        self.assertEqual(mk["listed"], "2026-08-20T14:30:00Z")
         self.assertEqual(mk["tzOffset"], -7.0)
         self.assertIsNotNone(mk["sunrise"])
         sr, ss = snapshots._parse_iso(mk["sunrise"]), snapshots._parse_iso(mk["sunset"])
         self.assertLess(abs((sr - dt.datetime(2026, 8, 21, 13, 20, tzinfo=U)).total_seconds()), 20 * 60)
         self.assertLess(abs((ss - dt.datetime(2026, 8, 22, 2, 35, tzinfo=U)).total_seconds()), 20 * 60)
+
+    def test_listing_markers_per_region(self):
+        # the three schedules the capture measures: US and Canada on the
+        # Eastern clock, Europe on its own late-evening cycle, others unknown
+        mk = lambda st, tz, unit: snapshots.day_markers(
+            {"station": st, "city": st, "lat": 45.0, "lon": -73.0, "tz": tz, "unit": unit},
+            dt.datetime(2026, 9, 2, 15, 0, tzinfo=U))
+        self.assertEqual(mk("CYUL", "America/Toronto", "C")["listed"], "2026-09-01T15:10:00Z")
+        self.assertEqual(mk("EDDF", "Europe/Berlin", "C")["listed"], "2026-09-01T22:40:00Z")
+        self.assertNotIn("listed", mk("RJTT", "Asia/Tokyo", "C"))
 
     def test_official_high_low_assignment(self):
         daily = [
