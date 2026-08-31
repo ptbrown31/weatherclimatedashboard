@@ -108,10 +108,12 @@ window.WXMap = (() => {
   const dev = v => (v == null ? null : Math.round((v - gapBase) * 10) / 10);
   const tdy = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.day : ''; };
 
-  // Which board is the one being traded. The day-ahead contracts list around
-  // midday Eastern and the current day's settle that evening, so before 5 pm ET
-  // the live board is today's and after it the day-ahead board is the one worth
-  // opening on. The other is always one click away.
+  // Which board is the one being traded. The day-ahead contracts list in the
+  // late morning Eastern and the current day's settle that evening, so before
+  // 5 pm ET the live board is today's and after it the day-ahead board is the
+  // one worth opening on. The other is always one click away. The hour is
+  // anchored on when the current day settles, not on when the next one lists,
+  // so the exchange moving its listings earlier in August 2026 did not move it.
   const FLIP_HOUR_ET = 17;
   function defaultMode() {
     let hr;

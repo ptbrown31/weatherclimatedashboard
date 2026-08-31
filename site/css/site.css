@@ -362,3 +362,38 @@ svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);borde
 .advrow .advside{flex:1;min-width:0}
 .advrow .advside .secttl{margin-top:2px}
 @media (max-width:900px){.advrow{flex-direction:column}.advrow #advCard{flex:1 1 100%;width:100%}}
+
+/* lessons: the written courses, folded shut because eighteen at full length is
+   a wall. The cue lines are what a reader would be looking at on screen, kept
+   visually apart from the words that go over them. */
+.course{margin:0 0 30px}
+.cmeta{font:500 12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+details.lesson{border:1px solid var(--line);border-radius:8px;background:var(--panel);margin:0 0 8px}
+details.lesson>summary{cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:12px;
+  padding:11px 14px;font-size:15px}
+details.lesson>summary::-webkit-details-marker{display:none}
+details.lesson>summary:hover .ltitle{color:var(--accent)}
+details.lesson[open]>summary{border-bottom:1px solid var(--line)}
+.lnum{font:600 12px/1.5 ui-monospace,Menlo,monospace;color:var(--muted);flex:0 0 auto}
+.ltitle{font-weight:600;color:var(--navy);flex:1 1 auto;min-width:0}
+.ldur{font:400 12px/1.5 ui-monospace,Menlo,monospace;color:var(--muted);flex:0 0 auto}
+.lbody{padding:14px 16px 16px}
+.lbody p{max-width:70ch;margin:0 0 10px}
+.laim{font-size:13.5px;color:var(--muted);border-left:2px solid var(--rule);padding-left:11px}
+a.lgo{display:inline-block;font-size:13px;margin:0 0 14px;text-decoration:none;border:1px solid var(--line);
+  border-radius:14px;padding:4px 12px;background:var(--chip);color:var(--accent)}
+a.lgo:hover{border-color:var(--accent)}
+.lcue{font:500 11px/1.5 ui-monospace,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--nws);background:var(--shade);border-radius:4px;padding:5px 9px;display:inline-block;
+  margin:16px 0 8px !important}
+.lnote{background:var(--warn-soft);border-left:3px solid var(--warn);padding:9px 12px;
+  border-radius:0 5px 5px 0;font-size:13.5px}
+.lquiz{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.lquiz h3{margin:0 0 8px;font:500 11px/1 ui-monospace,Menlo,monospace;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--muted)}
+.lquiz ol{margin:0;padding-left:18px;font-size:14px}
+.lquiz li{margin-bottom:7px}
+.lquiz summary{cursor:pointer;color:var(--ink)}
+.lquiz summary:hover{color:var(--accent)}
+.lans{margin:5px 0 0 !important;color:var(--accent);font-size:13.5px}

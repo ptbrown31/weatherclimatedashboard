@@ -73,6 +73,7 @@ window.WXC = (() => {
     // still answers, because the daily letter links its four views directly
     const REF = [['daily-temperature-markets.html', 'Trading temp markets'],
                  ['allocator.html', 'Position calculator'],
+                 ['lessons.html', 'Lessons'],
                  ['accuracy.html', 'Accuracy'], ['faq.html', 'FAQ'], ['about.html', 'About']];
     const nav = cfg.nav || { l1: [], categories: [] };
     const cats = nav.categories || [];

@@ -1697,6 +1697,38 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} robots: crawlers are allowed and told where the index is",
                         bool(idx and "Allow: /" in idx["robots"] and "sitemap.xml" in idx["robots"]),
                         str(idx and idx["robots"])[:80])
+                # the lessons page: both courses, every lesson addressable, and
+                # each one linking to the page it teaches
+                page.goto(f"{srv.url}/lessons.html"); page.wait_for_timeout(1200)
+                ls = page.evaluate("""() => {
+                  const courses = [...document.querySelectorAll('.course')].map(c => c.id);
+                  const lessons = [...document.querySelectorAll('details.lesson')];
+                  const links = [...document.querySelectorAll('a.lgo')].map(a => a.getAttribute('href'));
+                  return { courses, n: lessons.length, ids: lessons.map(l => l.id),
+                           links, quiz: document.querySelectorAll('.lquiz li').length,
+                           anyOpen: lessons.filter(l => l.open).length };
+                }""")
+                chk.add(f"{scheme} lessons: both courses render every lesson",
+                        bool(ls and ls["courses"] == ["reading", "trading"] and ls["n"] == 18
+                             and ls["quiz"] == 54),
+                        str(ls and {k: ls[k] for k in ('courses', 'n', 'quiz')}))
+                chk.add(f"{scheme} lessons: they open shut, so eighteen is not a wall",
+                        bool(ls and ls["anyOpen"] == 0), str(ls and ls["anyOpen"]))
+                chk.add(f"{scheme} lessons: every one links to a page that answers",
+                        bool(ls and len(ls["links"]) == 18), str(ls and len(ls["links"] or [])))
+                # a lesson named in the address opens itself, on a fresh load and
+                # on a hash that arrives later
+                page.goto(f"{srv.url}/lessons.html#trading-2"); page.wait_for_timeout(1200)
+                deep = page.evaluate("""async () => {
+                  const t = document.getElementById('trading-2');
+                  const fresh = !!(t && t.open);
+                  location.hash = 'reading-7';
+                  await new Promise(r => setTimeout(r, 400));
+                  const later = !!(document.getElementById('reading-7') || {}).open;
+                  return { fresh, later };
+                }""")
+                chk.add(f"{scheme} lessons: a lesson named in the address opens itself",
+                        bool(deep and deep["fresh"] and deep["later"]), str(deep))
                 page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
                 chk.add(f"{scheme} severe: the tornado reports lead the page",
                         page.evaluate("""() => {
@@ -1829,12 +1861,18 @@ def run(no_build: bool) -> int:
                 page.wait_for_timeout(900)
                 page.locator("#map g.dot").nth(2).hover(force=True); page.wait_for_timeout(120)
                 t_md = page.locator("#tip").inner_text()
-                # the tooltip carries the board on screen and nothing else: the
-                # default view is today's highs, so today's record belongs and
-                # the day-ahead forecasts do not
+                # the tooltip carries the board on screen and nothing else. Which
+                # board that is depends on the hour, since the map opens on
+                # today's until 5 pm Eastern and on the day-ahead after it, so the
+                # check reads the button that is pressed rather than assuming,
+                # which it did until it ran past five one evening and failed.
+                opened_today = page.locator("#m1.on").count() == 1
                 chk.add(f"{scheme} hover: map dot shows the board on screen, not both days",
-                        "today" in t_md and "Observed high so far" in t_md
-                        and "Blend of Models" not in t_md, t_md[:110])
+                        (("today" in t_md and "Observed high so far" in t_md
+                          and "Blend of Models" not in t_md) if opened_today
+                         else ("tomorrow" in t_md and "Blend of Models" in t_md
+                               and "Observed high so far" not in t_md)),
+                        ("today " if opened_today else "tomorrow ") + t_md[:100])
                 wdots = page.locator("#mapW g.dot").count()
                 chk.add(f"{scheme} map: the international stations sit on a world canvas below", wdots >= 10, f"dots={wdots}")
                 # the reference field is interpolated for tomorrow only, so the
