@@ -43,6 +43,25 @@ window.WXCity = (() => {
     const ms = Date.parse(iso);
     return isNaN(ms) ? sid : WXC.clockFull(ms, tz) + ' · ' + WXC.dateShort(ms, tz);
   }
+  /* When a cycle was issued, in the least ink that still answers the
+     question: the hour, a or p, and T or Y for whether that hour fell on the
+     contract day being shown or the day before it. A run standing since
+     11:26 the previous night is 11p Y.
+
+     Against the contract day rather than the wall clock, because the label
+     sits on a chart of one particular day and the fact worth reading is how
+     much of THAT day the forecast had already seen. It also keeps the label
+     from changing meaning as the clock passes midnight, and reads the same
+     on the day-ahead board. The hour is the one the cycle falls in, not a
+     rounding of it, and the full stamp is a hover away. */
+  const dayKeyOf = (ms, tz) => new Date(ms).toLocaleDateString('en-CA', { timeZone: tz });
+  function issuedTag(ms, tz, M) {
+    if (ms == null || isNaN(ms)) return '';
+    const h = WXC.hourOf(ms, tz);
+    const on = dayKeyOf(ms, tz);
+    const d = M && on === M.day ? 'T' : (M && on === M.yesterday ? 'Y' : '');
+    return (h % 12 || 12) + (h < 12 ? 'a' : 'p') + (d ? ' ' + d : '');
+  }
   const sw = col => '<span class="sw" style="background:' + col + '"></span>';
   const cents = v => (v == null ? '—' : v + '¢');
   const size = n => (n ? ' ×' + Math.round(n) : '');
@@ -738,21 +757,37 @@ window.WXCity = (() => {
     //      pre-day cycle exists yet (the archive is young for that source)
     const levels = [];
     const addLevel = (k, hi, lo, issued, meta) => {
-      // "issued" alone says nothing: forecasts are issued at all sorts of
-      // times, and when this one was issued is exactly what decides how much
-      // of the day it had already seen. So the label carries the time.
+      // when a forecast was issued is what decides how much of the day it had
+      // already seen, so every label carries it, in the compact form
       const tag = cyc => {
         if (!issued) return '';
-        const ms = parseStamp(cyc);
-        return isNaN(ms) ? ' (issued)' : ' (issued ' + clock(ms, tz) + ')';
+        const t = issuedTag(parseStamp(cyc), tz, M);
+        return t ? ' (' + t + ')' : '';
       };
       if (hi != null) levels.push({ v: hi, nm: NAME[k] + tag(meta.cycleHigh), col: COL[k], k, kind: 'high', issued, cycle: meta.cycleHigh, fromHourly: meta.fromHourly });
       if (lo != null) levels.push({ v: lo, nm: NAME[k] + tag(meta.cycleLow), col: COL[k], k, kind: 'low', issued, cycle: meta.cycleLow, fromHourly: meta.fromHourly });
     };
     ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
+      const f = fc && fc[k];
+      /* The day-ahead board takes each source's forecast for THAT day.
+
+         This drew the current day's levels on the day-ahead view, so the
+         lines and their labels described a day the chart was not showing:
+         at KSFO on 2026-08-26 the board read 79, which was today's high, with
+         tomorrow's 76 nowhere on it. Every standing cycle is pre-day for a
+         day that has not begun, so all of them carry the issued mark, and a
+         source whose horizon does not reach tomorrow simply has no line. */
+      if (dayMode === 'tomorrow') {
+        if (f && (f.highTomorrow != null || f.lowTomorrow != null)) {
+          addLevel(k, f.highTomorrow, f.lowTomorrow, true,
+                   { cycleHigh: f.cycle, cycleLow: f.cycle,
+                     fromHourly: k === 'nws' ? !f.officialHighTomorrow : false });
+        }
+        return;
+      }
       const ai = AI[k];
       if (ai && (ai.highToday != null || ai.lowToday != null)) addLevel(k, ai.highToday, ai.lowToday, ai.preDay || ai.levelPreDay, { cycleHigh: ai.levelCycleHigh || ai.cycle, cycleLow: ai.levelCycleLow || ai.cycle, fromHourly: ai.fromHourly });
-      else if (fc && fc[k] && (fc[k].highToday != null || fc[k].lowToday != null)) addLevel(k, fc[k].highToday, fc[k].lowToday, false, { cycleHigh: fc[k].cycle, cycleLow: fc[k].cycle, fromHourly: fc[k].highTodayFrom === 'hourly' || fc[k].partialDay });
+      else if (f && (f.highToday != null || f.lowToday != null)) addLevel(k, f.highToday, f.lowToday, false, { cycleHigh: f.cycle, cycleLow: f.cycle, fromHourly: f.highTodayFrom === 'hourly' || f.partialDay });
     });
     const levelTip = L => {
       // every source that sits at exactly this level shares the line, so the tooltip lists them all
@@ -761,7 +796,9 @@ window.WXCity = (() => {
       same.forEach(x => {
         const pre = same.length > 1 ? NAME[x.k] + ' · ' : '';
         rows.push([pre + 'Cycle', stamp(x.cycle, tz)]);
-        rows.push([pre + 'Issued', x.issued ? 'before the day began (as issued)' : 'standing forecast; no pre-day cycle in the archive yet']);
+        rows.push([pre + 'Issued', x.issued
+          ? issuedTag(parseStamp(x.cycle), tz, M) + ' on the label, before the day began'
+          : 'standing forecast; no pre-day cycle in the archive yet']);
         rows.push([pre + 'Derived from', x.fromHourly ? 'the hourly series (no day value in that cycle)' : (x.k === 'nws' ? 'the day/night product (official high or low)' : (x.k === 'mav' ? 'the N/X line' : (x.k === 'nbm' ? 'the NBS day max/min line' : 'the hourly series')))]);
       });
       return tip.rows(same.map(x => NAME[x.k]).join(', ') + ' — forecast ' + L.kind + ' for ' + isoDate(M.day), rows,
@@ -964,7 +1001,7 @@ window.WXCity = (() => {
         const pts = inWin(rows(yk.rows)).filter(p => p.t <= d0);
         if (pts.length > 1) {
           yg.appendChild(line(pts, { stroke: col, 'stroke-width': w, 'stroke-dasharray': '2 3', opacity: od(op) }));
-          YU.push({ nm: 'Yesterday ' + NAME[k] + ' (issued ' + clock(parseStamp(yk.cycle), tz) + ')', pts, col });
+          YU.push({ nm: 'Yesterday ' + NAME[k] + ' (' + issuedTag(parseStamp(yk.cycle), tz, M) + ')', pts, col });
         }
       });
       g.appendChild(yg);
@@ -974,7 +1011,9 @@ window.WXCity = (() => {
     if (A.length) {
       g.appendChild(line(A, { stroke: COL.nws, 'stroke-width': 1.4, 'stroke-dasharray': '2 3', opacity: od(.8) }));
       const ai = AI.nws;
-      g.appendChild(txt((ai.preDay ? 'issued ' : 'first archived cycle, ') + clock(A[0].t, tz), { x: x(A[0].t) + 6, y: y(A[0].v) + 14, class: 'mklab', fill: COL.nws }));
+      g.appendChild(txt(ai.preDay ? issuedTag(parseStamp(ai.cycle), tz, M)
+                                  : 'first archived cycle, ' + clock(A[0].t, tz),
+                        { x: x(A[0].t) + 6, y: y(A[0].v) + 14, class: 'mklab', fill: COL.nws }));
     }
     if (LA.length) g.appendChild(line(LA, { stroke: COL.lamp, 'stroke-width': 1.6, 'stroke-dasharray': '1 3', opacity: od(.9) }));
     if (N.length) g.appendChild(line(N, { stroke: COL.nbm, 'stroke-width': 2, 'stroke-dasharray': '5 4', opacity: od(.9) }));

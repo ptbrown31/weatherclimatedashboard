@@ -1624,16 +1624,50 @@ def run(no_build: bool) -> int:
                 mc = page.evaluate("""() => {
                   const svg = document.querySelector('#chart');
                   const yd = svg && svg.querySelector('g.ydfill');
-                  const lbl = svg ? [...svg.querySelectorAll('text')].map(t => t.textContent)
-                    .filter(t => /\(issued /.test(t)) : [];
-                  return { fill: yd ? yd.children.length : 0,
-                           timed: lbl.length, bare: lbl.filter(t => /\(issued\)/.test(t)).length };
+                  return { fill: yd ? yd.children.length : 0 };
                 }""")
                 chk.add(f"{scheme} chart: the lead-in hours carry yesterday's forecast",
                         bool(mc and mc["fill"] >= 1), str(mc and mc["fill"]))
-                chk.add(f"{scheme} chart: every issued label carries its time",
-                        bool(mc and mc["timed"] >= 2 and mc["bare"] == 0),
-                        str(mc and {k: mc[k] for k in ('timed', 'bare')}))
+                # the label is the hour, a or p, and T or Y against the day on
+                # screen; the word itself is gone, and the day-ahead board
+                # shows the day-ahead levels rather than today's
+                tg = page.evaluate("""async () => {
+                  const svg = document.querySelector('#chart');
+                  const texts = () => [...svg.querySelectorAll('text')].map(t => t.textContent);
+                  const word = texts().filter(t => /issued/i.test(t));
+                  const tags = texts().filter(t => /\(\d{1,2}[ap]( [TY])?\)$/.test(t));
+                  const fc = (await WXD.get('forecast/KSFO.json')).data;
+                  document.querySelector('#dayTomorrow').click();
+                  await new Promise(r => setTimeout(r, 900));
+                  const lv = texts().filter(t => /^\d{2,3}$/.test(t)).map(Number);
+                  document.querySelector('#dayToday').click();
+                  return { word, tags: tags.length, sample: tags[0] || null,
+                           tomorrowLevels: lv,
+                           wantTomorrow: fc.nws.highTomorrow, dontWantToday: fc.nws.highToday };
+                }""")
+                chk.add(f"{scheme} chart: a cycle label is an hour, a or p, and T or Y",
+                        bool(tg and not tg["word"] and tg["tags"] >= 3),
+                        str(tg and {"word": tg["word"], "sample": tg["sample"]})[:110])
+                chk.add(f"{scheme} chart: the day-ahead board draws the day-ahead levels",
+                        bool(tg and tg["wantTomorrow"] in tg["tomorrowLevels"]
+                             and (tg["dontWantToday"] == tg["wantTomorrow"]
+                                  or tg["dontWantToday"] not in tg["tomorrowLevels"])),
+                        str(tg and {k: tg[k] for k in ('wantTomorrow', 'dontWantToday')}))
+                # the postmortem asks for the reasoning that stood when it scores
+                pm = page.evaluate("""async () => {
+                  document.querySelector('#advYday').click();
+                  await new Promise(r => setTimeout(r, 1400));
+                  const host = document.querySelector('.advrow #discussion');
+                  const t = host ? host.innerText : '';
+                  document.querySelector('#advToday').click();
+                  await new Promise(r => setTimeout(r, 600));
+                  return { yday: t.slice(0, 400), today: (host ? host.innerText : '').slice(0, 400) };
+                }""")
+                chk.add(f"{scheme} postmortem: the discussion says which issuance it is showing",
+                        bool(pm and (("standing at the moment scored" in pm["yday"])
+                                     or ("do not reach back" in pm["yday"]))
+                             and "standing at the moment scored" not in pm["today"]),
+                        str(pm and pm["yday"])[:120])
                 # every station the board carries has to have a page to link to,
                 # built by the same rule the browser uses to write the link
                 page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1500)

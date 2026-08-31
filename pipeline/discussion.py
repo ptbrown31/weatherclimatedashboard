@@ -29,7 +29,14 @@ from .storage import Storage
 
 SCHEMA = 1
 KEY = "snapshots/discussion/{wfo}.json"
+PAST_KEY = "snapshots/discussion/{wfo}-past.json"
 INDEX_KEY = "snapshots/discussion/index.json"
+# How many issuances back to keep. The city page's postmortem asks for the
+# discussion that stood at six the evening before yesterday, so the window has
+# to reach two days; an office issues four or so a day and amends between, and
+# twelve covers that with room. Kept in its own object because it runs to tens
+# of kilobytes and the standing discussion is what a page load needs.
+PAST_KEEP = 12
 # offices reissue a discussion a few times a day and amend in between, so this is
 # read often enough to catch an amendment without asking on every pass
 CACHE = "public, max-age=900, stale-while-revalidate=7200, stale-if-error=86400"
@@ -120,6 +127,30 @@ def discussion_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None)
         store.put(KEY.format(wfo=wfo), json.dumps(doc, separators=(",", ":")).encode(),
                   "application/json", CACHE)
         written += 1
+
+        # The issuances this office has published lately, newest first, so a
+        # page can show the reasoning that stood at some earlier moment rather
+        # than today's against yesterday's numbers. `seen` is when this site
+        # first read the text, not when the office filed it: the office's own
+        # time is a string in its own zone and is carried for display, while
+        # ordering and selection use the time this site can vouch for. A
+        # discussion is context rather than a number a contract settles on, so
+        # this is a rolling window and not an archive.
+        if not prev or prev.get("text") != text:
+            past_raw = store.get(PAST_KEY.format(wfo=wfo))
+            try:
+                past = json.loads(past_raw).get("issuances", []) if past_raw else []
+            except (ValueError, AttributeError):
+                past = []
+            past = [{"seen": doc["seen"], "issued": parts["issued"], "office": parts["office"],
+                     "body": parts["body"], "url": doc["url"]}] + \
+                   [p for p in past if p.get("body") != parts["body"]]
+            store.put(PAST_KEY.format(wfo=wfo),
+                      json.dumps({"schema": SCHEMA, "wfo": wfo, "asof": _iso(now),
+                                  "note": "seen is when this site first read the text, "
+                                          "which is at or after the office filed it",
+                                  "issuances": past[:PAST_KEEP]}, separators=(",", ":")).encode(),
+                      "application/json", CACHE)
 
     idx = {"schema": SCHEMA, "asof": _iso(now), "stations": by_station,
            "offices": offices, "written": written}

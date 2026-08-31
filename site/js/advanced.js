@@ -409,6 +409,12 @@ window.WXAdv = (function () {
     Object.entries({ advToday: 'today', advTmw: 'tomorrow', advYday: 'yesterday' })
       .forEach(([id, dd]) => { const b = $('#' + id); if (b) b.classList.toggle('on', dd === day); });
     draw();
+    // the reasoning beside the panels follows the day they are showing: the
+    // postmortem gets the discussion that stood at the moment it scores
+    if (window.WXDiscussion && sid) {
+      WXDiscussion.draw(sid, day === 'yesterday' && adv ? Date.parse(adv.anchor) : null)
+        .catch(() => {});
+    }
   }
 
   /* The page tells this module which station it is on. The panels are part
