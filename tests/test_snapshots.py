@@ -309,3 +309,16 @@ class WxElements(unittest.TestCase):
         block = self.LAMP.replace(" DPT  55 55 54", " DPT  55    54")
         p = gw.parse_wx_block(block, "lamp")
         self.assertEqual([r["dew_f"] for r in p["rows"]], [55.0, None, 54.0])
+
+    def test_nws_hourly_conversions(self):
+        # wind arrives as words and mph, sky as a phrase; each converts once
+        self.assertEqual(gw.compass_deg("WSW"), 247.5)
+        self.assertIsNone(gw.compass_deg(""))
+        self.assertEqual(gw.mph_to_kt("8 mph"), 7.0)
+        self.assertEqual(gw.mph_to_kt("5 to 10 mph"), 6.5)   # a range becomes its midpoint
+        self.assertIsNone(gw.mph_to_kt(None))
+        self.assertEqual(gw.short_forecast_sky("Mostly Sunny"), 19)
+        self.assertEqual(gw.short_forecast_sky("Sunny"), 0)
+        self.assertEqual(gw.short_forecast_sky("Partly Cloudy then Patchy Fog"), 44)
+        self.assertEqual(gw.short_forecast_sky("Mostly Cloudy"), 75)
+        self.assertIsNone(gw.short_forecast_sky("Slight Chance Rain Showers"))

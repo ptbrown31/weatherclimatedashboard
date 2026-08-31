@@ -738,9 +738,16 @@ window.WXCity = (() => {
     //      pre-day cycle exists yet (the archive is young for that source)
     const levels = [];
     const addLevel = (k, hi, lo, issued, meta) => {
-      const tag = issued ? ' (issued)' : '';
-      if (hi != null) levels.push({ v: hi, nm: NAME[k] + tag, col: COL[k], k, kind: 'high', issued, cycle: meta.cycleHigh, fromHourly: meta.fromHourly });
-      if (lo != null) levels.push({ v: lo, nm: NAME[k] + tag, col: COL[k], k, kind: 'low', issued, cycle: meta.cycleLow, fromHourly: meta.fromHourly });
+      // "issued" alone says nothing: forecasts are issued at all sorts of
+      // times, and when this one was issued is exactly what decides how much
+      // of the day it had already seen. So the label carries the time.
+      const tag = cyc => {
+        if (!issued) return '';
+        const ms = parseStamp(cyc);
+        return isNaN(ms) ? ' (issued)' : ' (issued ' + clock(ms, tz) + ')';
+      };
+      if (hi != null) levels.push({ v: hi, nm: NAME[k] + tag(meta.cycleHigh), col: COL[k], k, kind: 'high', issued, cycle: meta.cycleHigh, fromHourly: meta.fromHourly });
+      if (lo != null) levels.push({ v: lo, nm: NAME[k] + tag(meta.cycleLow), col: COL[k], k, kind: 'low', issued, cycle: meta.cycleLow, fromHourly: meta.fromHourly });
     };
     ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
       const ai = AI[k];
@@ -940,6 +947,28 @@ window.WXCity = (() => {
       g.appendChild(line(sr.pts, a));
     });
     if (showYday && !YD.nws && !YD.nbm) g.appendChild(txt('Yesterday’s as-issued forecast appears here once the archive is a day old.', { x: S.L + 8, y: S.T + 30, class: 'axl' }));
+    /* The lead-in hours keep the forecast that stood for them.
+
+       The window opens at noon the day before, and the standing cycles above
+       only begin at their own issuance, so the first half of the figure showed
+       observations with no forecast beside them, as if none had existed. The
+       cycles that stood for yesterday are in the snapshot already; they draw
+       here in their real positions, clipped at the day boundary, in the same
+       dashed weight the as-issued lines use. Not on the day-ahead view, whose
+       lead-in is today and already carried by the standing series. */
+    let YU = [];
+    if (dayMode !== 'tomorrow') {
+      const yg = el('g', { class: 'ydfill' });
+      [['lamp', COL.lamp, 1.2, .7], ['nbm', COL.nbm, 1.3, .75], ['nws', COL.nws, 1.4, .8]].forEach(([k, col, w, op]) => {
+        const yk = YD[k]; if (!yk || !yk.rows) return;
+        const pts = inWin(rows(yk.rows)).filter(p => p.t <= d0);
+        if (pts.length > 1) {
+          yg.appendChild(line(pts, { stroke: col, 'stroke-width': w, 'stroke-dasharray': '2 3', opacity: od(op) }));
+          YU.push({ nm: 'Yesterday ' + NAME[k] + ' (issued ' + clock(parseStamp(yk.cycle), tz) + ')', pts, col });
+        }
+      });
+      g.appendChild(yg);
+    }
     if (LAI.length) g.appendChild(line(LAI, { stroke: COL.lamp, 'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: od(.7) }));
     if (NA.length) g.appendChild(line(NA, { stroke: COL.nbm, 'stroke-width': 1.3, 'stroke-dasharray': '2 3', opacity: od(.75) }));
     if (A.length) {
@@ -1169,6 +1198,7 @@ window.WXCity = (() => {
       series: [{ nm: 'Observed', pts: O, col: COL.obs }, { nm: 'NWS now', pts: F, col: COL.nws }, { nm: 'NBM', pts: N, col: COL.nbm },
                { nm: 'LAMP', pts: LA, col: COL.lamp }, { nm: 'NWS as issued', pts: A, col: COL.nws }, { nm: 'NBM as issued', pts: NA, col: COL.nbm },
                { nm: 'LAMP as issued', pts: LAI, col: COL.lamp }]
+        .concat(YU)
         .concat(ySeries.map(s => ({ nm: s.nm, pts: s.pts, col: s.col }))).filter(s => s.pts.length),
       prices: priceSer };
   }

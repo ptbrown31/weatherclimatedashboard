@@ -771,6 +771,42 @@ WX_ELEMENTS = {"nbh": ("TMP", "DPT", "SKY", "WDR", "WSP"),
                "mav": ("TMP", "DPT", "CLD", "WDR", "WSP")}
 
 
+# ---- the NWS hourly forecast's elements, for the same panels. The gridpoint
+# hourly product publishes wind as "8 mph" with a compass point and the sky as
+# a phrase rather than a percent, so each needs one small, honest conversion.
+_COMPASS = {"N": 0, "NNE": 22.5, "NE": 45, "ENE": 67.5, "E": 90, "ESE": 112.5, "SE": 135,
+            "SSE": 157.5, "S": 180, "SSW": 202.5, "SW": 225, "WSW": 247.5, "W": 270,
+            "WNW": 292.5, "NW": 315, "NNW": 337.5}
+
+# the sky terms the NWS phrase vocabulary uses, at the same band midpoints the
+# categorical bulletins map to, so every tool shares one axis. A phrase that
+# names no sky condition (a bare "Patchy Fog", a precipitation-only wording)
+# maps to nothing rather than to a guess.
+_SKY_PHRASE = (("mostly sunny", 19), ("mostly clear", 19), ("partly sunny", 44),
+               ("partly cloudy", 44), ("mostly cloudy", 75), ("becoming cloudy", 75),
+               ("sunny", 0), ("clear", 0), ("cloudy", 100), ("overcast", 100))
+
+
+def compass_deg(s: str) -> Optional[float]:
+    return _COMPASS.get((s or "").strip().upper())
+
+
+def mph_to_kt(s: str) -> Optional[float]:
+    """'8 mph' or '5 to 10 mph' -> knots. A range becomes its midpoint."""
+    ns = [float(m) for m in re.findall(r"\d+", s or "")]
+    return round(sum(ns) / len(ns) * 0.868976, 1) if ns else None
+
+
+def short_forecast_sky(s: str) -> Optional[int]:
+    """The sky-cover band midpoint a shortForecast phrase names, or None.
+    Longest phrases first, so 'Mostly Sunny' does not match bare 'sunny'."""
+    low = (s or "").lower()
+    for phrase, pct in _SKY_PHRASE:
+        if phrase in low:
+            return pct
+    return None
+
+
 def parse_wx_block(block: str, family: str) -> dict:
     """
     The upstream-of-temperature elements of one station block: dewpoint, sky

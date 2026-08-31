@@ -1552,7 +1552,7 @@ def run(no_build: bool) -> int:
                   const cap = (document.querySelector('#advCap') || {}).textContent || '';
                   btn.click();
                   return { hiddenBefore: before, today, yday,
-                           anchored: cap.indexOf('six the evening before') >= 0 && cap.indexOf('Cycles ') >= 0,
+                           anchored: cap.indexOf('six the evening before') >= 0 && cap.indexOf('Issued ') >= 0,
                            hiddenAfter: sect.hidden };
                 }""")
                 chk.add(f"{scheme} advanced: hidden until asked, panels draw for both days",
@@ -1562,6 +1562,48 @@ def run(no_build: bool) -> int:
                         str(av and {k: av[k] for k in ('hiddenBefore', 'today', 'yday')})[:120])
                 chk.add(f"{scheme} advanced: the postmortem says it reads the anchored cycle",
                         bool(av and av["anchored"]), str(av and av["anchored"]))
+                # the panels carry the Weather Service alongside the guidance
+                # tools, temperature leads both columns, and the labels name
+                # issuance times rather than the bare word
+                av2 = page.evaluate("""async () => {
+                  const btn = document.querySelector('#advBtn');
+                  btn.click();
+                  await new Promise(r => setTimeout(r, 700));
+                  const svg = document.querySelector('#advPanels svg');
+                  const texts = svg ? [...svg.querySelectorAll('text')].map(t => t.textContent) : [];
+                  const cap = (document.querySelector('#advCap') || {}).textContent || '';
+                  const dashes = svg ? new Set([...svg.querySelectorAll('path')]
+                    .map(pp => pp.getAttribute('stroke-dasharray')).filter(Boolean)) : new Set();
+                  btn.click();
+                  return { nws: texts.indexOf('Weather Service') >= 0,
+                           temps: texts.filter(t => t === 'TEMPERATURE').length,
+                           styles: [...dashes].sort(),
+                           issuedTimes: /Issued .*Weather Service \d/.test(cap) || /Weather Service \d/.test(cap) };
+                }""")
+                chk.add(f"{scheme} advanced: the Weather Service draws with the guidance tools",
+                        bool(av2 and av2["nws"]), str(av2 and av2["nws"]))
+                chk.add(f"{scheme} advanced: temperature leads both columns",
+                        bool(av2 and av2["temps"] == 2), str(av2 and av2["temps"]))
+                chk.add(f"{scheme} advanced: the tools keep the main chart's line styles",
+                        bool(av2 and "5 4" in av2["styles"] and "1 3" in av2["styles"]),
+                        str(av2 and av2["styles"]))
+                chk.add(f"{scheme} advanced: the caption names issuance times, not the bare word",
+                        bool(av2 and av2["issuedTimes"]), "")
+                # the main chart's lead-in hours keep the forecast that stood
+                # for them, and its level labels say when each was issued
+                mc = page.evaluate("""() => {
+                  const svg = document.querySelector('#chart');
+                  const yd = svg && svg.querySelector('g.ydfill');
+                  const lbl = svg ? [...svg.querySelectorAll('text')].map(t => t.textContent)
+                    .filter(t => /\(issued /.test(t)) : [];
+                  return { fill: yd ? yd.children.length : 0,
+                           timed: lbl.length, bare: lbl.filter(t => /\(issued\)/.test(t)).length };
+                }""")
+                chk.add(f"{scheme} chart: the lead-in hours carry yesterday's forecast",
+                        bool(mc and mc["fill"] >= 1), str(mc and mc["fill"]))
+                chk.add(f"{scheme} chart: every issued label carries its time",
+                        bool(mc and mc["timed"] >= 2 and mc["bare"] == 0),
+                        str(mc and {k: mc[k] for k in ('timed', 'bare')}))
                 # every station the board carries has to have a page to link to,
                 # built by the same rule the browser uses to write the link
                 page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1500)

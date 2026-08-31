@@ -636,7 +636,30 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
     yday = dt.date.fromisoformat(mk["yesterday"])
     anchor = (dt.datetime.combine(yday, dt.time(0), tzinfo=tz)
               - dt.timedelta(hours=6)).astimezone(dt.timezone.utc)
-    by_kind = {k: list_recent(store, sid, k, now) for k in ("nbh", "nbs", "lamp", "mav")}
+    by_kind = {k: list_recent(store, sid, k, now) for k in ("hourly", "nbh", "nbs", "lamp", "mav")}
+
+    def nws(key: str) -> Optional[dict]:
+        """The NWS hourly forecast's elements. Wind arrives as '8 mph' with a
+        compass point and the sky as a phrase, converted once each in
+        gov_weather; a phrase that names no sky condition carries no sky."""
+        try:
+            periods = (json.loads(_read_gz(store, key)).get("properties") or {}).get("periods") or []
+        except (ValueError, AttributeError, OSError):
+            return None
+        rows = []
+        for p in periods:
+            t = p.get("startTime")
+            if not t:
+                continue
+            dew = ((p.get("dewpoint") or {}).get("value"))
+            rows.append({"t": _iso(_parse_iso(t)),
+                         "tempF": float(p["temperature"]) if p.get("temperature") is not None else None,
+                         "dewF": round(gw.c_to_f(dew), 1) if dew is not None else None,
+                         "sky": gw.short_forecast_sky(p.get("shortForecast")),
+                         "cover": None,
+                         "wdir": gw.compass_deg(p.get("windDirection")),
+                         "wspd": gw.mph_to_kt(p.get("windSpeed"))})
+        return {"cycle": _stamp_of(key), "rows": rows} if rows else None
 
     def wx(kind: str, key: str) -> Optional[dict]:
         try:
@@ -654,7 +677,9 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
         if cut is not None:
             stamp = cut.strftime("%Y%m%dT%H%M%SZ")
             keys = [k for k in keys if _norm_stamp(_stamp_of(k)) <= _norm_stamp(stamp)]
-        return wx(kind, keys[-1]) if keys else None
+        if not keys:
+            return None
+        return nws(keys[-1]) if kind == "hourly" else wx(kind, keys[-1])
 
     def nbm(cut: Optional[dt.datetime] = None) -> Optional[dict]:
         hour, three = newest("nbh", cut), newest("nbs", cut)
@@ -668,7 +693,8 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
         return base
 
     def reading(cut: Optional[dt.datetime] = None) -> dict:
-        return {"nbm": nbm(cut), "lamp": newest("lamp", cut), "mav": newest("mav", cut)}
+        return {"nws": newest("hourly", cut), "nbm": nbm(cut),
+                "lamp": newest("lamp", cut), "mav": newest("mav", cut)}
 
     cur, yd = reading(), reading(anchor)
     if not any(cur.values()) and not any(yd.values()):
