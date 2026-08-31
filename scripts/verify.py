@@ -1595,6 +1595,23 @@ def run(no_build: bool) -> int:
                         bool(av and av["tmwSynced"]), str(av and av["tmwSynced"]))
                 chk.add(f"{scheme} advanced: every line carries dots at its own readings",
                         bool(av and av["toolDots"] >= 10), str(av and av["toolDots"]))
+                # expanding must never make the column smaller, and closing
+                # must give back exactly what was there
+                ex2 = page.evaluate("""() => {
+                  const svg = document.querySelector('#advPanels svg');
+                  const btn = document.querySelector('#advExpand button');
+                  if (!svg || !btn) return null;
+                  const w0 = svg.getBoundingClientRect().width;
+                  btn.click();
+                  const w1 = svg.getBoundingClientRect().width;
+                  btn.click();
+                  const w2 = svg.getBoundingClientRect().width;
+                  return { w0: Math.round(w0), w1: Math.round(w1), w2: Math.round(w2),
+                           grew: w1 >= w0 - 1, restored: Math.abs(w2 - w0) < 1 };
+                }""")
+                chk.add(f"{scheme} advanced: expanding never makes the panels smaller",
+                        bool(ex2 and ex2["grew"] and ex2["restored"]),
+                        str(ex2 and {k: ex2[k] for k in ('w0', 'w1', 'w2')}))
                 # the column is the temperature panel's share of the page, with
                 # the forecast discussion in what the ladders use above (on a
                 # window wide enough to hold the row)

@@ -312,6 +312,7 @@ window.WXAdv = (function () {
     hourLabels(svg, col, y + bh + 14, s);
     hover(svg, s, y + bh);
     host.appendChild(svg);
+    fitFull();
 
     const src = reading();
     const cyc = TOOLS.map(t => src[t.k] ? t.name + ' ' + clockOf(src[t.k].cycle) : null).filter(Boolean).join(', ');
@@ -346,12 +347,34 @@ window.WXAdv = (function () {
     return true;
   }
 
+  /* Expanded, the column is fitted the way the station map is: to the
+     window, floored at the width it already had in the page, and the card
+     scrolls when the floor wins. Expanding must never make a thing smaller,
+     which on a short window a bare fit-to-height does. */
+  let restW = 0;
+  function fitFull() {
+    const card = $('#advCard'), svgEl = host && host.querySelector('svg');
+    if (!card || !svgEl) return;
+    if (!card.classList.contains('full')) {
+      restW = host.clientWidth || restW;
+      svgEl.style.width = svgEl.style.height = '';
+      return;
+    }
+    const vb = svgEl.viewBox.baseVal;
+    const availW = card.clientWidth - 24, availH = window.innerHeight - 46;
+    const w = Math.min(availW, Math.max(availH * vb.width / vb.height, restW));
+    svgEl.style.width = Math.round(w) + 'px';
+    svgEl.style.height = Math.round(w * vb.height / vb.width) + 'px';
+  }
+
   function init() {
     tip = WXC.tooltip();
     host = $('#advPanels');
     if (!host) return;
     const xh = $('#advExpand'), card = $('#advCard');
     if (xh && card && !xh.childElementCount) xh.appendChild(WXC.expander(card, 'Expand'));
+    // the expander raises a resize on the way both in and out
+    window.addEventListener('resize', fitFull);
     const DAYS = { advToday: 'today', advTmw: 'tomorrow', advYday: 'yesterday' };
     Object.entries(DAYS).forEach(([id, d]) => {
       const b = $('#' + id); if (!b) return;
@@ -381,7 +404,12 @@ window.WXAdv = (function () {
     if (s === sid) return;
     sid = s; tz = zone || tz; adv = ob = null;
     const sect = $('#advSection');
-    load().then(ok => { if (sect) sect.hidden = !ok; }).catch(() => { if (sect) sect.hidden = true; });
+    load().then(ok => {
+      if (sect) sect.hidden = !ok;
+      // the resting width can only be read once the section is on the page;
+      // during draw it was hidden and measured as nothing
+      if (ok) requestAnimationFrame(fitFull);
+    }).catch(() => { if (sect) sect.hidden = true; });
   }
 
   return { init, station };

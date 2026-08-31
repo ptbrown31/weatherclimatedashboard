@@ -351,6 +351,13 @@ svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);borde
    610 of a 960 viewBox), and the forecast discussion fills what the strike
    ladders used, so the page's two readings sit side by side */
 .advrow{display:flex;gap:16px;align-items:flex-start}
+/* expanded, the panels' svg is not a direct child of the card the way the
+   chart's is, and a viewBox-only svg given width:auto collapses to nothing.
+   The wrapper becomes the centring frame and the svg is sized by height,
+   which an svg with a viewBox turns into a width by its own aspect. */
+.expandable.full #advPanels{display:flex;justify-content:center;width:100%}
+.expandable.full #advPanels svg{height:calc(100vh - 46px);width:auto;max-width:none;max-height:none}
+.expandable.full#advCard{align-items:safe center;justify-content:safe center}
 .advrow #advCard{flex:0 0 63.5%;min-width:0}
 .advrow .advside{flex:1;min-width:0}
 .advrow .advside .secttl{margin-top:2px}
