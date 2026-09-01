@@ -649,7 +649,7 @@ class PriceAtEachDelivery(unittest.TestCase):
 
 
 class LhlSeries(unittest.TestCase):
-    """The highest-wind pools' hourly price series."""
+    """The highest-wind pools' price series."""
 
     class Store:
         def __init__(self):
@@ -662,26 +662,36 @@ class LhlSeries(unittest.TestCase):
             self.d[k] = body
 
     ITEMS = [{"symbol": "LHLERG", "name": "Erin - highest wind, Gulf Coast", "contracts": [
-        {"strike": "Brownsville", "mid": 0.43}, {"strike": "Galveston", "mid": 0.21},
-        {"strike": "Port Arthur", "mid": None}]},
-        {"symbol": "HCAB", "contracts": [{"strike": 3, "mid": 0.5}]}]
+        {"strike": 1.0, "label": "Brownsville", "mid": 0.43},
+        {"strike": 2.0, "label": "Galveston", "mid": 0.21},
+        {"strike": 3.0, "label": "Port Arthur", "mid": None}]},
+        {"symbol": "HCAB", "contracts": [{"strike": 3, "label": "At Least 3", "mid": 0.5}]}]
 
-    def test_one_point_per_hour_and_pools_only(self):
+    def test_a_point_per_pass_keyed_by_place_not_strike(self):
         st = self.Store()
         t0 = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
         market._lhl_series(st, t0, self.ITEMS)
-        market._lhl_series(st, t0 + dt.timedelta(minutes=10), self.ITEMS)   # same hour: no new point
-        market._lhl_series(st, t0 + dt.timedelta(hours=1), self.ITEMS)
-        self.assertEqual(sorted(st.d), ["snapshots/lhl/LHLERG.json"])       # the count ladder is not a pool
+        market._lhl_series(st, t0 + dt.timedelta(minutes=10), self.ITEMS)
+        self.assertEqual(sorted(st.d), ["snapshots/lhl/LHLERG.json"])   # the count ladder is not a pool
         doc = json.loads(st.d["snapshots/lhl/LHLERG.json"])
+        # every pass, because an hourly sample missed the largest move a pool made
         self.assertEqual(len(doc["points"]), 2)
-        # an unpriced candidate is absent rather than zero, and cents are cents
+        # the place name, not the strike index, and an unpriced candidate is absent
         self.assertEqual(doc["points"][0]["p"], {"Brownsville": 43.0, "Galveston": 21.0})
 
-    def test_old_points_age_out(self):
+    def test_the_same_instant_replaces_rather_than_duplicates(self):
         st = self.Store()
         t0 = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
-        market._lhl_series(st, t0 - dt.timedelta(days=61), self.ITEMS)
         market._lhl_series(st, t0, self.ITEMS)
-        doc = json.loads(st.d["snapshots/lhl/LHLERG.json"])
-        self.assertEqual(len(doc["points"]), 1)
+        market._lhl_series(st, t0, self.ITEMS)
+        self.assertEqual(len(json.loads(st.d["snapshots/lhl/LHLERG.json"])["points"]), 1)
+
+    def test_the_series_is_capped(self):
+        st = self.Store()
+        t0 = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+        pts = [{"t": (t0 + dt.timedelta(minutes=10 * i)).isoformat().replace("+00:00", "Z"),
+                "p": {"Brownsville": 1.0}} for i in range(market.LHL_MAX_POINTS + 50)]
+        st.d["snapshots/lhl/LHLERG.json"] = json.dumps({"points": pts}).encode()
+        market._lhl_series(st, t0 + dt.timedelta(days=90), self.ITEMS)
+        self.assertEqual(len(json.loads(st.d["snapshots/lhl/LHLERG.json"])["points"]),
+                         market.LHL_MAX_POINTS)

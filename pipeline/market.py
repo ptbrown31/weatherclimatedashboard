@@ -147,16 +147,24 @@ def _group_snapshot(name: str, now: dt.datetime, items: List[dict]) -> dict:
     return {"schema": SCHEMA, "group": name, "source": SOURCE, "asof": _iso(now), "written": _iso(now), "markets": items}
 
 
+LHL_MAX_POINTS = 3000          # a storm's pool lives days; this holds weeks at the quote cadence
+
+
 def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
     """The highest-wind pools' prices, kept through time.
 
     A pool contract's Yes price is the market's own probability that its
     location takes the pool, and how that moved through a storm is worth as
     much as where it stands. The quote archive holds every pass, but a page
-    cannot read a season of gzipped passes, so each pool gets a small series,
-    one point per hour, appended by the pass that crosses the hour. Prices
-    only, the exchange's, in cents; the site computes no probability of its
-    own here or anywhere.
+    cannot read a season of gzipped passes, so each pool gets a small series
+    of its own.
+
+    One point per pass, not per hour. An hourly sample missed the largest
+    move Edouard's pool made all day, a flip from 95 to 23 cents that fell
+    between two samples, which is exactly the event the series exists to
+    show. Points are keyed by the contract's LABEL, the place name, because
+    the strike is an index and a chart legend reading "2.0" names nothing;
+    the page also matches the stated calculation to these lines by name.
     """
     for m in items:
         if not str(m.get("symbol", "")).startswith("LHL"):
@@ -167,21 +175,21 @@ def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
         except (ValueError, TypeError):
             doc = {}
         pts = doc.get("points") or []
-        last = pts[-1]["t"] if pts else None
-        if last and (now - dt.datetime.fromisoformat(last.replace("Z", "+00:00"))).total_seconds() < 3300:
-            continue
         prices = {}
         for c in m.get("contracts") or []:
-            if c.get("strike") is not None and c.get("mid") is not None:
-                prices[str(c["strike"])] = round(float(c["mid"]) * 100, 1)
+            nm = c.get("label") or (None if c.get("strike") is None else str(c["strike"]))
+            if nm and c.get("mid") is not None:
+                prices[str(nm)] = round(float(c["mid"]) * 100, 1)
         if not prices:
             continue
-        pts.append({"t": _iso(now), "p": prices})
-        # sixty days holds the longest-lived storm with room to spare
-        cut = _iso(now - dt.timedelta(days=60))
-        pts = [q for q in pts if q["t"] >= cut]
+        stamp = _iso(now)
+        pts = [q for q in pts if q.get("t") != stamp]
+        pts.append({"t": stamp, "p": prices})
+        pts.sort(key=lambda q: q["t"])
+        if len(pts) > LHL_MAX_POINTS:
+            pts = pts[-LHL_MAX_POINTS:]
         store.put(key, json.dumps({"schema": 1, "symbol": m["symbol"], "name": m.get("name"),
-                                   "asof": _iso(now), "points": pts},
+                                   "asof": stamp, "points": pts},
                                   separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
 
 
