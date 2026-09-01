@@ -1266,8 +1266,11 @@ def run(no_build: bool) -> int:
                   const p = cap && cap.nextElementSibling;
                   const txt = (p && p.textContent) || '';
                   const row = (document.querySelector('#vendor .stormrow span') || {}).textContent || '';
-                  return { threeClocks: /Three clocks/.test(txt) && /nominal cycle hour/.test(txt)
-                             && /takes its track from that advisory/.test(txt),
+                  const flat = txt.split(String.fromCharCode(10)).join(' ').replace(/  +/g, ' ');
+                  return { threeClocks: flat.indexOf('Three clocks') >= 0
+                             && flat.indexOf('forecast start time') >= 0
+                             && flat.indexOf('downstream of the official forecast') >= 0
+                             && flat.indexOf('released about three hours later') >= 0,
                            rowBoth: /LiveCyc cycle .*Z/.test(row) };
                 }""")
                 chk.add(f"{scheme} hurricane: the section explains its three clocks",

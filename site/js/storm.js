@@ -634,7 +634,9 @@ window.WXStorm = (() => {
         + 'reference locations. A forward-looking ladder declines once the storm moves past a place, and '
         + 'the vendor’s interim settlement file, which carries what was actually recorded, has not been '
         + 'published yet. Figures for passed locations read low until it arrives, and the exchange’s '
-        + 'quotes can sit above them for the same reason. Final values appear here when the file does.';
+        + 'quotes can sit above them for the same reason. Final values appear here when the file does; '
+        + 'the vendor’s final settlement file follows the storm’s last NHC advisory, typically within a '
+        + 'day or two of it.';
       host.appendChild(nt);
     }
     if (!doc || !cyc.length) {
