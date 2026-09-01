@@ -450,7 +450,13 @@ window.WXStorm = (() => {
         return { t: Date.parse(st.at), by };
       }).filter(q => isFinite(q.t));
     const W = 960, Hh = 260, L = 46, R = 830, T = 26, B = 232;
-    const t0 = Date.parse(pts[0].t), t1 = Date.parse(pts[pts.length - 1].t);
+    /* The window spans both series. The prices begin when the exchange listed
+       the pool, the deliveries began before that and land every six hours, so
+       a window drawn from the prices alone clipped every calculation point off
+       the left edge and the dashed lines vanished. */
+    const cts = calcSteps.map(q => q.t);
+    const t0 = Math.min(Date.parse(pts[0].t), ...(cts.length ? cts : [Infinity]));
+    const t1 = Math.max(Date.parse(pts[pts.length - 1].t), ...(cts.length ? cts : [-Infinity]));
     if (!(t1 > t0)) return null;
     const X = t => L + (t - t0) / (t1 - t0) * (R - L);
     const Y = v => B - (v / 100) * (B - T);
