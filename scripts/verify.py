@@ -968,34 +968,58 @@ def run(no_build: bool) -> int:
                     labels = page.eval_on_selector_all("#liveStorms .scardwrap text", "els => els.map(e => e.textContent)")
                     chk.add(f"{scheme} storm ({tag}): the settlement column is reserved from the first delivery",
                             ("settled" if _final else "settles") in labels, str(labels[:6]))
+                    ticks = len([t for t in labels if re.fullmatch(r"\d\dZ", t)])
+                    days = len([t for t in labels if re.fullmatch(r"\d\d/\d\d", t)])
+                    chk.add(f"{scheme} storm ({tag}): the card's delivery axis is labelled",
+                            ticks >= 2 and days >= 1, f"cycles={ticks} days={days}")
                     marks = len([t for t in labels if t in ("\u2713", "\u2715")])
                     chk.add(f"{scheme} storm ({tag}): outcome marks appear only once settled",
                             (marks > 0) == _final, f"marks={marks} settled={_final}")
                     pools_n = page.locator("#liveStorms .ladder .lrow").count()
                     chk.add(f"{scheme} storm ({tag}): the pool contract lists its named candidates", pools_n >= 1, f"rows={pools_n}")
-                    # the pool's price through time, below the ladders: one line
-                    # per candidate, titled as the market's own P(win)
+                    # the pool below the ladders, on the same delivery axis they
+                    # use: a calculation line per listed location with a dot at
+                    # every delivery, the exchange's price squared so it never
+                    # reads as a calculation, and a reserved column for the price
+                    # now, which moves between deliveries
                     lhl = page.evaluate("""() => {
                       const svg = document.querySelector('#liveStorms svg.lhlserie');
                       if (!svg) return null;
-                      const paths = [...svg.querySelectorAll('path')].filter(pp => pp.getAttribute('stroke') !== 'none').length;
-                      const dashed = svg.querySelectorAll('path.calcline').length;
+                      const rects = [...svg.querySelectorAll('rect')];
                       const wrap = svg.parentElement;
                       const title = (wrap.querySelector('.lt') || {}).textContent || '';
-                      // two paragraphs now: the lines, then the method
                       const cap = [...wrap.querySelectorAll('.cap')].map(e => e.textContent).join(' ');
+                      const labels = [...svg.querySelectorAll('text')].map(e => e.textContent);
                       const rowBoth = [...document.querySelectorAll('#liveStorms .ladder .lv')]
-                        .some(e => /¢ · calc \d+%/.test(e.textContent));
-                      return { paths, dashed, title, rowBoth,
-                               stated: /Each figure is the chance/.test(cap)
-                                       && /163 reference locations/.test(cap),
-                               lifetime: /whole lifetime/.test(cap)
-                                       && /need not add to one hundred/.test(cap) };
+                        .some(e => /\u00a2 \u00b7 calc \d+%/.test(e.textContent));
+                      return {
+                        calcLines: [...svg.querySelectorAll('path')]
+                          .filter(pp => pp.getAttribute('stroke-width') === '2').length,
+                        calcDots: svg.querySelectorAll('circle').length,
+                        priceSquares: rects.filter(r => r.getAttribute('width') === '6').length,
+                        nowSquares: rects.filter(r => r.getAttribute('width') === '8').length,
+                        nowColumn: labels.includes('price now'),
+                        cycleTicks: labels.filter(t => /^\d\dZ$/.test(t)).length,
+                        dayTicks: labels.filter(t => /^\d\d\/\d\d$/.test(t)).length,
+                        noTimeAxis: !/sampled hourly/.test(cap),
+                        title, rowBoth,
+                        stated: /Each figure is the chance/.test(cap)
+                                && /163 reference locations/.test(cap)
+                                && /need not add to one hundred/.test(cap),
+                        deliveryAxis: /axis counts LiveCyc deliveries/.test(cap),
+                      };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): the pool's P(win) draws through time, price and calculation together",
-                            bool(lhl and lhl["paths"] >= 3 and lhl["dashed"] >= 1
-                                 and "P(win) through time" in lhl["title"]
-                                 and lhl["rowBoth"] and lhl["stated"] and lhl["lifetime"]), str(lhl))
+                    chk.add(f"{scheme} storm ({tag}): the pool draws on the same delivery axis as the ladders",
+                            bool(lhl and lhl["calcLines"] >= 1 and lhl["calcDots"] >= 2
+                                 and lhl["cycleTicks"] >= 2 and lhl["dayTicks"] >= 1
+                                 and "delivery by delivery" in lhl["title"]
+                                 and lhl["deliveryAxis"] and lhl["noTimeAxis"]), str(lhl))
+                    chk.add(f"{scheme} storm ({tag}): the pool's prices are squares and the price now has its own column",
+                            bool(lhl and lhl["nowColumn"]
+                                 and (lhl["priceSquares"] + lhl["nowSquares"]) >= 1
+                                 and lhl["rowBoth"]), str(lhl))
+                    chk.add(f"{scheme} storm ({tag}): the calculation never appears without its formula",
+                            bool(lhl and lhl["stated"]), str(lhl))
                     page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
                     page.wait_for_timeout(150)
                     t_px = page.locator("#tip").inner_text()
