@@ -125,21 +125,24 @@ window.WXHur = (() => {
   const regionKey = label => REGION_ALIAS[label] || label;
 
   // ---- the map
-  function drawNhc(svg, X, Y, b) {
+  function drawNhc(svg, X, Y, b, g) {
+    // g is the glyph scale: world units per screen unit at the current zoom.
+    // Every size below is a screen intention, so each is multiplied by it.
+    const halo = 'stroke-width:' + (3 * g).toFixed(2) + 'px';
     const outl = (H.outlook || []).filter(o => (o.basin || '') === BASINS[b].outlook);
     const oplaced = [];
     const path = (r, close) => r.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join('') + (close ? 'Z' : '');
     outl.forEach(o => rings(o.region).forEach(r => {
-      const area = el('path', { d: path(r, true), fill: 'rgba(224,138,30,.13)', stroke: '#e08a1e', 'stroke-width': 1.6, 'stroke-dasharray': '6 4' });
+      const area = el('path', { d: path(r, true), fill: 'rgba(224,138,30,.13)', stroke: '#e08a1e', 'stroke-width': 1.6 * g, 'stroke-dasharray': (6 * g) + ' ' + (4 * g) });
       attach(area, tip.rows('NHC seven-day formation outlook — ' + esc(BASINS[b].outlook), [['2-day', esc(o.prob2 || '—')], ['7-day', esc(o.prob7 || '—')]],
         'NHC Tropical Weather Outlook, as of ' + utc(H.outlookAsof || H.asof)));
       svg.appendChild(area);
       const cx = Math.min(r.reduce((s, p) => s + X(p[0]), 0) / r.length, 905);
       let cy = r.reduce((s, p) => s + Y(p[1]), 0) / r.length;
-      while (oplaced.some(q => Math.abs(cx - q[0]) < 115 && Math.abs(cy - q[1]) < 34)) cy += 34;
+      while (oplaced.some(q => Math.abs(cx - q[0]) < 115 * g && Math.abs(cy - q[1]) < 34 * g)) cy += 34 * g;
       oplaced.push([cx, cy]);
-      svg.appendChild(txt((o.prob7 || '?') + ' / 7 days', { x: cx, y: cy, 'text-anchor': 'middle', 'font-size': 11, 'font-weight': 700, fill: '#b26a08', class: 'lbl' }));
-      svg.appendChild(txt((o.prob2 || '?') + ' / 2 days', { x: cx, y: cy + 14, 'text-anchor': 'middle', 'font-size': 9.5, fill: '#b26a08', class: 'lbl' }));
+      svg.appendChild(txt((o.prob7 || '?') + ' / 7 days', { x: cx, y: cy, 'text-anchor': 'middle', 'font-size': 11 * g, 'font-weight': 700, fill: '#b26a08', class: 'lbl', style: halo }));
+      svg.appendChild(txt((o.prob2 || '?') + ' / 2 days', { x: cx, y: cy + 14 * g, 'text-anchor': 'middle', 'font-size': 9.5 * g, fill: '#b26a08', class: 'lbl', style: halo }));
     }));
     const storms = (H.storms || []).filter(s => b === 'AL' ? s.basin === 'AL' : s.basin !== 'AL');
     storms.forEach(s => {
@@ -148,26 +151,26 @@ window.WXHur = (() => {
       const fetchedFoot = 'fetched ' + utc(s.geometryFetched);
       const name = esc(s.name);
       // a line is hard to hover at 2px, so each track gets an invisible wide twin for the pointer
-      const hitLine = (d, html) => { const q = el('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': 0, 'stroke-width': 9, 'pointer-events': 'stroke' }); attach(q, html); svg.appendChild(q); };
+      const hitLine = (d, html) => { const q = el('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': 0, 'stroke-width': 9 * g, 'pointer-events': 'stroke' }); attach(q, html); svg.appendChild(q); };
       (s.cone || []).forEach(c => rings(c).forEach(r => {
         // the cone lets the pointer through: the landfall regions beneath it carry the bids,
         // and the cone's advisory and fetch time are on every track point
-        svg.appendChild(el('path', { d: path(r, true), fill: 'rgba(100,116,139,.14)', stroke: '#64748b', 'stroke-width': 1, 'pointer-events': 'none' }));
+        svg.appendChild(el('path', { d: path(r, true), fill: 'rgba(100,116,139,.14)', stroke: '#64748b', 'stroke-width': 1 * g, 'pointer-events': 'none' }));
       }));
       (s.past || []).forEach(c => rings(c).forEach(r => {
-        svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.3, 'stroke-dasharray': '3 3' }));
+        svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.3 * g, 'stroke-dasharray': (3 * g) + ' ' + (3 * g) }));
         hitLine(path(r), tip.rows(name + ' — past track', geomRows, fetchedFoot));
       }));
       (s.track || []).forEach(c => rings(c).forEach(r => {
-        svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--navy)', 'stroke-width': 2 }));
+        svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--navy)', 'stroke-width': 2 * g }));
         hitLine(path(r), tip.rows(name + ' — NHC forecast track', geomRows, fetchedFoot));
       }));
       const hits = [];
       (s.points || []).forEach((p, i) => {
-        svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: p.tau === 0 ? 6 : 4.5, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 }));
-        if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + p.kt + 'kt' : ''), { x: X(p.lon) + 8, y: Y(p.lat) + (i % 2 ? 14 : -8), 'font-size': 9, fill: 'var(--ink)', class: 'lbl' }));
+        svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: (p.tau === 0 ? 6 : 4.5) * g, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 * g }));
+        if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + p.kt + 'kt' : ''), { x: X(p.lon) + 8 * g, y: Y(p.lat) + (i % 2 ? 14 : -8) * g, 'font-size': 9 * g, fill: 'var(--ink)', class: 'lbl', style: halo }));
         if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · ' + (p.kt != null ? p.kt : s.intensityKt) + 'kt · adv ' + (s.geometryAdvisory || s.advisory) + (s.geometryStale ? ' (stale)' : ''),
-          { x: X(p.lon) + 10, y: Y(p.lat) - 20, 'font-size': 12.5, 'font-weight': 700, fill: 'var(--navy)', class: 'lbl' }));
+          { x: X(p.lon) + 10 * g, y: Y(p.lat) - 20 * g, 'font-size': 12.5 * g, 'font-weight': 700, fill: 'var(--navy)', class: 'lbl', style: halo }));
         // the hover target: an invisible circle wider than the drawn point
         const now = p.tau === 0;
         const rows = [
@@ -183,7 +186,7 @@ window.WXHur = (() => {
         ];
         const html = tip.rows(esc(p.type || s.classification) + ' ' + name + ' — ' + (now ? 'current position' : 'forecast point'), rows,
           (s.geometryStale ? 'geometry trails the roster (stale) · ' : '') + (now && s.advisoryUrl ? 'NHC advisory → opens in a new tab' : 'lead time from the advisory'));
-        const hit = el('circle', { cx: X(p.lon), cy: Y(p.lat), r: now ? 11 : 9, fill: '#000', 'fill-opacity': 0, 'pointer-events': 'all', style: 'cursor:pointer' });
+        const hit = el('circle', { cx: X(p.lon), cy: Y(p.lat), r: (now ? 11 : 9) * g, fill: '#000', 'fill-opacity': 0, 'pointer-events': 'all', style: 'cursor:pointer' });
         if (now && s.advisoryUrl) {
           hit.onmousemove = e => tip.show(e, html);
           hit.onmouseleave = () => tip.hide();
@@ -197,11 +200,13 @@ window.WXHur = (() => {
     return { storms: storms.length, areas: outl.length };
   }
 
-  // the vendor ladder at a reference location: the hottest active storm's LiveCyc row
+  // the vendor ladder at a reference location: the hottest still-running
+  // storm's LiveCyc row. A storm that has stopped updating does not size
+  // today's map dots; its last ladder describes a day that is over.
   function vendorSite(id) {
     if (!RK || !RK.enabled) return null;
     let best = null;
-    (RK.storms || []).forEach(s => {
+    (RK.storms || []).filter(s => !WXStorm.dormant(s)).forEach(s => {
       const lc = s.livecyc; if (!lc || !lc.sites || !lc.sites[id]) return;
       const row = lc.sites[id];
       const i80 = lc.thresholds.indexOf(80);
@@ -295,6 +300,18 @@ window.WXHur = (() => {
   const VIEW0 = { x: 0, y: 0, w: 980, h: 600 };
   let view = Object.assign({}, VIEW0);
   const MAXZ = 12;                       // beyond this the vector outlines are the limit, not the pixels
+  /* Glyph scale. The viewBox zoom magnifies everything, geography and glyphs
+     alike, so at 4x a storm label filled the Gulf. Dots, labels and stroke
+     widths are drawn multiplied by this factor, the world units per screen
+     unit, which keeps them the same size on screen at every zoom; the wheel
+     still gets its instant viewBox response, and a short beat after the zoom
+     settles the map redraws its glyphs at the new scale. */
+  const GS = () => view.w / VIEW0.w;
+  let rescaleTimer = null;
+  function scheduleRescale() {
+    clearTimeout(rescaleTimer);
+    rescaleTimer = setTimeout(() => { if (H) draw(); }, 140);
+  }
   function applyView() {
     const svg = $('#basin'); if (!svg) return;
     svg.setAttribute('viewBox', [view.x, view.y, view.w, view.h].map(n => Math.round(n * 100) / 100).join(' '));
@@ -312,13 +329,13 @@ window.WXHur = (() => {
     view.x = cx - (cx - view.x) * (w / view.w);
     view.y = cy - (cy - view.y) * (h / view.h);
     view.w = w; view.h = h;
-    clampView(); applyView();
+    clampView(); applyView(); scheduleRescale();
   }
   function clampView() {
     view.x = Math.min(Math.max(view.x, VIEW0.x), VIEW0.x + VIEW0.w - view.w);
     view.y = Math.min(Math.max(view.y, VIEW0.y), VIEW0.y + VIEW0.h - view.h);
   }
-  const resetView = () => { view = Object.assign({}, VIEW0); applyView(); };
+  const resetView = () => { view = Object.assign({}, VIEW0); applyView(); scheduleRescale(); };
   function atPoint(ev) {
     const svg = $('#basin');
     const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
@@ -371,6 +388,7 @@ window.WXHur = (() => {
     const kx = W / (b1 - b0), ky = Hh / (la1 - la0);
     const X = lon => (lon - b0) * kx, Y = lat => (la1 - lat) * ky;
     const svg = $('#basin'); svg.innerHTML = '';
+    const g = GS();          // glyph scale at the current zoom, 1 at whole basin
     svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
     const lf = basin === 'AL' ? landfallQuotes() : null;
     const hlf = market('HLF');
@@ -395,13 +413,13 @@ window.WXHur = (() => {
       Object.entries(GEO.countries || {}).forEach(([nm, rr]) => {
         const label = Object.keys(lf || {}).find(k => regionKey(k) === nm) || nm;
         const [f, t, u] = fillFor(label, nm);
-        poly(rr, f, 'var(--map-line)', .6, t, u, nm);
+        poly(rr, f, 'var(--map-line)', .6 * g, t, u, nm);
       });
-      (NATION || []).forEach(r => poly([r], 'var(--map-land)', 'var(--map-line)', .6));
-      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7, t, u, nm); });
-      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8, t, u, nm); });
+      (NATION || []).forEach(r => poly([r], 'var(--map-land)', 'var(--map-line)', .6 * g));
+      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7 * g, t, u, nm); });
+      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8 * g, t, u, nm); });
     }
-    const counts = drawNhc(svg, X, Y, basin);
+    const counts = drawNhc(svg, X, Y, basin, g);
     // the reference locations: small dots, scaled by the vendor's P(gust > 80 mph) when the lane is live
     let vendorShown = 0;
     // the locations that have a delivery series loaded: those are the dots that
@@ -411,9 +429,9 @@ window.WXHur = (() => {
       if (L.lon < b0 || L.lon > b1 || L.lat < la0 || L.lat > la1) return;
       const v = vendorSite(L.id);
       const any = v && v.p.some(x => x > 0);
-      const r = v && v.p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(v.p80, 100) / 100) : (any ? 3 : 2.2);
+      const r = (v && v.p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(v.p80, 100) / 100) : (any ? 3 : 2.2)) * g;
       if (any) vendorShown++;
-      const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 });
+      const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 * g });
       attach(c, locationTip(L, v));
       if (any || withSeries[L.id]) {
         // first click opens the series, a second follows it to the contract
@@ -507,7 +525,7 @@ window.WXHur = (() => {
     if (!here.length) {
       list.appendChild(h('p', { class: 'cap', text: 'No active storms in this basin at the last update.' }));
     }
-    here.forEach(s => {
+    here.slice().sort((a, b) => (Date.parse(b.updated || '') || 0) - (Date.parse(a.updated || '') || 0)).forEach(s => {
       list.appendChild(h('div', { class: 'stormrow' }, [
         h('b', { text: s.classification + ' ' + s.name }),
         h('span', { text: s.basin + ' · ' + s.intensityKt + ' kt · ' + (s.pressureMb || '--') + ' mb · advisory ' + s.advisory + (s.geometryAdvisory && String(s.geometryAdvisory).replace(/^0+/, '') !== String(s.advisory).replace(/^0+/, '') ? ' (map shows ' + s.geometryAdvisory + ')' : '') }),
@@ -516,15 +534,19 @@ window.WXHur = (() => {
       ]));
       if (s.windProbs && s.windProbs.length) {
         const tb = h('table', { class: 'pws' });
-        tb.appendChild(h('tr', {}, [h('th', { text: 'NHC five-day cumulative probability' }), h('th', { class: 'num', text: '≥34 kt' }), h('th', { class: 'num', text: '≥50 kt' }), h('th', { class: 'num', text: '≥64 kt' })]));
+        // the product is issued in knots; the page reads in mph, at the
+        // strengths those thresholds define — 34 kt is the 39 mph of a
+        // tropical storm, 64 kt the 74 mph of a hurricane
+        tb.appendChild(h('tr', {}, [h('th', { text: 'NHC five-day cumulative probability, sustained winds' }), h('th', { class: 'num', text: '≥39 mph' }), h('th', { class: 'num', text: '≥58 mph' }), h('th', { class: 'num', text: '≥74 mph' })]));
         s.windProbs.slice(0, 14).forEach(r => {
           const tr = h('tr', {}, [h('td', { text: r.location }), h('td', { class: 'num', text: r.p34 + '%' }), h('td', { class: 'num', text: r.p50 + '%' }), h('td', { class: 'num', text: r.p64 + '%' })]);
           attach(tr, tip.rows(esc(r.location) + ' — NHC wind speed probabilities',
-            [['≥34 kt (39 mph)', r.p34 != null ? r.p34 + '%' : '—'], ['≥50 kt (58 mph)', r.p50 != null ? r.p50 + '%' : '—'], ['≥64 kt (74 mph)', r.p64 != null ? r.p64 + '%' : '—']],
-            'cumulative through the 5-day forecast, NHC PWSAT, advisory ' + esc(s.advisory)));
+            [['≥39 mph (34 kt)', r.p34 != null ? r.p34 + '%' : '—'], ['≥58 mph (50 kt)', r.p50 != null ? r.p50 + '%' : '—'], ['≥74 mph (64 kt)', r.p64 != null ? r.p64 + '%' : '—']],
+            'sustained winds, cumulative through the 5-day forecast, NHC PWSAT, advisory ' + esc(s.advisory)));
           tb.appendChild(tr);
         });
-        list.appendChild(h('div', { class: 'card', style: 'padding:0;margin:6px 0 12px' }, [tb]));
+        list.appendChild(h('div', { class: 'card', style: 'padding:0;margin:6px 0 0' }, [tb]));
+        list.appendChild(h('p', { class: 'cap', style: 'margin:4px 0 12px', text: 'These are the storm’s sustained winds, a one-minute average, at the strengths that define a tropical storm (39 mph), storm-force winds (58 mph) and a hurricane (74 mph), reaching each place within five days. The Reask LiveCyc figures above price a different quantity, the peak gust at a reference location, so the two are not comparable number for number.' }));
       }
     });
     if (!(H.storms || []).length) list.appendChild(h('div', { class: 'cap', text: 'No active tropical cyclones in the NHC roster.' }));
@@ -1053,13 +1075,32 @@ window.WXHur = (() => {
       host.appendChild(h('p', { class: 'cap', text: 'Not enabled on this site (' + (RK.reason || 'off') + '). When a storm is active and the lane is on, this section shows the vendor’s probability that the peak gust exceeds each threshold at the reference locations, as published, four times a day.' }));
       return;
     }
-    const storms = RK.storms || [];
+    const storms = (RK.storms || []).slice().sort((a, b) => {
+      const ta = WXStorm.stampOf(a), tb = WXStorm.stampOf(b);
+      return (tb == null ? Infinity : tb) - (ta == null ? Infinity : ta);
+    });
     if (!storms.length) {
       host.appendChild(h('p', { class: 'cap', text: 'Lane on; no storm with published probabilities this year yet (last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + ').' }));
     }
     storms.forEach(s => {
       const lc = s.livecyc;
-      host.appendChild(h('div', { class: 'stormrow' }, [h('b', { text: s.name + ' ' + s.year }),
+      /* A storm that has stopped updating folds shut. Its ladder is a record
+         of the last delivery rather than a probability for today, so it does
+         not share the page with the running storms; the record stays one
+         click away. */
+      const over = WXStorm.dormant(s);
+      let into = host;
+      if (over) {
+        const t = WXStorm.stampOf(s);
+        const det = h('details', { class: 'stormdone' });
+        det.appendChild(h('summary', {}, [h('b', { text: s.name + ' ' + s.year }),
+          h('span', { text: (s.final ? 'settled' : 'no longer updating')
+            + (t ? ' · last delivery ' + new Date(t).toISOString().slice(0, 10) : '') + ' · click to view' })]));
+        into = h('div');
+        det.appendChild(into);
+        host.appendChild(det);
+      }
+      into.appendChild(h('div', { class: 'stormrow' }, [h('b', { text: s.name + ' ' + s.year }),
         h('span', { text: lc ? 'LiveCyc cycle ' + lc.forecastTime + ' · ' + Object.keys(lc.sites || {}).length + ' locations with non-zero probability' : 'no LiveCyc cycle yet' }),
         h('span', { text: s.interim ? 'interim settlement file received' : '' }),
         h('span', { text: s.final ? 'final settlement file received' : '' })]));
@@ -1096,11 +1137,11 @@ window.WXHur = (() => {
           attach(tr, locationTip(L, { storm: s.name, thresholds: lc.thresholds, p: r.p, forecastTime: lc.forecastTime }));
           tb.appendChild(tr);
         });
-        host.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
+        into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
       }
       if (s.final && s.final.sites) {
         const fin = Object.entries(s.final.sites).sort((a, b) => b[1].peakGustMph - a[1].peakGustMph).slice(0, 10);
-        host.appendChild(h('p', { class: 'cap', text: 'Final peak gusts, highest first. ' + fin.map(([id, r]) => r.name + ' ' + r.peakGustMph + ' mph').join(' · ') }));
+        into.appendChild(h('p', { class: 'cap', text: 'Final peak gusts, highest first. ' + fin.map(([id, r]) => r.name + ' ' + r.peakGustMph + ' mph').join(' · ') }));
       }
     });
     host.appendChild(h('p', { class: 'cap attrib', text: (RK.attribution || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + '.' }));

@@ -28,6 +28,31 @@ window.WXStorm = (() => {
   const MAX_CARDS = 12;
   let tip = null, ledgers = {}, RK = null, MK = null, open = null;
 
+  /* When a storm stops updating. The vendor never announces an end; the
+     final settlement file is definitive, and short of one, a storm whose
+     newest delivery is older than a day and a half has outlived the
+     six-hourly cadence by enough to be treated as over. A storm with no
+     stamps at all is treated as live, which is the honest default for a
+     roster entry whose ledger has not been read. Shared with hurricane.js so
+     the map dots, the ladder tables and the delivery charts all agree on
+     which storms are still running. */
+  const STALE_MS = 36 * 3600000;
+  function stampOf(s) {
+    const lc = (s && s.livecyc) || {};
+    const t = Date.parse(lc.lastModified || lc.forecastTime || '');
+    return isFinite(t) ? t : null;
+  }
+  function dormant(s) {
+    if (s && s.final) return true;
+    const t = stampOf(s);
+    return t != null && (Date.now() - t) > STALE_MS;
+  }
+  // newest delivery first; a storm without a stamp sorts to the front
+  const byRecency = (a, b) => {
+    const ta = stampOf(a), tb = stampOf(b);
+    return (tb == null ? Infinity : tb) - (ta == null ? Infinity : ta);
+  };
+
   // a colour per threshold, cold to hot across the ladder
   const rung = (i, n) => 'hsl(' + Math.round(210 - 210 * (i / Math.max(1, n - 1))) + ' 70% 45%)';
   const stormCode = n => String(n || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
@@ -389,7 +414,7 @@ window.WXStorm = (() => {
     RK = rk; MK = mk;
     const host = $('#liveStorms'); if (!host) return;
     host.innerHTML = '';
-    const storms = ((rk && rk.storms) || []).filter(s => s && s.name);
+    const storms = ((rk && rk.storms) || []).filter(s => s && s.name).sort(byRecency);
     if (!rk || !rk.enabled) {
       host.appendChild(h('p', { class: 'cap', text: 'The live-storm wind lane is not enabled on this site' + (rk && rk.reason ? ' (' + esc(rk.reason) + ')' : '') + '. When it is on and a storm is active, each reference location the vendor signals on appears here, delivery by delivery, beside the exchange’s price for the same contract.' }));
       return;
@@ -398,19 +423,44 @@ window.WXStorm = (() => {
       host.appendChild(h('p', { class: 'cap', text: 'No storm with published probabilities at the moment. A storm appears here on its first vendor delivery.' }));
       return;
     }
-    // several storms can run at once, so each gets its own tab and its own ledger
-    const bar = h('div', { class: 'bar' });
-    const panel = h('div');
-    if (!open || !storms.some(s => s.name + '_' + s.year === open)) open = storms[0].name + '_' + storms[0].year;
-    storms.forEach(s => {
-      const k = s.name + '_' + s.year;
-      const b = h('button', { class: k === open ? 'on' : '', text: s.name });
-      b.onclick = () => { open = k; bar.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); drawStorm(s, panel); };
-      bar.appendChild(b);
+    /* Storms still delivering come first, newest delivery first, each with its
+       own tab. A storm that has stopped updating does not share that footing:
+       its record folds shut below and is drawn only when opened, so the page
+       leads with what is running rather than with what ran. */
+    const live = storms.filter(s => !dormant(s));
+    const done = storms.filter(dormant);
+    if (live.length) {
+      const bar = h('div', { class: 'bar' });
+      const panel = h('div');
+      if (!open || !live.some(s => s.name + '_' + s.year === open)) open = live[0].name + '_' + live[0].year;
+      live.forEach(s => {
+        const k = s.name + '_' + s.year;
+        const b = h('button', { class: k === open ? 'on' : '', text: s.name });
+        b.onclick = () => { open = k; bar.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); drawStorm(s, panel); };
+        bar.appendChild(b);
+      });
+      if (live.length > 1) host.appendChild(bar);
+      host.appendChild(panel);
+      await drawStorm(live.find(s => s.name + '_' + s.year === open) || live[0], panel);
+    } else {
+      host.appendChild(h('p', { class: 'cap', text: 'No storm is currently delivering. The storms below have stopped updating; open one to see its record.' }));
+    }
+    done.forEach(s => {
+      const t = stampOf(s);
+      const det = h('details', { class: 'stormdone' });
+      det.appendChild(h('summary', {}, [
+        h('b', { text: s.name + ' ' + s.year }),
+        h('span', { text: (s.final ? 'settled' : 'no longer updating')
+          + (t ? ' · last delivery ' + new Date(t).toISOString().slice(0, 10) : '') + ' · click to view' }),
+      ]));
+      const body = h('div');
+      det.appendChild(body);
+      let drawn = false;
+      det.addEventListener('toggle', () => {
+        if (det.open && !drawn) { drawn = true; drawStorm(s, body); }
+      });
+      host.appendChild(det);
     });
-    if (storms.length > 1) host.appendChild(bar);
-    host.appendChild(panel);
-    await drawStorm(storms.find(s => s.name + '_' + s.year === open) || storms[0], panel);
   }
 
   function init(t) { tip = t; }
@@ -463,5 +513,5 @@ window.WXStorm = (() => {
     return out;
   }
 
-  return { init, draw, siteCard, sites };
+  return { init, draw, siteCard, sites, dormant, stampOf };
 })();

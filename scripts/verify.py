@@ -1053,8 +1053,107 @@ def run(no_build: bool) -> int:
                         chk.add(f"{scheme} storm ({tag}): the panel closes", page.locator("#sitePanel .spanel").count() == 0, "")
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
                     page.unroute("**/data/snapshots/**")
+
+                # ---- the page's order, the standing links, and a storm that
+                #      has stopped updating alongside one still running
+                _index2 = {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026,
+                           "storms": [
+                               {"name": "Old", "year": 2026,
+                                "livecyc": {"forecastTime": "2026-07-01T00:00Z",
+                                            "lastModified": "2026-07-01T04:00:00Z", "cycles": 2,
+                                            "thresholds": [60, 70],
+                                            "sites": {"BR": {"name": "Brownsville", "p": [12, 3]}}}},
+                               {"name": "Erin", "year": 2026},
+                           ]}
+
+                def _mixed_routes(route):
+                    u = route.request.url
+                    if u.endswith("/reask.json"):
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index2))
+                    if "/storm/Erin_2026.json" in u:
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(False)))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", _mixed_routes)
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(1400)
+                lay = page.evaluate("""() => {
+                  const kids = [...document.querySelectorAll('.wrap > *')];
+                  const at = id => kids.findIndex(e => e.id === id || e.className === id);
+                  const bl = document.querySelector('.biglinks');
+                  return { order: [at('biglinks'), at('vendor'), at('liveStorms'), at('storms')],
+                           links: bl ? [...bl.querySelectorAll('a')].map(a => a.getAttribute('href')) : [] };
+                }""")
+                chk.add(f"{scheme} hurricane: the LiveCyc sections sit under the map, links first",
+                        bool(lay and all(x >= 0 for x in lay["order"])
+                             and lay["order"] == sorted(lay["order"])),
+                        str(lay and lay["order"]))
+                chk.add(f"{scheme} hurricane: the two standing links are present and correct",
+                        bool(lay and len(lay["links"]) == 2
+                             and "live-hurricane-wind-gust-prediction-markets-at-forecastex" in lay["links"][0]
+                             and "data.forecastex.com/supplemental_data/hurricanes" in lay["links"][1]),
+                        str(lay and lay["links"]))
+                mix = page.evaluate("""() => {
+                  const live = [...document.querySelectorAll('#liveStorms .bar button, #liveStorms > div > .cap')];
+                  return { doneLS: document.querySelectorAll('#liveStorms details.stormdone').length,
+                           doneV: document.querySelectorAll('#vendor details.stormdone').length,
+                           doneOpen: document.querySelectorAll('details.stormdone[open]').length,
+                           erinCards: document.querySelectorAll('#liveStorms .scardwrap').length,
+                           doneText: (document.querySelector('#liveStorms details.stormdone summary') || {}).textContent || '' };
+                }""")
+                chk.add(f"{scheme} hurricane: a stopped storm folds shut in both LiveCyc sections",
+                        bool(mix and mix["doneLS"] == 1 and mix["doneV"] == 1 and mix["doneOpen"] == 0
+                             and "no longer updating" in mix["doneText"]),
+                        str(mix))
+                chk.add(f"{scheme} hurricane: the running storm keeps the full display",
+                        bool(mix and mix["erinCards"] >= 1), str(mix and mix["erinCards"]))
+                page.unroute("**/data/snapshots/**")
+
                 page.goto(f"{srv.url}/hurricane.html")
                 page.wait_for_timeout(900)
+                # the five-day table reads in mph and says which quantity it is
+                page.locator("#b2").click(); page.wait_for_timeout(700)
+                pws = page.evaluate("""() => {
+                  const tb = document.querySelector('#storms table.pws');
+                  if (!tb) return null;
+                  const heads = [...tb.querySelectorAll('th')].map(t => t.textContent);
+                  const caps = [...document.querySelectorAll('#storms .cap')].map(c => c.textContent).join(' ');
+                  return { heads, sustained: /sustained winds/.test(heads.join(' ')),
+                           mph: heads.some(t => t === '≥39 mph') && heads.some(t => t === '≥74 mph'),
+                           kt: heads.some(t => /kt/.test(t)),
+                           gustNote: /peak gust/.test(caps) && /not comparable/.test(caps) };
+                }""")
+                chk.add(f"{scheme} hurricane: the five-day table reads in mph, named as sustained winds",
+                        bool(pws and pws["sustained"] and pws["mph"] and not pws["kt"]),
+                        str(pws and pws["heads"]))
+                chk.add(f"{scheme} hurricane: the table says it is not the LiveCyc gust quantity",
+                        bool(pws and pws["gustNote"]), str(pws and pws["gustNote"]))
+                # zooming the map keeps features the same size on screen: the
+                # viewBox shrinks and the glyphs redraw smaller by the same
+                # factor, so a label at 4x does not fill the Gulf
+                zm = page.evaluate("""async () => {
+                  const svg = () => document.querySelector('#basin');
+                  const font = () => {
+                    const t = [...svg().querySelectorAll('text')].find(x => x.getAttribute('font-size'));
+                    return t ? +t.getAttribute('font-size') : null;
+                  };
+                  const vbw = () => +svg().getAttribute('viewBox').split(' ')[2];
+                  const f0 = font(), w0 = vbw();
+                  const plus = [...document.querySelectorAll('#basinZoom button')].find(b => b.textContent === '+');
+                  plus.click(); plus.click();
+                  await new Promise(r => setTimeout(r, 400));
+                  const f1 = font(), w1 = vbw();
+                  const reset = [...document.querySelectorAll('#basinZoom button')].find(b => /whole|basin|reset/i.test(b.title || b.textContent));
+                  if (reset) { reset.click(); await new Promise(r => setTimeout(r, 400)); }
+                  return { f0, w0, f1, w1,
+                           screen0: f0 && w0 ? f0 / w0 : null, screen1: f1 && w1 ? f1 / w1 : null,
+                           restored: font() === f0 };
+                }""")
+                chk.add(f"{scheme} hurricane: zoomed glyphs hold their on-screen size",
+                        bool(zm and zm["f1"] and zm["f1"] < zm["f0"]
+                             and abs(zm["screen1"] - zm["screen0"]) < zm["screen0"] * 0.05),
+                        str(zm))
+                page.locator("#b1").click(); page.wait_for_timeout(700)
                 dots = page.locator("#basin circle").count()
                 chk.add(f"{scheme} hurricane: reference locations drawn", dots >= 100, f"circles={dots}")
                 page.locator("#basin circle").nth(40).hover(force=True); page.wait_for_timeout(120)
