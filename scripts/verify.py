@@ -982,12 +982,15 @@ def run(no_build: bool) -> int:
                       const dashed = svg.querySelectorAll('path.calcline').length;
                       const wrap = svg.parentElement;
                       const title = (wrap.querySelector('.lt') || {}).textContent || '';
-                      const cap = (wrap.querySelector('.cap') || {}).textContent || '';
+                      // two paragraphs now: the lines, then the method
+                      const cap = [...wrap.querySelectorAll('.cap')].map(e => e.textContent).join(' ');
                       const rowBoth = [...document.querySelectorAll('#liveStorms .ladder .lv')]
                         .some(e => /¢ · calc \d+%/.test(e.textContent));
                       return { paths, dashed, title, rowBoth,
-                               stated: /The calculation, stated/.test(cap),
-                               lifetime: /whole lifetime/.test(cap) && /looks forward from its cycle/.test(cap) };
+                               stated: /Each figure is the chance/.test(cap)
+                                       && /163 reference locations/.test(cap),
+                               lifetime: /whole lifetime/.test(cap)
+                                       && /need not add to one hundred/.test(cap) };
                     }""")
                     chk.add(f"{scheme} storm ({tag}): the pool's P(win) draws through time, price and calculation together",
                             bool(lhl and lhl["paths"] >= 3 and lhl["dashed"] >= 1
@@ -1216,7 +1219,7 @@ def run(no_build: bool) -> int:
                     .map(e => e.textContent).find(t => /awaiting listing/.test(t)) || null;
                   const caps = [...document.querySelectorAll('#liveStorms .cap')].map(c => c.textContent).join(' ');
                   return { lt, joined: /join this display at listing/.test(caps),
-                           stated: /The calculation, stated/.test(caps) };
+                           stated: /Each figure is the chance/.test(caps) };
                 }""")
                 chk.add(f"{scheme} hurricane: before listing the stated calculation stands alone with its formula",
                         bool(pre and pre["lt"] and pre["joined"] and pre["stated"]), str(pre))
@@ -1428,6 +1431,12 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} hurricane link: the caption says the map is clickable",
                         "clicking a shaded region" in page.locator("#basinCap").inner_text(),
                         page.locator("#basinCap").inner_text()[:80])
+                cap_txt = page.locator("#basinCap").inner_text()
+                chk.add(f"{scheme} hurricane: the map caption carries the two agencies' clock",
+                        ("00, 06, 12, and 18 UTC" in cap_txt
+                         and "03, 09, 15, and 21 UTC" in cap_txt
+                         and "labeled 18 UTC would be associated with the 21 UTC" in cap_txt),
+                        cap_txt[-120:])
                 page.locator("#ladders .lrow").first.hover(force=True); page.wait_for_timeout(120)
                 t_row = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: count ladder row shows the book and settlement", "Yes bid" in t_row and "Settles" in t_row, t_row[:80])

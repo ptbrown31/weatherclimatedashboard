@@ -12,10 +12,6 @@
 <body>
 <div class="wrap">
 <h1>Hurricane tracking</h1>
-<p class="sub">National Hurricane Center forecast tracks, cones, wind-speed probabilities and seven-day formation
-odds, drawn from NHC&rsquo;s own roster and NOAA&rsquo;s public GIS service, refreshed every half hour; the
-season&rsquo;s count from the ATCF best tracks; and, where the market layer is on, the exchange&rsquo;s listed
-hurricane contracts at their quoted prices.</p>
 <div class="bar">
   <button id="b1" class="on">Atlantic</button>
   <button id="b2">Pacific</button>
@@ -26,7 +22,7 @@ hurricane contracts at their quoted prices.</p>
 <div class="card"><svg id="basin" viewBox="0 0 980 600"></svg></div>
 <div id="sitePanel"></div>
 <div class="key" id="basinKey"></div>
-<p class="cap" id="basinCap"></p>
+<div id="basinCap"></div>
 
 <div class="biglinks">
 <a href="https://www.interactivebrokers.com/campus/traders-insight/ibkr-climate-energy/live-hurricane-wind-gust-prediction-markets-at-forecastex/">Live Hurricane Wind Gust Prediction Markets at ForecastEx &rarr;</a>
@@ -48,18 +44,6 @@ to the next cycle hour. Exchange prices carry their own as-of time wherever they
 <div id="vendor"></div>
 
 <div class="secttl">LIVECYC PROBABILITIES, DELIVERY BY DELIVERY</div>
-<p class="cap" style="margin-top:0">While a storm is running, each reference location the vendor has signalled on gets a
-chart of its probability ladder as it moved from one delivery to the next, with the exchange&rsquo;s price for the
-matching contract marked on the same axis, since a probability in percent and a price in cents share the 0 to 100
-scale. The horizontal axis counts vendor deliveries rather than clock time. Nobody knows in advance how many a
-storm will produce or when it will dissipate, so a new delivery adds a column and never moves what is already drawn.
-The rightmost column is reserved for settlement from the first delivery and stays empty until the vendor&rsquo;s
-final file arrives. The strip above the charts is one tick per delivery; drag it, use the arrows or press
-&larr; and &rarr; to step the cursor back through the storm, and every chart moves together. Stepping back also
-moves the price square to the exchange&rsquo;s price as it stood at that delivery, so an old ladder is never read
-against today&rsquo;s price. At the newest delivery the square is the current price. A cycle the vendor did not
-deliver is marked between the two columns either side of it, with the usual break slashes, because on an axis
-that counts deliveries a missed cycle would otherwise close up and read as though no extra time passed.</p>
 <div id="liveStorms"></div>
 
 <div class="secttl">ACTIVE STORMS</div>

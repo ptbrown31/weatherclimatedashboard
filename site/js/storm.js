@@ -96,18 +96,12 @@ window.WXStorm = (() => {
   /* The stated calculation's wording, printed beside every display of the
      number, because a probability the site computes exists only together
      with the formula that computed it. */
-  const METHOD = 'The calculation, stated in plain language first. Each figure is the chance that a location '
-    + 'records this storm’s single highest gust, computed from the vendor’s published per-location gust '
-    + 'probabilities. Take each location’s ladder as a distribution over gusts, treat locations as '
-    + 'independent, and the figure is the probability of coming out on top, evaluated exactly on a one-mph '
-    + 'grid with each ladder uniform within its published bins. Where an interim settlement ladder exists '
-    + 'its figure floors the lifetime one, because the contract asks about the storm’s whole lifetime while '
-    + 'a LiveCyc ladder looks forward from its cycle. All 163 reference locations compete, so the '
-    + 'percentages for the locations shown need not add to one hundred and the remainder belongs to those '
-    + 'not shown; a location the vendor scores at zero everywhere carries no chance under its own ladder. '
-    + 'Independence across locations was kept after backtests on past storms, where correlated alternatives '
-    + 'over-concentrated on the leading location and scored worse when the leader changed. The vendor’s '
-    + 'ladders are as published; the exchange’s prices are its own.';
+  const METHOD = 'Each figure is the chance that a location records this storm’s single highest gust, '
+    + 'computed from the vendor’s published per-location gust probabilities. The calculation treats each '
+    + 'location’s ladder as a distribution over gusts, assumes locations are independent, and computes the '
+    + 'probability of coming out on top exactly on a one-mph grid, with each ladder uniform within its '
+    + 'published bins. All 163 reference locations are included, so the percentages for the locations '
+    + 'shown need not add to one hundred; the remainder belongs to those not shown.';
 
   /* The current stated-calculation figure per location NAME for one storm.
      One field everywhere: the pool's candidates are all the reference
@@ -518,7 +512,11 @@ window.WXStorm = (() => {
       text: 'Highest-wind location (LHL) — P(win) through time' }));
     wrap.appendChild(svg);
     wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
-      text: 'Solid lines are the exchange’s Yes prices, sampled hourly from the quote record; a price in cents is the market’s probability that the location records the highest gust over the storm’s whole lifetime. Dashed lines are the stated calculation from each LiveCyc delivery, drawn at the delivery’s cycle time. ' + METHOD }));
+      text: 'Solid lines are the exchange’s Yes prices, sampled hourly from the quote record; a price in '
+          + 'cents is the market’s probability that the location records the highest gust over the storm’s '
+          + 'whole lifetime. Dashed lines are the stated calculation from each LiveCyc delivery, drawn at '
+          + 'the delivery’s cycle time.' }));
+    wrap.appendChild(h('p', { class: 'cap', style: 'margin:6px 0 0', text: METHOD }));
     return wrap;
   }
 

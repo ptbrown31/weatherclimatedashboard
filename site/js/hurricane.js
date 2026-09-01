@@ -516,19 +516,30 @@ window.WXHur = (() => {
     });
     wireZoom(); applyView();
     $('#modeTitle').textContent = B.name.toUpperCase() + ' · NHC forecast tracks, cones and formation odds' + (lf ? ' · landfall regions shaded by the exchange’s Yes price' : '');
-    $('#basinCap').textContent = (counts.storms ? '' : 'No active tropical cyclones in this basin at the last update. ') +
-      'Orange dashed regions are NHC seven-day formation odds; cones and tracks draw automatically when a storm is active. ' +
-      (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that part of the map shows storms only. ' : '') +
-      (lf ? 'States, countries and the six named counties are shaded by the Yes price of the landfall contract for that region (hover for the Yes and No bids); clicking a shaded region opens that contract on the exchange; unshaded regions have no listed contract or no bids. ' : '') +
-      'Scroll to zoom the map and drag to pan. During a live storm, clicking a red reference location opens its probability series below the map and keeps it there; clicking the same location again opens its wind contract. ' +
-      (vendorShown ? 'The red dots are the vendor’s (' + ((RK && RK.attribution) || 'Powered by Reask') + '). ' : '');
-    if (vendorShown) svg.appendChild(txt((RK && RK.attribution) || 'Powered by Reask', { x: W - 10, y: Hh - 10, 'text-anchor': 'end', 'font-size': 12, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl' }));
-    /* The key, drawn on the map's own ground.
-
-       The shading ramp reads as a ramp, with its two ends named, so a colour
-       can be read straight off the map. Under it sit the two kinds of dot the
-       map draws, each shown at the size it is drawn. */
-    const key = $('#basinKey'); if (key) key.innerHTML = '';
+    /* The map's caption, in three blocks: what is drawn, what a click does,
+       and the two agencies' clock, which is the question outside readers ask
+       most. The conditional sentences carry facts that are not always true,
+       so a caption never describes shading or an outlook that is not there. */
+    {
+      const cap = $('#basinCap'); cap.innerHTML = '';
+      const para = t => cap.appendChild(h('p', { class: 'cap', style: 'margin:8px 2px 0', text: t }));
+      para((counts.storms ? '' : 'No active tropical cyclones in this basin at the last update. ')
+        + 'Orange dashed regions show NHC seven-day formation odds. NHC cones and tracks are shown when a '
+        + 'storm is active. '
+        + (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that '
+                          + 'part of the map shows storms only. ' : '')
+        + (lf ? 'States, countries, and the six named counties are shaded by the Yes price of the Major '
+              + 'Hurricane (Category 3+) landfall contract for that region; clicking a shaded region opens '
+              + 'that contract on the exchange. ' : '')
+        + 'The point locations are associated with the Live Hurricane contract.');
+      para('During a live storm, clicking a red reference location opens its probability series below the '
+        + 'map; clicking the same location again opens its wind contract.');
+      para('Both the NHC and Reask LiveCyc pin the nominal 00, 06, 12, and 18 UTC forecasting cycle hours. '
+        + 'The standard times for the NHC tropical cyclone advisories are three hours after each of those '
+        + 'forecasting cycle times at 03, 09, 15, and 21 UTC (or 11:00 PM, 5:00 AM, 11:00 AM, and 5:00 PM '
+        + 'EDT). LiveCyc initiates on NHC updates, so a LiveCyc file labeled 18 UTC would be associated '
+        + 'with the 21 UTC NHC update.');
+    }
     if (lf || vendorShown) {
       const kg = el('g', { 'pointer-events': 'none' });
       const bx = 16, by = Hh - 84, bw = 132;
