@@ -488,6 +488,15 @@ window.WXStorm = (() => {
     try { doc = (await WXD.get('lhl/' + m.symbol + '.json', 10)).data; } catch (e) { doc = null; }
     const rec = ((doc && doc.points) || []).map(q => ({ t: Date.parse(q.t), p: q.p || {} }))
       .filter(q => isFinite(q.t));
+    // A recorded price is both sides of the book. Older points hold a single
+    // midpoint, which is read as a book of no width rather than dropped.
+    const book = v => {
+      if (v == null) return null;
+      const a = Array.isArray(v) ? v : [v, v];
+      if (a[0] == null && a[1] == null) return null;
+      const lo = a[0] == null ? a[1] : a[0], hi = a[1] == null ? a[0] : a[1];
+      return { bid: lo, ask: hi, mid: Math.round((lo + hi) * 5) / 10 };
+    };
     const NEAR = 45 * 60000;
     const prices = cyc.map(s => {
       const t = Date.parse(s.ts || s.at);
@@ -498,12 +507,15 @@ window.WXStorm = (() => {
     });
     const now = {};
     (m.contracts || []).forEach(c => {
-      if (c.label && c.mid != null) now[c.label] = Math.round(c.mid * 1000) / 10;
+      if (!c.label) return;
+      const b = book([c.bid == null ? null : Math.round(c.bid * 1000) / 10,
+                      c.ask == null ? null : Math.round(c.ask * 1000) / 10]);
+      if (b) now[c.label] = b;
     });
     // the locations the exchange listed: the ones a price exists for, and so the
     // ones the two numbers can be read against each other on
     const names = (m.contracts || []).map(c => c.label).filter(Boolean)
-      .sort((a, b) => (now[b] || 0) - (now[a] || 0)).slice(0, 8);
+      .sort((a, b) => ((now[b] || {}).mid || 0) - ((now[a] || {}).mid || 0)).slice(0, 8);
     if (!names.length) return null;
 
     const W = 960, Hh = 250, L = 46, R = 700, T = 26, B = 196, NOW = 772;
@@ -527,9 +539,13 @@ window.WXStorm = (() => {
       const band = el('rect', { x: x(k) - (R - L) / (2 * (n - 1)), y: T,
         width: Math.max((R - L) / (n - 1), 6), height: B - T, fill: 'transparent' });
       bind(band, () => tip.rows(label(s) + (k === cyc.length - 1 ? ' (latest)' : ''),
-        names.map(nm => [esc(nm),
-          (calc[k][nm] != null ? calc[k][nm] + '% calculated' : 'not calculated')
-          + ' · ' + (prices[k][nm] != null ? prices[k][nm] + '¢ priced' : 'not listed yet')]),
+        names.map(nm => {
+          const b = book(prices[k][nm]);
+          return [esc(nm),
+            (calc[k][nm] != null ? calc[k][nm] + '% calculated' : 'not calculated') + ' · '
+            + (b ? 'Yes bid ' + b.bid + '¢, No bid ' + Math.round(100 - b.ask) + '¢'
+                 : 'not listed yet')];
+        }),
         'delivery ' + (k + 1) + ' of ' + cyc.length + ' · recorded '
         + String(s.ts || s.at).slice(0, 16).replace('T', ' ') + 'Z · '
         + esc((RK && RK.attribution) || 'Powered by Reask')));
@@ -547,25 +563,31 @@ window.WXStorm = (() => {
         line.forEach(q => svg.appendChild(el('circle', { cx: x(q[0]).toFixed(1), cy: Y(q[1]).toFixed(1),
           r: 2.8, fill: col, 'pointer-events': 'none' })));
       }
-      // the price at each delivery, squared so it never reads as a calculation
-      prices.forEach((pr, k) => {
-        if (pr[nm] == null) return;
-        svg.appendChild(el('rect', { x: x(k) - 3, y: Y(pr[nm]) - 3, width: 6, height: 6,
-          fill: 'none', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
-      });
-      if (now[nm] != null) {
-        svg.appendChild(el('rect', { x: NOW - 4, y: Y(now[nm]) - 4, width: 8, height: 8,
-          fill: col, 'pointer-events': 'none' }));
-      }
-      const at = now[nm] != null ? now[nm] : (line.length ? line[line.length - 1][1] : 50);
+      // The price is a bar from the Yes bid to one dollar less the No bid, with
+      // a tick at the midpoint. There is no single price on this exchange, only
+      // two bids to buy, and drawing the spread is what lets a reader match the
+      // page against the exchange's own screen.
+      const bar = (cx, b, w) => {
+        const g = el('g', { class: 'pxbar', 'pointer-events': 'none' });
+        g.appendChild(el('line', { x1: cx, x2: cx, y1: Y(b.ask), y2: Y(b.bid),
+          stroke: col, 'stroke-width': 1.6 }));
+        [b.bid, b.ask].forEach(v => g.appendChild(el('line', { x1: cx - w, x2: cx + w,
+          y1: Y(v), y2: Y(v), stroke: col, 'stroke-width': 1.6 })));
+        g.appendChild(el('circle', { cx: cx, cy: Y(b.mid), r: 1.6, fill: col }));
+        svg.appendChild(g);
+      };
+      prices.forEach((pr, k) => { const b = book(pr[nm]); if (b) bar(x(k), b, 3); });
+      if (now[nm]) bar(NOW, now[nm], 4);
+      const b = now[nm];
+      const at = b ? b.mid : (line.length ? line[line.length - 1][1] : 50);
       const parts = [];
-      if (line.length) parts.push(line[line.length - 1][1] + '% calc');
-      if (now[nm] != null) parts.push(now[nm] + '¢');
-      svg.appendChild(txt(nm + '  ' + parts.join(' · '), { x: NOW + 14, y: Y(at) + 3.5,
+      if (line.length) parts.push('calc ' + line[line.length - 1][1] + '%');
+      if (b) parts.push('Yes ' + (b.bid === b.ask ? b.bid : b.bid + '–' + b.ask) + '¢');
+      svg.appendChild(txt(nm + '  ' + parts.join(' · '), { x: NOW + 16, y: Y(at) + 3.5,
         'font-size': 10, fill: col, class: 'lbl' }));
     });
 
-    const listed = prices.some(pr => names.some(nm => pr[nm] != null));
+    const listed = prices.some(pr => names.some(nm => book(pr[nm])));
     const wrap = h('div');
     wrap.appendChild(h('div', { class: 'lt', style: 'margin:12px 0 2px',
       text: 'Highest-wind location (LHL) — the calculation and the price, delivery by delivery' }));
@@ -573,11 +595,13 @@ window.WXStorm = (() => {
     wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
       text: 'The axis counts LiveCyc deliveries, the same axis the ladders above use, because nothing '
           + 'the calculation reads changes between them. A dot on a line is the stated calculation for '
-          + 'that location at that delivery. A hollow square is the exchange’s Yes price at the moment '
-          + 'that delivery was recorded, and the filled square in the column at the right is the price '
-          + 'now. A location with a line and no square was not listed when that delivery landed.'
+          + 'that location at that delivery. A bar is the exchange’s book at the moment that delivery '
+          + 'was recorded, running from the Yes bid up to one dollar less the No bid, with a tick at '
+          + 'the middle; the bar in the column at the right is the book now. There is no single price '
+          + 'on this exchange, only the two bids to buy, so both ends are drawn. A location with a '
+          + 'line and no bar was not listed when that delivery landed.'
           + (listed ? '' : ' The exchange listed this pool after every delivery shown, so the only '
-                          + 'price it has yet is the one at the right.') }));
+                          + 'book it has yet is the one at the right.') }));
     wrap.appendChild(h('p', { class: 'cap', style: 'margin:6px 0 0', text: METHOD }));
     return wrap;
   }

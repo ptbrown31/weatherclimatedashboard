@@ -662,10 +662,10 @@ class LhlSeries(unittest.TestCase):
             self.d[k] = body
 
     ITEMS = [{"symbol": "LHLERG", "name": "Erin - highest wind, Gulf Coast", "contracts": [
-        {"strike": 1.0, "label": "Brownsville", "mid": 0.43},
-        {"strike": 2.0, "label": "Galveston", "mid": 0.21},
-        {"strike": 3.0, "label": "Port Arthur", "mid": None}]},
-        {"symbol": "HCAB", "contracts": [{"strike": 3, "label": "At Least 3", "mid": 0.5}]}]
+        {"strike": 1.0, "label": "Brownsville", "bid": 0.40, "ask": 0.46, "mid": 0.43},
+        {"strike": 2.0, "label": "Galveston", "bid": 0.18, "ask": 0.24, "mid": 0.21},
+        {"strike": 3.0, "label": "Port Arthur", "bid": None, "ask": None, "mid": None}]},
+        {"symbol": "HCAB", "contracts": [{"strike": 3, "label": "At Least 3", "bid": 0.5, "ask": 0.5}]}]
 
     def test_a_point_per_pass_keyed_by_place_not_strike(self):
         st = self.Store()
@@ -676,8 +676,11 @@ class LhlSeries(unittest.TestCase):
         doc = json.loads(st.d["snapshots/lhl/LHLERG.json"])
         # every pass, because an hourly sample missed the largest move a pool made
         self.assertEqual(len(doc["points"]), 2)
-        # the place name, not the strike index, and an unpriced candidate is absent
-        self.assertEqual(doc["points"][0]["p"], {"Brownsville": 43.0, "Galveston": 21.0})
+        # the place name, not the strike index, and an unpriced candidate is absent.
+        # Both sides of the book, because the exchange publishes two bids to buy
+        # and a page showing one midpoint cannot be checked against its screen.
+        self.assertEqual(doc["points"][0]["p"],
+                         {"Brownsville": [40.0, 46.0], "Galveston": [18.0, 24.0]})
 
     def test_the_same_instant_replaces_rather_than_duplicates(self):
         st = self.Store()
@@ -690,7 +693,7 @@ class LhlSeries(unittest.TestCase):
         st = self.Store()
         t0 = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
         pts = [{"t": (t0 + dt.timedelta(minutes=10 * i)).isoformat().replace("+00:00", "Z"),
-                "p": {"Brownsville": 1.0}} for i in range(market.LHL_MAX_POINTS + 50)]
+                "p": {"Brownsville": [1.0, 2.0]}} for i in range(market.LHL_MAX_POINTS + 50)]
         st.d["snapshots/lhl/LHLERG.json"] = json.dumps({"points": pts}).encode()
         market._lhl_series(st, t0 + dt.timedelta(days=90), self.ITEMS)
         self.assertEqual(len(json.loads(st.d["snapshots/lhl/LHLERG.json"])["points"]),

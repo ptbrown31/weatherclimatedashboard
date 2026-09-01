@@ -175,11 +175,20 @@ def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
         except (ValueError, TypeError):
             doc = {}
         pts = doc.get("points") or []
+        # Both sides of the book, not the midpoint. The exchange's own screen
+        # shows the two bids to buy, so a page carrying one derived number
+        # cannot be checked against it; a reader comparing 54 against a screen
+        # reading 51 has no way to see that both are the same book.
         prices = {}
         for c in m.get("contracts") or []:
             nm = c.get("label") or (None if c.get("strike") is None else str(c["strike"]))
-            if nm and c.get("mid") is not None:
-                prices[str(nm)] = round(float(c["mid"]) * 100, 1)
+            if not nm:
+                continue
+            b, a = c.get("bid"), c.get("ask")
+            if b is None and a is None:
+                continue
+            prices[str(nm)] = [None if b is None else round(float(b) * 100, 1),
+                               None if a is None else round(float(a) * 100, 1)]
         if not prices:
             continue
         stamp = _iso(now)

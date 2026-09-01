@@ -48,14 +48,16 @@ def labels(store) -> dict:
     return out
 
 
-def mid(r: dict):
-    """The Yes price the pages show: midway between the two bids where both
-    exist, else the one side that does. The same rule pipeline/exchange.py
-    applies, restated here because an archived row is not a contract object."""
+def book(r: dict):
+    """Both sides of an archived row, in cents: the Yes bid and the Yes ask,
+    the second of which the pages show as one dollar less the No bid. Both,
+    rather than a midpoint, so a price on a page can be checked against the
+    exchange's own screen, which publishes the two bids."""
     b, a = r.get("bid"), r.get("ask")
-    if b is not None and a is not None:
-        return round((b + a) / 2, 4)
-    return b if b is not None else a
+    if b is None and a is None:
+        return None
+    return [None if b is None else round(float(b) * 100, 1),
+            None if a is None else round(float(a) * 100, 1)]
 
 
 def main(argv=None) -> int:
@@ -90,11 +92,11 @@ def main(argv=None) -> int:
                 sym = r.get("market")
                 if sym not in names or r.get("strike") is None:
                     continue
-                v = mid(r)
+                v = book(r)
                 if v is None:
                     continue
                 nm = names[sym].get(str(r["strike"]), str(r["strike"]))
-                series[sym].setdefault(asof, {})[nm] = round(float(v) * 100, 1)
+                series[sym].setdefault(asof, {})[nm] = v
 
     out = {}
     for sym, byt in series.items():

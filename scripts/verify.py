@@ -996,8 +996,9 @@ def run(no_build: bool) -> int:
                         calcLines: [...svg.querySelectorAll('path')]
                           .filter(pp => pp.getAttribute('stroke-width') === '2').length,
                         calcDots: svg.querySelectorAll('circle').length,
-                        priceSquares: rects.filter(r => r.getAttribute('width') === '6').length,
-                        nowSquares: rects.filter(r => r.getAttribute('width') === '8').length,
+                        priceBars: svg.querySelectorAll('g.pxbar').length,
+                        bothSides: [...svg.querySelectorAll('g.pxbar')]
+                          .every(g => g.querySelectorAll('line').length === 3),
                         nowColumn: labels.includes('price now'),
                         cycleTicks: labels.filter(t => /^\d\dZ$/.test(t)).length,
                         dayTicks: labels.filter(t => /^\d\d\/\d\d$/.test(t)).length,
@@ -1014,10 +1015,9 @@ def run(no_build: bool) -> int:
                                  and lhl["cycleTicks"] >= 2 and lhl["dayTicks"] >= 1
                                  and "delivery by delivery" in lhl["title"]
                                  and lhl["deliveryAxis"] and lhl["noTimeAxis"]), str(lhl))
-                    chk.add(f"{scheme} storm ({tag}): the pool's prices are squares and the price now has its own column",
-                            bool(lhl and lhl["nowColumn"]
-                                 and (lhl["priceSquares"] + lhl["nowSquares"]) >= 1
-                                 and lhl["rowBoth"]), str(lhl))
+                    chk.add(f"{scheme} storm ({tag}): the pool draws both sides of the book, and the book now has its own column",
+                            bool(lhl and lhl["nowColumn"] and lhl["priceBars"] >= 1
+                                 and lhl["bothSides"] and lhl["rowBoth"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the calculation never appears without its formula",
                             bool(lhl and lhl["stated"]), str(lhl))
                     page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
