@@ -979,7 +979,7 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} storm ({tag}): outcome marks appear only once settled",
                             (marks > 0) == _final, f"marks={marks} settled={_final}")
                     plad = page.evaluate("""() => {
-                      const svg = document.querySelector('#liveStorms svg.plad');
+                      const svg = document.querySelector('#liveStorms .plad');
                       if (!svg) return null;
                       return { rows: svg.querySelectorAll('g.prow').length,
                                yes: svg.querySelectorAll("rect[fill='var(--yes)']").length,
@@ -1002,7 +1002,8 @@ def run(no_build: bool) -> int:
                         priceSolid: svg.querySelectorAll('path.pxline').length,
                         calcDashed: svg.querySelectorAll('path.calcline').length,
                         calcDots: svg.querySelectorAll('circle.cdot').length,
-                        nowColumn: labels.includes('price now'),
+                        ladderRows: svg.querySelectorAll('g.plad g.prow').length,
+                        ladderTitle: labels.some(t => /market’s ladder/.test(t)),
                         legend: labels.includes('exchange price') && labels.includes('calculation'),
                         cycleTicks: labels.filter(t => /^\d\dZ$/.test(t)).length,
                         etTicks: labels.filter(t => /^\d{1,2}:\d\d[ap]$/.test(t)).length,
@@ -1016,8 +1017,10 @@ def run(no_build: bool) -> int:
                     }""")
                     chk.add(f"{scheme} storm ({tag}): the pool's price is solid and in front, the calculation dashed behind",
                             bool(lhl and lhl["priceSolid"] >= 1 and lhl["calcDashed"] >= 1
-                                 and lhl["calcDots"] >= 2 and lhl["nowColumn"] and lhl["legend"]
-                                 and "delivery by delivery" in lhl["title"]), str(lhl))
+                                 and lhl["calcDots"] >= 2 and lhl["legend"]
+                                 and "(LHL" in lhl["title"]), str(lhl))
+                    chk.add(f"{scheme} storm ({tag}): the market's ladder sits to the right of the chart",
+                            bool(lhl and lhl["ladderRows"] >= 1 and lhl["ladderTitle"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the pool's axis names the NHC cycle and the file's arrival in ET",
                             bool(lhl and lhl["cycleTicks"] >= 2 and lhl["etTicks"] >= 2 and lhl["headers"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the formula is the only prose under the chart",
