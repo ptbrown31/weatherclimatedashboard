@@ -87,17 +87,18 @@ window.WXStorm = (() => {
   /* The stated calculation's wording, printed beside every display of the
      number, because a probability the site computes exists only together
      with the formula that computed it. */
-  const METHOD = 'The calculation, stated: each location’s lifetime peak-gust distribution is its latest '
-    + 'LiveCyc exceedance ladder, uniform within the published threshold bins, and where an interim '
-    + 'settlement ladder exists its figure floors the lifetime one, because the contract asks about the '
-    + 'storm’s whole lifetime while a LiveCyc ladder looks forward from its cycle. Locations are treated '
-    + 'as independent and P(highest) is the probability of being the maximum, evaluated on a one-mph grid '
-    + 'and normalised to sum to one over the field, which is every reference location — a location the '
-    + 'vendor scores at zero everywhere cannot record the maximum under its ladder, so the listed strikes '
-    + 'need not sum to one and the remainder is the chance a location outside them takes it. '
-    + 'Independence is the one assumption: locations share the storm, and '
-    + 'correlation concentrates the outcome on the leader, so the leader here is if anything understated. '
-    + 'The vendor’s ladders are as published; the exchange’s prices are its own.';
+  const METHOD = 'The calculation, stated in plain language first. Each figure is the chance that a location '
+    + 'records this storm’s single highest gust, computed from the vendor’s published per-location gust '
+    + 'probabilities. Take each location’s ladder as a distribution over gusts, treat locations as '
+    + 'independent, and the figure is the probability of coming out on top, evaluated exactly on a one-mph '
+    + 'grid with each ladder uniform within its published bins. Where an interim settlement ladder exists '
+    + 'its figure floors the lifetime one, because the contract asks about the storm’s whole lifetime while '
+    + 'a LiveCyc ladder looks forward from its cycle. All 163 reference locations compete, so the '
+    + 'percentages for the locations shown need not add to one hundred and the remainder belongs to those '
+    + 'not shown; a location the vendor scores at zero everywhere carries no chance under its own ladder. '
+    + 'Independence across locations was kept after backtests on past storms, where correlated alternatives '
+    + 'over-concentrated on the leading location and scored worse when the leader changed. The vendor’s '
+    + 'ladders are as published; the exchange’s prices are its own.';
 
   /* The current stated-calculation figure per location NAME for one storm.
      One field everywhere: the pool's candidates are all the reference
