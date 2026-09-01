@@ -1729,14 +1729,48 @@ def run(no_build: bool) -> int:
                 }""")
                 chk.add(f"{scheme} lessons: a lesson named in the address opens itself",
                         bool(deep and deep["fresh"] and deep["later"]), str(deep))
+                # unfinished and kept that way: a notice at the top, no link from
+                # the navigation, and no entry in the index handed to crawlers
+                page.goto(f"{srv.url}/lessons.html"); page.wait_for_timeout(900)
+                wip = page.evaluate("""async () => {
+                  const note = document.querySelector('.wrap > .note.warn');
+                  const refs = [...document.querySelectorAll('header.site .refnav a')]
+                    .map(a => a.getAttribute('href'));
+                  const robots = document.querySelector('meta[name="robots"]');
+                  const sm = await fetch('sitemap.xml').then(r => r.ok ? r.text() : '').catch(() => '');
+                  return { notice: !!note && /under construction/i.test(note.textContent),
+                           linked: refs.indexOf('lessons.html') >= 0,
+                           noindex: !!robots && /noindex/.test(robots.content),
+                           inSitemap: sm.indexOf('lessons.html') >= 0 };
+                }""")
+                chk.add(f"{scheme} lessons: the page says it is under construction",
+                        bool(wip and wip["notice"]), str(wip and wip["notice"]))
+                chk.add(f"{scheme} lessons: nothing links to it and nothing indexes it",
+                        bool(wip and not wip["linked"] and wip["noindex"] and not wip["inSitemap"]),
+                        str(wip))
                 page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
                 chk.add(f"{scheme} severe: the tornado reports lead the page",
                         page.evaluate("""() => {
                           const p = document.querySelector('#panels .panel');
                           return p ? /tornado/i.test(p.textContent) : false;
                         }""") is True, "")
+                # the running figure exists only once the month in progress has a
+                # published count, which it does not on the first of a month
+                # before the Storm Prediction Center posts. The blocks are always
+                # there; the figure is required only when there is one to draw.
+                sw_live = page.evaluate("""async () => {
+                  const d = await fetch('data/snapshots/series/severe-tornado.json')
+                    .then(r => r.json()).catch(() => null);
+                  const pts = (d && d.points) || [];
+                  const now = new Date();
+                  const key = String(now.getUTCFullYear())
+                            + String(now.getUTCMonth() + 1).padStart(2, '0');
+                  return pts.length ? pts[pts.length - 1][0] === key : false;
+                }""")
                 chk.add(f"{scheme} severe: all three phenomena draw the month in progress",
-                        sw["blocks"] == 3 and sw["envelopes"] >= 3 and sw["bigFig"], str(sw))
+                        sw["blocks"] == 3 and sw["envelopes"] >= 3
+                        and (sw["bigFig"] or not sw_live),
+                        str(sw) + (" monthHasData=" + str(sw_live)))
                 chk.add(f"{scheme} severe: the running month carries the market's ladder where one is listed",
                         sw["ladder"], str(sw))
                 chk.add(f"{scheme} severe: the caption names the settlement number",

@@ -299,10 +299,15 @@ def build(store: Storage, now: dt.datetime) -> dict:
     return snap
 
 
-def headline_pass(cfg: dict, store: Storage) -> int:
+def headline_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) -> int:
     """Entry point: read the snapshots on hand, write the small file. No
-    network, so the only thing that can fail is the write itself."""
-    now = dt.datetime.now(dt.timezone.utc)
+    network, so the only thing that can fail is the write itself.
+
+    `now` is the moment to read the snapshots at, defaulting to this one. It is
+    a parameter because which contract is this month's depends on it, and a
+    test that leaves that to the wall clock passes until the month turns over.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
     t0 = time.time()
     errors = 0
     snap: dict = {}

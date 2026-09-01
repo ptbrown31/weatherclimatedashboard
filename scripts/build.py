@@ -237,6 +237,12 @@ def stamp_assets(out: str) -> int:
     return n_rewritten
 
 
+def noindex(out: str, name: str) -> bool:
+    """Whether a page asks search engines to leave it alone."""
+    with open(os.path.join(out, name)) as fh:
+        return 'name="robots" content="noindex"' in fh.read(4096)
+
+
 def identity(out: str, cfg: dict) -> tuple:
     """Write the station pages, give every page its metadata, and index the lot.
 
@@ -268,8 +274,11 @@ def identity(out: str, cfg: dict) -> tuple:
         base = "https://" + domain
         day = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
         # city.html carries no station of its own, so it is left out of the index
-        # in favour of the thirty-seven pages that each name one
-        urls = sorted(n2 for n2 in os.listdir(out) if n2.endswith(".html") and n2 != "city.html")
+        # in favour of the thirty-seven pages that each name one. A page that
+        # asks not to be indexed is left out too, which is how an unfinished
+        # page stays unfinished in public rather than being handed to a crawler
+        urls = sorted(n2 for n2 in os.listdir(out)
+                      if n2.endswith(".html") and n2 != "city.html" and not noindex(out, n2))
         body = "".join('<url><loc>%s/%s</loc><lastmod>%s</lastmod></url>\n'
                        % (base, "" if u == "index.html" else u, day) for u in urls)
         with open(os.path.join(out, "sitemap.xml"), "w") as fh:

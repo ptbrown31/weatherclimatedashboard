@@ -71,9 +71,10 @@ window.WXC = (() => {
     // where a reader is already looking when they want one.
     // the scorecard lives on the daily temperatures page now; scorecard.html
     // still answers, because the daily letter links its four views directly
+    // the lessons page is being written and is deliberately not linked here
+    // yet; it answers at its own address for anyone working on it
     const REF = [['daily-temperature-markets.html', 'Trading temp markets'],
                  ['allocator.html', 'Position calculator'],
-                 ['lessons.html', 'Lessons'],
                  ['accuracy.html', 'Accuracy'], ['faq.html', 'FAQ'], ['about.html', 'About']];
     const nav = cfg.nav || { l1: [], categories: [] };
     const cats = nav.categories || [];

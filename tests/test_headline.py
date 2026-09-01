@@ -63,8 +63,10 @@ class Store(unittest.TestCase):
     def put(self, key, body):
         self.st.put(key, json.dumps(body).encode(), "application/json")
 
-    def run_job(self):
-        self.assertEqual(headline.headline_pass({}, self.st), 0)
+    def run_job(self, now=NOW):
+        # at a stated moment, never the wall clock: which contract is this
+        # month's depends on it, and these fixtures are written around NOW
+        self.assertEqual(headline.headline_pass({}, self.st, now), 0)
         return json.loads(self.st.get(headline.SNAP_KEY))
 
 

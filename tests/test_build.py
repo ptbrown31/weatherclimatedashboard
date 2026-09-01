@@ -119,6 +119,19 @@ class Metadata(unittest.TestCase):
             self.assertTrue(build.title_of(s), f"{n} has no title")
 
 
+class Indexing(unittest.TestCase):
+    def test_a_page_that_asks_not_to_be_indexed_says_so(self):
+        # the lessons page is unfinished and deliberately kept out of the index
+        s = read("site", "lessons.html")
+        self.assertIn('<meta name="robots" content="noindex">', s)
+        self.assertIn("Under construction", s)
+
+    def test_nothing_links_to_it_from_the_navigation(self):
+        nav = read("site", "js", "common.js")
+        ref = re.search(r"const REF = \[(.*?)\];", nav, re.S).group(1)
+        self.assertNotIn("lessons.html", ref)
+
+
 class StationPage(unittest.TestCase):
     def page(self):
         tpl = read("site", "city.html")
