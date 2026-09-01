@@ -471,6 +471,15 @@ window.WXStorm = (() => {
       const miss = gp.reduce((a, g) => a + g.missing, 0);
       state.push(miss + ' cycle' + (miss === 1 ? '' : 's') + ' the vendor did not deliver, marked on the charts');
     }
+    /* Whether the exchange has listed this storm's wind contracts yet. The
+       vendor's probabilities usually run ahead of the listing, so a panel
+       with ladders and no prices is a storm the exchange has not opened,
+       not a storm without a market coming; saying so stops the absence
+       reading as nonexistence. */
+    if (MK && !poolMarkets(storm.name).length
+        && !(MK.markets || []).some(m => m.symbol.indexOf('L' + stormCode(storm.name)) === 0)) {
+      state.push('no wind contracts listed on the exchange yet; the price squares, the pool ladder and its price series appear at listing');
+    }
     host.appendChild(h('p', { class: 'cap', text: state.join(' · ') }));
     if (!doc || !cyc.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
