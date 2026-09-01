@@ -402,6 +402,10 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             if age > 14:
                 continue
         keep.append(s)
+    # the pool's field is every reference location (owner's decision
+    # 2026-09-01), so one figure serves every display: a location the vendor
+    # scores at zero everywhere cannot record the maximum under its ladder,
+    # which is why the signalled set carries the whole field
     for s2 in keep:
         lc = s2.get("livecyc")
         if lc and lc.get("sites"):

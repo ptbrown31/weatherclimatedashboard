@@ -92,11 +92,18 @@ window.WXStorm = (() => {
     + 'settlement ladder exists its figure floors the lifetime one, because the contract asks about the '
     + 'storm’s whole lifetime while a LiveCyc ladder looks forward from its cycle. Locations are treated '
     + 'as independent and P(highest) is the probability of being the maximum, evaluated on a one-mph grid '
-    + 'and normalised to sum to one. Independence is the one assumption: locations share the storm, and '
+    + 'and normalised to sum to one over the field, which is every reference location — a location the '
+    + 'vendor scores at zero everywhere cannot record the maximum under its ladder, so the listed strikes '
+    + 'need not sum to one and the remainder is the chance a location outside them takes it. '
+    + 'Independence is the one assumption: locations share the storm, and '
     + 'correlation concentrates the outcome on the leader, so the leader here is if anything understated. '
     + 'The vendor’s ladders are as published; the exchange’s prices are its own.';
 
-  // the current stated-calculation figure per location NAME for one storm
+  /* The current stated-calculation figure per location NAME for one storm.
+     One field everywhere: the pool's candidates are all the reference
+     locations (the owner's call, 2026-09-01), so each figure is the chance
+     of beating the whole field, and the listed strikes need not sum to one;
+     the remainder is the chance a location outside them takes it. */
   function calcByName(stormName) {
     const s = ((RK && RK.storms) || []).find(x => x.name === stormName);
     const lc = s && s.livecyc;
