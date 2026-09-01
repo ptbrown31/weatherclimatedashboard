@@ -258,7 +258,8 @@ window.WXHur = (() => {
       const row = lc.sites[id];
       const i80 = lc.thresholds.indexOf(80);
       out.push({ storm: s.name, p80: i80 >= 0 ? row.p[i80] : row.p[0],
-                 thresholds: lc.thresholds, p: row.p, forecastTime: lc.forecastTime });
+                 thresholds: lc.thresholds, p: row.p, forecastTime: lc.forecastTime,
+                 received: lc.lastModified });
     });
     out.sort((a, b) => b.p80 - a.p80);
     return out.length ? out : null;
@@ -281,7 +282,8 @@ window.WXHur = (() => {
          only a strong storm reaches, and five each when storms share the box. */
       const cap = list.length > 1 ? 5 : 8;
       list.forEach(v2 => {
-        rows.push(['Storm', esc(v2.storm) + ' · cycle ' + utc(v2.forecastTime)]);
+        rows.push(['Storm', esc(v2.storm) + ' · cycle ' + utc(v2.forecastTime)
+          + (v2.received ? ', received ' + utc(v2.received) : '')]);
         v2.thresholds.map((t, i) => (v2.p[i] ? ['&gt; ' + t + ' mph', v2.p[i] + '%'] : null))
           .filter(Boolean).slice(0, cap).forEach(r => rows.push(r));
       });
@@ -1168,7 +1170,9 @@ window.WXHur = (() => {
         host.appendChild(det);
       }
       into.appendChild(h('div', { class: 'stormrow' }, [h('b', { text: s.name + ' ' + s.year }),
-        h('span', { text: lc ? 'LiveCyc cycle ' + lc.forecastTime + ' · ' + Object.keys(lc.sites || {}).length + ' locations with non-zero probability' : 'no LiveCyc cycle yet' }),
+        h('span', { text: lc ? 'LiveCyc cycle ' + utc(lc.forecastTime)
+          + (lc.lastModified ? ' · file received ' + utc(lc.lastModified) : '')
+          + ' · ' + Object.keys(lc.sites || {}).length + ' locations with non-zero probability' : 'no LiveCyc cycle yet' }),
         h('span', { text: s.interim ? 'interim settlement file received' : '' }),
         h('span', { text: s.final ? 'final settlement file received' : '' })]));
       if (lc && lc.sites) {

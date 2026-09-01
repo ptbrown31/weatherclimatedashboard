@@ -1220,6 +1220,21 @@ def run(no_build: bool) -> int:
                            onLagMark: cyc.getUTCHours() % 6 === 0 && cyc.getUTCMinutes() === 0,
                            line: e.parentElement.textContent };
                 }""")
+                # the section says what its three clocks are, and each storm row
+                # shows the cycle hour and the file's own arrival, which is the
+                # question a careful outside reader actually asked
+                clocks = page.evaluate("""() => {
+                  const cap = [...document.querySelectorAll('.secttl')]
+                    .find(t => /REASK LIVECYC/.test(t.textContent));
+                  const p = cap && cap.nextElementSibling;
+                  const txt = (p && p.textContent) || '';
+                  const row = (document.querySelector('#vendor .stormrow span') || {}).textContent || '';
+                  return { threeClocks: /Three clocks/.test(txt) && /nominal cycle hour/.test(txt)
+                             && /takes its track from that advisory/.test(txt),
+                           rowBoth: /LiveCyc cycle .*Z/.test(row) };
+                }""")
+                chk.add(f"{scheme} hurricane: the section explains its three clocks",
+                        bool(clocks and clocks["threeClocks"]), str(clocks))
                 chk.add(f"{scheme} hurricane: the LiveCyc countdown aims at the file, not the cycle stamp",
                         bool(cd and cd["onLagMark"] and 0 < cd["left"] <= 6 * 3600000
                              and ("in " in cd["text"] or cd["text"] == "due now")
