@@ -200,17 +200,23 @@ window.WXHur = (() => {
     return { storms: storms.length, areas: outl.length };
   }
 
-  /* The two feeds' clocks. NHC issues full advisories at 03, 09, 15 and 21Z
-     and LiveCyc runs its cycles at 00, 06, 12 and 18Z, so the next mark of
-     each gets a countdown, refreshed every half minute while the page sits
-     open. Typical, not promised: intermediate and special advisories arrive
-     between the marks whenever watches are in effect, and a cycle's file
-     lands a few hours after the cycle it is for. */
+  /* The two feeds' clocks. NHC issues full advisories at 03, 09, 15 and 21Z.
+     LiveCyc runs four cycles a day at 00, 06, 12 and 18Z, but the thing a
+     reader waits for is the file, and every 2026 file on the exchange's
+     download directory has landed 3.9 to 5.7 hours after its cycle stamp,
+     median about 4.7, which puts each one after the NHC advisory it takes
+     its track from. So the LiveCyc countdown aims at the expected arrival,
+     the cycle plus four and a half hours, not at the cycle stamp, which the
+     first version counted to and which read as a file being due when the
+     previous cycle's had only just arrived. Refreshed every half minute;
+     typical, not promised. */
+  const LIVECYC_LAG_H = 4.5;
   function nextMark(marks) {
     const now = Date.now(), d = new Date(now);
-    const base = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    // yesterday too: an offset mark near midnight can belong to the day before
+    const base = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - 86400000;
     const all = [];
-    for (let day = 0; day < 2; day++) marks.forEach(hh => all.push(base + day * 86400000 + hh * 3600000));
+    for (let day = 0; day < 3; day++) marks.forEach(hh => all.push(base + day * 86400000 + hh * 3600000));
     return all.find(t => t > now);
   }
   function cdText(t) {
@@ -1134,8 +1140,11 @@ window.WXHur = (() => {
       return (tb == null ? Infinity : tb) - (ta == null ? Infinity : ta);
     });
     if (storms.some(s2 => !WXStorm.dormant(s2) && s2.livecyc)) {
-      host.appendChild(scheduleLine('Next LiveCyc cycle', [0, 6, 12, 18],
-        'a cycle’s file usually arrives within a few hours after it'));
+      host.appendChild(scheduleLine('Next LiveCyc file expected about',
+        [0, 6, 12, 18].map(hh => hh + LIVECYC_LAG_H),
+        'the ' + String(new Date(nextMark([0, 6, 12, 18].map(hh => hh + LIVECYC_LAG_H))
+                                  - LIVECYC_LAG_H * 3600000).getUTCHours()).padStart(2, '0')
+          + 'Z cycle; this season’s files have landed 4 to 6 hours after their cycle, once the NHC advisory they take their track from is out'));
     }
     if (!storms.length) {
       host.appendChild(h('p', { class: 'cap', text: 'Lane on; no storm with published probabilities this year yet (last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + ').' }));

@@ -932,6 +932,12 @@ def run(no_build: bool) -> int:
                             return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index))
                         if "/storm/Erin_2026.json" in u:
                             return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(final)))
+                        if u.endswith("/lhl/LHLERG.json"):
+                            pts = [{"t": "2026-09-0%dT%02d:00:00Z" % (1 + hh // 24, hh % 24),
+                                    "p": {"Brownsville": 30 + hh, "Galveston": 40 - hh, "Corpus Christi": 12}}
+                                   for hh in range(0, 30, 3)]
+                            return route.fulfill(status=200, content_type="application/json",
+                                                 body=json.dumps({"schema": 1, "symbol": "LHLERG", "points": pts}))
                         if u.endswith("/market/hurricane.json"):
                             resp = route.fetch()
                             m = json.loads(resp.text())
@@ -962,6 +968,20 @@ def run(no_build: bool) -> int:
                             (marks > 0) == _final, f"marks={marks} settled={_final}")
                     pools_n = page.locator("#liveStorms .ladder .lrow").count()
                     chk.add(f"{scheme} storm ({tag}): the pool contract lists its named candidates", pools_n >= 1, f"rows={pools_n}")
+                    # the pool's price through time, below the ladders: one line
+                    # per candidate, titled as the market's own P(win)
+                    lhl = page.evaluate("""() => {
+                      const svg = document.querySelector('#liveStorms svg.lhlserie');
+                      if (!svg) return null;
+                      const paths = [...svg.querySelectorAll('path')].filter(pp => pp.getAttribute('stroke') !== 'none').length;
+                      const wrap = svg.parentElement;
+                      const title = (wrap.querySelector('.lt') || {}).textContent || '';
+                      const cap = (wrap.querySelector('.cap') || {}).textContent || '';
+                      return { paths, title, own: /computes no probability of its own/.test(cap) };
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): the pool's market P(win) draws through time",
+                            bool(lhl and lhl["paths"] >= 3 and "market P(win) through time" in lhl["title"]
+                                 and lhl["own"]), str(lhl))
                     page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
                     page.wait_for_timeout(150)
                     t_px = page.locator("#tip").inner_text()
@@ -1161,20 +1181,23 @@ def run(no_build: bool) -> int:
                         and t_two.index("Alpha") < t_two.index("Beta")
                         and "50.1%" in t_two and "27.8%" in t_two
                         and "each storm is its own hazard" in t_two, t_two[:160])
-                # the LiveCyc countdown: present while a storm is running, aimed
-                # at the next 00/06/12/18Z mark, counting down
+                # the LiveCyc countdown aims at the expected file arrival, the
+                # cycle plus four and a half hours, because every 2026 file has
+                # landed 4 to 6 hours after its cycle stamp
                 cd = page.evaluate("""() => {
                   const e = document.querySelector('#vendor [data-cdt]');
                   if (!e) return null;
                   const t = +e.getAttribute('data-cdt'), left = t - Date.now();
+                  const cyc = new Date(t - 4.5 * 3600000);
                   return { text: e.textContent, left,
-                           onMark: new Date(t).getUTCHours() % 6 === 0 && new Date(t).getUTCMinutes() === 0,
+                           onLagMark: cyc.getUTCHours() % 6 === 0 && cyc.getUTCMinutes() === 0,
                            line: e.parentElement.textContent };
                 }""")
-                chk.add(f"{scheme} hurricane: the next LiveCyc cycle counts down on a 6-hour mark",
-                        bool(cd and cd["onMark"] and 0 < cd["left"] <= 6 * 3600000
+                chk.add(f"{scheme} hurricane: the LiveCyc countdown aims at the file, not the cycle stamp",
+                        bool(cd and cd["onLagMark"] and 0 < cd["left"] <= 6 * 3600000
                              and ("in " in cd["text"] or cd["text"] == "due now")
-                             and "usually arrives" in cd["line"]),
+                             and "file expected" in cd["line"]
+                             and "4 to 6 hours after their cycle" in cd["line"]),
                         str(cd))
                 page.unroute("**/data/snapshots/**")
 

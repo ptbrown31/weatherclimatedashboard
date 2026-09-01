@@ -147,6 +147,44 @@ def _group_snapshot(name: str, now: dt.datetime, items: List[dict]) -> dict:
     return {"schema": SCHEMA, "group": name, "source": SOURCE, "asof": _iso(now), "written": _iso(now), "markets": items}
 
 
+def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
+    """The highest-wind pools' prices, kept through time.
+
+    A pool contract's Yes price is the market's own probability that its
+    location takes the pool, and how that moved through a storm is worth as
+    much as where it stands. The quote archive holds every pass, but a page
+    cannot read a season of gzipped passes, so each pool gets a small series,
+    one point per hour, appended by the pass that crosses the hour. Prices
+    only, the exchange's, in cents; the site computes no probability of its
+    own here or anywhere.
+    """
+    for m in items:
+        if not str(m.get("symbol", "")).startswith("LHL"):
+            continue
+        key = f"snapshots/lhl/{m['symbol']}.json"
+        try:
+            doc = json.loads(store.get(key) or b"null") or {}
+        except (ValueError, TypeError):
+            doc = {}
+        pts = doc.get("points") or []
+        last = pts[-1]["t"] if pts else None
+        if last and (now - dt.datetime.fromisoformat(last.replace("Z", "+00:00"))).total_seconds() < 3300:
+            continue
+        prices = {}
+        for c in m.get("contracts") or []:
+            if c.get("strike") is not None and c.get("mid") is not None:
+                prices[str(c["strike"])] = round(float(c["mid"]) * 100, 1)
+        if not prices:
+            continue
+        pts.append({"t": _iso(now), "p": prices})
+        # sixty days holds the longest-lived storm with room to spare
+        cut = _iso(now - dt.timedelta(days=60))
+        pts = [q for q in pts if q["t"] >= cut]
+        store.put(key, json.dumps({"schema": 1, "symbol": m["symbol"], "name": m.get("name"),
+                                   "asof": _iso(now), "points": pts},
+                                  separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+
+
 def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline: Optional[arch.Deadline] = None) -> dict:
     if not (cfg.get("sources") or {}).get("exchange", True):
         log(kind="market", skipped="sources.exchange is off")
@@ -332,6 +370,8 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             log(kind="market", step="group", group=name, kept="previous snapshot: the deadline cut this group's quotes short")
             continue
         store.put(f"{PREFIX}{name}.json", json.dumps(_group_snapshot(name, now, items), separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+        if name == "hurricane":
+            _lhl_series(store, now, items)
     summary = {"schema": SCHEMA, "source": SOURCE, "asof": _iso(now), "written": _iso(now), "quoted": quoted, "failed": failed,
                "listErrors": list_errors[:20], "unmatched": unmatched, "partialKept": partial_kept,
                "deadline": bool(partial_kept), "cities": summary_rows}

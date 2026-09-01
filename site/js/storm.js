@@ -384,6 +384,72 @@ window.WXStorm = (() => {
     return out;
   }
 
+  /* The highest-wind pool's prices through time: one line per candidate,
+     drawn from the hourly series the quote job keeps. A Yes price in cents
+     is the market's own probability that the location takes the pool, so
+     this is the market's P(win) through time and nothing else; the desk
+     figures under the same title elsewhere are not this site's to publish. */
+  async function poolSeries(m) {
+    let doc = null;
+    try { doc = (await WXD.get('lhl/' + m.symbol + '.json', 10)).data; } catch (e) { doc = null; }
+    const pts = (doc && doc.points) || [];
+    if (pts.length < 2) return null;
+    const W = 960, Hh = 260, L = 46, R = 830, T = 26, B = 232;
+    const t0 = Date.parse(pts[0].t), t1 = Date.parse(pts[pts.length - 1].t);
+    if (!(t1 > t0)) return null;
+    const X = t => L + (t - t0) / (t1 - t0) * (R - L);
+    const Y = v => B - (v / 100) * (B - T);
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'ts lhlserie' });
+    [0, 25, 50, 75, 100].forEach(v => {
+      svg.appendChild(el('line', { x1: L, y1: Y(v), x2: R, y2: Y(v), stroke: 'var(--rule)', 'stroke-width': 0.5 }));
+      svg.appendChild(txt(v + '¢', { x: L - 5, y: Y(v) + 3, 'text-anchor': 'end', class: 'axl', 'font-size': 9.5 }));
+    });
+    // the candidates, ranked by where they stand now, the top eight drawn
+    const latest = pts[pts.length - 1].p || {};
+    const names = Object.keys(latest).sort((a, b) => (latest[b] || 0) - (latest[a] || 0)).slice(0, 8);
+    names.forEach((nm, i) => {
+      const col = rung(names.length - 1 - i, Math.max(2, names.length));
+      const line = pts.map(q => ({ t: Date.parse(q.t), v: (q.p || {})[nm] })).filter(q => q.v != null);
+      if (line.length < 2) return;
+      svg.appendChild(el('path', {
+        d: line.map((q, j) => (j ? 'L' : 'M') + X(q.t).toFixed(1) + ' ' + Y(q.v).toFixed(1)).join(''),
+        fill: 'none', stroke: col, 'stroke-width': i ? 1.6 : 2.4, opacity: i ? 0.85 : 1 }));
+      const last = line[line.length - 1];
+      svg.appendChild(el('circle', { cx: X(last.t), cy: Y(last.v), r: 2.4, fill: col }));
+      svg.appendChild(txt(nm + ' ' + Math.round(last.v) + '¢', { x: R + 6, y: Y(last.v) + 3,
+        'font-size': 9.5, fill: col, class: 'lbl' }));
+    });
+    // day marks along the base, in UTC, the clock the storm runs on
+    const DAY = 86400000;
+    for (let t = Math.ceil(t0 / DAY) * DAY; t <= t1; t += DAY) {
+      svg.appendChild(el('line', { x1: X(t), y1: T, x2: X(t), y2: B, stroke: 'var(--rule)', 'stroke-width': 0.5 }));
+      svg.appendChild(txt(new Date(t).toISOString().slice(5, 10), { x: X(t), y: B + 14, 'text-anchor': 'middle', class: 'axl', 'font-size': 9.5 }));
+    }
+    // the crosshair reads every candidate at one instant
+    const rule = el('line', { y1: T, y2: B, stroke: 'var(--muted)', 'stroke-width': 0.8, visibility: 'hidden' });
+    svg.appendChild(rule);
+    svg.addEventListener('mousemove', ev => {
+      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const x = pt.matrixTransform(svg.getScreenCTM().inverse()).x;
+      if (x < L || x > R) { rule.setAttribute('visibility', 'hidden'); tip.hide(); return; }
+      rule.setAttribute('x1', x); rule.setAttribute('x2', x); rule.setAttribute('visibility', 'visible');
+      const at = t0 + (x - L) / (R - L) * (t1 - t0);
+      let best = pts[0];
+      pts.forEach(q => { if (Math.abs(Date.parse(q.t) - at) < Math.abs(Date.parse(best.t) - at)) best = q; });
+      const rows = names.map(nm => [esc(nm), (best.p || {})[nm] != null ? best.p[nm] + '¢' : '—']);
+      tip.show(ev, tip.rows('Pool Yes prices · ' + best.t.slice(0, 16).replace('T', ' ') + 'Z', rows,
+                            'the exchange’s published prices, sampled hourly'));
+    });
+    svg.addEventListener('mouseleave', () => { rule.setAttribute('visibility', 'hidden'); tip.hide(); });
+    const wrap = h('div');
+    wrap.appendChild(h('div', { class: 'lt', style: 'margin:12px 0 2px',
+      text: 'Highest-wind location (LHL) — market P(win) through time' }));
+    wrap.appendChild(svg);
+    wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
+      text: 'The exchange’s Yes price for each candidate in the pool, sampled hourly from the quote record. A price in cents is the market’s own probability that the location records the highest wind; this site computes no probability of its own.' }));
+    return wrap;
+  }
+
   // ---- one storm
   async function drawStorm(storm, host) {
     const key = storm.name + '_' + storm.year;
@@ -434,6 +500,10 @@ window.WXStorm = (() => {
     if (order.length > MAX_CARDS) host.appendChild(h('p', { class: 'cap', text: order.length - MAX_CARDS + ' further locations have signalled and are not drawn; the strongest ' + MAX_CARDS + ' are shown.' }));
     const p = pools(storm);
     if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
+    for (const m of poolMarkets(storm.name)) {
+      const ser = await poolSeries(m);
+      if (ser) host.appendChild(ser);
+    }
     host.appendChild(h('p', { class: 'cap attrib', text: ((RK && RK.attribution) || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; the squares are the exchange’s own prices. The horizontal axis counts vendor deliveries, not time.' }));
   }
 
