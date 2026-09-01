@@ -245,7 +245,9 @@ def storm_wind_markets(tree: dict, names: list) -> List[dict]:
     codes = {storm_code(n) for n in names if storm_code(n)}
     out = []
     for sym, m in markets_by_symbol(tree).items():
-        if any(sym.startswith("LHL" + c) and len(sym) == len("LHL" + c) + 1 for c in codes):
+        # the pool is LHL<storm> with an optional pool letter: Edouard's
+        # listed as bare LHLED, Erin's fixture as LHLERG, and both are pools
+        if any(sym.startswith("LHL" + c) and len(sym) in (len("LHL" + c), len("LHL" + c) + 1) for c in codes):
             out.append({**m, "product": "LHL", "storm": sym[3:5]})
         elif any(sym.startswith("L" + c) and len(sym) == len("L" + c) + 2 for c in codes):
             out.append({**m, "product": "L", "storm": sym[1:3], "location": sym[3:5]})

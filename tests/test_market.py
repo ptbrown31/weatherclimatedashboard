@@ -487,6 +487,7 @@ class StormWindContracts(unittest.TestCase):
             {"symbol": "LERBR", "name": "Erin — Brownsville peak gust", "conid": 21},
             {"symbol": "LERTA", "name": "Erin — Tampa peak gust", "conid": 22},
             {"symbol": "LHLERG", "name": "Erin — highest wind, Gulf Coast", "conid": 23},
+            {"symbol": "LHLED", "name": "Edouard — peak wind location", "conid": 26},
             {"symbol": "LFIBR", "name": "Fiona — Brownsville peak gust", "conid": 24},
             {"symbol": "LOFUS", "name": "US Total Layoffs", "conid": 25},
         ]},
@@ -495,6 +496,10 @@ class StormWindContracts(unittest.TestCase):
     def test_matches_by_storm_code_not_by_pattern(self):
         got = ex.storm_wind_markets(self.TREE, ["Erin"])
         self.assertEqual(sorted(m["symbol"] for m in got), ["LERBR", "LERTA", "LHLERG"])
+        # Edouard's pool listed bare, no pool letter, and it is still a pool
+        got2 = {m["symbol"]: m for m in ex.storm_wind_markets(self.TREE, ["Edouard"])}
+        self.assertEqual(sorted(got2), ["LHLED"])
+        self.assertEqual(got2["LHLED"]["product"], "LHL")
         # a symbol that merely starts with L is not swept in, and another storm is not either
         self.assertNotIn("LOFUS", [m["symbol"] for m in got])
         self.assertNotIn("LFIBR", [m["symbol"] for m in got])

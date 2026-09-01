@@ -587,9 +587,17 @@ window.WXStorm = (() => {
     if (order.length > MAX_CARDS) host.appendChild(h('p', { class: 'cap', text: order.length - MAX_CARDS + ' further locations have signalled and are not drawn; the strongest ' + MAX_CARDS + ' are shown.' }));
     const p = pools(storm);
     if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
+    let seriesShown = false;
     for (const m of poolMarkets(storm.name)) {
       const ser = await poolSeries(m, doc);
-      if (ser) host.appendChild(ser);
+      if (ser) { host.appendChild(ser); seriesShown = true; }
+    }
+    /* The calculation never appears without its formula. The series caption
+       carries it once prices accumulate; until then, a listed pool showing
+       calc figures on its rows gets the formula right here. */
+    if (!seriesShown && poolMarkets(storm.name).length && calcByName(storm.name)) {
+      host.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
+        text: 'The pool is listed and its price history begins with its first bids; the calc figure on each row is the stated calculation. ' + METHOD }));
     }
     appendStatedLadder(storm, host);
     host.appendChild(h('p', { class: 'cap attrib', text: ((RK && RK.attribution) || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; the squares are the exchange’s own prices. The horizontal axis counts vendor deliveries, not time.' }));
