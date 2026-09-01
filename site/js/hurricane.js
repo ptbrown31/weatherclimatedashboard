@@ -200,37 +200,87 @@ window.WXHur = (() => {
     return { storms: storms.length, areas: outl.length };
   }
 
-  // the vendor ladder at a reference location: the hottest still-running
-  // storm's LiveCyc row. A storm that has stopped updating does not size
-  // today's map dots; its last ladder describes a day that is over.
+  /* The two feeds' clocks. NHC issues full advisories at 03, 09, 15 and 21Z
+     and LiveCyc runs its cycles at 00, 06, 12 and 18Z, so the next mark of
+     each gets a countdown, refreshed every half minute while the page sits
+     open. Typical, not promised: intermediate and special advisories arrive
+     between the marks whenever watches are in effect, and a cycle's file
+     lands a few hours after the cycle it is for. */
+  function nextMark(marks) {
+    const now = Date.now(), d = new Date(now);
+    const base = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+    const all = [];
+    for (let day = 0; day < 2; day++) marks.forEach(hh => all.push(base + day * 86400000 + hh * 3600000));
+    return all.find(t => t > now);
+  }
+  function cdText(t) {
+    const left = t - Date.now();
+    if (left <= 0) return 'due now';
+    const hrs = Math.floor(left / 3600000), min = Math.round((left % 3600000) / 60000);
+    return 'in ' + (hrs ? hrs + 'h ' : '') + String(min).padStart(2, '0') + 'm';
+  }
+  let cdTimer = null;
+  function wireCountdowns() {
+    if (cdTimer) return;
+    cdTimer = setInterval(() => {
+      document.querySelectorAll('[data-cdt]').forEach(e => { e.textContent = cdText(+e.getAttribute('data-cdt')); });
+    }, 30000);
+  }
+  function scheduleLine(label, marks, note) {
+    wireCountdowns();
+    const t = nextMark(marks);
+    const sp = h('b', { 'data-cdt': String(t), text: cdText(t) });
+    return h('p', { class: 'cap', style: 'margin:2px 0 8px' }, [
+      h('b', { text: label + ' ' }),
+      utc(new Date(t).toISOString()) + ' (' + clockFull(t, local()) + ') · ',
+      sp,
+      note ? ' · ' + note : '',
+    ]);
+  }
+
+  /* Every still-running storm's LiveCyc row at a reference location, hottest
+     first. It used to return only the hottest storm's row, and with two
+     storms in the Gulf at once the hover on Port Arthur quoted one storm
+     while the table underneath quoted the other, and the numbers read as a
+     contradiction. A storm that has stopped updating does not appear; its
+     last ladder describes a day that is over. */
   function vendorSite(id) {
     if (!RK || !RK.enabled) return null;
-    let best = null;
+    const out = [];
     (RK.storms || []).filter(s => !WXStorm.dormant(s)).forEach(s => {
       const lc = s.livecyc; if (!lc || !lc.sites || !lc.sites[id]) return;
       const row = lc.sites[id];
       const i80 = lc.thresholds.indexOf(80);
-      const p80 = i80 >= 0 ? row.p[i80] : row.p[0];
-      if (!best || p80 > best.p80) best = { storm: s.name, p80, thresholds: lc.thresholds, p: row.p, forecastTime: lc.forecastTime };
+      out.push({ storm: s.name, p80: i80 >= 0 ? row.p[i80] : row.p[0],
+                 thresholds: lc.thresholds, p: row.p, forecastTime: lc.forecastTime });
     });
-    return best;
+    out.sort((a, b) => b.p80 - a.p80);
+    return out.length ? out : null;
   }
-  // the tooltip for a reference location, on the map and in the vendor table
+  // the tooltip for a reference location, on the map and in the vendor table.
+  // Takes one storm's row or the list vendorSite returns, and when more than
+  // one storm is signalling on the location, every one is shown, each under
+  // its own name and cycle, because a box quoting one storm over a table
+  // quoting another reads as a contradiction rather than two hazards.
   function locationTip(L, v) {
+    const list = Array.isArray(v) ? v : (v ? [v] : []);
     const rows = [['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)]];
     let foot;
-    if (v) {
-      rows.push(['Storm', esc(v.storm)]);
+    if (list.length) {
       /* The ladder as published, to the same figure as the table underneath.
          Rounding it to whole percent put "3%" in the box over a cell reading
          3.3%, and culling anything under half a percent left the box showing
          one rung where the table and the storm card both showed three. A rung
          the page prints is a rung this box prints; eight is the cap, which
-         only a strong storm reaches. */
-      const ladder = v.thresholds.map((t, i) => (v.p[i] ? ['&gt; ' + t + ' mph', v.p[i] + '%'] : null)).filter(Boolean).slice(0, 8);
-      ladder.forEach(r => rows.push(r));
-      rows.push(['LiveCyc cycle', utc(v.forecastTime)]);
-      foot = esc((RK && RK.attribution) || 'Powered by Reask') + '; probabilities as published';
+         only a strong storm reaches, and five each when storms share the box. */
+      const cap = list.length > 1 ? 5 : 8;
+      list.forEach(v2 => {
+        rows.push(['Storm', esc(v2.storm) + ' · cycle ' + utc(v2.forecastTime)]);
+        v2.thresholds.map((t, i) => (v2.p[i] ? ['&gt; ' + t + ' mph', v2.p[i] + '%'] : null))
+          .filter(Boolean).slice(0, cap).forEach(r => rows.push(r));
+      });
+      foot = esc((RK && RK.attribution) || 'Powered by Reask') + '; probabilities as published'
+           + (list.length > 1 ? '; each storm is its own hazard' : '');
     } else foot = (RK && RK.enabled) ? 'no storm probabilities published' : 'no live-storm probabilities (lane off)';
     return tip.rows(esc(L.name) + ' (' + esc(L.id) + ')', rows, foot);
   }
@@ -428,8 +478,9 @@ window.WXHur = (() => {
     (GEO && GEO.locations || []).forEach(L => {
       if (L.lon < b0 || L.lon > b1 || L.lat < la0 || L.lat > la1) return;
       const v = vendorSite(L.id);
-      const any = v && v.p.some(x => x > 0);
-      const r = (v && v.p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(v.p80, 100) / 100) : (any ? 3 : 2.2)) * g;
+      const any = !!(v && v.some(x => x.p.some(p => p > 0)));
+      const p80 = v ? Math.max.apply(null, v.map(x => x.p80 || 0)) : 0;
+      const r = (p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(p80, 100) / 100) : (any ? 3 : 2.2)) * g;
       if (any) vendorShown++;
       const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 * g });
       attach(c, locationTip(L, v));
@@ -524,6 +575,9 @@ window.WXHur = (() => {
     const here = stormsHere();
     if (!here.length) {
       list.appendChild(h('p', { class: 'cap', text: 'No active storms in this basin at the last update.' }));
+    } else {
+      list.appendChild(scheduleLine('Next full NHC advisory typically', [3, 9, 15, 21],
+        'intermediate and special advisories can come sooner'));
     }
     here.slice().sort((a, b) => (Date.parse(b.updated || '') || 0) - (Date.parse(a.updated || '') || 0)).forEach(s => {
       list.appendChild(h('div', { class: 'stormrow' }, [
@@ -1079,6 +1133,10 @@ window.WXHur = (() => {
       const ta = WXStorm.stampOf(a), tb = WXStorm.stampOf(b);
       return (tb == null ? Infinity : tb) - (ta == null ? Infinity : ta);
     });
+    if (storms.some(s2 => !WXStorm.dormant(s2) && s2.livecyc)) {
+      host.appendChild(scheduleLine('Next LiveCyc cycle', [0, 6, 12, 18],
+        'a cycle’s file usually arrives within a few hours after it'));
+    }
     if (!storms.length) {
       host.appendChild(h('p', { class: 'cap', text: 'Lane on; no storm with published probabilities this year yet (last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + ').' }));
     }

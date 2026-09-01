@@ -1063,6 +1063,16 @@ def run(no_build: bool) -> int:
                                             "lastModified": "2026-07-01T04:00:00Z", "cycles": 2,
                                             "thresholds": [60, 70],
                                             "sites": {"BR": {"name": "Brownsville", "p": [12, 3]}}}},
+                               # two running storms signalling on one location: the
+                               # Port Arthur case, where the hover must carry both
+                               {"name": "Alpha", "year": 2026,
+                                "livecyc": {"forecastTime": "2026-09-01T06:00Z", "cycles": 3,
+                                            "thresholds": [60, 70, 80],
+                                            "sites": {"BR": {"name": "Brownsville", "p": [50.1, 15.2, 0.5]}}}},
+                               {"name": "Beta", "year": 2026,
+                                "livecyc": {"forecastTime": "2026-08-31T18:00Z", "cycles": 5,
+                                            "thresholds": [60, 70, 80],
+                                            "sites": {"BR": {"name": "Brownsville", "p": [27.8, 7.5, 0.2]}}}},
                                {"name": "Erin", "year": 2026},
                            ]}
 
@@ -1107,6 +1117,31 @@ def run(no_build: bool) -> int:
                         str(mix))
                 chk.add(f"{scheme} hurricane: the running storm keeps the full display",
                         bool(mix and mix["erinCards"] >= 1), str(mix and mix["erinCards"]))
+                # two storms signal on one location: the dot's box carries both
+                # ladders, each under its own name and cycle, hottest first
+                dot2 = page.locator("#basin circle[role='button']").first
+                dot2.hover(force=True); page.wait_for_timeout(200)
+                t_two = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} hurricane: a location two storms signal on shows both ladders",
+                        "Alpha" in t_two and "Beta" in t_two
+                        and t_two.index("Alpha") < t_two.index("Beta")
+                        and "50.1%" in t_two and "27.8%" in t_two
+                        and "each storm is its own hazard" in t_two, t_two[:160])
+                # the LiveCyc countdown: present while a storm is running, aimed
+                # at the next 00/06/12/18Z mark, counting down
+                cd = page.evaluate("""() => {
+                  const e = document.querySelector('#vendor [data-cdt]');
+                  if (!e) return null;
+                  const t = +e.getAttribute('data-cdt'), left = t - Date.now();
+                  return { text: e.textContent, left,
+                           onMark: new Date(t).getUTCHours() % 6 === 0 && new Date(t).getUTCMinutes() === 0,
+                           line: e.parentElement.textContent };
+                }""")
+                chk.add(f"{scheme} hurricane: the next LiveCyc cycle counts down on a 6-hour mark",
+                        bool(cd and cd["onMark"] and 0 < cd["left"] <= 6 * 3600000
+                             and ("in " in cd["text"] or cd["text"] == "due now")
+                             and "usually arrives" in cd["line"]),
+                        str(cd))
                 page.unroute("**/data/snapshots/**")
 
                 page.goto(f"{srv.url}/hurricane.html")
