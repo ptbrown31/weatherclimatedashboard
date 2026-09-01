@@ -1270,10 +1270,9 @@ def run(no_build: bool) -> int:
                   const txt = (p && p.textContent) || '';
                   const row = (document.querySelector('#vendor .stormrow span') || {}).textContent || '';
                   const flat = txt.split(String.fromCharCode(10)).join(' ').replace(/  +/g, ' ');
-                  return { threeClocks: flat.indexOf('Three clocks') >= 0
-                             && flat.indexOf('forecast start time') >= 0
-                             && flat.indexOf('downstream of the official forecast') >= 0
-                             && flat.indexOf('released about three hours later') >= 0,
+                  return { threeClocks: flat.indexOf('00, 06, 12, and 18 UTC') >= 0
+                             && flat.indexOf('03, 09, 15, and 21 UTC') >= 0
+                             && flat.indexOf('labeled 18 UTC would be associated with the 21 UTC') >= 0,
                            rowBoth: /LiveCyc cycle .*Z/.test(row) };
                 }""")
                 chk.add(f"{scheme} hurricane: the section explains its three clocks",
@@ -1432,10 +1431,10 @@ def run(no_build: bool) -> int:
                         "clicking a shaded region" in page.locator("#basinCap").inner_text(),
                         page.locator("#basinCap").inner_text()[:80])
                 cap_txt = page.locator("#basinCap").inner_text()
-                chk.add(f"{scheme} hurricane: the map caption carries the two agencies' clock",
-                        ("00, 06, 12, and 18 UTC" in cap_txt
-                         and "03, 09, 15, and 21 UTC" in cap_txt
-                         and "labeled 18 UTC would be associated with the 21 UTC" in cap_txt),
+                chk.add(f"{scheme} hurricane: the map caption says what a click does",
+                        ("opens its probability series below the" in cap_txt
+                         and "opens its wind contract" in cap_txt
+                         and "00, 06, 12, and 18 UTC" not in cap_txt),
                         cap_txt[-120:])
                 page.locator("#ladders .lrow").first.hover(force=True); page.wait_for_timeout(120)
                 t_row = page.locator("#tip").inner_text()

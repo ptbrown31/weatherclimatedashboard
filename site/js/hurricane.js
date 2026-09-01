@@ -516,10 +516,9 @@ window.WXHur = (() => {
     });
     wireZoom(); applyView();
     $('#modeTitle').textContent = B.name.toUpperCase() + ' · NHC forecast tracks, cones and formation odds' + (lf ? ' · landfall regions shaded by the exchange’s Yes price' : '');
-    /* The map's caption, in three blocks: what is drawn, what a click does,
-       and the two agencies' clock, which is the question outside readers ask
-       most. The conditional sentences carry facts that are not always true,
-       so a caption never describes shading or an outlook that is not there. */
+    /* The map's caption, in two blocks: what is drawn and what a click does.
+       The conditional sentences carry facts that are not always true, so a
+       caption never describes shading or an outlook that is not there. */
     {
       const cap = $('#basinCap'); cap.innerHTML = '';
       const para = t => cap.appendChild(h('p', { class: 'cap', style: 'margin:8px 2px 0', text: t }));
@@ -534,11 +533,6 @@ window.WXHur = (() => {
         + 'The point locations are associated with the Live Hurricane contract.');
       para('During a live storm, clicking a red reference location opens its probability series below the '
         + 'map; clicking the same location again opens its wind contract.');
-      para('Both the NHC and Reask LiveCyc pin the nominal 00, 06, 12, and 18 UTC forecasting cycle hours. '
-        + 'The standard times for the NHC tropical cyclone advisories are three hours after each of those '
-        + 'forecasting cycle times at 03, 09, 15, and 21 UTC (or 11:00 PM, 5:00 AM, 11:00 AM, and 5:00 PM '
-        + 'EDT). LiveCyc initiates on NHC updates, so a LiveCyc file labeled 18 UTC would be associated '
-        + 'with the 21 UTC NHC update.');
     }
     if (lf || vendorShown) {
       const kg = el('g', { 'pointer-events': 'none' });
