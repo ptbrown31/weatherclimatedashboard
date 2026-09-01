@@ -80,6 +80,15 @@ window.WXStorm = (() => {
     return (tb == null ? Infinity : tb) - (ta == null ? Infinity : ta);
   };
 
+  /* The vendor's mark, inside each plot built on its numbers: small, muted,
+     drawn before the data so every line and label sits over it and nothing
+     is displaced. The internal dashboards carry the vendor's raster badge in
+     their page header; a chart corner takes a quiet vector line instead. */
+  function reaskMark(svg, x, y) {
+    svg.appendChild(txt('POWERED BY REASK', { x, y, 'text-anchor': 'end', 'font-size': 7.5,
+      'letter-spacing': '0.12em', fill: 'var(--muted)', opacity: 0.5, 'pointer-events': 'none' }));
+  }
+
   // a colour per threshold, cold to hot across the ladder
   const rung = (i, n) => 'hsl(' + Math.round(210 - 210 * (i / Math.max(1, n - 1))) + ' 70% 45%)';
   const stormCode = n => String(n || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
@@ -185,6 +194,7 @@ window.WXStorm = (() => {
     const rungs = [];
     const W = 470, H = 190, L = 34, R = 384, T = 16, B = 150, SETTLE = 424;
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'scard' });
+    reaskMark(svg, R - 4, B - 5);
     const n = Math.max(cyc.length, 2);
     const x = i => L + (i / (n - 1)) * (R - L);
     const y = p => B - (p / 100) * (B - T);
@@ -451,6 +461,7 @@ window.WXStorm = (() => {
     const X = t => L + (t - t0) / (t1 - t0) * (R - L);
     const Y = v => B - (v / 100) * (B - T);
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'ts lhlserie' });
+    reaskMark(svg, R - 4, B - 6);
     [0, 25, 50, 75, 100].forEach(v => {
       svg.appendChild(el('line', { x1: L, y1: Y(v), x2: R, y2: Y(v), stroke: 'var(--rule)', 'stroke-width': 0.5 }));
       svg.appendChild(txt(v + '¢', { x: L - 5, y: Y(v) + 3, 'text-anchor': 'end', class: 'axl', 'font-size': 9.5 }));
@@ -511,6 +522,59 @@ window.WXStorm = (() => {
     return wrap;
   }
 
+  /* A storm past a location, before the settlement file.
+
+     A forward-looking ladder declines once the storm moves past a place,
+     while the interim settlement that carries what was recorded can lag by
+     many hours, so in that window the figures sag for a reason that has
+     nothing to do with the threat having been overstated. The criterion is
+     deliberately cheap and public. A location has decayed when its
+     lowest-rung probability has fallen to half its peak across the
+     deliveries, from a peak worth noticing; where the NHC roster carries
+     the storm's position and past track, the storm must also have receded
+     from such a location beyond its closest approach. An interim or final
+     file ends the state, because from then on the figures carry what was
+     recorded. */
+  function passedPending(storm, doc) {
+    const steps = ((doc && doc.steps) || []).filter(st => st.kind === 'livecyc');
+    if (steps.length < 2) return false;
+    if ((doc.steps || []).some(st => st.kind === 'interim') || doc.final) return false;
+    const flat = a => {
+      const out = [];
+      const walk = v => {
+        if (Array.isArray(v) && v.length === 2 && typeof v[0] === 'number') out.push(v);
+        else if (Array.isArray(v)) v.forEach(walk);
+        else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+      };
+      walk(a); return out;
+    };
+    const km = (a, b, c, d) => {
+      const r = Math.PI / 180, dl = (d - b) * r, df = (c - a) * r;
+      const q = Math.sin(df / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin(dl / 2) ** 2;
+      return 6371 * 2 * Math.asin(Math.sqrt(q));
+    };
+    const rst = ROSTER.find(r => String(r.name).toLowerCase() === String(storm.name).toLowerCase());
+    const lastMeta = steps[steps.length - 1].siteMeta || {};
+    let hit = false;
+    Object.keys(doc.sites || {}).forEach(sid => {
+      if (hit) return;
+      const seq = steps.map(st => (((st.sites || {})[sid]) || [0])[0] || 0);
+      const peak = Math.max.apply(null, seq);
+      if (!(peak >= 25 && seq[seq.length - 1] <= peak * 0.5)) return;
+      const meta = lastMeta[sid] || {};
+      if (rst && rst.lat != null && meta.lat != null) {
+        const dNow = km(rst.lat, rst.lon, meta.lat, meta.lon);
+        const past = flat(rst.past || []);
+        if (past.length) {
+          const dMin = Math.min.apply(null, past.map(pp => km(pp[1], pp[0], meta.lat, meta.lon)));
+          if (dNow < dMin + 50) return;      // not yet receded past this place
+        }
+      }
+      hit = true;
+    });
+    return hit;
+  }
+
   /* Before the exchange lists the pool there is no price to draw, but the
      stated calculation exists from the first delivery, so it stands alone
      with its formula until the prices join it at listing. */
@@ -564,6 +628,15 @@ window.WXStorm = (() => {
       state.push('no wind contracts listed on the exchange yet; the price squares, the pool ladder and its price series appear at listing');
     }
     host.appendChild(h('p', { class: 'cap', text: state.join(' · ') }));
+    if (doc && passedPending(storm, doc)) {
+      const nt = h('div', { class: 'note warn' });
+      nt.innerHTML = '<b>Settlement data pending.</b> This storm appears to have passed some of its '
+        + 'reference locations. A forward-looking ladder declines once the storm moves past a place, and '
+        + 'the vendor’s interim settlement file, which carries what was actually recorded, has not been '
+        + 'published yet. Figures for passed locations read low until it arrives, and the exchange’s '
+        + 'quotes can sit above them for the same reason. Final values appear here when the file does.';
+      host.appendChild(nt);
+    }
     if (!doc || !cyc.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
       // the stated calculation needs only the index's current ladder, so it

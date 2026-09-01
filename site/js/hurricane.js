@@ -1202,10 +1202,18 @@ window.WXHur = (() => {
         const rows = Object.entries(lc.sites).sort(rank).slice(0, 16);
         const tb = h('table');
         tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
+        // the exchange's wind contract for this storm and location, where one
+        // is listed, so a probability row opens its market the way every
+        // other priced surface does
+        const code2 = String(s.name || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
         rows.forEach(([id, r]) => {
           const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: r.p[i] + '%' }))));
           const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
-          attach(tr, locationTip(L, { storm: s.name, thresholds: lc.thresholds, p: r.p, forecastTime: lc.forecastTime }));
+          attach(tr, locationTip(L, { storm: s.name, thresholds: lc.thresholds, p: r.p, forecastTime: lc.forecastTime, received: lc.lastModified }));
+          const lm = MK && (MK.markets || []).find(m2 => m2.symbol === 'L' + code2 + String(id).toUpperCase());
+          const c0 = lm && (lm.contracts || [])[0];
+          const url = lm && c0 ? WXM.contractUrl(lm.productConid, c0.conidYes || c0.conid) : null;
+          if (url) WXM.linkTo(tr, url, 'Open the ' + r.name + ' wind contract on IBKR');
           tb.appendChild(tr);
         });
         into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));

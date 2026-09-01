@@ -1082,6 +1082,19 @@ def run(no_build: bool) -> int:
                         p2.close()
                         page.locator("#sitePanel .spx").first.click(); page.wait_for_timeout(200)
                         chk.add(f"{scheme} storm ({tag}): the panel closes", page.locator("#sitePanel .spanel").count() == 0, "")
+                    marks_n = page.evaluate("""() => [...document.querySelectorAll('#liveStorms svg text')]
+                      .filter(t => t.textContent === 'POWERED BY REASK').length""")
+                    chk.add(f"{scheme} storm ({tag}): the vendor's mark sits inside its plots",
+                            marks_n >= 1, f"marks={marks_n}")
+                    vrow = page.evaluate("""() => {
+                      const tr = [...document.querySelectorAll('#vendor table tr')]
+                        .find(r => /Brownsville/.test(r.textContent));
+                      return tr ? (tr.getAttribute('data-contract-url') || '') : null;
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): a probability row opens its wind contract",
+                            bool(vrow and "conid_yes=" in vrow), str(vrow)[:90])
+                    chk.add(f"{scheme} storm ({tag}): a rising ladder fires no settlement-pending note",
+                            page.locator("#liveStorms .note.warn").count() == 0, "")
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
                     page.unroute("**/data/snapshots/**")
 
@@ -1123,6 +1136,17 @@ def run(no_build: bool) -> int:
                         return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index2))
                     if "/storm/Erin_2026.json" in u:
                         return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(False)))
+                    if "/storm/Beta_2026.json" in u:
+                        decay = {"schema": 2, "name": "Beta", "year": 2026, "thresholds": [60, 70],
+                                 "sites": {"BR": {"name": "Brownsville", "firstStep": "2026083100"}},
+                                 "final": None, "steps": [
+                                     {"id": "2026083100", "kind": "livecyc", "at": "2026-08-31T00:00:00Z", "ts": "t",
+                                      "sites": {"BR": [60, 20]}, "siteMeta": {"BR": {"name": "Brownsville", "lat": 25.9, "lon": -97.4}},
+                                      "prices": {}},
+                                     {"id": "2026083112", "kind": "livecyc", "at": "2026-08-31T12:00:00Z", "ts": "t",
+                                      "sites": {"BR": [12, 2]}, "siteMeta": {"BR": {"name": "Brownsville", "lat": 25.9, "lon": -97.4}},
+                                      "prices": {}}]}
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps(decay))
                     if u.endswith("/hurricane.json"):
                         resp = route.fetch()
                         hj = json.loads(resp.text())
@@ -1196,6 +1220,19 @@ def run(no_build: bool) -> int:
                 }""")
                 chk.add(f"{scheme} hurricane: before listing the stated calculation stands alone with its formula",
                         bool(pre and pre["lt"] and pre["joined"] and pre["stated"]), str(pre))
+                # a decayed ladder with no interim file raises the pending note,
+                # so the sag reads as settlement data pending rather than as the
+                # threat having vanished
+                pend = page.evaluate("""async () => {
+                  const tab = [...document.querySelectorAll('#liveStorms .bar button')]
+                    .find(b => b.textContent === 'Beta');
+                  if (tab) { tab.click(); await new Promise(r => setTimeout(r, 500)); }
+                  const n = document.querySelector('#liveStorms .note.warn');
+                  return { note: !!n, pending: n ? /Settlement data pending/.test(n.textContent) : false,
+                           explains: n ? /quotes can sit above/.test(n.textContent) : false };
+                }""")
+                chk.add(f"{scheme} hurricane: a passed, unsettled location raises the pending note",
+                        bool(pend and pend["note"] and pend["pending"] and pend["explains"]), str(pend))
                 chk.add(f"{scheme} hurricane: the running storm keeps the full display",
                         bool(mix and mix["erinCards"] >= 1), str(mix and mix["erinCards"]))
                 # two storms signal on one location: the dot's box carries both
