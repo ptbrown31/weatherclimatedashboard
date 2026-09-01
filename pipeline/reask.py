@@ -121,6 +121,13 @@ def parse_final_csv(text: str) -> dict:
     return out
 
 
+# The stated calculation's identity. Every figure written carries it, so a
+# changed formula is visible in the record and the ledgers can be brought
+# forward rather than left holding two vintages under one name. Bump it
+# whenever pwin's arithmetic changes.
+PWIN_METHOD = "indep-argmax-1mph-v1"
+
+
 def pwin(thresholds: list, sites: dict, floor_sites: Optional[dict] = None) -> dict:
     """P(location records the storm's highest gust), the stated calculation.
 
@@ -291,6 +298,7 @@ def _step(lad: dict, kind: str, sid: str, at, ts: str, prices: Optional[dict] = 
         # what was knowable at the time; the index's current figure also folds
         # the interim settlement once one exists
         out["pwin"] = pwin(lad.get("thresholds"), sites)
+        out["pwinMethod"] = PWIN_METHOD
     return out
 
 
@@ -298,6 +306,44 @@ def _stamp(s: str) -> str:
     """'2026-09-01T06:00:00Z' -> '2026090106' for archive names."""
     digits = re.sub(r"\D", "", s or "")
     return digits[:10] if len(digits) >= 10 else digits
+
+
+def restate_pwin(store: Storage, name: str, year, thresholds: list, log: Callable) -> int:
+    """Recompute every stored delivery's figure under the current method.
+
+    A step keeps the ladder it published, so its figure can be recomputed
+    exactly as it would have been at the time, from what that delivery said
+    and nothing later. That makes the series one methodology end to end
+    rather than a join between whatever was current when each point was
+    written. Steps already carrying the current method are left alone, so
+    this is idempotent and costs one listing per storm per pass.
+
+    Returns the number of steps restated.
+    """
+    key = STORM_KEY.format(name=name, year=year)
+    try:
+        doc = json.loads(store.get(key) or b"null") or {}
+    except (ValueError, TypeError):
+        return 0
+    thr = doc.get("thresholds") or thresholds
+    if not thr:
+        return 0
+    n = 0
+    for st in doc.get("steps") or []:
+        if st.get("kind") != "livecyc" or not st.get("sites"):
+            continue
+        st.pop("pwinPool", None)          # a field from a method that was withdrawn
+        if st.get("pwinMethod") == PWIN_METHOD and st.get("pwin"):
+            continue
+        got = pwin(thr, st["sites"])
+        if got:
+            st["pwin"] = got
+            st["pwinMethod"] = PWIN_METHOD
+            n += 1
+    if n:
+        store.put(key, json.dumps(doc, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+        log(kind="reask", step="restate", storm=name, steps=n, method=PWIN_METHOD)
+    return n
 
 
 def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch: Optional[Callable] = None) -> dict:
@@ -412,6 +458,8 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             fl = ((s2.get("interim") or {}).get("sites")) or None
             lc["pwin"] = pwin(lc.get("thresholds"), {k: v.get("p") for k, v in lc["sites"].items()},
                               {k: v.get("p") for k, v in fl.items()} if fl else None)
+            lc["pwinMethod"] = PWIN_METHOD
+        restate_pwin(store, s2.get("name"), s2.get("year"), (lc or {}).get("thresholds") or [], log)
     asof = max([(s.get("livecyc") or {}).get("forecastTime") or "" for s in keep] + [prev.get("asof") or ""]) or None
     ok = live is not None
     snap = {"schema": SCHEMA, "enabled": True, "attribution": ATTRIBUTION, "asof": asof, "written": _iso(now),
