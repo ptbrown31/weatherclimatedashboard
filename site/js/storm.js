@@ -520,9 +520,9 @@ window.WXStorm = (() => {
            ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
            ['Calculation', cv == null ? null : cv + '%'],
           ],
-          'settles on the vendor’s final peak gusts' + (url ? ' · click the right side to open the contract' : '')));
+          'settles on the vendor’s final peak gusts' + (url ? ' · click to open the contract' : '')));
         if (url) {
-          const link = el('rect', { x: RX - 58, y: yTop, width: 58, height: rowH, fill: 'transparent', cursor: 'pointer' });
+          const link = el('rect', { x: LX, y: yTop, width: RX - LX, height: rowH, fill: 'transparent' });
           WXM.linkTo(link, url, 'Open ' + nm + ' on IBKR');
           g.appendChild(link);
         }
@@ -714,9 +714,9 @@ window.WXStorm = (() => {
          ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
          ['Calculation', cv == null ? null : cv + '%'],
         ],
-        'settles on the vendor’s final peak gusts' + (url ? ' · click the right side to open the contract' : '')));
+        'settles on the vendor’s final peak gusts' + (url ? ' · click to open the contract' : '')));
       if (url) {
-        const link = el('rect', { x: RX2 - 58, y: yTop, width: 58, height: rowH, fill: 'transparent', cursor: 'pointer' });
+        const link = el('rect', { x: LX2 - 14, y: yTop, width: RX2 - LX2 + 14, height: rowH, fill: 'transparent' });
         WXM.linkTo(link, url, 'Open ' + nm + ' on IBKR');
         g.appendChild(link);
       }
