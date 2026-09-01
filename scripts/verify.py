@@ -915,6 +915,8 @@ def run(no_build: bool) -> int:
                         steps.append({"id": t0.strftime("%Y%m%d%H"), "kind": "livecyc",
                                       "at": t0.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": "t",
                                       "sites": _lad(0.2 + 0.1 * k),
+                                      "siteMeta": {"BR": {"name": "Brownsville"}},
+                                      "pwin": {"BR": 100.0},
                                       "prices": {"BR": {str(t): 10.0 + 5 * k for t in THR}}})
                     steps.append({"id": "INT", "kind": "interim", "at": "t", "ts": "t", "sites": _lad(0.95),
                                   "prices": {"BR": {str(t): 44.0 for t in THR}}})
@@ -923,7 +925,10 @@ def run(no_build: bool) -> int:
                             "final": {"BR": 96.0} if final else None}
 
                 _index = {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026,
-                          "storms": [{"name": "Erin", "year": 2026}]}
+                          "storms": [{"name": "Erin", "year": 2026,
+                                      "livecyc": {"forecastTime": None, "thresholds": THR,
+                                                  "sites": {"BR": {"name": "Brownsville", "p": [60, 30, 10]}},
+                                                  "pwin": {"BR": 55.0}}}]}
 
                 def _storm_routes(final):
                     def handler(route):
@@ -974,14 +979,20 @@ def run(no_build: bool) -> int:
                       const svg = document.querySelector('#liveStorms svg.lhlserie');
                       if (!svg) return null;
                       const paths = [...svg.querySelectorAll('path')].filter(pp => pp.getAttribute('stroke') !== 'none').length;
+                      const dashed = svg.querySelectorAll('path.calcline').length;
                       const wrap = svg.parentElement;
                       const title = (wrap.querySelector('.lt') || {}).textContent || '';
                       const cap = (wrap.querySelector('.cap') || {}).textContent || '';
-                      return { paths, title, own: /computes no probability of its own/.test(cap) };
+                      const rowBoth = [...document.querySelectorAll('#liveStorms .ladder .lv')]
+                        .some(e => /¢ · calc \d+%/.test(e.textContent));
+                      return { paths, dashed, title, rowBoth,
+                               stated: /The calculation, stated/.test(cap),
+                               lifetime: /whole lifetime/.test(cap) && /looks forward from its cycle/.test(cap) };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): the pool's market P(win) draws through time",
-                            bool(lhl and lhl["paths"] >= 3 and "market P(win) through time" in lhl["title"]
-                                 and lhl["own"]), str(lhl))
+                    chk.add(f"{scheme} storm ({tag}): the pool's P(win) draws through time, price and calculation together",
+                            bool(lhl and lhl["paths"] >= 3 and lhl["dashed"] >= 1
+                                 and "P(win) through time" in lhl["title"]
+                                 and lhl["rowBoth"] and lhl["stated"] and lhl["lifetime"]), str(lhl))
                     page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
                     page.wait_for_timeout(150)
                     t_px = page.locator("#tip").inner_text()
@@ -1088,7 +1099,9 @@ def run(no_build: bool) -> int:
                                {"name": "Alpha", "year": 2026,
                                 "livecyc": {"forecastTime": "2026-09-01T06:00Z", "cycles": 3,
                                             "thresholds": [60, 70, 80],
-                                            "sites": {"BR": {"name": "Brownsville", "p": [50.1, 15.2, 0.5]}}}},
+                                            "pwin": {"BR": 61.0, "GA": 39.0},
+                                            "sites": {"BR": {"name": "Brownsville", "p": [50.1, 15.2, 0.5]},
+                                                      "GA": {"name": "Galveston", "p": [40.0, 9.0, 0.2]}}}},
                                {"name": "Beta", "year": 2026,
                                 "livecyc": {"forecastTime": "2026-08-31T18:00Z", "cycles": 5,
                                             "thresholds": [60, 70, 80],
@@ -1169,6 +1182,20 @@ def run(no_build: bool) -> int:
                 t_ren = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hurricane: the renamed depression's ladder leaves the hover",
                         "Five" not in t_ren and "Alpha" in t_ren, t_ren[:120])
+                # no pool listed for the running storm: the stated calculation
+                # stands alone, formula printed, prices joining at listing
+                pre = page.evaluate("""async () => {
+                  const tab = [...document.querySelectorAll('#liveStorms .bar button')]
+                    .find(b => b.textContent === 'Alpha');
+                  if (tab) { tab.click(); await new Promise(r => setTimeout(r, 500)); }
+                  const lt = [...document.querySelectorAll('#liveStorms .ladder .lt')]
+                    .map(e => e.textContent).find(t => /awaiting listing/.test(t)) || null;
+                  const caps = [...document.querySelectorAll('#liveStorms .cap')].map(c => c.textContent).join(' ');
+                  return { lt, joined: /join this display at listing/.test(caps),
+                           stated: /The calculation, stated/.test(caps) };
+                }""")
+                chk.add(f"{scheme} hurricane: before listing the stated calculation stands alone with its formula",
+                        bool(pre and pre["lt"] and pre["joined"] and pre["stated"]), str(pre))
                 chk.add(f"{scheme} hurricane: the running storm keeps the full display",
                         bool(mix and mix["erinCards"] >= 1), str(mix and mix["erinCards"]))
                 # two storms signal on one location: the dot's box carries both

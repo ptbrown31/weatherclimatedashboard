@@ -121,6 +121,79 @@ def parse_final_csv(text: str) -> dict:
     return out
 
 
+def pwin(thresholds: list, sites: dict, floor_sites: Optional[dict] = None) -> dict:
+    """P(location records the storm's highest gust), the stated calculation.
+
+    Each location's lifetime peak-gust distribution is its exceedance ladder,
+    read as uniform within each threshold bin; where an interim settlement
+    ladder exists for a location, the lifetime exceedance at each threshold is
+    the maximum of the forward and the settled figure, which is the fold the
+    contract's lifetime question requires once part of the storm is realized.
+    Locations are treated as independent and P(highest) is the probability of
+    being the maximum, evaluated exactly on a one-mph grid and normalised to
+    sum to one over the candidates.
+
+    Independence is the one assumption, and it is stated wherever the number
+    is shown: locations share the storm, and correlation concentrates the
+    outcome on the leader, so the leader here is if anything understated. The
+    same convention prices the exchange's own L ladders, marginal by marginal.
+    """
+    thr = [float(t) for t in (thresholds or [])]
+    ids = [k for k, ps in (sites or {}).items() if any((p or 0) > 0 for p in (ps or []))]
+    if not thr or not ids:
+        return {}
+    top = thr[-1] + 10.0
+    edges = [0.0] + thr + [top]
+
+    def exceed(ps, fl):
+        # exceedance at each edge, in [0,1], monotone non-increasing
+        e = [1.0]
+        for i in range(len(thr)):
+            v = (ps[i] if i < len(ps) and ps[i] is not None else 0.0) / 100.0
+            if fl is not None and i < len(fl) and fl[i] is not None:
+                v = max(v, fl[i] / 100.0)
+            e.append(min(e[-1], max(0.0, min(1.0, v))))
+        e.append(0.0)
+        return e
+
+    E = {sid: exceed(sites[sid], (floor_sites or {}).get(sid)) for sid in ids}
+    # one-mph grid: F and f per location, linear exceedance within a bin
+    xs = []
+    x = 0.5
+    while x < top:
+        xs.append(x)
+        x += 1.0
+    def at(e, x2):
+        for i in range(len(edges) - 1):
+            if edges[i] <= x2 < edges[i + 1]:
+                w = edges[i + 1] - edges[i]
+                fr = (x2 - edges[i]) / w
+                ex = e[i] + (e[i + 1] - e[i]) * fr
+                dens = (e[i] - e[i + 1]) / w
+                return 1.0 - ex, dens
+        return 1.0, 0.0
+    F, f = {}, {}
+    for sid in ids:
+        F[sid] = [at(E[sid], x2)[0] for x2 in xs]
+        f[sid] = [at(E[sid], x2)[1] for x2 in xs]
+    out = {}
+    for sid in ids:
+        tot = 0.0
+        for k in range(len(xs)):
+            prod = f[sid][k]
+            if prod <= 0:
+                continue
+            for oth in ids:
+                if oth != sid:
+                    prod *= F[oth][k]
+            tot += prod
+        out[sid] = tot
+    norm = sum(out.values())
+    if norm <= 0:
+        return {}
+    return {sid: round(v / norm * 100, 1) for sid, v in out.items()}
+
+
 def _num(v) -> Optional[float]:
     try:
         return float(v) if v not in (None, "") else None
@@ -211,8 +284,14 @@ def _step(lad: dict, kind: str, sid: str, at, ts: str, prices: Optional[dict] = 
     between different measurements, so the ledger does not."""
     sites = {k: v.get("p") or [] for k, v in (lad.get("sites") or {}).items()}
     meta = {k: {"name": v.get("name"), "lat": v.get("lat"), "lon": v.get("lon")} for k, v in (lad.get("sites") or {}).items()}
-    return {"id": sid, "kind": kind, "at": at, "ts": ts, "prices": prices or {},
-            "sites": sites, "siteMeta": meta, "thresholds": lad.get("thresholds")}
+    out = {"id": sid, "kind": kind, "at": at, "ts": ts, "prices": prices or {},
+           "sites": sites, "siteMeta": meta, "thresholds": lad.get("thresholds")}
+    if kind == "livecyc":
+        # the stated calculation from this delivery's ladder alone, which is
+        # what was knowable at the time; the index's current figure also folds
+        # the interim settlement once one exists
+        out["pwin"] = pwin(lad.get("thresholds"), sites)
+    return out
 
 
 def _stamp(s: str) -> str:
@@ -323,6 +402,12 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             if age > 14:
                 continue
         keep.append(s)
+    for s2 in keep:
+        lc = s2.get("livecyc")
+        if lc and lc.get("sites"):
+            fl = ((s2.get("interim") or {}).get("sites")) or None
+            lc["pwin"] = pwin(lc.get("thresholds"), {k: v.get("p") for k, v in lc["sites"].items()},
+                              {k: v.get("p") for k, v in fl.items()} if fl else None)
     asof = max([(s.get("livecyc") or {}).get("forecastTime") or "" for s in keep] + [prev.get("asof") or ""]) or None
     ok = live is not None
     snap = {"schema": SCHEMA, "enabled": True, "attribution": ATTRIBUTION, "asof": asof, "written": _iso(now),

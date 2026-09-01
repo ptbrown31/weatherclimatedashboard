@@ -60,7 +60,10 @@ reference package's synthetic ladders. Prices are the exchange's, in cents, with
 never fee adjusted. Exchange language: there are no sellers, only bids to buy Yes or No that sum to $1;
 the feed's "ask" on a Yes contract is one dollar less the No bid and the pages never say "ask", "sell"
 or "offer". The pages never compute a fair value, a model probability or a disagreement
-score (those are internal systems and stay out of this repo). When off, the layout reserves no
+score (those are internal systems and stay out of this repo). One documented exception (owner's
+decision 2026-09-01): the highest-wind pool's stated calculation, `pwin` in `pipeline/reask.py` —
+an independence argmax over the vendor's published exceedance ladders, floored by published interim
+settlements — shown only with its formula printed beside it and never a desk number. When off, the layout reserves no
 space for market elements.
 
 ## Decisions taken 2026-08-21

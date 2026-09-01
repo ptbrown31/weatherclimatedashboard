@@ -84,6 +84,31 @@ window.WXStorm = (() => {
   const rung = (i, n) => 'hsl(' + Math.round(210 - 210 * (i / Math.max(1, n - 1))) + ' 70% 45%)';
   const stormCode = n => String(n || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
 
+  /* The stated calculation's wording, printed beside every display of the
+     number, because a probability the site computes exists only together
+     with the formula that computed it. */
+  const METHOD = 'The calculation, stated: each location’s lifetime peak-gust distribution is its latest '
+    + 'LiveCyc exceedance ladder, uniform within the published threshold bins, and where an interim '
+    + 'settlement ladder exists its figure floors the lifetime one, because the contract asks about the '
+    + 'storm’s whole lifetime while a LiveCyc ladder looks forward from its cycle. Locations are treated '
+    + 'as independent and P(highest) is the probability of being the maximum, evaluated on a one-mph grid '
+    + 'and normalised to sum to one. Independence is the one assumption: locations share the storm, and '
+    + 'correlation concentrates the outcome on the leader, so the leader here is if anything understated. '
+    + 'The vendor’s ladders are as published; the exchange’s prices are its own.';
+
+  // the current stated-calculation figure per location NAME for one storm
+  function calcByName(stormName) {
+    const s = ((RK && RK.storms) || []).find(x => x.name === stormName);
+    const lc = s && s.livecyc;
+    if (!lc || !lc.pwin) return null;
+    const out = {};
+    Object.keys(lc.pwin).forEach(sid => {
+      const nm = (lc.sites && lc.sites[sid] && lc.sites[sid].name) || sid;
+      out[nm] = lc.pwin[sid];
+    });
+    return out;
+  }
+
   // the exchange's market for one location of one storm, if it is listed
   function lMarket(storm, sid) {
     if (!MK) return null;
@@ -361,12 +386,18 @@ window.WXStorm = (() => {
     poolMarkets(storm.name).forEach(m => {
       const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: (m.name || m.symbol) + ' (' + m.symbol + ')' }),
         h('div', { class: 'cap', style: 'margin:0 0 6px', text: 'Which of these locations records the highest wind. The candidates are the strikes and the pool is fixed when it is opened.' })]);
+      const calc = calcByName(storm.name);
       (m.contracts || []).slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
         const v = c.mid == null ? null : cents(c.mid);
+        const cw = calc ? calc[c.label || String(c.strike)] : null;
+        const bar = h('span', { class: 'lb' }, [h('i', { style: 'width:' + (v == null ? 0 : v) + '%' })]);
+        if (cw != null) bar.appendChild(h('u', { class: 'calcmk', style: 'left:' + cw + '%',
+          title: 'stated calculation ' + cw + '%' }));
         const row = h('div', { class: 'lrow' }, [
           h('span', { class: 'lk', text: c.label || String(c.strike) }),
-          h('span', { class: 'lb' }, [h('i', { style: 'width:' + (v == null ? 0 : v) + '%' })]),
-          h('span', { class: 'lv', text: v == null ? 'no bids' : v + '¢' })]);
+          bar,
+          h('span', { class: 'lv', text: (v == null ? 'no bids' : v + '¢')
+            + (cw != null ? ' · calc ' + Math.round(cw) + '%' : '') })]);
         const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
         bind(row, () => tip.rows((m.name || m.symbol) + ' — ' + esc(c.label || c.strike),
           [['Yes price', v == null ? 'no bids' : v + '¢'],
@@ -389,11 +420,23 @@ window.WXStorm = (() => {
      is the market's own probability that the location takes the pool, so
      this is the market's P(win) through time and nothing else; the desk
      figures under the same title elsewhere are not this site's to publish. */
-  async function poolSeries(m) {
+  async function poolSeries(m, ledger) {
     let doc = null;
     try { doc = (await WXD.get('lhl/' + m.symbol + '.json', 10)).data; } catch (e) { doc = null; }
     const pts = (doc && doc.points) || [];
     if (pts.length < 2) return null;
+    // the stated calculation at each delivery, by location name, for the
+    // dashed lines; each step's figure is from its own ladder alone
+    const calcSteps = ((ledger && ledger.steps) || [])
+      .filter(st => st.kind === 'livecyc' && st.pwin && st.at)
+      .map(st => {
+        const by = {};
+        Object.keys(st.pwin).forEach(sid => {
+          const nm = (st.siteMeta && st.siteMeta[sid] && st.siteMeta[sid].name) || sid;
+          by[nm] = st.pwin[sid];
+        });
+        return { t: Date.parse(st.at), by };
+      }).filter(q => isFinite(q.t));
     const W = 960, Hh = 260, L = 46, R = 830, T = 26, B = 232;
     const t0 = Date.parse(pts[0].t), t1 = Date.parse(pts[pts.length - 1].t);
     if (!(t1 > t0)) return null;
@@ -418,6 +461,16 @@ window.WXStorm = (() => {
       svg.appendChild(el('circle', { cx: X(last.t), cy: Y(last.v), r: 2.4, fill: col }));
       svg.appendChild(txt(nm + ' ' + Math.round(last.v) + '¢', { x: R + 6, y: Y(last.v) + 3,
         'font-size': 9.5, fill: col, class: 'lbl' }));
+      // the stated calculation, dashed in the same colour, clipped to the
+      // chart's own window so the two read on one axis
+      const cl = calcSteps.map(q => ({ t: q.t, v: q.by[nm] }))
+        .filter(q => q.v != null && q.t >= t0 && q.t <= t1);
+      if (cl.length > 1) {
+        svg.appendChild(el('path', {
+          d: cl.map((q, j) => (j ? 'L' : 'M') + X(q.t).toFixed(1) + ' ' + Y(q.v).toFixed(1)).join(''),
+          fill: 'none', stroke: col, 'stroke-width': 1.1, 'stroke-dasharray': '4 3', opacity: 0.75,
+          class: 'calcline' }));
+      }
     });
     // day marks along the base, in UTC, the clock the storm runs on
     const DAY = 86400000;
@@ -443,11 +496,33 @@ window.WXStorm = (() => {
     svg.addEventListener('mouseleave', () => { rule.setAttribute('visibility', 'hidden'); tip.hide(); });
     const wrap = h('div');
     wrap.appendChild(h('div', { class: 'lt', style: 'margin:12px 0 2px',
-      text: 'Highest-wind location (LHL) — market P(win) through time' }));
+      text: 'Highest-wind location (LHL) — P(win) through time' }));
     wrap.appendChild(svg);
     wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
-      text: 'The exchange’s Yes price for each candidate in the pool, sampled hourly from the quote record. A price in cents is the market’s own probability that the location records the highest wind; this site computes no probability of its own.' }));
+      text: 'Solid lines are the exchange’s Yes prices, sampled hourly from the quote record; a price in cents is the market’s probability that the location records the highest gust over the storm’s whole lifetime. Dashed lines are the stated calculation from each LiveCyc delivery, drawn at the delivery’s cycle time. ' + METHOD }));
     return wrap;
+  }
+
+  /* Before the exchange lists the pool there is no price to draw, but the
+     stated calculation exists from the first delivery, so it stands alone
+     with its formula until the prices join it at listing. */
+  function appendStatedLadder(storm, host) {
+    if (poolMarkets(storm.name).length) return;
+    const calc = calcByName(storm.name);
+    if (!calc) return;
+    const names = Object.keys(calc).sort((a, b) => calc[b] - calc[a]);
+    const div = h('div', { class: 'ladder' }, [
+      h('div', { class: 'lt', text: 'Highest-wind location (LHL) — the stated calculation, awaiting listing' })]);
+    names.forEach(nm => {
+      div.appendChild(h('div', { class: 'lrow' }, [
+        h('span', { class: 'lk', text: nm }),
+        h('span', { class: 'lb' }, [h('i', { style: 'width:' + calc[nm] + '%' })]),
+        h('span', { class: 'lv', text: calc[nm] + '%' })]));
+    });
+    const g = h('div', { class: 'ladders' }); g.appendChild(div);
+    host.appendChild(g);
+    host.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
+      text: 'The exchange has not listed this pool yet; its prices join this display at listing. ' + METHOD }));
   }
 
   // ---- one storm
@@ -483,6 +558,9 @@ window.WXStorm = (() => {
     host.appendChild(h('p', { class: 'cap', text: state.join(' · ') }));
     if (!doc || !cyc.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
+      // the stated calculation needs only the index's current ladder, so it
+      // does not wait for the delivery ledger
+      appendStatedLadder(storm, host);
       return;
     }
     // the locations worth showing: the strongest so far, which can only look backwards
@@ -510,9 +588,10 @@ window.WXStorm = (() => {
     const p = pools(storm);
     if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
     for (const m of poolMarkets(storm.name)) {
-      const ser = await poolSeries(m);
+      const ser = await poolSeries(m, doc);
       if (ser) host.appendChild(ser);
     }
+    appendStatedLadder(storm, host);
     host.appendChild(h('p', { class: 'cap attrib', text: ((RK && RK.attribution) || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; the squares are the exchange’s own prices. The horizontal axis counts vendor deliveries, not time.' }));
   }
 
