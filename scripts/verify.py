@@ -1073,6 +1073,14 @@ def run(no_build: bool) -> int:
                                 "livecyc": {"forecastTime": "2026-08-31T18:00Z", "cycles": 5,
                                             "thresholds": [60, 70, 80],
                                             "sites": {"BR": {"name": "Brownsville", "p": [27.8, 7.5, 0.2]}}}},
+                               # a depression whose files are fresh but whose system
+                               # has been named: the roster below carries AL05 as
+                               # Gamma, so Five is the same storm under its old name
+                               {"name": "Five", "year": 2026,
+                                "livecyc": {"forecastTime": "2026-09-01T06:00Z",
+                                            "lastModified": "2026-09-01T07:00:00Z", "cycles": 4,
+                                            "thresholds": [60, 70],
+                                            "sites": {"BR": {"name": "Brownsville", "p": [30, 8]}}}},
                                {"name": "Erin", "year": 2026},
                            ]}
 
@@ -1082,6 +1090,15 @@ def run(no_build: bool) -> int:
                         return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index2))
                     if "/storm/Erin_2026.json" in u:
                         return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(False)))
+                    if u.endswith("/hurricane.json"):
+                        resp = route.fetch()
+                        hj = json.loads(resp.text())
+                        hj["storms"] = (hj.get("storms") or []) + [
+                            {"id": "al052026", "name": "Gamma", "basin": "AL", "classification": "TS",
+                             "advisory": "12", "intensityKt": 45, "lat": 25.0, "lon": -80.0,
+                             "updated": "2026-09-01T09:00:00Z", "points": [], "track": [], "past": [],
+                             "cone": [], "windProbs": []}]
+                        return route.fulfill(response=resp, body=json.dumps(hj))
                     return route.continue_()
 
                 page.route("**/data/snapshots/**", _mixed_routes)
@@ -1109,12 +1126,29 @@ def run(no_build: bool) -> int:
                            doneV: document.querySelectorAll('#vendor details.stormdone').length,
                            doneOpen: document.querySelectorAll('details.stormdone[open]').length,
                            erinCards: document.querySelectorAll('#liveStorms .scardwrap').length,
-                           doneText: (document.querySelector('#liveStorms details.stormdone summary') || {}).textContent || '' };
+                           doneText: [...document.querySelectorAll('#liveStorms details.stormdone summary')]
+                             .map(x => x.textContent).join(' | ') };
                 }""")
                 chk.add(f"{scheme} hurricane: a stopped storm folds shut in both LiveCyc sections",
-                        bool(mix and mix["doneLS"] == 1 and mix["doneV"] == 1 and mix["doneOpen"] == 0
+                        bool(mix and mix["doneLS"] == 2 and mix["doneV"] == 2 and mix["doneOpen"] == 0
                              and "no longer updating" in mix["doneText"]),
                         str(mix))
+                # the renamed depression: fresh files, but the roster says AL05
+                # is Gamma now, so Five folds as the same storm under its old
+                # name, and its ladder no longer reaches the hover
+                ren = page.evaluate("""() => {
+                  const sums = [...document.querySelectorAll('#liveStorms details.stormdone summary')]
+                    .map(x => x.textContent);
+                  return { renamed: sums.some(t => /Five 2026/.test(t) && /now named Gamma/.test(t)),
+                           sums: sums.map(t => t.slice(0, 50)) };
+                }""")
+                chk.add(f"{scheme} hurricane: a renamed depression folds as the same storm, not a second one",
+                        bool(ren and ren["renamed"]), str(ren))
+                dot3 = page.locator("#basin circle[role='button']").first
+                dot3.hover(force=True); page.wait_for_timeout(200)
+                t_ren = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} hurricane: the renamed depression's ladder leaves the hover",
+                        "Five" not in t_ren and "Alpha" in t_ren, t_ren[:120])
                 chk.add(f"{scheme} hurricane: the running storm keeps the full display",
                         bool(mix and mix["erinCards"] >= 1), str(mix and mix["erinCards"]))
                 # two storms signal on one location: the dot's box carries both

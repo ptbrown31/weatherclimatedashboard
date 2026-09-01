@@ -1152,7 +1152,7 @@ window.WXHur = (() => {
         const t = WXStorm.stampOf(s);
         const det = h('details', { class: 'stormdone' });
         det.appendChild(h('summary', {}, [h('b', { text: s.name + ' ' + s.year }),
-          h('span', { text: (s.final ? 'settled' : 'no longer updating')
+          h('span', { text: WXStorm.doneLabel(s)
             + (t ? ' · last delivery ' + new Date(t).toISOString().slice(0, 10) : '') + ' · click to view' })]));
         into = h('div');
         det.appendChild(into);
@@ -1243,6 +1243,9 @@ window.WXHur = (() => {
     const mk = await WXM.loadGroup('hurricane');
     const geo = await fetch('assets/hurricane-geo.json').then(x => x.json()).catch(() => null);
     H = r.data; GEO = geo; NATION = geo ? geo.nation : null; RK = rk.data; SZN = sz.data; MK = WXM.hurricaneMarkets();
+    // the roster is what lets the vendor lane see that a numbered depression
+    // and the named storm it became are one system
+    if (window.WXStorm && WXStorm.setRoster) WXStorm.setRoster((H && H.storms) || []);
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 30));
     if (mk) { const q = WXC.statusEl([mk], 10); q.insertBefore(document.createTextNode('Quotes: '), q.firstChild); st.appendChild(q); }
     if (!H) { $('#basin').innerHTML = ''; $('#basin').appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }

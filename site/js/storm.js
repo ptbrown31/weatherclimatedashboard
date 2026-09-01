@@ -37,6 +37,32 @@ window.WXStorm = (() => {
      the map dots, the ladder tables and the delivery charts all agree on
      which storms are still running. */
   const STALE_MS = 36 * 3600000;
+  /* A depression is named by its number, and on upgrade the same system gets
+     a real name: Five became Edouard, and the vendor's files simply started
+     arriving under the new name. The two are one storm, so the number-word
+     roster entry is superseded, not a second hazard. The join is through the
+     NHC roster's ATCF id, whose two digits are the storm number the word
+     spells; hurricane.js hands the roster over as soon as it has one. */
+  const NUMWORD = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen',
+    'Nineteen', 'Twenty', 'Twenty-One', 'Twenty-Two', 'Twenty-Three', 'Twenty-Four', 'Twenty-Five',
+    'Twenty-Six', 'Twenty-Seven', 'Twenty-Eight', 'Twenty-Nine', 'Thirty'];
+  const numOf = name => { const i = NUMWORD.indexOf(String(name || '').trim()); return i > 0 ? i : null; };
+  let ROSTER = [];
+  function setRoster(list) { ROSTER = list || []; }
+  function supersededBy(s) {
+    const n = numOf(s && s.name);
+    if (n == null) return null;
+    const hit = ROSTER.find(r => {
+      const m = /^al(\d{2})/i.exec(r.id || '');
+      return m && +m[1] === n && numOf(r.name) == null;
+    });
+    return hit ? hit.name : null;
+  }
+  // what a folded storm's summary says about why it is folded
+  const doneLabel = s => (s.final ? 'settled'
+    : supersededBy(s) ? 'now named ' + supersededBy(s)
+    : 'no longer updating');
   function stampOf(s) {
     const lc = (s && s.livecyc) || {};
     const t = Date.parse(lc.lastModified || lc.forecastTime || '');
@@ -44,6 +70,7 @@ window.WXStorm = (() => {
   }
   function dormant(s) {
     if (s && s.final) return true;
+    if (supersededBy(s)) return true;
     const t = stampOf(s);
     return t != null && (Date.now() - t) > STALE_MS;
   }
@@ -450,7 +477,7 @@ window.WXStorm = (() => {
       const det = h('details', { class: 'stormdone' });
       det.appendChild(h('summary', {}, [
         h('b', { text: s.name + ' ' + s.year }),
-        h('span', { text: (s.final ? 'settled' : 'no longer updating')
+        h('span', { text: doneLabel(s)
           + (t ? ' · last delivery ' + new Date(t).toISOString().slice(0, 10) : '') + ' · click to view' }),
       ]));
       const body = h('div');
@@ -513,5 +540,5 @@ window.WXStorm = (() => {
     return out;
   }
 
-  return { init, draw, siteCard, sites, dormant, stampOf };
+  return { init, draw, siteCard, sites, dormant, stampOf, setRoster, supersededBy, doneLabel };
 })();
