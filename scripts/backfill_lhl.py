@@ -26,7 +26,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline import config, storage    # noqa: E402
-from pipeline.market import LHL_MAX_POINTS    # noqa: E402
+from pipeline.market import LHL_DROP_BEFORE, LHL_MAX_POINTS    # noqa: E402
 from pipeline.snapshots import SNAP_CACHE     # noqa: E402
 
 PREFIX = "archive/market/"
@@ -100,7 +100,8 @@ def main(argv=None) -> int:
 
     out = {}
     for sym, byt in series.items():
-        pts = [{"t": t, "p": p} for t, p in sorted(byt.items()) if p][-LHL_MAX_POINTS:]
+        cut = LHL_DROP_BEFORE.get(sym, "")
+        pts = [{"t": t, "p": p} for t, p in sorted(byt.items()) if p and t > cut][-LHL_MAX_POINTS:]
         out[sym] = len(pts)
         if not pts or args.dry_run:
             continue

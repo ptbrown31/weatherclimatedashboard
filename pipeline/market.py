@@ -149,6 +149,13 @@ def _group_snapshot(name: str, now: dt.datetime, items: List[dict]) -> dict:
 
 LHL_MAX_POINTS = 3000          # a storm's pool lives days; this holds weeks at the quote cadence
 
+# One pool's opening quotes ruled out of the public display (the owner's call,
+# 2026-09-01): Edouard's market opened on a pair-normalised 95/5 book that had
+# nothing to do with the field and was corrected within hours. Points at or
+# before the cutoff are dropped on every write, so a rebuild cannot put them
+# back.
+LHL_DROP_BEFORE = {"LHLED": "2026-09-01T17:30:00Z"}
+
 
 def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
     """The highest-wind pools' prices, kept through time.
@@ -195,6 +202,9 @@ def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
         pts = [q for q in pts if q.get("t") != stamp]
         pts.append({"t": stamp, "p": prices})
         pts.sort(key=lambda q: q["t"])
+        cut = LHL_DROP_BEFORE.get(m["symbol"])
+        if cut:
+            pts = [q for q in pts if q.get("t", "") > cut]
         if len(pts) > LHL_MAX_POINTS:
             pts = pts[-LHL_MAX_POINTS:]
         store.put(key, json.dumps({"schema": 1, "symbol": m["symbol"], "name": m.get("name"),

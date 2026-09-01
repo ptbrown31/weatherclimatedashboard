@@ -689,6 +689,21 @@ class LhlSeries(unittest.TestCase):
         market._lhl_series(st, t0, self.ITEMS)
         self.assertEqual(len(json.loads(st.d["snapshots/lhl/LHLERG.json"])["points"]), 1)
 
+    def test_quotes_ruled_out_by_the_owner_stay_out(self):
+        # Edouard's opening book was an error the owner ruled out of the
+        # display; the cutoff lives in the pipeline so a rebuild cannot
+        # put those points back
+        st = self.Store()
+        t0 = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+        keep, market.LHL_DROP_BEFORE = market.LHL_DROP_BEFORE, {"LHLERG": "2026-09-01T12:05:00Z"}
+        try:
+            market._lhl_series(st, t0, self.ITEMS)
+            market._lhl_series(st, t0 + dt.timedelta(minutes=10), self.ITEMS)
+        finally:
+            market.LHL_DROP_BEFORE = keep
+        doc = json.loads(st.d["snapshots/lhl/LHLERG.json"])
+        self.assertEqual([q["t"][11:16] for q in doc["points"]], ["12:10"])
+
     def test_the_series_is_capped(self):
         st = self.Store()
         t0 = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
