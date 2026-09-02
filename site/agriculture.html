@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agriculture contracts</title>
-<meta name="description" content="World crop yields as the Department of Agriculture publishes them, with the thresholds the listed contracts are written at.">
+<title>Crop yield prediction markets</title>
+<meta name="description" content="Prediction markets on global corn, wheat and rice yields, drawn against the yields the Department of Agriculture publishes for each marketing year.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -23,6 +23,26 @@ quote; click a marker to open that contract on IBKR.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div id="panels"></div>
 <p class="cap" id="foot"></p>
+
+<div class="prose" style="margin-top:26px">
+<h2>Crop yield prediction markets</h2>
+<p>ForecastEx lists contracts on global crop yields for corn, for wheat and for rice. Each pays one dollar if
+the yield the Department of Agriculture publishes for the marketing year comes in above the stated threshold.
+The department posts a figure for a year still under way and revises it until that year closes, and that
+running figure is what the market is pricing, which is why the record above is drawn solid to the last closed
+year and dashed after it.</p>
+<h2>Records behind each contract</h2>
+<p>Yields come from the Production, Supply and Distribution database the Foreign Agricultural Service
+maintains, which carries one figure per crop per marketing year for the world and for each producing country.
+A global yield is production over area harvested, so it moves with weather in the growing season and with how
+much land was planted and brought in. The estimate is revised month by month as harvests are reported, and a
+contract settles on the figure published for the marketing year it names.</p>
+<p>Each contract pays one dollar if the published yield comes in above its threshold and nothing if it does
+not, so the price in cents is the market&rsquo;s probability of that outcome. There are no sellers on this
+exchange. A participant buys Yes or buys No, and the two bids sum to one dollar. Dragging across a chart fits
+a straight line to the window dragged and projects it forward with the year it would cross each threshold,
+which describes that window and carries no forecast of the yield.</p>
+</div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

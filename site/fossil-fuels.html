@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fossil fuels</title>
-<meta name="description" content="Coal, natural gas and oil as the Energy Information Administration publishes them, with the thresholds the listed contracts are written at.">
+<title>Natural gas, coal and oil prediction markets</title>
+<meta name="description" content="Prediction markets on coal and natural gas consumption and on the share of US electricity generated from each fuel, drawn against the Energy Information Administration's series.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -20,6 +20,27 @@ contract&rsquo;s quote; click a marker to open that contract on IBKR.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div id="panels"></div>
 <p class="cap" id="foot"></p>
+
+<div class="prose" style="margin-top:26px">
+<h2>Natural gas, coal and oil prediction markets</h2>
+<p>These contracts settle on figures the Energy Information Administration publishes each month. ForecastEx
+lists them on total consumption of coal and of natural gas, in the United States and in California, and on the
+share of United States electricity generated from coal, from natural gas and from petroleum. Each pays one
+dollar if the published figure comes in above the stated threshold.</p>
+<p>Contracts on wind, solar, nuclear and hydroelectric generation, on electricity prices and on fusion
+milestones are on the <a href="electricity-renewables.html">electricity and renewables page</a>.</p>
+<h2>Records behind each contract</h2>
+<p>Every series here is the Energy Information Administration&rsquo;s own, and a contract settles on the value
+in the agency&rsquo;s release for the month it names. The agency publishes a month well after that month ends
+and revises earlier months as more complete data arrives, so a contract on a recent month is priced against a
+figure that has not been published yet. Each panel draws the series with the listed strikes at the month the
+contract settles, and dragging across the history fits a straight line to the window dragged, which describes
+that window and carries no forecast of the series.</p>
+<p>Consumption is measured in the units the agency reports for each fuel, and a generation share is the
+percentage of total United States electricity that fuel supplied, which moves with demand as well as with what
+is burned. There are no sellers on this exchange. A participant buys Yes or buys No, and the two bids sum to
+one dollar.</p>
+</div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

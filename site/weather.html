@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Severe weather, rain, temperature and drought</title>
-<meta name="description" content="Tornado, hail and wind reports, rain, monthly average temperature and drought as NOAA publishes them, with the strikes each contract is listed at.">
+<title>Rain, drought and severe weather prediction markets</title>
+<meta name="description" content="Prediction markets on monthly rain, drought, hail, thunderstorms, wind speed and tornado counts, drawn against the NOAA records each contract settles on.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -22,6 +22,31 @@ contract&rsquo;s quote; click a marker to open that contract on IBKR.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div id="panels"></div>
 <p class="cap" id="foot"></p>
+
+<div class="prose" style="margin-top:26px">
+<h2>Weather prediction markets on this page</h2>
+<p>These contracts are written on figures NOAA publishes for a whole month, and each pays one dollar if the
+published figure comes in above the stated threshold. ForecastEx lists monthly rainfall at New York, Chicago,
+Houston, Miami and Seattle, monthly average temperature at New York, Chicago, Los Angeles, Dallas, Houston and
+Miami, the monthly count of tornado reports in the United States, counts of severe hailstorm and severe
+windstorm events, hail and thunderstorm activity at Austin, Dallas, Oklahoma City and San Antonio, average and
+maximum wind speed at Boston, Chicago, Dallas, Miami and San Francisco, and how much of the United States is
+in drought.</p>
+<p>Each panel above draws the record as NOAA posts it, with the listed strikes at the month each contract
+settles. Past the end of a record a dashed line carries that calendar month&rsquo;s usual value forward, which
+is a climatology and says nothing about the weather in the month being priced. Daily high and low temperature
+contracts at individual stations are on the <a href="index.html">station board</a>.</p>
+<h2>Records behind each contract</h2>
+<p>Rainfall and monthly average temperature come from the NOAA Climate at a Glance city time series, drought
+coverage from the United States Drought Monitor, and the severe weather counts from the Storm Prediction
+Center&rsquo;s preliminary storm reports, whose monthly totals are what the tornado, hail and windstorm event
+contracts settle on. A month&rsquo;s figure is published after the month ends and a contract settles on the
+figure published for the month it names, so a contract on a month under way is priced against a record that
+does not exist yet. A preliminary count is revised, and where a panel shows one the page says so.</p>
+<p>Each pays one dollar if the published figure comes in above the stated threshold and nothing if it does
+not, so its price in cents is the market&rsquo;s probability of that outcome. There are no sellers on this
+exchange. A participant buys Yes or buys No, and the two bids sum to one dollar.</p>
+</div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

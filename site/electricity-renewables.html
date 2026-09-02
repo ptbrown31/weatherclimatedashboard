@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Electricity and renewables</title>
-<meta name="description" content="Generation, price and revenue as the Energy Information Administration publishes them, with the thresholds the listed contracts are written at.">
+<title>Energy prediction markets for electricity and renewables</title>
+<meta name="description" content="Prediction markets on wind, solar, nuclear and hydroelectric generation, electricity prices and fusion milestones, drawn against the Energy Information Administration's own series.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -20,6 +20,29 @@ contract&rsquo;s quote; click a marker to open that contract on IBKR.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div id="panels"></div>
 <p class="cap" id="foot"></p>
+
+<div class="prose" style="margin-top:26px">
+<h2>Energy prediction markets</h2>
+<p>An energy prediction market on this page is a contract written on a figure the Energy Information
+Administration publishes, settled on the value in the agency&rsquo;s own release for the stated month or year.
+ForecastEx lists these on the share of United States electricity generated from wind, from solar, from nuclear
+and from hydroelectric sources, on total generation and on renewable generation, on average electricity prices
+by sector, and on electricity generation sales revenue in California, New York and Texas. Alongside them sit
+contracts on milestones in fusion energy development, among them first plasma and plant operation. Each pays
+one dollar if its outcome happens.</p>
+<h2>Reading a threshold against the record</h2>
+<p>Each panel above carries the agency&rsquo;s series with the listed strikes drawn at the month or year the
+contract settles, so the level a contract is written at can be read against the record that will settle it.
+Contracts on coal, natural gas and oil are on the <a href="fossil-fuels.html">fossil fuels page</a>.</p>
+<p>Every series here is the Energy Information Administration&rsquo;s own, and a contract settles on the value
+in the agency&rsquo;s release for the month or year it names. The agency publishes a month well after that
+month ends and revises earlier months as more complete data arrives, so a contract on a recent month is priced
+against a figure that has not been published yet. Generation shares are the percentage of total United States
+generation a source supplied, which moves with demand as well as with what is built.</p>
+<p>Each contract pays one dollar if its outcome happens and nothing if it does not, so the price in cents is
+the market&rsquo;s probability of that outcome. There are no sellers on this exchange. A participant buys Yes
+or buys No, and the two bids sum to one dollar.</p>
+</div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

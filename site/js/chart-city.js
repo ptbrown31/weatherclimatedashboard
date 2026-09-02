@@ -205,7 +205,10 @@ window.WXCity = (() => {
       : one(dayMode === 'tomorrow' ? mk.tomorrow : mk.day);
     const t = (c.city || c.station) + ' (' + c.station + ')' + (shown ? ', ' + shown : '');
     node.textContent = t;
-    document.title = t;
+    // the heading names the station and the day it is drawing. The title is
+    // read somewhere else, in a tab and in a search result, where the city's
+    // weather is what the page is and the day is a detail of it
+    document.title = (c.city || c.station) + ' weather' + (shown ? ', ' + shown : '') + ' (' + c.station + ')';
   }
 
   /* A small map saying where this station is.

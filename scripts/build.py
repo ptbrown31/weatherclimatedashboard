@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import sys
+from html import unescape
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -110,6 +111,41 @@ def title_of(html: str) -> str:
     return " ".join(m.group(1).split()) if m else ""
 
 
+def strip_tags(s: str) -> str:
+    """Readable text out of a fragment of the page's own markup."""
+    s = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", s, flags=re.S | re.I)
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", s)).split())
+
+
+def jsonld(obj: dict) -> str:
+    """One structured-data block. The only sequence that can close a script
+    element early is escaped, which is what embedding JSON in one asks for."""
+    return ('<script type="application/ld+json">%s</script>'
+            % json.dumps(obj, separators=(",", ":")).replace("</", "<\\/"))
+
+
+def faq_questions(html: str) -> list:
+    """The page's own questions, in the shape a search engine reads them.
+
+    Taken from the headings rather than from a list kept beside them, so a
+    question is in the structured data by being on the page and one that goes
+    cannot linger after it. A heading that asks nothing is not a question, and
+    a page carrying one or two is not a list of them, so both are passed over.
+    """
+    items = []
+    for part in re.split(r"<h2[^>]*>", html)[1:]:
+        q, _, rest = part.partition("</h2>")
+        q = strip_tags(q)
+        if not q.endswith("?"):
+            continue
+        answer = strip_tags(re.split(r"<h2[^>]*>", rest)[0])
+        if not answer:
+            continue
+        items.append({"@type": "Question", "name": q,
+                      "acceptedAnswer": {"@type": "Answer", "text": answer[:1500]}})
+    return items if len(items) >= 3 else []
+
+
 def head_meta(html: str, rel: str, cfg: dict, image: str = "") -> str:
     """Give a page the identity a search result and a shared link need.
 
@@ -148,7 +184,71 @@ def head_meta(html: str, rel: str, cfg: dict, image: str = "") -> str:
     tags.append('<meta name="twitter:title" content="%s">' % esc(title))
     if desc:
         tags.append('<meta name="twitter:description" content="%s">' % esc(desc))
+    # the same two facts once more, in the vocabulary a search engine parses
+    # rather than reads. Without a domain there is no identity to assert and
+    # this is skipped, as the link tags above are
+    if base:
+        pub = {"@type": "Organization", "@id": base + "/#publisher", "name": site, "url": base + "/"}
+        site_node = {"@type": "WebSite", "@id": base + "/#site", "name": site, "url": base + "/",
+                     "publisher": {"@id": base + "/#publisher"}}
+        page = {"@type": "WebPage", "@id": url + "#page", "url": url, "name": title,
+                "isPartOf": {"@id": base + "/#site"}, "publisher": {"@id": base + "/#publisher"}}
+        if desc:
+            page["description"] = desc
+        graph = [pub, site_node, page]
+        questions = faq_questions(html)
+        if questions:
+            graph.append({"@type": "FAQPage", "@id": url + "#faq", "url": url, "mainEntity": questions})
+        tags.append(jsonld({"@context": "https://schema.org", "@graph": graph}))
     return html.replace("</head>", "\n".join(tags) + "\n</head>", 1)
+
+
+def station_intro(c: dict) -> str:
+    """The station's own facts, written into its page as text.
+
+    Everything else on a station page is drawn by script out of the snapshots,
+    so until that runs the page says almost nothing about the station it is
+    for. This is what a reader arriving from a search wants first and the only
+    part a crawler can read without running anything.
+    """
+    icao, city = c["station"], c["city"]
+    unit = "Celsius" if c.get("unit") == "C" else "Fahrenheit"
+    drawn = ("The chart above carries the National Weather Service forecast, the National Blend of Models "
+             "and the LAMP guidance against the readings the station has published so far, with the "
+             "exchange's prices for the same day on the same scale."
+             if us_station(icao) else
+             "The chart above carries the readings the station has published so far for the day, with the "
+             "exchange's prices for the same day on the same scale.")
+    return ('<h2>%s weather and the daily temperature contracts</h2>\n'
+            '<p>%s (%s) is the weather station the %s daily temperature contracts settle on, and everything '
+            'on this page is drawn against its record. ForecastEx lists a high contract and a low contract '
+            'for each day. Each one asks whether the day’s high, or the day’s low, will finish above or '
+            'below a stated whole-degree threshold, and it settles on the station’s own METAR record over '
+            'the local calendar day, in whole degrees %s. A high contract pays Yes only when the settled '
+            'value is strictly above its threshold, and a low contract only when it is strictly below. '
+            '%s</p>\n'
+            '<p>How a ladder of strikes is put together and what settles it is set out on the '
+            '<a href="daily-temperature-markets.html">daily temperature markets page</a>. How each forecast '
+            'tool has scored against the market at this station and the others is on the '
+            '<a href="accuracy.html">accuracy page</a>.</p>' % (city, city, icao, city, unit, drawn))
+
+
+def station_index(cities: list) -> str:
+    """Every station's page linked by name.
+
+    A station is reached by its dot on the map, which serves a reader who is
+    already looking at the map and nobody else. This is the same set of pages
+    as a list of names, for a reader who knows which city they want and for
+    anything that cannot read a map at all.
+    """
+    def links(rows):
+        return " · ".join('<a href="%s">%s weather (%s)</a>'
+                          % (slug(c["city"], c["station"]) + ".html", c["city"], c["station"])
+                          for c in sorted(rows, key=lambda r: r["city"]))
+    us = [c for c in cities if us_station(c["station"])]
+    intl = [c for c in cities if not us_station(c["station"])]
+    return ('<h2>Stations on this board</h2>\n<p>%s</p>\n'
+            '<h2>Stations abroad</h2>\n<p>%s</p>' % (links(us), links(intl)))
 
 
 def station_page(tpl: str, c: dict, cfg: dict) -> str:
@@ -163,10 +263,13 @@ def station_page(tpl: str, c: dict, cfg: dict) -> str:
     """
     icao, city = c["station"], c["city"]
     unit = "°C" if c.get("unit") == "C" else "°F"
-    title = "%s daily temperature market (%s)" % (city, icao)
-    desc = ("Forecasts, observations and ForecastEx contract prices for the daily high and low "
-            "temperature at %s (%s), against the METAR record the contracts settle on, in %s."
-            % (city, icao, unit))
+    # the title carries the two things a search for this station can be after,
+    # the city's weather and the contracts written on it, and the station code
+    # that names which weather is meant
+    title = "%s weather and temperature prediction market (%s)" % (city, icao)
+    desc = ("%s weather at %s, with %sthe station's own observations and ForecastEx prices for the daily "
+            "high and low temperature contracts that settle on its record, in %s."
+            % (city, icao, "the National Weather Service forecast, " if us_station(icao) else "", unit))
     out = re.sub(r"<title>.*?</title>", "<title>%s</title>" % title, tpl, count=1, flags=re.S)
     out = re.sub(r'<meta name="description" content="[^"]*">',
                  '<meta name="description" content="%s">' % desc, out, count=1)
@@ -177,6 +280,11 @@ def station_page(tpl: str, c: dict, cfg: dict) -> str:
                      r'\g<1>%s (%s)\g<2>' % (city, icao), out, count=1)
     if not n:
         raise ValueError("city.html has no cityTitle h1 to fill")
+    # the station's own paragraph, in the page rather than in a snapshot
+    out, n = re.subn(r'(<div class="prose" id="cityAbout"[^>]*>)(</div>)',
+                     lambda m: m.group(1) + station_intro(c) + m.group(2), out, count=1)
+    if not n:
+        raise ValueError("city.html has no cityAbout block to fill")
     # which station this page is, for a page that has no query string to read
     out = out.replace("<script src=\"config.js\">",
                       "<script>window.WX_STATION = %s;</script>\n<script src=\"config.js\">"
@@ -259,6 +367,17 @@ def identity(out: str, cfg: dict) -> tuple:
         for c in cities:
             with open(os.path.join(out, slug(c["city"], c["station"]) + ".html"), "w") as fh:
                 fh.write(station_page(tpl, c, cfg))
+        # and the board links to every one of them by name, from the same list
+        # the pages were written from, so the two cannot disagree
+        idx = os.path.join(out, "index.html")
+        with open(idx) as fh:
+            board = fh.read()
+        board, n_idx = re.subn(r'(<div class="prose" id="stationIndex"[^>]*>)(</div>)',
+                               lambda m: m.group(1) + station_index(cities) + m.group(2), board, count=1)
+        if not n_idx:
+            raise ValueError("index.html has no stationIndex block to fill")
+        with open(idx, "w") as fh:
+            fh.write(board)
     n = 0
     for name in sorted(os.listdir(out)):
         if not name.endswith(".html") or "og:title" in open(os.path.join(out, name)).read():

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hurricane tracking and forecast cones</title>
-<meta name="description" content="National Hurricane Center forecast tracks, cones, wind-speed probabilities and seven-day formation outlooks, beside the contracts written on them.">
+<title>Hurricane prediction markets, tracks and wind contracts</title>
+<meta name="description" content="Prediction markets on Atlantic named storms, hurricanes, major hurricane landfall and live storm wind gusts, beside National Hurricane Center forecast tracks and cones.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -65,6 +65,30 @@ blue line shows where an average season stands on this date.</p>
 <p class="cap" id="pacificNote" style="display:none">The count and landfall contracts on this exchange are
 Atlantic and United States contracts, so they are not shown on the Pacific view. Switch back to the Atlantic
 to see them.</p>
+
+<div class="prose" style="margin-top:26px">
+<h2>Hurricane prediction markets</h2>
+<p>ForecastEx lists contracts on how many named storms and how many hurricanes form in the Atlantic season, on
+how many major hurricanes form in a month, on whether a Category 4 hurricane makes landfall in the United
+States, and on major hurricane landfall by region. While a storm is running it also lists a wind gust contract
+at each reference location in the storm&rsquo;s path and a pool contract on which location records the highest
+gust of the storm. Each pays one dollar if its outcome happens.</p>
+<p>Season counts settle on the National Hurricane Center&rsquo;s record of the season, and the live storm wind
+contracts settle on the vendor&rsquo;s final peak gust for each location. Tracks, cones, wind probabilities and
+formation outlooks on this page are the National Hurricane Center&rsquo;s own, drawn as published.</p>
+<h2>Reading a live storm</h2>
+<p>A storm becomes tradeable location by location. The exchange settles its wind gust contracts at a fixed
+list of reference locations, and while a storm is running the vendor publishes a probability ladder for each
+one every six hours, on the same cycle the National Hurricane Center advisories run on. The sections above
+carry each delivery as it arrives, so a location&rsquo;s probabilities and the price of the contract written on
+it can be read side by side through the life of the storm. A gust probability looks forward from the cycle it
+was issued on, while the price covers the whole storm including what has already been recorded, which is why
+the two part company once the strongest winds have passed a place.</p>
+<p>Each contract pays one dollar if its outcome happens and nothing if it does not, so the price in cents is
+the market&rsquo;s probability of that outcome. There are no sellers on this exchange. A participant buys Yes
+or buys No, and the two bids sum to one dollar. Prices here are the exchange&rsquo;s own, as published at the
+time stamped on the page, and they are never adjusted for fees.</p>
+</div>
 
 </div>
 <script src="js/common.js"></script>

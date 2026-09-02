@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Climate series</title>
-<meta name="description" content="The long climate series the climate contracts settle on, drawn as their publishers post them, with the listed strikes marked at the year each contract settles.">
+<title>Climate prediction markets</title>
+<meta name="description" content="Prediction markets on global temperature, atmospheric carbon dioxide, sea level and ocean circulation, drawn against the published records each contract settles on.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -21,6 +21,30 @@ line for the expirations listed at that level.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div id="panels"></div>
 <p class="cap" id="foot"></p>
+
+<div class="prose" style="margin-top:26px">
+<h2>Climate prediction markets</h2>
+<p>A climate prediction market is a contract written on a published climate record, settled on the figure its
+publishing agency posts for a stated month or year. ForecastEx lists these on global average temperature,
+annual and monthly, on United States temperature, on atmospheric carbon dioxide and on carbon dioxide
+emissions, on global sea level, on a weakening of the Atlantic overturning circulation, and on
+population-weighted heating and cooling degree days. Each pays one dollar if the record comes in above the
+stated threshold, so the price in cents is the market&rsquo;s probability of that outcome.</p>
+<h2>Records these contracts settle on</h2>
+<p>Every panel above draws the series as its publisher posts it, with the listed strikes marked at the year
+each contract settles. Dragging across a chart fits a straight line to the window dragged and projects it
+forward with the year it would cross each threshold, which describes that window and carries no forecast of
+the record. Different windows give different answers.</p>
+<p>Global temperature comes from the NOAA Climate at a Glance global land and ocean series, carbon dioxide
+from the Mauna Loa record kept by the NOAA Global Monitoring Laboratory, sea level from the satellite
+altimetry NOAA and NESDIS publish, and the overturning circulation from the RAPID monitoring project. Each
+agency posts on its own schedule and revises as it goes, and a contract settles on the figure that agency
+publishes for the period the contract names. Global temperature contracts are quoted against the
+preindustrial baseline the exchange uses, which is a fixed offset from the anomaly the agency publishes, and
+the page carries the offset it applied.</p>
+<p>Each contract pays one dollar if the record comes in above its threshold and nothing if it does not. There
+are no sellers on this exchange. A participant buys Yes or buys No, and the two bids sum to one dollar.</p>
+</div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

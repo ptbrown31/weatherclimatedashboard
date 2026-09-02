@@ -55,7 +55,9 @@ window.WXCat = (() => {
     const s = param('s') || (nav().l1[0] || {}).slug;
     const b = nav().l1.find(x => x.slug === s) || nav().l1[0];
     if (!b) return;
-    document.title = b.name;
+    // the heading is the branch. The title says what the branch is a branch of,
+    // because it is read on its own in a tab and in a search result
+    document.title = b.name + ' prediction markets';
     $('#secTitle').textContent = b.name;
     const host = $('#cats'); host.innerHTML = '';
     const cats = nav().categories.filter(c => c.l1 === b.name);
@@ -86,7 +88,7 @@ window.WXCat = (() => {
       location.replace(meta.page);
       return;
     }
-    document.title = meta.l2;
+    document.title = meta.l2 + ' prediction markets';
     $('#catTitle').textContent = meta.l2.toUpperCase();
     $('#catCrumb').innerHTML = '<a href="section.html?s=' + esc(meta.l1slug || '') + '">' + esc(meta.l1) + '</a> · ' + esc(meta.l2);
     const r = await WXD.get(CAT(slug), 1440);
@@ -138,7 +140,7 @@ window.WXCat = (() => {
       $('#cBody').appendChild(h('p', { class: 'cap', text: 'No catalogue entry for this contract. Either the exchange is not listing it, or the daily pass has not read it yet.' }));
       return;
     }
-    document.title = p.name || id;
+    document.title = (p.name || id) + ' prediction market';
     $('#cTitle').textContent = p.name || id;
     const cat = nav().categories.find(c => c.l2 === p.l2);
     $('#cCrumb').innerHTML = cat

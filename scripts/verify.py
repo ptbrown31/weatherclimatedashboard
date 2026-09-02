@@ -32,9 +32,17 @@ import re
 import subprocess
 import sys
 import time
+import urllib.request
+from html import unescape
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "verify-out")
+
+
+def strip_markup(doc: str) -> str:
+    """Readable text out of a page as it is served, before any script runs."""
+    doc = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", doc, flags=re.S | re.I)
+    return " ".join(unescape(re.sub(r"<[^>]+>", " ", doc)).split())
 
 
 def free_port() -> int:
@@ -1935,6 +1943,20 @@ def run(no_build: bool) -> int:
                         str(sp and {k: sp[k] for k in ('canon', 'card')})[:130])
                 chk.add(f"{scheme} station page: the calculator opens on this station",
                         bool(sp and sp["alloc"] and sp["alloc"].endswith("city:KSFO")), str(sp and sp["alloc"]))
+                # what the page says about its station in words, which is the
+                # part a search reaches and the only part readable without the
+                # scripts having run
+                about = page.locator("#cityAbout").inner_text()
+                chk.add(f"{scheme} station page: it names the city's weather and what settles the contracts",
+                        "San Francisco weather" in about and "KSFO) is the weather station" in about
+                        and "METAR" in about and "whole degrees Fahrenheit" in about, about[:120])
+                # the tag a search result reads, and the title the chart leaves
+                # behind once it has drawn, which a rendering crawler reads instead
+                chk.add(f"{scheme} station page: the title carries the city's weather and its market",
+                        bool(sp and sp["ogTitle"].startswith("San Francisco weather")
+                             and "prediction market" in sp["ogTitle"]
+                             and sp["title"].startswith("San Francisco weather")
+                             and "KSFO" in sp["title"]), str(sp and [sp["ogTitle"], sp["title"]]))
                 # the additional-variables panels are part of the page: drawn
                 # without a click, single column at the temperature panel's own
                 # frame, the discussion beside them, both days one toggle apart
@@ -2551,6 +2573,53 @@ def run(no_build: bool) -> int:
             chk.add("prose: no section title opens with an article", not bad_title, "; ".join(bad_title[:3]))
             chk.add("prose: no colons or em-dashes in page copy", not bad_colon, "; ".join(bad_colon[:2]))
             chk.add("prose: nothing is defined by what it is not", not bad_not, "; ".join(bad_not[:2]))
+
+            # ---- what a page says to a reader who arrives from a search
+            #
+            # Each board is drawn by script out of the snapshots, so a page can
+            # carry a whole screen of information and still serve almost no text.
+            # Every page below has to name in words what its contracts are
+            # written on, and say it in the page rather than through a script.
+            WORDS = {
+                "index.html": ["weather prediction market", "settles on that station", "no sellers"],
+                "weather.html": ["rainfall", "tornado", "hail", "thunderstorm", "wind speed", "drought"],
+                "climate.html": ["climate prediction market", "sea level", "carbon dioxide", "degree days"],
+                "electricity-renewables.html": ["energy prediction market", "wind", "solar", "nuclear", "fusion"],
+                "fossil-fuels.html": ["natural gas", "coal", "petroleum"],
+                "hurricane.html": ["hurricane prediction market", "named storms", "landfall", "wind gust"],
+                "agriculture.html": ["crop yields", "corn", "wheat", "rice"],
+            }
+            thin, missing = [], []
+            for path, words in WORDS.items():
+                raw = urllib.request.urlopen(f"{srv.url}/{path}").read().decode()
+                served = strip_markup(raw)
+                if len(served.split()) < 300:
+                    thin.append("%s: %d words" % (path, len(served.split())))
+                low = served.lower()
+                for w in words:
+                    if w not in low:
+                        missing.append("%s: %s" % (path, w))
+            chk.add("search: every board page serves its own text without running a script",
+                    not thin, "; ".join(thin))
+            chk.add("search: each page names in words what its contracts are written on",
+                    not missing, "; ".join(missing[:4]))
+            # ---- the same facts in the vocabulary a search engine parses
+            page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(600)
+            ld = page.evaluate("""() => [...document.querySelectorAll('script[type="application/ld+json"]')]
+                                    .map(s => JSON.parse(s.textContent))""")
+            types = [n["@type"] for n in (ld[0]["@graph"] if ld else [])]
+            chk.add("search: a page declares itself, its site and its publisher",
+                    len(ld) == 1 and sorted(types) == ["Organization", "WebPage", "WebSite"], str(types))
+            page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(600)
+            faq = page.evaluate("""() => {
+              const s = document.querySelector('script[type="application/ld+json"]');
+              const g = s ? JSON.parse(s.textContent)['@graph'] : [];
+              const f = g.find(n => n['@type'] === 'FAQPage');
+              return f ? { n: f.mainEntity.length,
+                           questions: f.mainEntity.every(q => q.name.endsWith('?') && q.acceptedAnswer.text) } : null;
+            }""")
+            chk.add("search: the FAQ's own questions are the questions in its structured data",
+                    bool(faq and faq["n"] >= 4 and faq["questions"]), str(faq))
             ctx.close()
 
             # ---- embed target
