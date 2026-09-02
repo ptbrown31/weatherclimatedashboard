@@ -233,19 +233,21 @@ window.WXStorm = (() => {
     const cyc = arrived.filter(s => s.kind === 'livecyc');
     const cols = arrived.map(s => ({ kind: s.kind, step: s }));
     const settled = !!(doc && doc.final);
-    // the next cycle is promised only while cycles are still coming. The
-    // vendor stops issuing them once the storm is done, and an interim that
-    // lands days later keeps the storm on the page without reviving them; a
-    // storm with no stamp at all is taken as still delivering
+    const interim = arrived.some(s => s.kind === 'interim');
+    // the next cycle is promised only during the LiveCyc phase, while cycles
+    // are still coming. Once the interim has landed the storm is waiting on
+    // the final and nothing else; and the vendor stops issuing cycles once a
+    // storm is done, so a storm whose cycles have gone stale gets no promise
+    // either. A storm with no stamp at all is taken as still delivering.
     const lcStamp = entry && entry.livecyc ? Date.parse(entry.livecyc.lastModified || entry.livecyc.forecastTime || '') : NaN;
     const cycling = !isFinite(lcStamp) || (Date.now() - lcStamp) <= STALE_MS;
-    if (!settled && !(entry && dormant(entry)) && cycling) {
+    if (!settled && !interim && !(entry && dormant(entry)) && cycling) {
       const last = cyc[cyc.length - 1];
       const m = last && /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(last.id || ''));
       const hh = m ? (+m[4] + 6) % 24 : null;
       cols.push({ kind: 'next', cycle: hh == null ? '' : (hh < 10 ? '0' : '') + hh + 'Z' });
     }
-    if (!settled && !arrived.some(s => s.kind === 'interim')) cols.push({ kind: 'interim-ph' });
+    if (!settled && !interim) cols.push({ kind: 'interim-ph' });
     if (settled) cols.push({ kind: 'final', step: steps.find(s => s.kind === 'final') || { id: 'FINAL', kind: 'final' } });
     else cols.push({ kind: 'final-ph' });
     return cols;
@@ -256,8 +258,10 @@ window.WXStorm = (() => {
   // arrived on the Eastern clock, and the date where the day turns over. A
   // column still to come is ticked dashed and labelled for what it waits on.
   // Cycle labels thin rather than overlap, so a storm that runs a week keeps
-  // an axis that can still be read; the pending columns always show.
-  function deliveryAxis(svg, cols, x, B, size, hx) {
+  // an axis that can still be read; the pending columns always show. What
+  // the rows are is said once, in the section's key, because a heading on
+  // the chart itself has nowhere to sit that the end columns cannot reach.
+  function deliveryAxis(svg, cols, x, B, size) {
     const n = cols.length;
     if (!n) return;
     const room = Math.max(2, Math.floor((x(n - 1) - x(0)) / (size * 5.2)));
@@ -291,14 +295,6 @@ window.WXStorm = (() => {
         day = d;
       }
     });
-    if (hx) {
-      // to the left of the axis the headers grow rightward, to the right leftward
-      const ha = hx < 120 ? 'start' : 'end', hpx = hx < 120 ? 2 : hx;
-      svg.appendChild(txt('NHC cycle', { x: hpx, y: B + 4 + size, 'text-anchor': ha,
-        class: 'axl', 'font-size': size * 0.85, opacity: .7 }));
-      svg.appendChild(txt('file, ET', { x: hpx, y: B + 5 + size * 2.15, 'text-anchor': ha,
-        class: 'axl', 'font-size': size * 0.85, opacity: .7 }));
-    }
   }
 
   // ---- which series stands forward
@@ -345,6 +341,7 @@ window.WXStorm = (() => {
     });
     d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl' }), 'exchange price, the Yes midpoint']));
     d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'LiveCyc, and the Metryc interim once it lands, as published']));
+    d.appendChild(h('span', { class: 'kk', text: 'axis rows, the NHC cycle over the file’s arrival in ET, dated where the day turns' }));
     return d;
   }
   // the hover box for one column: the strikes down the side, the series across
@@ -400,7 +397,7 @@ window.WXStorm = (() => {
     const pend = cols.findIndex(c => !c.step);
     if (pend >= 0) svg.appendChild(el('rect', { class: 'pending', x: x(pend) - wcol / 2, y: T,
       width: x(cols.length - 1) - x(pend) + wcol / 2, height: B - T, fill: 'var(--shade)', 'pointer-events': 'none' }));
-    deliveryAxis(svg, cols, x, B, 7.5, 466);
+    deliveryAxis(svg, cols, x, B, 7.5);
 
     // the strikes worth a row anywhere on this card: a LiveCyc figure above
     // zero at some delivery, a recorded price, or a price now
@@ -798,13 +795,15 @@ window.WXStorm = (() => {
     const pend = cols.findIndex(c => !c.step);
     if (pend >= 0) svg.appendChild(el('rect', { class: 'pending', x: x(pend) - wcol / 2, y: T,
       width: x(cols.length - 1) - x(pend) + wcol / 2, height: B - T, fill: 'var(--shade)', 'pointer-events': 'none' }));
-    deliveryAxis(svg, cols, x, B, 9, L - 2);
-    // the legend, inside the frame
+    deliveryAxis(svg, cols, x, B, 9);
+    // the legend, inside the frame, with what the axis rows are
     svg.appendChild(el('line', { x1: L, x2: L + 20, y1: 11, y2: 11, stroke: 'var(--ink)', 'stroke-width': 2.4 }));
     svg.appendChild(txt('exchange price', { x: L + 25, y: 14, class: 'ax' }));
     svg.appendChild(el('line', { x1: L + 110, x2: L + 130, y1: 11, y2: 11, stroke: 'var(--ink)',
       'stroke-width': 1.7, 'stroke-dasharray': '5 4' }));
     svg.appendChild(txt('calculation', { x: L + 135, y: 14, class: 'ax' }));
+    svg.appendChild(txt('axis rows, the NHC cycle over the file’s arrival in ET', { x: R, y: 14, 'text-anchor': 'end',
+      class: 'ax', opacity: .75 }));
 
     // time anchors: a delivery sits at its column, and the price walks between
     // columns at the pace it actually moved. Past the newest delivery it walks

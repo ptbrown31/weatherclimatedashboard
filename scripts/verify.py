@@ -921,7 +921,7 @@ def run(no_build: bool) -> int:
                 BASE = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
                 HOURS = [0, 6, 12, 24, 30, 36]
 
-                def _ledger(final):
+                def _ledger(interim, final):
                     # a distinct recorded price per delivery, so scrubbing back has to
                     # move the square rather than leave today's price under an old ladder
                     steps = []
@@ -935,38 +935,41 @@ def run(no_build: bool) -> int:
                                       "prices": {"BR": {str(t): 10.0 + 5 * k for t in THR}}})
                     # stamped the way the pipeline stamps it, the vendor's time and the
                     # moment it was recorded, so it takes its place on the axis by arrival
-                    steps.append({"id": "INT", "kind": "interim", "at": "2026-09-02T14:50:56Z", "ts": "2026-09-02T14:54:48Z",
-                                  "sites": _lad(0.95, [0, 0, 0, 0, 0, 0]),
-                                  "siteMeta": {"BR": {"name": "Brownsville", "covered": True},
-                                               "GA": {"name": "Galveston", "covered": True}},
-                                  "pwin": {"BR": 99.0, "GA": 1.0},
-                                  "prices": {"BR": {str(t): 44.0 for t in THR}}})
+                    if interim:
+                        steps.append({"id": "INT", "kind": "interim", "at": "2026-09-02T14:50:56Z", "ts": "2026-09-02T14:54:48Z",
+                                      "sites": _lad(0.95, [0, 0, 0, 0, 0, 0]),
+                                      "siteMeta": {"BR": {"name": "Brownsville", "covered": True},
+                                                   "GA": {"name": "Galveston", "covered": True}},
+                                      "pwin": {"BR": 99.0, "GA": 1.0},
+                                      "prices": {"BR": {str(t): 44.0 for t in THR}}})
                     return {"schema": 2, "name": "Erin", "year": 2026, "attribution": "Powered by Reask", "thresholds": THR,
                             "steps": steps, "sites": {"BR": {"name": "Brownsville", "firstStep": "2026090100"},
                                                       "GA": {"name": "Galveston", "firstStep": "2026090100"}},
                             "final": {"BR": 96.0, "GA": 41.0} if final else None}
 
-                _index = {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026,
-                          "storms": [{"name": "Erin", "year": 2026,
-                                      "livecyc": {"forecastTime": None, "thresholds": THR,
-                                                  "sites": {"BR": {"name": "Brownsville", "p": [60, 30, 10, 3, 1, 0]},
-                                                            "GA": {"name": "Galveston", "p": [30, 10, 2, 0, 0, 0]}},
-                                                  "pwin": {"BR": 55.0, "GA": 45.0}},
-                                      # stamped off the clock: the interim's stamp keeps a storm on the
-                                      # page for a day and a half, and a fixed date here would fold the
-                                      # synthetic storm shut once the calendar passed it
-                                      "interim": {"lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                                                  "thresholds": THR,
-                                                  "sites": {"BR": {"name": "Brownsville", "p": [95, 75, 55, 35, 15, 5]},
-                                                            "GA": {"name": "Galveston", "p": [0, 0, 0, 0, 0, 0]}}}}]}
+                def _index_for(interim):
+                    storm = {"name": "Erin", "year": 2026,
+                             "livecyc": {"forecastTime": None, "thresholds": THR,
+                                         "sites": {"BR": {"name": "Brownsville", "p": [60, 30, 10, 3, 1, 0]},
+                                                   "GA": {"name": "Galveston", "p": [30, 10, 2, 0, 0, 0]}},
+                                         "pwin": {"BR": 55.0, "GA": 45.0}}}
+                    if interim:
+                        # stamped off the clock: the interim's stamp keeps a storm on the
+                        # page for a day and a half, and a fixed date here would fold the
+                        # synthetic storm shut once the calendar passed it
+                        storm["interim"] = {"lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                            "thresholds": THR,
+                                            "sites": {"BR": {"name": "Brownsville", "p": [95, 75, 55, 35, 15, 5]},
+                                                      "GA": {"name": "Galveston", "p": [0, 0, 0, 0, 0, 0]}}}
+                    return {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026, "storms": [storm]}
 
-                def _storm_routes(final):
+                def _storm_routes(interim, final):
                     def handler(route):
                         u = route.request.url
                         if u.endswith("/reask.json"):
-                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index))
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index_for(interim)))
                         if "/storm/Erin_2026.json" in u:
-                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(final)))
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(interim, final)))
                         if u.endswith("/lhl/LHLERG.json"):
                             pts = [{"t": "2026-09-0%dT%02d:00:00Z" % (1 + hh // 24, hh % 24),
                                     "p": {"Brownsville": 30 + hh, "Galveston": 40 - hh, "Corpus Christi": 12}}
@@ -989,31 +992,36 @@ def run(no_build: bool) -> int:
                         return route.continue_()
                     return handler
 
-                for _final in (False, True):
-                    page.route("**/data/snapshots/**", _storm_routes(_final))
+                # the storm in its three states: cycles still coming, the interim
+                # landed and the final awaited, and settled
+                for tag, _interim, _final in (("live", False, False), ("interim", True, False), ("settled", True, True)):
+                    page.route("**/data/snapshots/**", _storm_routes(_interim, _final))
                     page.goto(f"{srv.url}/hurricane.html")
                     page.wait_for_timeout(1400)
-                    tag = "settled" if _final else "live"
+                    n_del = 6 + (1 if _interim else 0)          # deliveries on the timeline
                     ncards = page.locator("#liveStorms .scardwrap").count()
                     chk.add(f"{scheme} storm ({tag}): a card per signalled location", ncards >= 1, f"cards={ncards}")
                     labels = page.eval_on_selector_all("#liveStorms .scardwrap text", "els => els.map(e => e.textContent)")
                     # the pending columns: the next file, the interim and the final
                     # hold their places while the storm runs; once settled the final
                     # column is real and nothing is still to come
+                    pend = [t for t in labels if t in ("next", "Metryc", "Interim", "final")]
                     if _final:
                         chk.add(f"{scheme} storm ({tag}): the settled axis ends on the real settlement columns",
-                                "Metryc" in labels and "Interim" in labels and "final" in labels and "next" not in labels,
-                                str([t for t in labels if t in ("next", "Metryc", "Interim", "final")]))
+                                "Metryc" in labels and "Interim" in labels and "final" in labels and "next" not in labels, str(pend))
+                    elif _interim:
+                        # once the interim has landed the storm waits on the final and nothing else
+                        chk.add(f"{scheme} storm ({tag}): after the interim only the final is still to come",
+                                "Interim" in labels and "final" in labels and "next" not in labels, str(pend))
                     else:
                         chk.add(f"{scheme} storm ({tag}): the next file, the interim and the final hold their columns",
-                                "next" in labels and "Metryc" in labels and "Interim" in labels and "final" in labels,
-                                str([t for t in labels if t in ("next", "Metryc", "Interim", "final")]))
+                                "next" in labels and "Metryc" in labels and "Interim" in labels and "final" in labels, str(pend))
                     ticks = len([t for t in labels if re.fullmatch(r"\d\dZ", t)])
                     days = len([t for t in labels if re.fullmatch(r"\d\d/\d\d", t)])
                     ets = len([t for t in labels if re.fullmatch(r"\d{1,2}:\d\d[ap]", t)])
                     chk.add(f"{scheme} storm ({tag}): the card's axis names the NHC cycle and the file's arrival in ET",
                             ticks >= 2 and days >= 1 and ets >= 2
-                            and "NHC cycle" in labels and "file, ET" in labels,
+                            and "NHC cycle" not in labels and "file, ET" not in labels,
                             f"cycles={ticks} days={days} ets={ets}")
                     marks = len([t for t in labels if t in ("\u2713", "\u2715")])
                     chk.add(f"{scheme} storm ({tag}): outcome marks appear only once settled",
@@ -1047,7 +1055,7 @@ def run(no_build: bool) -> int:
                         legend: labels.includes('exchange price') && labels.includes('calculation'),
                         cycleTicks: labels.filter(t => /^\d\dZ$/.test(t)).length,
                         etTicks: labels.filter(t => /^\d{1,2}:\d\d[ap]$/.test(t)).length,
-                        headers: labels.includes('NHC cycle') && labels.includes('file, ET'),
+                        axisNote: labels.some(t => /^axis rows, the NHC cycle/.test(t)),
                         title: ((wrap.querySelector('.lt') || {}).textContent || ''),
                         capCount: wrap.querySelectorAll('.cap').length,
                         stated: /Each figure is the chance/.test(cap)
@@ -1062,7 +1070,7 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} storm ({tag}): the market's ladder sits to the right of the chart",
                             bool(lhl and lhl["ladderRows"] >= 1 and lhl["ladderTitle"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the pool's axis names the NHC cycle and the file's arrival in ET",
-                            bool(lhl and lhl["cycleTicks"] >= 2 and lhl["etTicks"] >= 2 and lhl["headers"]), str(lhl))
+                            bool(lhl and lhl["cycleTicks"] >= 2 and lhl["etTicks"] >= 2 and lhl["axisNote"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the formula is the only prose under the chart",
                             bool(lhl and lhl["stated"] and lhl["capCount"] == 1), str(lhl))
                     # ---- the key, the switch between the two series, and the note beside it
@@ -1071,7 +1079,8 @@ def run(no_build: bool) -> int:
                     leg = page.locator("#liveStorms div:not(.xhdr) > .slegend")
                     leg_t = leg.first.inner_text() if leg.count() else ""
                     chk.add(f"{scheme} storm ({tag}): one key names the strikes' colours and the two line styles",
-                            leg.count() == 1 and "≥70" in leg_t and "LiveCyc" in leg_t and "exchange price" in leg_t, leg_t[:100])
+                            leg.count() == 1 and "≥70" in leg_t and "LiveCyc" in leg_t and "exchange price" in leg_t
+                            and "NHC cycle" in leg_t and "ET" in leg_t, leg_t[:100])
                     tog = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphtog button")
                     note_l = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphnote")
                     note_t = note_l.first.inner_text() if note_l.count() else ""
@@ -1102,27 +1111,31 @@ def run(no_build: bool) -> int:
                     # capitals, so the text is compared lower-cased.
                     bands = page.locator("#liveStorms .scardwrap").first.locator("rect.hband")
                     chk.add(f"{scheme} storm ({tag}): a hover band per delivered column, none for a pending one",
-                            bands.count() == (8 if _final else 7), f"bands={bands.count()}")
+                            bands.count() == n_del + (1 if _final else 0), f"bands={bands.count()}")
                     bands.nth(5).hover(force=True)
                     page.wait_for_timeout(150)
                     t_px = page.locator("#tip").inner_text()
                     low = t_px.lower()
                     chk.add(f"{scheme} storm ({tag}): the hover reads LiveCyc and the exchange's price side by side",
                             "livecyc" in low and "exchange" in low and "≥70 mph" in t_px and "%" in t_px and "35¢" in t_px, t_px[:120])
-                    # the price now belongs beside the newest delivery, which here is the
-                    # interim, so a cycle before it shows only the price recorded with it
-                    chk.add(f"{scheme} storm ({tag}): a cycle before the newest delivery carries no price now",
-                            "now" not in low, t_px[:160])
-                    bands.nth(6).hover(force=True)
-                    page.wait_for_timeout(150)
-                    t_int = page.locator("#tip").inner_text()
-                    chk.add(f"{scheme} storm ({tag}): the interim column is named and priced as it stood",
-                            "metryc interim" in t_int.lower() and "44¢" in t_int and "(latest)" in t_int, t_int[:120])
-                    chk.add(f"{scheme} storm ({tag}): the newest delivery also carries the price now",
-                            "now" in t_int.lower() and "43¢" in t_int, t_int[:160])
-                    if _final:
-                        chk.add(f"{scheme} storm ({tag}): once settled the hover says how each strike resolved",
-                                "settled" in t_int.lower() and "✓ Yes" in t_int, t_int[:160])
+                    # the price now belongs beside the newest delivery: the last cycle while
+                    # cycles are coming, the interim once it has landed
+                    if not _interim:
+                        chk.add(f"{scheme} storm ({tag}): the newest cycle carries the price now",
+                                "now" in low and "43¢" in t_px and "(latest)" in t_px, t_px[:160])
+                    else:
+                        chk.add(f"{scheme} storm ({tag}): a cycle before the newest delivery carries no price now",
+                                "now" not in low, t_px[:160])
+                        bands.nth(6).hover(force=True)
+                        page.wait_for_timeout(150)
+                        t_int = page.locator("#tip").inner_text()
+                        chk.add(f"{scheme} storm ({tag}): the interim column is named and priced as it stood",
+                                "metryc interim" in t_int.lower() and "44¢" in t_int and "(latest)" in t_int, t_int[:120])
+                        chk.add(f"{scheme} storm ({tag}): the newest delivery also carries the price now",
+                                "now" in t_int.lower() and "43¢" in t_int, t_int[:160])
+                        if _final:
+                            chk.add(f"{scheme} storm ({tag}): once settled the hover says how each strike resolved",
+                                    "settled" in t_int.lower() and "✓ Yes" in t_int, t_int[:160])
                     # ---- the interim's zero is a figure: Galveston's dashed line runs on
                     # to the interim column at zero rather than stopping at the last
                     # cycle, the hover names the file and prints the zero, and the
@@ -1132,36 +1145,37 @@ def run(no_build: bool) -> int:
                       if (!card) return null;
                       const svg = card.querySelector('svg.scard');
                       const bands = [...svg.querySelectorAll('rect.hband')];
+                      const labels = [...svg.querySelectorAll('text')].map(t => t.textContent);
+                      const order = labels.filter(t => /^(next|Interim|final)$/.test(t)).join(' ');
                       const int = bands[6], line = svg.querySelector('path.lcline');
-                      if (!int || !line) return { bands: bands.length, line: !!line };
+                      if (!int || !line) return { bands: bands.length, line: !!line, order };
                       const colX = +int.getAttribute('x') + (+int.getAttribute('width')) / 2;
                       const d = line.getAttribute('d');
                       const m = d.match(/([\d.]+),([\d.]+)$/) || [0, NaN, NaN];
-                      const labels = [...svg.querySelectorAll('text')].map(t => t.textContent);
-                      return { endX: +m[1], endY: +m[2], colX, bands: bands.length,
-                               order: labels.filter(t => /^(next|Interim|final)$/.test(t)).join(' ') };
+                      return { endX: +m[1], endY: +m[2], colX, bands: bands.length, order };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): the dashed line runs on to the interim column at the zero it published",
-                            bool(ga and abs(ga["endX"] - ga["colX"]) < 1.5 and abs(ga["endY"] - 150) < 0.6), str(ga))
-                    chk.add(f"{scheme} storm ({tag}): the interim sits where it arrived, before what is still to come",
-                            bool(ga and (ga["order"] == "Interim next final" if not _final else ga["order"] == "Interim final")),
-                            str(ga and ga["order"]))
-                    page.locator('#liveStorms .scardwrap[data-sid="GA"] rect.hband').nth(6).hover(force=True)
-                    page.wait_for_timeout(150)
-                    t_ga = page.locator("#tip").inner_text().lower()
-                    chk.add(f"{scheme} storm ({tag}): the interim column names the file and prints the zero",
-                            "metryc interim" in t_ga and "0%" in t_ga and "the metryc interim file" in t_ga, t_ga[:160])
-                    vt = page.evaluate("""() => {
-                      const rows = [...document.querySelectorAll('#vendor table tr')];
-                      const ga = rows.findIndex(r => /Galveston/.test(r.textContent));
-                      const nxt = rows[ga + 1];
-                      return { hasInterimRow: !!(nxt && /Metryc interim/.test(nxt.textContent)),
-                               zeros: nxt ? [...nxt.querySelectorAll('td.num')].map(td => td.textContent).join(' ') : '',
-                               state: (document.querySelector('#vendor') || {}).textContent || '' };
-                    }""")
-                    chk.add(f"{scheme} storm ({tag}): the vendor table carries the interim's row under the cycle's",
-                            bool(vt and vt["hasInterimRow"] and vt["zeros"].startswith("0% 0%")
-                                 and "Metryc interim received" in vt["state"]), str(vt and vt["zeros"])[:80])
+                    want = "next Interim final" if not _interim else "Interim final"
+                    chk.add(f"{scheme} storm ({tag}): the columns still to come follow the deliveries in order",
+                            bool(ga and ga["order"] == want), str(ga and ga["order"]))
+                    if _interim:
+                        chk.add(f"{scheme} storm ({tag}): the dashed line runs on to the interim column at the zero it published",
+                                bool(ga and abs(ga["endX"] - ga["colX"]) < 1.5 and abs(ga["endY"] - 150) < 0.6), str(ga))
+                        page.locator('#liveStorms .scardwrap[data-sid="GA"] rect.hband').nth(6).hover(force=True)
+                        page.wait_for_timeout(150)
+                        t_ga = page.locator("#tip").inner_text().lower()
+                        chk.add(f"{scheme} storm ({tag}): the interim column names the file and prints the zero",
+                                "metryc interim" in t_ga and "0%" in t_ga and "the metryc interim file" in t_ga, t_ga[:160])
+                        vt = page.evaluate("""() => {
+                          const rows = [...document.querySelectorAll('#vendor table tr')];
+                          const ga = rows.findIndex(r => /Galveston/.test(r.textContent));
+                          const nxt = rows[ga + 1];
+                          return { hasInterimRow: !!(nxt && /Metryc interim/.test(nxt.textContent)),
+                                   zeros: nxt ? [...nxt.querySelectorAll('td.num')].map(td => td.textContent).join(' ') : '',
+                                   state: (document.querySelector('#vendor') || {}).textContent || '' };
+                        }""")
+                        chk.add(f"{scheme} storm ({tag}): the vendor table carries the interim's row under the cycle's",
+                                bool(vt and vt["hasInterimRow"] and vt["zeros"].startswith("0% 0%")
+                                     and "Metryc interim received" in vt["state"]), str(vt and vt["zeros"])[:80])
                     # ---- a card opened to fill the window brings the key and the switch with it
                     page.locator("#liveStorms .scardwrap .zb.ex").first.click(); page.wait_for_timeout(200)
                     full = page.locator("#liveStorms .scardwrap.full")
@@ -1183,17 +1197,17 @@ def run(no_build: bool) -> int:
                             attrib.strip() == "Powered by Reask", attrib)
                     # ---- the cursor, and scrubbing across deliveries
                     ticks = page.locator("#liveStorms svg.stimeline circle, #liveStorms svg.stimeline rect").count()
-                    chk.add(f"{scheme} storm ({tag}): one tick per delivery on the timeline", ticks == 7, f"ticks={ticks}")
+                    chk.add(f"{scheme} storm ({tag}): one tick per delivery on the timeline", ticks == n_del, f"ticks={ticks}")
                     strip = page.locator("#liveStorms svg.stimeline").first
                     read = lambda: page.locator("#liveStorms svg.stimeline text").first.text_content()
                     chk.add(f"{scheme} storm ({tag}): the cursor starts at the newest delivery",
-                            "delivery 7 of 7" in read() and "(latest)" in read(), read())
+                            f"delivery {n_del} of {n_del}" in read() and "(latest)" in read(), read())
                     cx = lambda: page.eval_on_selector("#liveStorms .scardwrap line.scur", "e => e.getAttribute('x1')")
                     was = cx()
                     page.get_by_title("the delivery before this one").first.click()
                     page.wait_for_timeout(120)
                     chk.add(f"{scheme} storm ({tag}): stepping back names the delivery it lands on",
-                            "delivery 6 of 7" in read() and "(latest)" not in read(), read())
+                            f"delivery {n_del - 1} of {n_del}" in read() and "(latest)" not in read(), read())
                     chk.add(f"{scheme} storm ({tag}): the cursor line moves with the step", cx() != was, f"{was} -> {cx()}")
                     # a past delivery is priced as it stood then: the cursor's hollow square
                     # sits at that delivery's recorded price, and the dot on the vendor's line
@@ -1211,12 +1225,12 @@ def run(no_build: bool) -> int:
                     page.mouse.up()
                     page.wait_for_timeout(120)
                     chk.add(f"{scheme} storm ({tag}): dragging the strip scrubs to another delivery",
-                            "of 7" in read() and "delivery 7 of 7" not in read(), read())
+                            f"of {n_del}" in read() and f"delivery {n_del} of {n_del}" not in read(), read())
                     strip.press("ArrowLeft"); page.wait_for_timeout(100)
                     mid = read()
                     strip.press("End"); page.wait_for_timeout(120)
                     chk.add(f"{scheme} storm ({tag}): the arrow keys step and End returns to the latest",
-                            mid != read() and "delivery 7 of 7" in read(), f"{mid} -> {read()}")
+                            mid != read() and f"delivery {n_del} of {n_del}" in read(), f"{mid} -> {read()}")
                     # ---- a cycle the vendor never delivered
                     ngap = page.locator("#liveStorms .scardwrap rect.sgap").count()
                     ncards2 = page.locator("#liveStorms .scardwrap").count()
@@ -1333,7 +1347,7 @@ def run(no_build: bool) -> int:
                     if u.endswith("/reask.json"):
                         return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index2))
                     if "/storm/Erin_2026.json" in u:
-                        return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(False)))
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(True, False)))
                     if "/storm/Beta_2026.json" in u:
                         decay = {"schema": 2, "name": "Beta", "year": 2026, "thresholds": [60, 70],
                                  "sites": {"BR": {"name": "Brownsville", "firstStep": "2026083100"}},

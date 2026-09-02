@@ -5,7 +5,7 @@
  "absorbs": [
   "Five"
  ],
- "reason": "The exchange's first live-storm listing. No contract traded and the quotes were not maintained through the storm, so the owner ruled on 2026-09-02 that this storm's exchange series is the per-delivery price the exchange was given to quote, for every strike that price was produced for, and that the pool's calculation is that same series, so the two lines fall on top of each other. The pool's series starts at the delivery on which the whole-field pricing came in; the pair-normalised prices before it are the error already ruled out of the display. The depression's deliveries under its number, Five, belong to this storm and are absorbed into its ledger. Later storms carry the exchange's quotes as read and the site's own calculation.",
+ "reason": "The exchange's first live-storm listing. No contract traded and the quotes were not maintained through the storm, so the owner ruled on 2026-09-02 that this storm's exchange series is the per-delivery price the exchange was given to quote, for every strike that price was produced for, and that the pool's calculation is that same series, so the two lines fall on top of each other. The pool's series starts at the delivery on which the whole-field pricing came in; the pair-normalised prices before it are the error already ruled out of the display. The depression's deliveries under its number, Five, belong to this storm and are absorbed into its ledger. Later storms carry the exchange's quotes as read and the site's own calculation. At the Metryc interim the desk produced nothing, and the interim's ladder was zero at every location, so the ruled series carries through the interim unchanged, which is what folding that interim into the last figure gives.",
  "steps": {
   "2026083112": {},
   "2026083118": {
@@ -77,7 +77,22 @@
     "80": 0.0
    }
   },
-  "INT": {}
+  "INT": {
+   "BT": {
+    "70": 0.2
+   },
+   "LA": {
+    "70": 0.0
+   },
+   "LC": {
+    "70": 0.0,
+    "80": 0.0
+   },
+   "PA": {
+    "70": 0.0,
+    "80": 0.0
+   }
+  }
  },
  "pwin": {
   "2026083112": {},
@@ -95,7 +110,10 @@
    "LC": 34.7,
    "PA": 22.2
   },
-  "INT": {}
+  "INT": {
+   "LC": 34.7,
+   "PA": 22.2
+  }
  },
  "pools": {
   "LHLED": [
@@ -127,6 +145,19 @@
    },
    {
     "t": "2026-09-01T22:34:18Z",
+    "p": {
+     "Lake Charles": [
+      34.7,
+      34.7
+     ],
+     "Port Arthur": [
+      22.2,
+      22.2
+     ]
+    }
+   },
+   {
+    "t": "2026-09-02T14:54:48Z",
     "p": {
      "Lake Charles": [
       34.7,
