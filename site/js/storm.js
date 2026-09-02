@@ -63,10 +63,14 @@ window.WXStorm = (() => {
   const doneLabel = s => (s.final ? 'settled'
     : supersededBy(s) ? 'now named ' + supersededBy(s)
     : 'no longer updating');
+  // the newest thing the vendor has said about the storm: a cycle, or the
+  // interim, which can land days after the last cycle and keeps the storm
+  // in play until the final resolves it
   function stampOf(s) {
     const lc = (s && s.livecyc) || {};
-    const t = Date.parse(lc.lastModified || lc.forecastTime || '');
-    return isFinite(t) ? t : null;
+    const ts = [Date.parse(lc.lastModified || lc.forecastTime || ''), Date.parse(((s && s.interim) || {}).lastModified || '')]
+      .filter(isFinite);
+    return ts.length ? Math.max.apply(null, ts) : null;
   }
   function dormant(s) {
     if (s && s.final) return true;
@@ -113,8 +117,11 @@ window.WXStorm = (() => {
     const lc = s && s.livecyc;
     if (!lc || !lc.pwin) return null;
     const out = {};
+    // a candidate the interim settled high can be absent from the newest
+    // cycle, so its name is looked for on the interim's rows as well
+    const im = (s.interim && s.interim.sites) || {};
     Object.keys(lc.pwin).forEach(sid => {
-      const nm = (lc.sites && lc.sites[sid] && lc.sites[sid].name) || sid;
+      const nm = (lc.sites && lc.sites[sid] && lc.sites[sid].name) || (im[sid] && im[sid].name) || sid;
       out[nm] = lc.pwin[sid];
     });
     return out;
@@ -193,28 +200,52 @@ window.WXStorm = (() => {
     return ((RK && RK.storms) || []).find(s => s.name === storm.name && String(s.year) === String(storm.year)) || storm;
   }
 
+  // ---- the deliveries, in the order they arrived
+  //
+  // The ledger files the interim after every cycle whatever the clock said,
+  // and the page reads time left to right, so a cycle that landed after the
+  // interim belongs after it here. The moment a file was recorded orders it,
+  // the vendor's stamp stands in where there is none, and steps with neither
+  // go last, in the order the ledger holds them. The final is not a delivery
+  // on this axis.
+  const arrivedAt = s => {
+    const t = [s && s.ts, s && s.at].map(v => Date.parse(v || '')).find(isFinite);
+    return t == null ? Infinity : t;
+  };
+  function delivered(doc) {
+    return ((doc && doc.steps) || []).filter(s => s.kind !== 'final')
+      .map((s, i) => [s, i])
+      .sort((a, b) => (arrivedAt(a[0]) - arrivedAt(b[0])) || (a[1] - b[1]))
+      .map(x => x[0]);
+  }
+
   // ---- the columns of a storm's axis
   //
-  // Every delivery so far in ledger order, then what is still to come: the
-  // next LiveCyc file while the storm is still delivering, the interim
-  // settlement until it has arrived, and the final settlement until the
+  // Every delivery so far in the order it arrived, then what is still to
+  // come: the next LiveCyc file while the storm is still delivering, the
+  // Metryc interim until it has arrived, and the final settlement until the
   // contracts have resolved. The pending columns hold their place from the
   // first frame, so a chart never rescales when one of them lands; the column
   // fills in where it already was.
   function columns(doc, entry) {
     const steps = (doc && doc.steps) || [];
-    const cyc = steps.filter(s => s.kind === 'livecyc');
-    const int = steps.find(s => s.kind === 'interim') || null;
-    const cols = cyc.map(s => ({ kind: 'livecyc', step: s }));
+    const arrived = delivered(doc);
+    const cyc = arrived.filter(s => s.kind === 'livecyc');
+    const cols = arrived.map(s => ({ kind: s.kind, step: s }));
     const settled = !!(doc && doc.final);
-    if (!settled && !(entry && dormant(entry))) {
+    // the next cycle is promised only while cycles are still coming. The
+    // vendor stops issuing them once the storm is done, and an interim that
+    // lands days later keeps the storm on the page without reviving them; a
+    // storm with no stamp at all is taken as still delivering
+    const lcStamp = entry && entry.livecyc ? Date.parse(entry.livecyc.lastModified || entry.livecyc.forecastTime || '') : NaN;
+    const cycling = !isFinite(lcStamp) || (Date.now() - lcStamp) <= STALE_MS;
+    if (!settled && !(entry && dormant(entry)) && cycling) {
       const last = cyc[cyc.length - 1];
       const m = last && /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(last.id || ''));
       const hh = m ? (+m[4] + 6) % 24 : null;
       cols.push({ kind: 'next', cycle: hh == null ? '' : (hh < 10 ? '0' : '') + hh + 'Z' });
     }
-    if (int) cols.push({ kind: 'interim', step: int });
-    else if (!settled) cols.push({ kind: 'interim-ph' });
+    if (!settled && !arrived.some(s => s.kind === 'interim')) cols.push({ kind: 'interim-ph' });
     if (settled) cols.push({ kind: 'final', step: steps.find(s => s.kind === 'final') || { id: 'FINAL', kind: 'final' } });
     else cols.push({ kind: 'final-ph' });
     return cols;
@@ -313,7 +344,7 @@ window.WXStorm = (() => {
       d.appendChild(h('span', {}, [h('i', { class: 'sw', style: 'background:' + rung(i, thr.length) }), '≥' + t]));
     });
     d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl' }), 'exchange price, the Yes midpoint']));
-    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'LiveCyc, as published']));
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'LiveCyc, and the Metryc interim once it lands, as published']));
     return d;
   }
   // the hover box for one column: the strikes down the side, the series across
@@ -335,7 +366,7 @@ window.WXStorm = (() => {
   function card(doc, sid, storm, gp) {
     const meta = doc.sites[sid] || {};
     const thr = doc.thresholds || [];
-    const cyc = (doc.steps || []).filter(s => s.kind !== 'final');      // what the timeline scrubs
+    const cyc = delivered(doc);                                          // what the timeline scrubs
     const cols = columns(doc, stormEntry(storm));
     const fin = doc.final || null;
     // a storm under the owner's ruling carries its recorded prices and no live quote
@@ -356,6 +387,9 @@ window.WXStorm = (() => {
     const colOf = {};
     cols.forEach((c, k) => { if (c.step && c.step.id != null) colOf[c.step.id] = k; });
     const lastLc = cols.map((c, k) => (c.kind === 'livecyc' ? k : -1)).filter(k => k >= 0).pop();
+    // the newest thing the vendor has said, cycle or interim: where the price
+    // now belongs, and what the latest column is
+    const newest = cols.map((c, k) => (c.step && c.kind !== 'final' ? k : -1)).filter(k => k >= 0).pop();
     const used = {};
 
     [0, 25, 50, 75, 100].forEach(p => {
@@ -389,12 +423,16 @@ window.WXStorm = (() => {
       bind(band, () => {
         const arr = (s.sites && s.sites[sid]) || [];
         const pr = (s.prices && s.prices[sid]) || {};
-        const nowCol = k === lastLc && !!mk;
-        const head = ['strike', 'LiveCyc', 'exchange'].concat(nowCol ? ['now'] : []).concat(fin && fin[sid] != null ? ['settled'] : []);
+        const nowCol = k === newest && !!mk;
+        // the figure in the second column is whichever file this column is:
+        // a forecast cycle's LiveCyc, or the Metryc interim's folded ladder
+        const head = ['strike', c.kind === 'interim' ? 'Metryc interim' : 'LiveCyc', 'exchange']
+          .concat(nowCol ? ['now'] : []).concat(fin && fin[sid] != null ? ['settled'] : []);
         const rows = [];
         thr.forEach((t, i) => {
           if (!used[t]) return;
-          const v = arr.length > i && arr[i] > 0 ? arr[i] : null;
+          // a zero the vendor printed is a figure and reads as one
+          const v = arr.length > i && arr[i] != null ? arr[i] : null;
           const p = pr[String(t)];
           const r = ['≥' + t + ' mph', v == null ? null : v + '%', p == null ? null : Math.round(p) + '¢'];
           if (nowCol) { const live = priceAt(mk, t); r.push(live == null ? null : live + '¢'); }
@@ -403,9 +441,10 @@ window.WXStorm = (() => {
         });
         const et = etTime(s.ts) || etTime(s.at);
         const what = c.kind === 'final' ? 'final settlement' + (fin && fin[sid] != null ? ' · ' + fin[sid] + ' mph' : '')
-          : c.kind === 'interim' ? 'interim settlement'
+          : c.kind === 'interim' ? 'the Metryc interim file'
+              + (arr.length ? '' : ' · it carries no figure for this location')
           : 'delivery ' + (k + 1) + ' of ' + (lastLc + 1) + ' so far';
-        return colTip(esc(meta.name || sid) + ' · ' + label(s) + (k === lastLc ? ' (latest)' : ''),
+        return colTip(esc(meta.name || sid) + ' · ' + label(s) + (k === newest ? ' (latest)' : ''),
           et ? 'file ' + et + ' ET' : '', head,
           rows.length ? rows : [['—', 'nothing above zero', null]],
           what + (url ? ' · click to open the contract' : '') + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
@@ -455,7 +494,9 @@ window.WXStorm = (() => {
                                    'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
       // one point per delivery: the vendor issues these at set times and nothing
       // is measured between them, so each reading is marked rather than implied
-      if (pts.length > 1 && wcol >= 5) pts.forEach(v => svg.appendChild(el('circle',
+      // a rung with a single reading, which a location the interim alone
+      // names has, is still a reading and gets its dot
+      if ((pts.length > 1 && wcol >= 5) || pts.length === 1) pts.forEach(v => svg.appendChild(el('circle',
         { class: 'ldot', cx: x(v[0]).toFixed(1), cy: y(v[1]).toFixed(1), r: Math.min(2.6, wcol / 4),
           fill: col, 'pointer-events': 'none' })));
       if (fin && fin[sid] != null) {
@@ -489,8 +530,8 @@ window.WXStorm = (() => {
         width: 4.4, height: 4.4, fill: col, 'pointer-events': 'none' })));
       // the price now is fresher than the one recorded when the newest delivery
       // landed: a hollow square beside that column, hollow to read as the market's
-      const live = mk && lastLc != null ? priceAt(mk, t) : null;
-      if (live != null) svg.appendChild(el('rect', { class: 'pxnow', x: x(lastLc) + 5, y: y(live) - 3.5, width: 7, height: 7,
+      const live = mk && newest != null ? priceAt(mk, t) : null;
+      if (live != null) svg.appendChild(el('rect', { class: 'pxnow', x: x(newest) + 5, y: y(live) - 3.5, width: 7, height: 7,
         fill: 'transparent', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
     });
 
@@ -511,7 +552,8 @@ window.WXStorm = (() => {
         if (!used[t]) return;
         const col = rung(i, thr.length);
         const v = arr.length > i ? arr[i] : null;
-        if (v != null && v > 0) marks.appendChild(el('circle', { cx: x(k), cy: y(v), r: 2.8, fill: col, 'pointer-events': 'none' }));
+        // a forecast at zero is drawn as nothing; an interim at zero is a published figure
+        if (v != null && (v > 0 || s.kind === 'interim')) marks.appendChild(el('circle', { cx: x(k), cy: y(v), r: 2.8, fill: col, 'pointer-events': 'none' }));
         const p = pr[String(t)];
         if (p != null) marks.appendChild(el('rect', { x: x(k) - 3.2, y: y(p) - 3.2, width: 6.4, height: 6.4, fill: 'var(--panel)',
           stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
@@ -533,7 +575,7 @@ window.WXStorm = (() => {
     return { node: wrap, setCursor, used };
   }
 
-  const label = s => (s.kind === 'interim' ? 'interim settlement' : s.kind === 'final' ? 'final settlement' : String(s.id || '').replace(/^(\d{4})(\d{2})(\d{2})(\d{2})$/, '$2/$3 $4Z'));
+  const label = s => (s.kind === 'interim' ? 'Metryc interim' : s.kind === 'final' ? 'final settlement' : String(s.id || '').replace(/^(\d{4})(\d{2})(\d{2})(\d{2})$/, '$2/$3 $4Z'));
 
   // a hover box on the node; a click follows the node to its contract when it
   // has one, and pins the box when it has not
@@ -682,7 +724,9 @@ window.WXStorm = (() => {
   // moved, because the market trades between deliveries even though the
   // calculation cannot.
   async function poolSeries(m, ledger) {
-    const cyc = ((ledger && ledger.steps) || []).filter(s => s.kind === 'livecyc' && s.pwin);
+    // every delivery that carries the figure: the cycles, and the interim,
+    // whose figure is the fold of the newest cycle with what it settled
+    const cyc = delivered(ledger).filter(s => s.pwin && (s.kind === 'livecyc' || s.kind === 'interim'));
     if (!cyc.length) return null;
     // the calculation at each delivery, under the location's name
     const calc = cyc.map(s => {
@@ -720,7 +764,10 @@ window.WXStorm = (() => {
         if (b) now[c.label] = b;
       });
     }
-    const latestCalc = calc[calc.length - 1] || {};
+    // the ladder's tick is the index's current figure, the same fold the
+    // newest delivery carries and the one a ruling governs; failing that,
+    // the newest delivery that carried a figure at all
+    const latestCalc = calcByName(ledger.name) || calc.slice().reverse().find(by => Object.keys(by).length) || {};
     const names = (m.contracts || []).map(c => c.label).filter(Boolean)
       .sort((a, b) => (((now[b] || {}).mid || 0) - ((now[a] || {}).mid || 0))
                    || ((latestCalc[b] || 0) - (latestCalc[a] || 0))).slice(0, 8);
@@ -991,11 +1038,11 @@ window.WXStorm = (() => {
     }
     const doc = ledgers[key];
     host.innerHTML = '';
-    const cyc = doc ? (doc.steps || []).filter(s => s.kind !== 'final') : [];
+    const cyc = delivered(doc);
     const state = [];
     state.push(cyc.length + ' vendor deliver' + (cyc.length === 1 ? 'y' : 'ies') + ' so far');
-    if (doc && (doc.steps || []).some(s => s.kind === 'interim')) state.push('interim settlement received');
-    else state.push('interim settlement pending');
+    if (doc && (doc.steps || []).some(s => s.kind === 'interim')) state.push('Metryc interim received');
+    else state.push('Metryc interim pending');
     if (doc && doc.final) state.push('final settlement received; the contracts have resolved');
     else state.push('final settlement pending, and its timing is not known in advance');
     const gp = gaps(cyc);
@@ -1017,7 +1064,7 @@ window.WXStorm = (() => {
       const nt = h('div', { class: 'note warn' });
       nt.innerHTML = '<b>Settlement data pending.</b> This storm appears to have passed some of its '
         + 'reference locations. A forward-looking ladder declines once the storm moves past a place, and '
-        + 'the vendor’s interim settlement file, which carries what was actually recorded, has not been '
+        + 'the vendor’s Metryc interim file, which folds in what was actually recorded, has not been '
         + 'published yet. Figures for passed locations read low until it arrives, and the exchange’s '
         + 'quotes can sit above them for the same reason. Final values appear here when the file does; '
         + 'the vendor’s final settlement file follows the storm’s last NHC advisory, typically within a '
@@ -1190,7 +1237,7 @@ window.WXStorm = (() => {
     Object.keys(ledgers).forEach(k => {
       const doc = ledgers[k];
       if (!doc || !doc.sites) return;
-      const cyc = (doc.steps || []).filter(x => x.kind !== 'final');
+      const cyc = delivered(doc);
       Object.keys(doc.sites).forEach(sid => {
         if (cyc.some(x => ((x.sites || {})[sid] || []).some(v => v > 0))) out[sid] = true;
       });

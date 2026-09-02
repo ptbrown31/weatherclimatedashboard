@@ -254,12 +254,19 @@ window.WXHur = (() => {
     if (!RK || !RK.enabled) return null;
     const out = [];
     (RK.storms || []).filter(s => !WXStorm.dormant(s)).forEach(s => {
-      const lc = s.livecyc; if (!lc || !lc.sites || !lc.sites[id]) return;
-      const row = lc.sites[id];
-      const i80 = lc.thresholds.indexOf(80);
-      out.push({ storm: s.name, p80: i80 >= 0 ? row.p[i80] : row.p[0],
-                 thresholds: lc.thresholds, p: row.p, forecastTime: lc.forecastTime,
-                 received: lc.lastModified });
+      // the newest cycle's row, and the Metryc interim's row for the same
+      // location once one has landed, which is the vendor's later word on it
+      const lc = s.livecyc || {};
+      const row = lc.sites && lc.sites[id];
+      const im = s.interim && s.interim.sites && s.interim.sites[id];
+      if (!row && !im) return;
+      const thr = lc.thresholds || (s.interim || {}).thresholds || [];
+      const p = row ? row.p : thr.map(() => 0);
+      const i80 = thr.indexOf(80);
+      out.push({ storm: s.name, p80: i80 >= 0 ? p[i80] : p[0],
+                 thresholds: thr, p, forecastTime: lc.forecastTime,
+                 received: lc.lastModified,
+                 interim: im ? { p: im.p, received: s.interim.lastModified } : null });
     });
     out.sort((a, b) => b.p80 - a.p80);
     return out.length ? out : null;
@@ -286,6 +293,14 @@ window.WXHur = (() => {
           + (v2.received ? ', received ' + utc(v2.received) : '')]);
         v2.thresholds.map((t, i) => (v2.p[i] ? ['&gt; ' + t + ' mph', v2.p[i] + '%'] : null))
           .filter(Boolean).slice(0, cap).forEach(r => rows.push(r));
+        if (v2.interim) {
+          // the interim's rungs under their own heading; a published zero at
+          // every rung is printed at the lowest one, since it is a figure
+          rows.push(['Metryc interim', 'received ' + utc(v2.interim.received)]);
+          const im = v2.thresholds.map((t, i) => (v2.interim.p[i] ? ['interim &gt; ' + t + ' mph', v2.interim.p[i] + '%'] : null))
+            .filter(Boolean);
+          (im.length ? im.slice(0, cap) : [['interim &gt; ' + v2.thresholds[0] + ' mph', '0%']]).forEach(r => rows.push(r));
+        }
       });
       foot = esc((RK && RK.attribution) || 'Powered by Reask') + '; probabilities as published'
            + (list.length > 1 ? '; each storm is its own hazard' : '');
@@ -432,8 +447,11 @@ window.WXHur = (() => {
     (GEO && GEO.locations || []).forEach(L => {
       if (L.lon < b0 || L.lon > b1 || L.lat < la0 || L.lat > la1) return;
       const v = vendorSite(L.id);
-      const any = !!(v && v.some(x => x.p.some(p => p > 0)));
-      const p80 = v ? Math.max.apply(null, v.map(x => x.p80 || 0)) : 0;
+      // a location the interim settles high is a signal even when the newest
+      // cycle has moved on and reads zero there
+      const im80 = x => (x.interim && x.interim.p ? (x.interim.p[x.thresholds.indexOf(80)] || 0) : 0);
+      const any = !!(v && v.some(x => x.p.some(p => p > 0) || (x.interim && x.interim.p.some(p => p > 0))));
+      const p80 = v ? Math.max.apply(null, v.map(x => Math.max(x.p80 || 0, im80(x)))) : 0;
       const r = (p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(p80, 100) / 100) : (any ? 3 : 2.2)) * g;
       if (any) vendorShown++;
       const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 * g });
@@ -1121,7 +1139,7 @@ window.WXHur = (() => {
         h('span', { text: lc ? 'LiveCyc cycle ' + utc(lc.forecastTime)
           + (lc.lastModified ? ' · file received ' + utc(lc.lastModified) : '')
           + ' · ' + Object.keys(lc.sites || {}).length + ' locations with non-zero probability' : 'no LiveCyc cycle yet' }),
-        h('span', { text: s.interim ? 'interim settlement file received' : '' }),
+        h('span', { text: s.interim ? 'Metryc interim received' : '' }),
         h('span', { text: s.final ? 'final settlement file received' : '' })]));
       if (lc && lc.sites) {
         /* The vendor's lowest rung is on the table.
@@ -1147,7 +1165,13 @@ window.WXHur = (() => {
           }
           return 0;
         };
-        const rows = Object.entries(lc.sites).sort(rank).slice(0, 16);
+        // every location the newest cycle names, and every one the interim
+        // names that the cycle has since dropped, which reads zero on the
+        // cycle's row and carries the interim's figure underneath
+        const imSites = (s.interim && s.interim.sites) || {};
+        const union = Object.assign({}, Object.fromEntries(Object.keys(imSites).map(id =>
+          [id, { name: imSites[id].name, p: lc.thresholds.map(() => 0) }])), lc.sites);
+        const rows = Object.entries(union).sort(rank).slice(0, 16);
         const tb = h('table');
         tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
         // the exchange's wind contract for this storm and location, where one
@@ -1163,6 +1187,16 @@ window.WXHur = (() => {
           const url = lm && c0 ? WXM.contractUrl(lm.productConid, c0.conidYes || c0.conid) : null;
           if (url) WXM.linkTo(tr, url, 'Open the ' + r.name + ' wind contract on IBKR');
           tb.appendChild(tr);
+          // the interim's row for the same location under the cycle's, once
+          // it has landed, so the vendor's later word sits beside the earlier
+          const im = s.interim && s.interim.sites && s.interim.sites[id];
+          if (im) {
+            const tr2 = h('tr', { class: 'dim' }, [h('td', { text: '↳ Metryc interim' })]
+              .concat(idx.map(i => h('td', { class: 'num', text: (im.p[i] != null ? im.p[i] : 0) + '%' }))));
+            attach(tr2, locationTip(L, { storm: s.name, thresholds: lc.thresholds, p: r.p, forecastTime: lc.forecastTime,
+                                         received: lc.lastModified, interim: { p: im.p, received: s.interim.lastModified } }));
+            tb.appendChild(tr2);
+          }
         });
         into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
       }

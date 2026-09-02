@@ -84,10 +84,19 @@ def _get(base: str, path: str, api_key: str, params: Optional[dict] = None, time
         return r.read()
 
 
-def parse_ladder_csv(text: str) -> dict:
-    """{"thresholds": [60, 70, ...], "sites": {ID: {"name", "lat", "lon", "p": [..percent..]}},
-    "rows": n} from a LiveCyc or interim file. Sites whose every probability
-    is zero are dropped (they carry nothing to draw); `rows` keeps the count."""
+def parse_ladder_csv(text: str, keep_zero: bool = False) -> dict:
+    """{"thresholds": [60, 70, ...], "sites": {ID: {"name", "lat", "lon", "covered", "p": [..percent..]}},
+    "rows": n} from a LiveCyc or interim file.
+
+    A blank cell is no figure, and a row of blanks is a location the file does
+    not reach: the vendor's interim is computed on a domain around the
+    landfall and marks the locations inside it covered, leaving the rest
+    empty. A row of printed zeros is a figure, nothing above the lowest
+    threshold. On a forecast cycle that figure carries nothing to draw and the
+    row is dropped. On an interim, which folds what the storm has already done
+    into the ladder, a covered zero is the vendor saying the location saw
+    nothing, and keep_zero keeps it; a blank row is never kept, whatever the
+    flag says. `rows` counts every row the file carried."""
     rd = csv.DictReader(io.StringIO(text))
     cols = rd.fieldnames or []
     thr = sorted((int(m.group(1)), c) for c in cols for m in [re.match(r"prob_(\d+)mph$", c)] if m)
@@ -97,17 +106,23 @@ def parse_ladder_csv(text: str) -> dict:
         sid = (row.get("ID") or "").strip()
         if not sid:
             continue
-        ps = []
+        ps, blank = [], 0
         for _, col in thr:
+            raw = (row.get(col) or "").strip()
             try:
-                ps.append(round(float(row.get(col) or 0), 2))
+                v = float(raw)
+                if not (0 <= v < float("inf")):        # a NaN or a negative is no figure either
+                    raise ValueError(raw)
+                ps.append(round(v, 2))
             except ValueError:
                 ps.append(0.0)
-        if not any(p > 0 for p in ps):
+                blank += 1
+        covered = (row.get("covered") or "").strip().lower() in ("true", "1", "yes")
+        if not any(p > 0 for p in ps) and not (keep_zero and covered and thr and blank == 0):
             continue
         sites[sid] = {"name": (row.get("Display Location") or "").strip(),
                       "lat": _num(row.get("Latitude")), "lon": _num(row.get("Longitude")),
-                      "covered": (row.get("covered") or "").strip().lower() in ("true", "1", "yes"), "p": ps}
+                      "covered": covered, "p": ps}
     return {"thresholds": [t for t, _ in thr], "sites": sites, "rows": n}
 
 
@@ -147,7 +162,12 @@ def pwin(thresholds: list, sites: dict, floor_sites: Optional[dict] = None) -> d
     same convention prices the exchange's own L ladders, marginal by marginal.
     """
     thr = [float(t) for t in (thresholds or [])]
-    ids = [k for k, ps in (sites or {}).items() if any((p or 0) > 0 for p in (ps or []))]
+    fl = floor_sites or {}
+    live = lambda ps: any((p or 0) > 0 for p in (ps or []))
+    # a candidate is any location with a figure above zero on either ladder:
+    # a forecast that has gone to zero after passage does not remove a
+    # location the interim has since settled high
+    ids = sorted(k for k in set(sites or {}) | set(fl) if live((sites or {}).get(k)) or live(fl.get(k)))
     if not thr or not ids:
         return {}
     top = thr[-1] + 10.0
@@ -164,7 +184,7 @@ def pwin(thresholds: list, sites: dict, floor_sites: Optional[dict] = None) -> d
         e.append(0.0)
         return e
 
-    E = {sid: exceed(sites[sid], (floor_sites or {}).get(sid)) for sid in ids}
+    E = {sid: exceed((sites or {}).get(sid) or [], fl.get(sid)) for sid in ids}
     # one-mph grid: F and f per location, linear exceedance within a bin
     xs = []
     x = 0.5
@@ -340,19 +360,38 @@ def absorbed_storms() -> dict:
     return out
 
 
+def _prune_interim(step: dict, known) -> None:
+    """Keep an interim's zero rows only for locations the ledger already has.
+
+    The interim covers a whole domain, so a storm that touched four locations
+    arrives with a hundred and sixty covered zeros. A zero is a figure for a
+    location this storm's cards draw, where it closes the ladder the
+    forecasts opened; for every other location it is a row about a place the
+    page never mentions, and it would enter the ledger as a site with nothing
+    to show. Rows above zero are always kept."""
+    if step.get("kind") != "interim":
+        return
+    keep = {sid for sid, ps in (step.get("sites") or {}).items()
+            if sid in known or any((p or 0) > 0 for p in (ps or []))}
+    for field in ("sites", "siteMeta", "prices"):
+        step[field] = {k: v for k, v in (step.get(field) or {}).items() if k in keep}
+
+
 def append_step(store: Storage, name: str, year: int, step: dict, log: Callable) -> dict:
     """Append one delivery to a storm's ledger and return its summary.
 
-    The ledger is append-only and keyed by the delivery's own identity (the
-    forecast time for a cycle, the file's last-modified stamp for an interim or
-    final), so re-reading a file the vendor re-issued replaces that delivery
-    rather than adding a duplicate, and a delivery that arrives late still lands
-    in its own place. Nothing here looks forward: a step records only what that
-    delivery said."""
+    The ledger is append-only and keyed by the delivery's own identity: the
+    forecast time for a cycle, and one standing id each for the interim and
+    the final, so a file the vendor re-issues replaces the one before it
+    rather than adding a duplicate, and a cycle that arrives late still lands
+    in its own place. Nothing here looks forward: a step records only what
+    that delivery said. The summary names the sites the step kept, which is
+    what the index needs to carry the same rows the ledger does."""
     key = STORM_KEY.format(name=name, year=year)
     raw = store.get(key)
     doc = json.loads(raw) if raw else {"schema": SCHEMA, "name": name, "year": year, "attribution": ATTRIBUTION,
                                        "thresholds": [], "steps": [], "sites": {}, "final": None}
+    _prune_interim(step, set(doc.get("sites") or {}))
     doc["thresholds"] = step.get("thresholds") or doc.get("thresholds") or []
     steps = [x for x in doc.get("steps") or [] if x.get("id") != step["id"]]
     steps.append({k: v for k, v in step.items() if k != "thresholds"})
@@ -377,7 +416,8 @@ def append_step(store: Storage, name: str, year: int, step: dict, log: Callable)
     apply_price_override(doc, price_override(name, year))
     store.put(key, json.dumps(doc, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     log(kind="reask", step=step["id"], storm=name, sites=len(step.get("sites") or {}), steps=len(steps), bytes=len(json.dumps(doc)))
-    return {"steps": len(steps), "sites": len(doc["sites"]), "latest": step["id"], "final": doc.get("final") is not None}
+    return {"steps": len(steps), "sites": len(doc["sites"]), "latest": step["id"], "final": doc.get("final") is not None,
+            "kept": sorted(step.get("sites") or {})}
 
 
 def l_prices(store: Storage, storm: str, sids) -> dict:
@@ -416,23 +456,71 @@ def l_prices(store: Storage, storm: str, sids) -> dict:
     return out
 
 
-def _step(lad: dict, kind: str, sid: str, at, ts: str, prices: Optional[dict] = None) -> dict:
+def _floor_of(interim: Optional[dict]) -> Optional[dict]:
+    """The interim's ladders as a floor for the pool figure, or None before
+    there is one. What the interim has settled at a location is the least its
+    lifetime ladder can be, whatever a later forecast says."""
+    # the index carries a site as {"p": [...]} and a ledger step as the bare list
+    sites = (interim or {}).get("sites") or {}
+    return {k: (v.get("p") if isinstance(v, dict) else v) for k, v in sites.items()} or None
+
+
+def _step(lad: dict, kind: str, sid: str, at, ts: str, prices: Optional[dict] = None,
+          floor: Optional[dict] = None) -> dict:
     """One delivery as the ledger stores it: the probability ladder per site, as
     percentages in the file's own threshold order. Deliberately nothing else.
     The advisory's sustained wind is a one-minute mean and these contracts settle
     on a peak three-second gust; carrying the two together invites a comparison
-    between different measurements, so the ledger does not."""
+    between different measurements, so the ledger does not.
+
+    A cycle that arrives after the interim knows what the interim settled, so
+    its figure is floored by it, which is the fold the index carries; a cycle
+    from before it is left as it was knowable at the time."""
     sites = {k: v.get("p") or [] for k, v in (lad.get("sites") or {}).items()}
     meta = {k: {"name": v.get("name"), "lat": v.get("lat"), "lon": v.get("lon")} for k, v in (lad.get("sites") or {}).items()}
+    if kind == "interim":
+        # whether the interim's domain reached the location, which is what
+        # separates a zero it published from a location it never looked at
+        for k, v in (lad.get("sites") or {}).items():
+            meta[k]["covered"] = bool(v.get("covered"))
     out = {"id": sid, "kind": kind, "at": at, "ts": ts, "prices": prices or {},
            "sites": sites, "siteMeta": meta, "thresholds": lad.get("thresholds")}
     if kind == "livecyc":
-        # the stated calculation from this delivery's ladder alone, which is
-        # what was knowable at the time; the index's current figure also folds
-        # the interim settlement once one exists
-        out["pwin"] = pwin(lad.get("thresholds"), sites)
+        # the stated calculation from this delivery's ladder, floored by the
+        # interim where one had already landed, which is what was knowable at
+        # the time; the index's current figure carries the same fold
+        out["pwin"] = pwin(lad.get("thresholds"), sites, floor)
         out["pwinMethod"] = PWIN_METHOD
     return out
+
+
+def _aligned(ladders: dict, from_thr: list, to_thr: list) -> dict:
+    """The same ladders re-indexed onto another threshold list by value, a
+    threshold the source lacks reading as zero, so two files that happen to
+    carry different rungs are joined by what a rung means, never by position."""
+    if not from_thr or not to_thr or list(from_thr) == list(to_thr):
+        return ladders
+    pos = {t: i for i, t in enumerate(from_thr)}
+    return {k: [(v[pos[t]] if t in pos and pos[t] < len(v or []) else 0.0) for t in to_thr]
+            for k, v in (ladders or {}).items()}
+
+
+def interim_step(lad: dict, lm, ts: str, prices: Optional[dict], livecyc: Optional[dict]) -> dict:
+    """The interim as one step of the ledger.
+
+    Its ladder is the vendor's own. Its pool figure is the stated calculation
+    folded with it, the newest forecast cycle's ladders floored by what the
+    interim says each location has already seen, which is the same fold the
+    index carries once an interim exists, so the pool chart's last point and
+    the ladder's tick come from one figure rather than two."""
+    st = _step(lad, "interim", "INT", lm, ts, prices)
+    lc = livecyc or {}
+    if lc.get("sites"):
+        thr = lad.get("thresholds") or lc.get("thresholds")
+        fwd = _aligned({k: v.get("p") for k, v in lc["sites"].items()}, lc.get("thresholds") or thr, thr)
+        st["pwin"] = pwin(thr, fwd, _floor_of(lad))
+        st["pwinMethod"] = PWIN_METHOD
+    return st
 
 
 def _stamp(s: str) -> str:
@@ -463,14 +551,26 @@ def restate_pwin(store: Storage, name: str, year, thresholds: list, log: Callabl
         return 0
     # a step whose figure the owner has ruled on is not the site's to recompute
     ruled = set((price_override(name, year) or {}).get("pwin") or {})
+    steps = doc.get("steps") or []
+    interim = next((st for st in steps if st.get("kind") == "interim"), None)
+    # what the interim settled floors every cycle recorded after it, and the
+    # interim's own figure is the fold of the newest cycle before it
+    floor = _floor_of(interim) if interim else None
+    after = lambda st: bool(interim) and (st.get("ts") or "") > (interim.get("ts") or "")
     n = 0
-    for st in doc.get("steps") or []:
-        if st.get("kind") != "livecyc" or not st.get("sites") or str(st.get("id")) in ruled:
+    for st in steps:
+        if st.get("kind") not in ("livecyc", "interim") or str(st.get("id")) in ruled:
+            continue
+        if st.get("kind") == "livecyc" and not st.get("sites"):
             continue
         st.pop("pwinPool", None)          # a field from a method that was withdrawn
         if st.get("pwinMethod") == PWIN_METHOD and st.get("pwin"):
             continue
-        got = pwin(thr, st["sites"])
+        if st.get("kind") == "interim":
+            cycles = [c for c in steps if c.get("kind") == "livecyc" and c.get("sites") and not after(c)]
+            got = pwin(thr, cycles[-1]["sites"], floor) if cycles else {}
+        else:
+            got = pwin(thr, st["sites"], floor if after(st) else None)
         if got:
             st["pwin"] = got
             st["pwinMethod"] = PWIN_METHOD
@@ -535,14 +635,15 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
                                 "cycles": len(fcs), **lad}
             entry["ledger"] = append_step(store, name, year,
                                           _step(lad, "livecyc", _stamp(ft) or ft, ft, _iso(now),
-                                                l_prices(store, name, set((lad.get("sites") or {}).keys()))), log)
+                                                l_prices(store, name, set((lad.get("sites") or {}).keys())),
+                                                floor=_floor_of(entry.get("interim"))), log)
             fetched += 1
         except Exception as e:  # noqa: BLE001
             errors.append(f"livecyc {name} {ft}: {type(e).__name__}: {e}")
 
     # ---- Metryc interim and final, refetched when the listing says they changed
-    for kind, lpath, ppath, parse in (("interim", "/metryc/interim/tcwind/list", "/metryc/interim/tcwind/probabilities", parse_ladder_csv),
-                                      ("final", "/metryc/historical/tcwind/list", "/metryc/historical/tcwind/peak_gust", parse_final_csv)):
+    for kind, lpath, ppath in (("interim", "/metryc/interim/tcwind/list", "/metryc/interim/tcwind/probabilities"),
+                               ("final", "/metryc/historical/tcwind/list", "/metryc/historical/tcwind/peak_gust")):
         try:
             listing = json.loads(fetch(lpath).decode())
         except Exception as e:  # noqa: BLE001
@@ -563,13 +664,20 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             try:
                 body = fetch(ppath, {"storm_name": name, "storm_year": year, "format": "csv"})
                 store.put(akey, gzip.compress(body), "application/gzip")
-                parsed = parse(body.decode("utf-8", "replace"))
-                entry[kind] = {"lastModified": lm, "fetched": _iso(now), **(parsed if kind == "interim" else {"sites": parsed})}
+                text = body.decode("utf-8", "replace")
                 if kind == "interim":
-                    entry["ledger"] = append_step(store, name, year,
-                                                  _step(parsed, "interim", "INT", lm, _iso(now),
-                                                        l_prices(store, name, set((parsed.get("sites") or {}).keys()))), log)
+                    # the covered zeros are figures here; the ledger keeps the
+                    # ones for its own sites and the index carries those same rows
+                    parsed = parse_ladder_csv(text, keep_zero=True)
+                    st = interim_step(parsed, lm, _iso(now),
+                                      l_prices(store, name, set((parsed.get("sites") or {}).keys())), entry.get("livecyc"))
+                    entry["ledger"] = append_step(store, name, year, st, log)
+                    kept = set(entry["ledger"].get("kept") or [])
+                    entry[kind] = {"lastModified": lm, "fetched": _iso(now), **parsed,
+                                   "sites": {k: v for k, v in (parsed.get("sites") or {}).items() if k in kept}}
                 else:
+                    parsed = parse_final_csv(text)
+                    entry[kind] = {"lastModified": lm, "fetched": _iso(now), "sites": parsed}
                     entry["ledger"] = append_step(store, name, year,
                                                   {"id": "FINAL", "kind": "final", "at": lm, "ts": _iso(now),
                                                    "sites": {}, "siteMeta": {}, "thresholds": None,

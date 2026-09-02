@@ -187,6 +187,13 @@ class VendorLane(unittest.TestCase):
         self.assertEqual(s["livecyc"]["forecastTime"], "2026-08-23T06:00:00Z")      # the latest cycle
         self.assertEqual(s["livecyc"]["sites"]["BR"]["p"][0], 40.5)
         self.assertEqual(s["interim"]["lastModified"], "2026-08-23T08:00:00Z")
+        # the interim's rows in the index are the ones the ledger kept: the
+        # storm's own sites, not every covered zero the file carried
+        self.assertEqual(sorted(s["interim"]["sites"]), ["BR"])
+        led = json.loads(self.st.get("snapshots/storm/Milton_2026.json"))
+        int_step = next(x for x in led["steps"] if x["kind"] == "interim")
+        self.assertEqual(sorted(int_step["sites"]), ["BR"])
+        self.assertEqual(int_step["pwinMethod"], reask.PWIN_METHOD)      # the fold rides on the interim
         self.assertEqual(snap["asof"], "2026-08-23T06:00:00Z")
         self.assertEqual(snap["attribution"], "Powered by Reask")
         self.assertTrue(self.st.exists("archive/reask/Milton_2026/livecyc_2026082306.csv.gz"))
@@ -648,6 +655,163 @@ class PriceAtEachDelivery(unittest.TestCase):
         self.assertEqual(doc["steps"][0]["prices"]["BR"]["70"], 53.0)
 
 
+class InterimRows(unittest.TestCase):
+    """What an interim row means: a covered zero is a figure, a blank row is
+    a location the file does not reach, and a forecast cycle's zero is
+    nothing to draw."""
+
+    HEAD = "ID,Display Location,Latitude,Longitude,covered,prob_60mph,prob_70mph\n"
+
+    def test_a_covered_zero_is_kept_for_an_interim_and_dropped_for_a_cycle(self):
+        text = self.HEAD + "BR,Brownsville,25.9,-97.5,True,0.0,0.0\nTA,Tampa,27.9,-82.5,True,99.0,50.0\n"
+        self.assertEqual(list(reask.parse_ladder_csv(text)["sites"]), ["TA"])
+        lad = reask.parse_ladder_csv(text, keep_zero=True)
+        self.assertEqual(sorted(lad["sites"]), ["BR", "TA"])
+        self.assertEqual(lad["sites"]["BR"]["p"], [0.0, 0.0])
+        self.assertTrue(lad["sites"]["BR"]["covered"])
+        self.assertEqual(lad["rows"], 2)
+
+    def test_a_blank_row_is_never_a_figure(self):
+        # Milton's interim: covered=False rows carry empty cells for locations
+        # outside the domain, and a blank must not become a published zero
+        text = self.HEAD + "MR,Merida,20.9,-89.6,False,,\nJX,Jacksonville,30.3,-81.7,True,,\n"
+        self.assertEqual(reask.parse_ladder_csv(text, keep_zero=True)["sites"], {})
+
+    def test_an_uncovered_zero_row_is_not_a_figure_either(self):
+        text = self.HEAD + "BR,Brownsville,25.9,-97.5,False,0.0,0.0\n"
+        self.assertEqual(reask.parse_ladder_csv(text, keep_zero=True)["sites"], {})
+
+
+class ReparsingTheInterim(unittest.TestCase):
+    """The archived interim read back through the current parser: the step
+    gains the rows the old parser dropped and keeps everything else it had."""
+
+    def test_the_stored_step_gains_its_zero_rows_and_keeps_its_prices(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+        import reparse_metryc
+        tmp = tempfile.TemporaryDirectory()
+        st = storage.LocalStorage(tmp.name)
+        thr = [60, 70]
+        lc = {"forecastTime": "2026-09-01T18:00Z", "lastModified": "2026-09-01T22:29:40Z", "thresholds": thr,
+              "sites": {"LC": {"name": "Lake Charles", "p": [19.5, 0]}}}
+        st.put(reask.KEY, json.dumps({"schema": 2, "storms": [
+            {"name": "Erin", "year": 2026, "livecyc": lc,
+             "interim": {"lastModified": "2026-09-02T14:50:56Z", "thresholds": thr, "sites": {}, "rows": 3}}]}).encode())
+        st.put("snapshots/storm/Erin_2026.json", json.dumps({
+            "schema": 2, "name": "Erin", "year": 2026, "thresholds": thr, "final": None,
+            "sites": {"LC": {"name": "Lake Charles", "firstStep": "2026090118"}},
+            "steps": [{"id": "2026090118", "kind": "livecyc", "at": "2026-09-01T18:00Z", "ts": "2026-09-01T22:34:18Z",
+                       "sites": {"LC": [19.5, 0]}, "siteMeta": {"LC": {"name": "Lake Charles"}}, "prices": {}},
+                      {"id": "INT", "kind": "interim", "at": "2026-09-02T14:50:56Z", "ts": "2026-09-02T14:54:48Z",
+                       "sites": {}, "siteMeta": {}, "prices": {"LC": {"70": 15.0}}}]}).encode())
+        csv_ = ("ID,Display Location,Latitude,Longitude,covered,prob_60mph,prob_70mph\n"
+                "LC,Lake Charles,30.2,-93.2,True,0.0,0.0\nBR,Brownsville,25.9,-97.5,True,0.0,0.0\nMR,Merida,20.9,-89.6,False,,\n")
+        st.put("archive/reask/Erin_2026/interim_2026090214.csv.gz", gzip.compress(csv_.encode()), "application/gzip")
+        dry = reparse_metryc.reparse(st, dry_run=True)
+        self.assertEqual(dry["storms"]["Erin"]["would"], "rewrite")
+        self.assertIsNone(st.get("snapshots/storm/Erin_2026.json.bak"))
+        got = reparse_metryc.reparse(st, dry_run=False)
+        self.assertEqual(got["storms"]["Erin"]["sites"], ["LC"])          # BR was never this storm's; Merida is blank
+        doc = json.loads(st.get("snapshots/storm/Erin_2026.json"))
+        int_step = doc["steps"][-1]
+        self.assertEqual(int_step["sites"], {"LC": [0.0, 0.0]})
+        self.assertEqual(int_step["prices"], {"LC": {"70": 15.0}})       # what stood when it landed, not today's book
+        self.assertEqual(int_step["ts"], "2026-09-02T14:54:48Z")
+        self.assertIn("pwin", int_step)
+        snap = json.loads(st.get(reask.KEY))
+        self.assertEqual(sorted(snap["storms"][0]["interim"]["sites"]), ["LC"])
+        # a second run finds the step as it would write it
+        self.assertEqual(reparse_metryc.reparse(st, dry_run=True)["storms"]["Erin"]["would"], "unchanged")
+        tmp.cleanup()
+
+
+class InterimInTheLedger(unittest.TestCase):
+    """The interim step keeps its zeros only for the ledger's own sites and
+    carries the pool figure folded with what it settled."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.quiet = lambda **k: None
+
+    def lad(self, ps, covered=True):
+        return {"thresholds": [60, 70], "rows": len(ps),
+                "sites": {k: {"name": k.lower(), "lat": 1.0, "lon": 2.0, "covered": covered, "p": v} for k, v in ps.items()}}
+
+    def test_zero_rows_stay_only_for_sites_the_ledger_already_has(self):
+        reask.append_step(self.st, "Erin", 2026, reask._step(self.lad({"LC": [20, 5]}), "livecyc", "2026090100", "t", "ts"), self.quiet)
+        interim = self.lad({"LC": [0, 0], "BR": [0, 0], "TA": [99, 50]})
+        got = reask.append_step(self.st, "Erin", 2026,
+                                reask.interim_step(interim, "lm", "ts2", {}, {"thresholds": [60, 70], "sites": {"LC": {"p": [20, 5]}}}),
+                                self.quiet)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        st = doc["steps"][-1]
+        self.assertEqual(st["kind"], "interim")
+        self.assertEqual(sorted(st["sites"]), ["LC", "TA"])          # BR: a zero for a site the page never drew
+        self.assertEqual(got["kept"], ["LC", "TA"])
+        self.assertEqual(sorted(doc["sites"]), ["LC", "TA"])        # TA enters on its figure; BR does not enter at all
+        self.assertTrue(st["siteMeta"]["LC"]["covered"])
+        self.assertEqual(st["sites"]["LC"], [0, 0])
+
+    def test_the_interims_pool_figure_folds_the_forecast_with_what_settled(self):
+        live = {"thresholds": [60, 70], "sites": {"A": {"p": [10, 2]}, "B": {"p": [50, 20]}}}
+        st = reask.interim_step(self.lad({"A": [100, 100], "B": [0, 0]}), "lm", "ts", {}, live)
+        # A is settled above both rungs, so it holds the storm's highest gust unless B's
+        # remaining 20% above 70 lands on top, which the uniform bin splits evenly: 90
+        self.assertEqual(st["pwinMethod"], reask.PWIN_METHOD)
+        self.assertAlmostEqual(st["pwin"]["A"], 90.0, delta=0.1)
+        self.assertGreater(st["pwin"]["A"], st["pwin"]["B"])
+        # without a cycle to fold there is no figure to carry
+        self.assertNotIn("pwin", reask.interim_step(self.lad({"A": [100, 100]}), "lm", "ts", {}, None))
+
+    def test_a_cycle_after_the_interim_carries_the_fold_and_one_before_does_not(self):
+        lad = self.lad({"A": [10, 2], "B": [50, 20]})
+        before = reask._step(lad, "livecyc", "2026090100", "t", "ts")
+        after = reask._step(lad, "livecyc", "2026090106", "t", "ts", floor={"A": [100, 100]})
+        self.assertGreater(before["pwin"]["B"], before["pwin"]["A"])   # the forecast alone favours B
+        self.assertGreater(after["pwin"]["A"], after["pwin"]["B"])     # what the interim settled favours A
+
+    def test_a_nan_or_negative_cell_is_no_figure(self):
+        head = "ID,Display Location,Latitude,Longitude,covered,prob_60mph,prob_70mph\n"
+        for cells in ("nan,0.0", "-1,0.0", "inf,0.0"):
+            lad = reask.parse_ladder_csv(head + "BR,Brownsville,25.9,-97.5,True," + cells + "\n", keep_zero=True)
+            self.assertEqual(lad["sites"], {}, cells)
+
+    def test_two_files_with_different_rungs_are_joined_by_value(self):
+        # the cycle carries a 60 mph rung the interim lacks; A's 100% at 70 is read at 70, not shifted
+        live = {"thresholds": [60, 70, 80], "sites": {"A": {"p": [90, 10, 2]}, "B": {"p": [95, 50, 20]}}}
+        interim = {"thresholds": [70, 80], "rows": 2,
+                   "sites": {"A": {"name": "a", "covered": True, "p": [100, 100]},
+                             "B": {"name": "b", "covered": True, "p": [0, 0]}}}
+        st = reask.interim_step(interim, "lm", "ts", {}, live)
+        self.assertGreater(st["pwin"]["A"], st["pwin"]["B"])
+        self.assertEqual(reask._aligned({"A": [90, 10, 2]}, [60, 70, 80], [70, 80]), {"A": [10, 2]})
+        self.assertEqual(reask._aligned({"A": [10, 2]}, [70, 80], [60, 70, 80]), {"A": [0.0, 10, 2]})
+
+    def test_restating_brings_the_interim_and_the_cycles_after_it_to_the_fold(self):
+        doc = {"thresholds": [60, 70], "steps": [
+            {"kind": "livecyc", "id": "a", "ts": "2026-09-01T00:00Z", "sites": {"A": [10, 2], "B": [50, 20]}},
+            {"kind": "interim", "id": "INT", "ts": "2026-09-01T06:00Z", "sites": {"A": [100, 100], "B": [0, 0]}},
+            {"kind": "livecyc", "id": "b", "ts": "2026-09-01T12:00Z", "sites": {"A": [0, 0], "B": [50, 20]}}]}
+        self.st.put("snapshots/storm/Erin_2026.json", json.dumps(doc).encode())
+        n = reask.restate_pwin(self.st, "Erin", 2026, [], self.quiet)
+        self.assertEqual(n, 3)
+        out = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        a, i, b = out["steps"]
+        self.assertGreater(a["pwin"]["B"], a["pwin"]["A"])      # before the interim, the forecast alone
+        self.assertGreater(i["pwin"]["A"], i["pwin"]["B"])      # the interim's figure is the fold
+        self.assertGreater(b["pwin"]["A"], b["pwin"]["B"])      # and so is a cycle that came after it
+        self.assertEqual(reask.restate_pwin(self.st, "Erin", 2026, [], self.quiet), 0)   # idempotent
+
+    def test_a_location_the_forecast_zeroed_but_the_interim_settled_is_a_candidate(self):
+        got = reask.pwin([60, 70], {"A": [50, 10], "B": [0, 0]}, {"B": [100, 100]})
+        self.assertIn("B", got)
+        self.assertGreater(got["B"], got["A"])
+        # and a location only the interim names is a candidate too
+        got = reask.pwin([60, 70], {"A": [50, 10]}, {"B": [100, 100]})
+        self.assertGreater(got["B"], 90)
+
+
 class PriceRuling(unittest.TestCase):
     """A storm the owner has ruled on carries the ruling's prices, not the
     exchange's, on every write, so a re-delivery or a rebuild cannot put the
@@ -735,6 +899,24 @@ class PriceRuling(unittest.TestCase):
         self.assertIsNotNone(self.st.get("archive/storm/Five_2026.absorbed-into-Erin.json"))   # but kept
         # a second fold finds nothing and changes nothing
         self.assertEqual(reask.absorb_ledger(self.st, "Five", 2026, "Erin", lambda **k: None)["absorbed"], 0)
+
+    def test_the_ruling_can_name_the_interim_without_it_becoming_the_index_figure(self):
+        with open(os.path.join(self.ovdir, "erin_2026.json"), "w") as f:
+            json.dump({"storm": "Erin", "year": 2026,
+                       "steps": {"2026090100": {"BR": {"70": 14.9}}, "INT": {}},
+                       "pwin": {"2026090100": {"BR": 54.8, "TA": 23.7}, "INT": {}}}, f)
+        reask.append_step(self.st, "Erin", 2026,
+                          reask._step(self.lad([40, 12]), "livecyc", "2026090100", "t", "ts", {"BR": {"70": 53.0}}), lambda **k: None)
+        interim = {"thresholds": [70, 80], "rows": 1, "sites": {"BR": {"name": "b", "covered": True, "p": [0, 0]}}}
+        reask.append_step(self.st, "Erin", 2026,
+                          reask.interim_step(interim, "lm", "ts2", {"BR": {"70": 15.0}}, {"thresholds": [70, 80], "sites": {"BR": {"p": [40, 12]}}}),
+                          lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        int_step = doc["steps"][-1]
+        self.assertEqual(int_step["prices"], {})                         # the exchange's stale book does not show
+        self.assertEqual(int_step["pwin"], {})                           # and the ruled series carries no figure there
+        # 'INT' sorts above every digit key, and an empty figure must not become the index's
+        self.assertEqual(reask.latest_override_pwin(reask.price_override("Erin", 2026)), {"BR": 54.8, "TA": 23.7})
 
     def test_a_ruled_pool_series_is_the_ruling_not_the_quotes(self):
         items = [{"symbol": "LHLERG", "name": "Erin pool", "contracts": [

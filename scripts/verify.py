@@ -904,10 +904,17 @@ def run(no_build: bool) -> int:
                 # a synthetic storm to the browser and take it away again
                 THR = [70, 80, 90, 100, 110, 120]
 
-                def _lad(scale):
+                # two locations: Brownsville climbs cycle by cycle and the interim
+                # settles it high; Galveston holds a flat forecast and the interim
+                # publishes a zero for it, the case a storm that spared a place
+                # produces, which the page has to draw as a figure rather than as
+                # a line that stops at the last cycle
+                GA = [30, 10, 2, 0, 0, 0]
+
+                def _lad(scale, ga=GA):
                     def q(i):
                         return max(0, round(min(99, scale * (1 - i / len(THR)) * 100 - i * 4), 1))
-                    return {"BR": [q(i) for i in range(len(THR))]}
+                    return {"BR": [q(i) for i in range(len(THR))], "GA": list(ga)}
 
                 # six-hourly cycles with the 18Z one missing, so the gap mark has
                 # something real to find and the even spacings have to stay unmarked
@@ -923,20 +930,35 @@ def run(no_build: bool) -> int:
                         steps.append({"id": t0.strftime("%Y%m%d%H"), "kind": "livecyc",
                                       "at": t0.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": "t",
                                       "sites": _lad(0.2 + 0.1 * k),
-                                      "siteMeta": {"BR": {"name": "Brownsville"}},
-                                      "pwin": {"BR": 100.0},
+                                      "siteMeta": {"BR": {"name": "Brownsville"}, "GA": {"name": "Galveston"}},
+                                      "pwin": {"BR": 80.0, "GA": 20.0},
                                       "prices": {"BR": {str(t): 10.0 + 5 * k for t in THR}}})
-                    steps.append({"id": "INT", "kind": "interim", "at": "t", "ts": "t", "sites": _lad(0.95),
+                    # stamped the way the pipeline stamps it, the vendor's time and the
+                    # moment it was recorded, so it takes its place on the axis by arrival
+                    steps.append({"id": "INT", "kind": "interim", "at": "2026-09-02T14:50:56Z", "ts": "2026-09-02T14:54:48Z",
+                                  "sites": _lad(0.95, [0, 0, 0, 0, 0, 0]),
+                                  "siteMeta": {"BR": {"name": "Brownsville", "covered": True},
+                                               "GA": {"name": "Galveston", "covered": True}},
+                                  "pwin": {"BR": 99.0, "GA": 1.0},
                                   "prices": {"BR": {str(t): 44.0 for t in THR}}})
                     return {"schema": 2, "name": "Erin", "year": 2026, "attribution": "Powered by Reask", "thresholds": THR,
-                            "steps": steps, "sites": {"BR": {"name": "Brownsville", "firstStep": "2026090100"}},
-                            "final": {"BR": 96.0} if final else None}
+                            "steps": steps, "sites": {"BR": {"name": "Brownsville", "firstStep": "2026090100"},
+                                                      "GA": {"name": "Galveston", "firstStep": "2026090100"}},
+                            "final": {"BR": 96.0, "GA": 41.0} if final else None}
 
                 _index = {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026,
                           "storms": [{"name": "Erin", "year": 2026,
                                       "livecyc": {"forecastTime": None, "thresholds": THR,
-                                                  "sites": {"BR": {"name": "Brownsville", "p": [60, 30, 10]}},
-                                                  "pwin": {"BR": 55.0}}}]}
+                                                  "sites": {"BR": {"name": "Brownsville", "p": [60, 30, 10, 3, 1, 0]},
+                                                            "GA": {"name": "Galveston", "p": [30, 10, 2, 0, 0, 0]}},
+                                                  "pwin": {"BR": 55.0, "GA": 45.0}},
+                                      # stamped off the clock: the interim's stamp keeps a storm on the
+                                      # page for a day and a half, and a fixed date here would fold the
+                                      # synthetic storm shut once the calendar passed it
+                                      "interim": {"lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                                  "thresholds": THR,
+                                                  "sites": {"BR": {"name": "Brownsville", "p": [95, 75, 55, 35, 15, 5]},
+                                                            "GA": {"name": "Galveston", "p": [0, 0, 0, 0, 0, 0]}}}}]}
 
                 def _storm_routes(final):
                     def handler(route):
@@ -1078,7 +1100,7 @@ def run(no_build: bool) -> int:
                     # six cycles and the interim are delivered columns; once settled the
                     # final is a delivered column too. The table's headers render in
                     # capitals, so the text is compared lower-cased.
-                    bands = page.locator("#liveStorms .scardwrap rect.hband")
+                    bands = page.locator("#liveStorms .scardwrap").first.locator("rect.hband")
                     chk.add(f"{scheme} storm ({tag}): a hover band per delivered column, none for a pending one",
                             bands.count() == (8 if _final else 7), f"bands={bands.count()}")
                     bands.nth(5).hover(force=True)
@@ -1087,16 +1109,59 @@ def run(no_build: bool) -> int:
                     low = t_px.lower()
                     chk.add(f"{scheme} storm ({tag}): the hover reads LiveCyc and the exchange's price side by side",
                             "livecyc" in low and "exchange" in low and "≥70 mph" in t_px and "%" in t_px and "35¢" in t_px, t_px[:120])
-                    chk.add(f"{scheme} storm ({tag}): the newest delivery also carries the price now",
-                            "now" in low and "43¢" in t_px, t_px[:160])
+                    # the price now belongs beside the newest delivery, which here is the
+                    # interim, so a cycle before it shows only the price recorded with it
+                    chk.add(f"{scheme} storm ({tag}): a cycle before the newest delivery carries no price now",
+                            "now" not in low, t_px[:160])
                     bands.nth(6).hover(force=True)
                     page.wait_for_timeout(150)
                     t_int = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} storm ({tag}): the interim column is named and priced as it stood",
-                            "interim settlement" in t_int and "44¢" in t_int and "now" not in t_int.lower(), t_int[:120])
+                            "metryc interim" in t_int.lower() and "44¢" in t_int and "(latest)" in t_int, t_int[:120])
+                    chk.add(f"{scheme} storm ({tag}): the newest delivery also carries the price now",
+                            "now" in t_int.lower() and "43¢" in t_int, t_int[:160])
                     if _final:
                         chk.add(f"{scheme} storm ({tag}): once settled the hover says how each strike resolved",
                                 "settled" in t_int.lower() and "✓ Yes" in t_int, t_int[:160])
+                    # ---- the interim's zero is a figure: Galveston's dashed line runs on
+                    # to the interim column at zero rather than stopping at the last
+                    # cycle, the hover names the file and prints the zero, and the
+                    # vendor table carries the interim's row under the cycle's
+                    ga = page.evaluate(r"""() => {
+                      const card = document.querySelector('#liveStorms .scardwrap[data-sid="GA"]');
+                      if (!card) return null;
+                      const svg = card.querySelector('svg.scard');
+                      const bands = [...svg.querySelectorAll('rect.hband')];
+                      const int = bands[6], line = svg.querySelector('path.lcline');
+                      if (!int || !line) return { bands: bands.length, line: !!line };
+                      const colX = +int.getAttribute('x') + (+int.getAttribute('width')) / 2;
+                      const d = line.getAttribute('d');
+                      const m = d.match(/([\d.]+),([\d.]+)$/) || [0, NaN, NaN];
+                      const labels = [...svg.querySelectorAll('text')].map(t => t.textContent);
+                      return { endX: +m[1], endY: +m[2], colX, bands: bands.length,
+                               order: labels.filter(t => /^(next|Interim|final)$/.test(t)).join(' ') };
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): the dashed line runs on to the interim column at the zero it published",
+                            bool(ga and abs(ga["endX"] - ga["colX"]) < 1.5 and abs(ga["endY"] - 150) < 0.6), str(ga))
+                    chk.add(f"{scheme} storm ({tag}): the interim sits where it arrived, before what is still to come",
+                            bool(ga and (ga["order"] == "Interim next final" if not _final else ga["order"] == "Interim final")),
+                            str(ga and ga["order"]))
+                    page.locator('#liveStorms .scardwrap[data-sid="GA"] rect.hband').nth(6).hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_ga = page.locator("#tip").inner_text().lower()
+                    chk.add(f"{scheme} storm ({tag}): the interim column names the file and prints the zero",
+                            "metryc interim" in t_ga and "0%" in t_ga and "the metryc interim file" in t_ga, t_ga[:160])
+                    vt = page.evaluate("""() => {
+                      const rows = [...document.querySelectorAll('#vendor table tr')];
+                      const ga = rows.findIndex(r => /Galveston/.test(r.textContent));
+                      const nxt = rows[ga + 1];
+                      return { hasInterimRow: !!(nxt && /Metryc interim/.test(nxt.textContent)),
+                               zeros: nxt ? [...nxt.querySelectorAll('td.num')].map(td => td.textContent).join(' ') : '',
+                               state: (document.querySelector('#vendor') || {}).textContent || '' };
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): the vendor table carries the interim's row under the cycle's",
+                            bool(vt and vt["hasInterimRow"] and vt["zeros"].startswith("0% 0%")
+                                 and "Metryc interim received" in vt["state"]), str(vt and vt["zeros"])[:80])
                     # ---- a card opened to fill the window brings the key and the switch with it
                     page.locator("#liveStorms .scardwrap .zb.ex").first.click(); page.wait_for_timeout(200)
                     full = page.locator("#liveStorms .scardwrap.full")

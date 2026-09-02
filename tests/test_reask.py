@@ -71,7 +71,7 @@ class Pwin(unittest.TestCase):
         ]}
         st = Store(doc)
         n = reask.restate_pwin(st, "Dolly", 2026, [], lambda **k: None)
-        self.assertEqual(n, 2)                      # a and b, not c and not the interim
+        self.assertEqual(n, 3)                      # a, b and the interim's fold; not c
         out = j.loads(st.d["snapshots/storm/Dolly_2026.json"])
         a, b, c, i = out["steps"]
         self.assertEqual(a["pwinMethod"], reask.PWIN_METHOD)
@@ -79,7 +79,9 @@ class Pwin(unittest.TestCase):
         self.assertNotIn("pwinPool", b)             # the withdrawn field is cleared
         self.assertNotEqual(b["pwin"]["LC"], 99.0)  # and its figure is recomputed
         self.assertEqual(c["pwin"]["LC"], 12.3)     # a current step is untouched
-        self.assertNotIn("pwin", i)                 # an interim carries none
+        # an interim with no ladder of its own carries the newest cycle's figure, folded with nothing
+        self.assertEqual(i["pwinMethod"], reask.PWIN_METHOD)
+        self.assertAlmostEqual(sum(i["pwin"].values()), 100, delta=0.3)
         reask.restate_pwin(st, "Dolly", 2026, [], lambda **k: None)
         self.assertEqual(st.puts, 1)                # idempotent: no second write
 
