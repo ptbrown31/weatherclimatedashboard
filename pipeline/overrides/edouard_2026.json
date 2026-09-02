@@ -1,0 +1,112 @@
+{
+ "storm": "Edouard",
+ "year": 2026,
+ "decided": "2026-09-02",
+ "reason": "The exchange's first live-storm listing. No contract traded and the quotes were not maintained through the storm, so the owner ruled on 2026-09-02 that this storm's exchange series is the per-delivery price the exchange was given to quote, for every strike that price was produced for. The pool's series starts at the delivery on which the whole-field pricing came in; the pair-normalised prices before it are the error already ruled out of the display. Later storms carry the exchange's quotes as read.",
+ "steps": {
+  "2026090100": {
+   "BT": {
+    "70": 0.2
+   },
+   "LA": {
+    "70": 1.6
+   },
+   "LC": {
+    "70": 14.9,
+    "80": 0.4
+   },
+   "PA": {
+    "70": 1.4,
+    "80": 0.0
+   }
+  },
+  "2026090106": {
+   "BT": {
+    "70": 0.0
+   },
+   "LA": {
+    "70": 0.0
+   },
+   "LC": {
+    "70": 15.2,
+    "80": 0.5
+   },
+   "PA": {
+    "70": 5.0,
+    "80": 0.1
+   }
+  },
+  "2026090112": {
+   "LA": {
+    "70": 0.0
+   },
+   "LC": {
+    "70": 0.2,
+    "80": 0.0
+   },
+   "PA": {
+    "70": 0.0,
+    "80": 0.0
+   }
+  },
+  "2026090118": {
+   "BT": {
+    "70": 0.2
+   },
+   "LA": {
+    "70": 0.0
+   },
+   "LC": {
+    "70": 0.0,
+    "80": 0.0
+   },
+   "PA": {
+    "70": 0.0,
+    "80": 0.0
+   }
+  }
+ },
+ "pools": {
+  "LHLED": [
+   {
+    "t": "2026-09-01T10:43:55Z",
+    "p": {
+     "Lake Charles": [
+      54.8,
+      54.8
+     ],
+     "Port Arthur": [
+      23.7,
+      23.7
+     ]
+    }
+   },
+   {
+    "t": "2026-09-01T16:04:17Z",
+    "p": {
+     "Lake Charles": [
+      54.0,
+      54.0
+     ],
+     "Port Arthur": [
+      23.3,
+      23.3
+     ]
+    }
+   },
+   {
+    "t": "2026-09-01T22:34:18Z",
+    "p": {
+     "Lake Charles": [
+      34.7,
+      34.7
+     ],
+     "Port Arthur": [
+      22.2,
+      22.2
+     ]
+    }
+   }
+  ]
+ }
+}

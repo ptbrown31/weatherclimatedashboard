@@ -38,6 +38,7 @@ import datetime as dt
 import gzip
 import io
 import json
+import os
 import re
 import time
 import urllib.error
@@ -208,6 +209,53 @@ def _num(v) -> Optional[float]:
         return None
 
 
+# ---- a storm whose exchange series is not the exchange's quotes
+#
+# Edouard (2026) was the exchange's first live-storm listing. No contract
+# traded and the quotes were not maintained through the storm, so the owner
+# ruled (2026-09-02) that its recorded prices are the per-delivery prices the
+# exchange was given to quote, for every strike such a price was produced for.
+# The ruling is a file under pipeline/overrides/, one per storm, named
+# {storm}_{year}.json, and it is applied on every write of the ledger so that
+# neither a re-delivered cycle nor a rebuild can put the exchange's quotes
+# back. A storm without a file carries the exchange's quotes as read, and
+# nothing here touches it.
+OVERRIDES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overrides")
+
+
+def price_override(name: str, year) -> Optional[dict]:
+    """The owner's ruling for one storm, or None when there is none."""
+    path = os.path.join(OVERRIDES_DIR, "%s_%s.json" % (str(name or "").lower(), year))
+    try:
+        with open(path, encoding="utf-8") as f:
+            ov = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return ov if isinstance(ov, dict) else None
+
+
+def apply_price_override(doc: dict, ov: Optional[dict]) -> bool:
+    """Replace the recorded prices of every step the ruling names. Returns
+    whether the document changed. Steps the ruling does not name keep what
+    they recorded, so a delivery after the ruling carries the exchange's own
+    quote for that delivery."""
+    if not ov:
+        return False
+    want_by_id = ov.get("steps") or {}
+    changed = False
+    for st in doc.get("steps") or []:
+        want = want_by_id.get(str(st.get("id")))
+        if want is None:
+            continue
+        if st.get("prices") != want:
+            st["prices"] = want
+            changed = True
+    if doc.get("pricesFrom") != "override":
+        doc["pricesFrom"] = "override"
+        changed = True
+    return changed
+
+
 def append_step(store: Storage, name: str, year: int, step: dict, log: Callable) -> dict:
     """Append one delivery to a storm's ledger and return its summary.
 
@@ -242,6 +290,7 @@ def append_step(store: Storage, name: str, year: int, step: dict, log: Callable)
     if step.get("kind") == "final":
         doc["final"] = step.get("final")
     doc["written"] = step.get("ts")
+    apply_price_override(doc, price_override(name, year))
     store.put(key, json.dumps(doc, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     log(kind="reask", step=step["id"], storm=name, sites=len(step.get("sites") or {}), steps=len(steps), bytes=len(json.dumps(doc)))
     return {"steps": len(steps), "sites": len(doc["sites"]), "latest": step["id"], "final": doc.get("final") is not None}

@@ -26,7 +26,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline import config, storage    # noqa: E402
-from pipeline.market import LHL_DROP_BEFORE, LHL_MAX_POINTS    # noqa: E402
+from pipeline.market import LHL_DROP_BEFORE, LHL_MAX_POINTS, lhl_override    # noqa: E402
 from pipeline.snapshots import SNAP_CACHE     # noqa: E402
 
 PREFIX = "archive/market/"
@@ -102,12 +102,18 @@ def main(argv=None) -> int:
     for sym, byt in series.items():
         cut = LHL_DROP_BEFORE.get(sym, "")
         pts = [{"t": t, "p": p} for t, p in sorted(byt.items()) if p and t > cut][-LHL_MAX_POINTS:]
+        # a pool under the owner's ruling is that ruling's points, never the archive's
+        ruled = lhl_override(sym)
+        if ruled is not None:
+            pts = ruled
         out[sym] = len(pts)
         if not pts or args.dry_run:
             continue
+        doc = {"schema": 1, "symbol": sym, "asof": pts[-1]["t"], "points": pts}
+        if ruled is not None:
+            doc["override"] = True
         store.put(f"snapshots/lhl/{sym}.json",
-                  json.dumps({"schema": 1, "symbol": sym, "asof": pts[-1]["t"], "points": pts},
-                             separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+                  json.dumps(doc, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     print(json.dumps({"kind": "backfill-lhl", "passesRead": passes, "points": out,
                       "dryRun": bool(args.dry_run)}))
     return 0

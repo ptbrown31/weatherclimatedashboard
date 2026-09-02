@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import gzip
 import json
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
@@ -156,6 +157,32 @@ LHL_MAX_POINTS = 3000          # a storm's pool lives days; this holds weeks at 
 # back.
 LHL_DROP_BEFORE = {"LHLED": "2026-09-01T17:30:00Z"}
 
+# A pool whose series is not the exchange's quotes at all: the same ruling
+# that governs a storm's ledger (pipeline/reask.py, OVERRIDES_DIR) can carry
+# a "pools" block, one point per delivery, and that block is the series,
+# written in place of the quotes on every pass so nothing can overwrite it.
+OVERRIDES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overrides")
+
+
+def lhl_override(symbol: str) -> Optional[list]:
+    """The points a ruling substitutes for one pool's series, or None."""
+    try:
+        names = sorted(os.listdir(OVERRIDES_DIR))
+    except OSError:
+        return None
+    for fn in names:
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(OVERRIDES_DIR, fn), encoding="utf-8") as f:
+                ov = json.load(f)
+        except (OSError, ValueError):
+            continue
+        pts = ((ov if isinstance(ov, dict) else {}).get("pools") or {}).get(symbol)
+        if isinstance(pts, list):
+            return pts
+    return None
+
 
 def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
     """The highest-wind pools' prices, kept through time.
@@ -177,6 +204,12 @@ def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
         if not str(m.get("symbol", "")).startswith("LHL"):
             continue
         key = f"snapshots/lhl/{m['symbol']}.json"
+        ruled = lhl_override(m["symbol"])
+        if ruled is not None:
+            store.put(key, json.dumps({"schema": 1, "symbol": m["symbol"], "name": m.get("name"),
+                                       "asof": _iso(now), "override": True, "points": ruled},
+                                      separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+            continue
         try:
             doc = json.loads(store.get(key) or b"null") or {}
         except (ValueError, TypeError):

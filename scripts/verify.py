@@ -966,8 +966,17 @@ def run(no_build: bool) -> int:
                     ncards = page.locator("#liveStorms .scardwrap").count()
                     chk.add(f"{scheme} storm ({tag}): a card per signalled location", ncards >= 1, f"cards={ncards}")
                     labels = page.eval_on_selector_all("#liveStorms .scardwrap text", "els => els.map(e => e.textContent)")
-                    chk.add(f"{scheme} storm ({tag}): the settlement column is reserved from the first delivery",
-                            ("settled" if _final else "settles") in labels, str(labels[:6]))
+                    # the pending columns: the next file, the interim and the final
+                    # hold their places while the storm runs; once settled the final
+                    # column is real and nothing is still to come
+                    if _final:
+                        chk.add(f"{scheme} storm ({tag}): the settled axis ends on the real settlement columns",
+                                "Metryc" in labels and "Interim" in labels and "final" in labels and "next" not in labels,
+                                str([t for t in labels if t in ("next", "Metryc", "Interim", "final")]))
+                    else:
+                        chk.add(f"{scheme} storm ({tag}): the next file, the interim and the final hold their columns",
+                                "next" in labels and "Metryc" in labels and "Interim" in labels and "final" in labels,
+                                str([t for t in labels if t in ("next", "Metryc", "Interim", "final")]))
                     ticks = len([t for t in labels if re.fullmatch(r"\d\dZ", t)])
                     days = len([t for t in labels if re.fullmatch(r"\d\d/\d\d", t)])
                     ets = len([t for t in labels if re.fullmatch(r"\d{1,2}:\d\d[ap]", t)])
@@ -1025,11 +1034,79 @@ def run(no_build: bool) -> int:
                             bool(lhl and lhl["cycleTicks"] >= 2 and lhl["etTicks"] >= 2 and lhl["headers"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the formula is the only prose under the chart",
                             bool(lhl and lhl["stated"] and lhl["capCount"] == 1), str(lhl))
-                    page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
+                    # ---- the key, the switch between the two series, and the note beside it
+                    # the section's own key and switch, as against the copies each
+                    # card keeps out of sight for when it fills the window
+                    leg = page.locator("#liveStorms div:not(.xhdr) > .slegend")
+                    leg_t = leg.first.inner_text() if leg.count() else ""
+                    chk.add(f"{scheme} storm ({tag}): one key names the strikes' colours and the two line styles",
+                            leg.count() == 1 and "≥70" in leg_t and "LiveCyc" in leg_t and "exchange price" in leg_t, leg_t[:100])
+                    tog = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphtog button")
+                    note_l = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphnote")
+                    note_t = note_l.first.inner_text() if note_l.count() else ""
+                    chk.add(f"{scheme} storm ({tag}): the switch offers the two series and the note explains why they differ",
+                            tog.count() == 2 and "looks forward" in note_t and "whole storm" in note_t, f"buttons={tog.count()} {note_t[:60]}")
+                    emph = lambda: page.evaluate("() => [...document.querySelectorAll('#liveStorms svg.scard, #liveStorms svg.lhlserie')].map(s => s.classList.contains('emph-livecyc') ? 'L' : s.classList.contains('emph-exchange') ? 'X' : '?').join('')")
+                    chk.add(f"{scheme} storm ({tag}): the exchange's price stands forward by default",
+                            emph() and set(emph()) == {"X"}, emph())
+                    tog.nth(1).click(); page.wait_for_timeout(120)
+                    chk.add(f"{scheme} storm ({tag}): the switch brings LiveCyc forward on every chart at once",
+                            emph() and set(emph()) == {"L"} and tog.nth(1).evaluate("b => b.classList.contains('on')"), emph())
+                    tog.nth(0).click(); page.wait_for_timeout(120)
+                    chk.add(f"{scheme} storm ({tag}): and back", emph() and set(emph()) == {"X"}, emph())
+                    # ---- both series, dashed and solid, in the strike's colour
+                    styles = page.evaluate("""() => {
+                      const svg = document.querySelector('#liveStorms svg.scard');
+                      const dash = [...svg.querySelectorAll('path.lcline')].filter(p => p.getAttribute('stroke-dasharray'));
+                      const solid = [...svg.querySelectorAll('path.pxline')];
+                      return { dashed: dash.length, solid: solid.length,
+                               same: !!(dash[0] && solid[0] && dash[0].getAttribute('stroke') === solid[0].getAttribute('stroke')),
+                               pending: svg.querySelectorAll('rect.pending').length };
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): LiveCyc dashed and the exchange solid, one colour per strike",
+                            styles["dashed"] >= 3 and styles["solid"] >= 3 and styles["same"], str(styles))
+                    # ---- the hover: the strikes down the side, both series across
+                    # six cycles and the interim are delivered columns; once settled the
+                    # final is a delivered column too. The table's headers render in
+                    # capitals, so the text is compared lower-cased.
+                    bands = page.locator("#liveStorms .scardwrap rect.hband")
+                    chk.add(f"{scheme} storm ({tag}): a hover band per delivered column, none for a pending one",
+                            bands.count() == (8 if _final else 7), f"bands={bands.count()}")
+                    bands.nth(5).hover(force=True)
                     page.wait_for_timeout(150)
                     t_px = page.locator("#tip").inner_text()
-                    chk.add(f"{scheme} storm ({tag}): the exchange's price reads against the vendor's probability",
-                            "The exchange" in t_px and "The vendor" in t_px, t_px[:80])
+                    low = t_px.lower()
+                    chk.add(f"{scheme} storm ({tag}): the hover reads LiveCyc and the exchange's price side by side",
+                            "livecyc" in low and "exchange" in low and "≥70 mph" in t_px and "%" in t_px and "35¢" in t_px, t_px[:120])
+                    chk.add(f"{scheme} storm ({tag}): the newest delivery also carries the price now",
+                            "now" in low and "43¢" in t_px, t_px[:160])
+                    bands.nth(6).hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_int = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} storm ({tag}): the interim column is named and priced as it stood",
+                            "interim settlement" in t_int and "44¢" in t_int and "now" not in t_int.lower(), t_int[:120])
+                    if _final:
+                        chk.add(f"{scheme} storm ({tag}): once settled the hover says how each strike resolved",
+                                "settled" in t_int.lower() and "✓ Yes" in t_int, t_int[:160])
+                    # ---- a card opened to fill the window brings the key and the switch with it
+                    page.locator("#liveStorms .scardwrap .zb.ex").first.click(); page.wait_for_timeout(200)
+                    full = page.locator("#liveStorms .scardwrap.full")
+                    inner = full.locator(".xhdr .slegend").count() + full.locator(".xhdr .emphtog").count() if full.count() else 0
+                    vis = full.locator(".xhdr").first.is_visible() if full.count() else False
+                    chk.add(f"{scheme} storm ({tag}): a card expands to fill the window with its own key and switch",
+                            full.count() == 1 and inner == 2 and vis, f"full={full.count()} inner={inner} visible={vis}")
+                    page.keyboard.press("Escape"); page.wait_for_timeout(200)
+                    chk.add(f"{scheme} storm ({tag}): Escape closes it and the key goes back out of sight",
+                            page.locator("#liveStorms .scardwrap.full").count() == 0
+                            and not page.locator("#liveStorms .scardwrap .xhdr").first.is_visible(), "")
+                    page.locator("#liveStorms .cwrap .zb.ex").first.click(); page.wait_for_timeout(200)
+                    chk.add(f"{scheme} storm ({tag}): the pool panel expands the same way",
+                            page.locator("#liveStorms .cwrap.full").count() == 1
+                            and page.locator("#liveStorms .cwrap.full .xhdr .emphtog").count() == 1, "")
+                    page.keyboard.press("Escape"); page.wait_for_timeout(150)
+                    attrib = page.locator("#liveStorms .attrib").first.inner_text()
+                    chk.add(f"{scheme} storm ({tag}): the attribution carries the vendor's mark and no claim about whose numbers they are",
+                            attrib.strip() == "Powered by Reask", attrib)
                     # ---- the cursor, and scrubbing across deliveries
                     ticks = page.locator("#liveStorms svg.stimeline circle, #liveStorms svg.stimeline rect").count()
                     chk.add(f"{scheme} storm ({tag}): one tick per delivery on the timeline", ticks == 7, f"ticks={ticks}")
@@ -1044,11 +1121,15 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} storm ({tag}): stepping back names the delivery it lands on",
                             "delivery 6 of 7" in read() and "(latest)" not in read(), read())
                     chk.add(f"{scheme} storm ({tag}): the cursor line moves with the step", cx() != was, f"{was} -> {cx()}")
-                    page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
-                    page.wait_for_timeout(150)
-                    t_back = page.locator("#tip").inner_text()
-                    chk.add(f"{scheme} storm ({tag}): a past delivery is priced as it stood then, not now",
-                            "at that delivery" in t_back and "35" in t_back, t_back[:120])
+                    # a past delivery is priced as it stood then: the cursor's hollow square
+                    # sits at that delivery's recorded price, and the dot on the vendor's line
+                    cur = page.evaluate("""() => {
+                      const svg = document.querySelector('#liveStorms svg.scard');
+                      const g = svg.querySelector('line.scur').nextElementSibling;
+                      return { dots: g.querySelectorAll('circle').length, squares: g.querySelectorAll('rect').length };
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): the cursor marks both series at the delivery it stands on",
+                            cur["dots"] >= 1 and cur["squares"] >= 1, str(cur))
                     box = strip.bounding_box()
                     page.mouse.move(box["x"] + box["width"] * 0.05, box["y"] + box["height"] / 2)
                     page.mouse.down()
@@ -1062,11 +1143,6 @@ def run(no_build: bool) -> int:
                     strip.press("End"); page.wait_for_timeout(120)
                     chk.add(f"{scheme} storm ({tag}): the arrow keys step and End returns to the latest",
                             mid != read() and "delivery 7 of 7" in read(), f"{mid} -> {read()}")
-                    page.locator("#liveStorms .scardwrap rect[stroke-width='1.6']").first.hover(force=True)
-                    page.wait_for_timeout(150)
-                    t_now = page.locator("#tip").inner_text()
-                    chk.add(f"{scheme} storm ({tag}): the newest delivery carries the current price",
-                            "The exchange, now" in t_now, t_now[:120])
                     # ---- a cycle the vendor never delivered
                     ngap = page.locator("#liveStorms .scardwrap rect.sgap").count()
                     ncards2 = page.locator("#liveStorms .scardwrap").count()
@@ -1132,6 +1208,11 @@ def run(no_build: bool) -> int:
 
                 # ---- the page's order, the standing links, and a storm that
                 #      has stopped updating alongside one still running
+                # the running storms are stamped relative to now: a storm folds
+                # shut a day and a half after its newest file, so a fixed date
+                # here would fold them as the calendar moved past it
+                _now = dt.datetime.now(dt.timezone.utc)
+                _ago = lambda hours: (_now - dt.timedelta(hours=hours)).strftime("%Y-%m-%dT%H:00Z")
                 _index2 = {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026,
                            "storms": [
                                {"name": "Old", "year": 2026,
@@ -1142,21 +1223,21 @@ def run(no_build: bool) -> int:
                                # two running storms signalling on one location: the
                                # Port Arthur case, where the hover must carry both
                                {"name": "Alpha", "year": 2026,
-                                "livecyc": {"forecastTime": "2026-09-01T06:00Z", "cycles": 3,
+                                "livecyc": {"forecastTime": _ago(6), "cycles": 3,
                                             "thresholds": [60, 70, 80],
                                             "pwin": {"BR": 61.0, "GA": 39.0},
                                             "sites": {"BR": {"name": "Brownsville", "p": [50.1, 15.2, 0.5]},
                                                       "GA": {"name": "Galveston", "p": [40.0, 9.0, 0.2]}}}},
                                {"name": "Beta", "year": 2026,
-                                "livecyc": {"forecastTime": "2026-08-31T18:00Z", "cycles": 5,
+                                "livecyc": {"forecastTime": _ago(12), "cycles": 5,
                                             "thresholds": [60, 70, 80],
                                             "sites": {"BR": {"name": "Brownsville", "p": [27.8, 7.5, 0.2]}}}},
                                # a depression whose files are fresh but whose system
                                # has been named: the roster below carries AL05 as
                                # Gamma, so Five is the same storm under its old name
                                {"name": "Five", "year": 2026,
-                                "livecyc": {"forecastTime": "2026-09-01T06:00Z",
-                                            "lastModified": "2026-09-01T07:00:00Z", "cycles": 4,
+                                "livecyc": {"forecastTime": _ago(6),
+                                            "lastModified": _ago(5).replace("Z", ":00Z"), "cycles": 4,
                                             "thresholds": [60, 70],
                                             "sites": {"BR": {"name": "Brownsville", "p": [30, 8]}}}},
                                {"name": "Erin", "year": 2026},

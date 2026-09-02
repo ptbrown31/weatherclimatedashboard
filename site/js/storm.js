@@ -187,30 +187,71 @@ window.WXStorm = (() => {
     try { return ETFMT.format(t).toLowerCase().replace(' ', '').replace(/m$/, ''); } catch (e) { return ''; }
   }
 
+  // the storm's index entry, which knows whether it is still delivering; a
+  // caller holding only a name and a year gets the same answer through it
+  function stormEntry(storm) {
+    return ((RK && RK.storms) || []).find(s => s.name === storm.name && String(s.year) === String(storm.year)) || storm;
+  }
+
+  // ---- the columns of a storm's axis
+  //
+  // Every delivery so far in ledger order, then what is still to come: the
+  // next LiveCyc file while the storm is still delivering, the interim
+  // settlement until it has arrived, and the final settlement until the
+  // contracts have resolved. The pending columns hold their place from the
+  // first frame, so a chart never rescales when one of them lands; the column
+  // fills in where it already was.
+  function columns(doc, entry) {
+    const steps = (doc && doc.steps) || [];
+    const cyc = steps.filter(s => s.kind === 'livecyc');
+    const int = steps.find(s => s.kind === 'interim') || null;
+    const cols = cyc.map(s => ({ kind: 'livecyc', step: s }));
+    const settled = !!(doc && doc.final);
+    if (!settled && !(entry && dormant(entry))) {
+      const last = cyc[cyc.length - 1];
+      const m = last && /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(last.id || ''));
+      const hh = m ? (+m[4] + 6) % 24 : null;
+      cols.push({ kind: 'next', cycle: hh == null ? '' : (hh < 10 ? '0' : '') + hh + 'Z' });
+    }
+    if (int) cols.push({ kind: 'interim', step: int });
+    else if (!settled) cols.push({ kind: 'interim-ph' });
+    if (settled) cols.push({ kind: 'final', step: steps.find(s => s.kind === 'final') || { id: 'FINAL', kind: 'final' } });
+    else cols.push({ kind: 'final-ph' });
+    return cols;
+  }
+
   // The delivery axis, drawn the same way wherever the vendor's deliveries are
   // the x axis: the NHC cycle each file is built on in UTC, the moment the file
-  // arrived on the Eastern clock, and the date where the day turns over. Labels
-  // thin rather than overlap, so a storm that runs a week keeps an axis that
-  // can still be read.
-  function deliveryAxis(svg, cyc, x, B, size, hx) {
-    const n = cyc.length;
+  // arrived on the Eastern clock, and the date where the day turns over. A
+  // column still to come is ticked dashed and labelled for what it waits on.
+  // Cycle labels thin rather than overlap, so a storm that runs a week keeps
+  // an axis that can still be read; the pending columns always show.
+  function deliveryAxis(svg, cols, x, B, size, hx) {
+    const n = cols.length;
     if (!n) return;
     const room = Math.max(2, Math.floor((x(n - 1) - x(0)) / (size * 5.2)));
     const every = Math.max(1, Math.ceil(n / room));
     let day = '';
-    cyc.forEach((s, k) => {
+    cols.forEach((c, k) => {
+      const s = c.step || {};
       const m = String(s.id || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})$/);
-      const show = k % every === 0 || k === n - 1;
+      const pending = !c.step;
+      const show = pending || !m || k % every === 0 || k === n - 1;
       svg.appendChild(el('line', { x1: x(k), x2: x(k), y1: B, y2: B + (show ? 4 : 2),
-        stroke: 'var(--rule)', 'stroke-width': 1 }));
-      if (!m) return;
+        stroke: 'var(--rule)', 'stroke-width': 1, 'stroke-dasharray': pending ? '2 2' : null }));
+      let r1 = '', r2 = '';
+      if (m) { r1 = m[4] + 'Z'; r2 = etTime(s.ts) || etTime(s.at); }
+      else if (c.kind === 'next') { r1 = c.cycle || 'next'; r2 = 'next'; }
+      else if (c.kind === 'interim' || c.kind === 'interim-ph') { r1 = 'Metryc'; r2 = 'Interim'; }
+      else if (c.kind === 'final' || c.kind === 'final-ph') { r1 = 'Metryc'; r2 = 'final'; }
+      const op = pending ? 0.55 : 1;
       // row one: the NHC cycle the file is built on, in UTC
-      if (show) svg.appendChild(txt(m[4] + 'Z', { x: x(k), y: B + 4 + size, 'text-anchor': 'middle',
-        class: 'axl', 'font-size': size }));
+      if (show && r1) svg.appendChild(txt(r1, { x: x(k), y: B + 4 + size, 'text-anchor': 'middle',
+        class: 'axl', 'font-size': size, opacity: op }));
       // row two: when the file itself arrived, on the Eastern clock
-      const arrived = etTime(s.ts) || etTime(s.at);
-      if (show && arrived) svg.appendChild(txt(arrived, { x: x(k), y: B + 5 + size * 2.15,
-        'text-anchor': 'middle', class: 'axl', 'font-size': size * 0.9, opacity: .75 }));
+      if (show && r2) svg.appendChild(txt(r2, { x: x(k), y: B + 5 + size * 2.15,
+        'text-anchor': 'middle', class: 'axl', 'font-size': size * 0.9, opacity: 0.75 * op }));
+      if (!m) return;
       // row three: the cycle's date, only where the day turns over
       const d = m[2] + '/' + m[3];
       if (d !== day) {
@@ -229,58 +270,157 @@ window.WXStorm = (() => {
     }
   }
 
-  // ---- one location's card: the ladder through the deliveries.
-  // Returns the node and a setCursor, so scrubbing moves a line and a few marks
-  // rather than rebuilding every card on every step.
+  // ---- which series stands forward
+  //
+  // Both series are always drawn; the choice is which one is read first, and
+  // the exchange's price is the default. One state for the whole section, so
+  // a click restyles every chart at once. Each chart opened to fill the window
+  // carries its own copy of the switch, because the section's is behind it then.
+  let EMPH = 'exchange';
+  function setEmph(mode) {
+    EMPH = mode === 'livecyc' ? 'livecyc' : 'exchange';
+    document.querySelectorAll('svg.scard, svg.lhlserie').forEach(s => {
+      s.classList.toggle('emph-livecyc', EMPH === 'livecyc');
+      s.classList.toggle('emph-exchange', EMPH === 'exchange');
+    });
+    document.querySelectorAll('.emphtog button').forEach(b => b.classList.toggle('on', b.dataset.mode === EMPH));
+  }
+  const NOTE = 'Each LiveCyc file looks forward from its own cycle and gives the chance that a gust above '
+    + 'the strike is still to come. The contract pays on the highest gust over the whole storm, so the '
+    + 'exchange prices what has already been recorded together with what is still ahead. Before the storm '
+    + 'reaches a location the two run close. Once the strongest winds have passed, LiveCyc falls toward '
+    + 'zero while the price keeps what has already happened, so a gap between the lines there is expected '
+    + 'rather than a disagreement.';
+  function controls() {
+    const tog = h('div', { class: 'emphtog', role: 'group', 'aria-label': 'which series stands forward' });
+    [['exchange', 'Exchange price'], ['livecyc', 'LiveCyc']].forEach(([m, t]) => {
+      const b = h('button', { class: m === EMPH ? 'on' : '', text: t, 'data-mode': m,
+                              title: 'bring the ' + t + ' lines forward' });
+      b.onclick = () => setEmph(m);
+      tog.appendChild(b);
+    });
+    const note = h('div', { class: 'note emphnote' });
+    note.innerHTML = '<b>LiveCyc looks forward. The price covers the whole storm.</b> ' + NOTE;
+    return h('div', { class: 'emphrow' }, [
+      h('div', { class: 'emphctl' }, [h('span', { class: 'emphl', text: 'Highlight' }), tog]),
+      note]);
+  }
+  // the key: a colour per strike, and the two line styles
+  function legend(thr, used) {
+    const d = h('div', { class: 'slegend' });
+    (thr || []).forEach((t, i) => {
+      if (used && !used[t]) return;
+      d.appendChild(h('span', {}, [h('i', { class: 'sw', style: 'background:' + rung(i, thr.length) }), '≥' + t]));
+    });
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl' }), 'exchange price, the Yes midpoint']));
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'LiveCyc, as published']));
+    return d;
+  }
+  // the hover box for one column: the strikes down the side, the series across
+  function colTip(title, sub, head, rows, foot) {
+    const cell = v => '<td>' + (v == null ? '—' : v) + '</td>';
+    return '<b>' + title + '</b>' + (sub ? '<div class="tf" style="margin:0 0 2px">' + sub + '</div>' : '')
+      + '<table class="l3"><tr>' + head.map(v => '<th>' + v + '</th>').join('') + '</tr>'
+      + rows.map(r => '<tr>' + r.map(cell).join('') + '</tr>').join('') + '</table>'
+      + (foot ? '<div class="tf">' + foot + '</div>' : '');
+  }
+
+  // ---- one location's card: the two series through the deliveries.
+  //
+  // A dashed line per strike is the vendor's LiveCyc probability as published,
+  // a solid line in the same colour the exchange's Yes price for the same
+  // contract, both on the delivery axis with the pending columns held open at
+  // the end. Returns the node, a setCursor so scrubbing moves a line and a few
+  // marks rather than rebuilding every card, and the strikes it drew.
   function card(doc, sid, storm, gp) {
     const meta = doc.sites[sid] || {};
     const thr = doc.thresholds || [];
-    const cyc = (doc.steps || []).filter(s => s.kind !== 'final');
+    const cyc = (doc.steps || []).filter(s => s.kind !== 'final');      // what the timeline scrubs
+    const cols = columns(doc, stormEntry(storm));
     const fin = doc.final || null;
-    const mk = lMarket(storm.name, sid);
-    const rungs = [];
-    const W = 470, H = 198, L = 34, R = 384, T = 16, B = 150, SETTLE = 424;
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'scard' });
+    // a storm under the owner's ruling carries its recorded prices and no live quote
+    const ruled = doc.pricesFrom === 'override';
+    const listed = lMarket(storm.name, sid);
+    const mk = ruled ? null : listed;
+    const W = 470, H = 198, L = 34, R = 450, T = 16, B = 150;
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'scard emph-' + EMPH });
     reaskMark(svg, R - 4, B - 5);
-    const n = Math.max(cyc.length, 2);
-    const x = i => L + (i / (n - 1)) * (R - L);
+    const N = Math.max(cols.length, 2);
+    const x = i => L + (i / (N - 1)) * (R - L);
     const y = p => B - (p / 100) * (B - T);
+    const wcol = (R - L) / (N - 1);
+    const colOf = {};
+    cols.forEach((c, k) => { if (c.step && c.step.id != null) colOf[c.step.id] = k; });
+    const lastLc = cols.map((c, k) => (c.kind === 'livecyc' ? k : -1)).filter(k => k >= 0).pop();
+    const used = {};
 
     [0, 25, 50, 75, 100].forEach(p => {
       svg.appendChild(el('line', { x1: L, x2: R, y1: y(p), y2: y(p), class: 'grid' }));
       svg.appendChild(txt(p, { x: L - 5, y: y(p) + 3.5, 'text-anchor': 'end', class: 'ax' }));
     });
-    deliveryAxis(svg, cyc, x, B, 7.5, 466);
-    // the settlement column, reserved from the first delivery so the axis never moves
-    svg.appendChild(el('line', { x1: SETTLE - 22, x2: SETTLE - 22, y1: T, y2: B, stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
-    svg.appendChild(txt(fin ? 'settled' : 'settles', { x: SETTLE - 18, y: T + 8, class: 'ax' }));
+    // what is still to come, shaded from the first pending column to the end
+    const pend = cols.findIndex(c => !c.step);
+    if (pend >= 0) svg.appendChild(el('rect', { class: 'pending', x: x(pend) - wcol / 2, y: T,
+      width: x(cols.length - 1) - x(pend) + wcol / 2, height: B - T, fill: 'var(--shade)', 'pointer-events': 'none' }));
+    deliveryAxis(svg, cols, x, B, 7.5, 466);
 
-    // one hover band per delivery, in before the rungs so a price mark on top of
-    // a band still takes the pointer
-    cyc.forEach((s, k) => {
-      const band = el('rect', { x: x(k) - (R - L) / (2 * (n - 1)), y: T, width: Math.max((R - L) / (n - 1), 6), height: B - T, fill: 'transparent' });
+    // the strikes worth a row anywhere on this card: a LiveCyc figure above
+    // zero at some delivery, a recorded price, or a price now
+    thr.forEach((t, i) => {
+      cols.forEach(c => {
+        if (!c.step) return;
+        const arr = c.step.sites && c.step.sites[sid];
+        if (arr && arr.length > i && arr[i] > 0) used[t] = true;
+        if (((c.step.prices || {})[sid] || {})[String(t)] != null) used[t] = true;
+      });
+      if (mk && priceAt(mk, t) != null) used[t] = true;
+    });
+
+    // one hover band per delivered column, in before the lines so a mark on
+    // top of a band still takes the pointer
+    cols.forEach((c, k) => {
+      if (!c.step) return;
+      const s = c.step;
+      const band = el('rect', { class: 'hband', x: x(k) - wcol / 2, y: T, width: Math.max(wcol, 6), height: B - T, fill: 'transparent' });
       bind(band, () => {
         const arr = (s.sites && s.sites[sid]) || [];
-        const rows = thr.map((t, i) => arr[i] > 0 ? ['above ' + t + ' mph', arr[i] + '%'] : null).filter(Boolean);
-        return tip.rows(esc(meta.name || sid) + ' — ' + label(s) + (k === cyc.length - 1 ? ' (latest)' : ''),
-          rows.length ? rows : [['Ladder', 'nothing above zero at this delivery']],
-          'delivery ' + (k + 1) + ' of ' + cyc.length + ' so far · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
+        const pr = (s.prices && s.prices[sid]) || {};
+        const nowCol = k === lastLc && !!mk;
+        const head = ['strike', 'LiveCyc', 'exchange'].concat(nowCol ? ['now'] : []).concat(fin && fin[sid] != null ? ['settled'] : []);
+        const rows = [];
+        thr.forEach((t, i) => {
+          if (!used[t]) return;
+          const v = arr.length > i && arr[i] > 0 ? arr[i] : null;
+          const p = pr[String(t)];
+          const r = ['≥' + t + ' mph', v == null ? null : v + '%', p == null ? null : Math.round(p) + '¢'];
+          if (nowCol) { const live = priceAt(mk, t); r.push(live == null ? null : live + '¢'); }
+          if (fin && fin[sid] != null) r.push(fin[sid] >= t ? '✓ Yes' : '✕ No');
+          rows.push(r);
+        });
+        const et = etTime(s.ts) || etTime(s.at);
+        const what = c.kind === 'final' ? 'final settlement' + (fin && fin[sid] != null ? ' · ' + fin[sid] + ' mph' : '')
+          : c.kind === 'interim' ? 'interim settlement'
+          : 'delivery ' + (k + 1) + ' of ' + (lastLc + 1) + ' so far';
+        return colTip(esc(meta.name || sid) + ' · ' + label(s) + (k === lastLc ? ' (latest)' : ''),
+          et ? 'file ' + et + ' ET' : '', head,
+          rows.length ? rows : [['—', 'nothing above zero', null]],
+          what + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
       });
       svg.appendChild(band);
     });
 
     // a missed cycle, marked between the two columns that sit either side of it.
     // The strip is narrower than the space between them so each delivery keeps
-    // most of its own hover band, and it goes in before the rungs so a price mark
+    // most of its own hover band, and it goes in before the lines so a mark
     // still takes the pointer ahead of it.
-    const wcol = (R - L) / (n - 1);
     (gp || []).forEach(g => {
-      if (g.after + 1 >= cyc.length) return;
-      const mid = (x(g.after) + x(g.after + 1)) / 2;
+      const a = cyc[g.after], b = cyc[g.after + 1];
+      if (!a || !b || colOf[a.id] == null || colOf[b.id] == null) return;
+      const mid = (x(colOf[a.id]) + x(colOf[b.id])) / 2;
       const strip = el('rect', { class: 'sgap', x: mid - wcol * 0.2, y: T, width: Math.max(wcol * 0.4, 5), height: B - T,
                                  fill: 'var(--rule)', opacity: .28, 'pointer-events': 'all' });
       bind(strip, () => tip.rows('A delivery is missing here',
-        [['Between', label(cyc[g.after]) + ' and ' + label(cyc[g.after + 1])],
+        [['Between', label(a) + ' and ' + label(b)],
          ['Elapsed', g.hours + ' hours'],
          ['Cycles missing', String(g.missing)],
          ['Usual cadence', g.cadence + ' hours']],
@@ -289,115 +429,104 @@ window.WXStorm = (() => {
       const gl = el('g'); slashes(gl, mid, B, 9); svg.appendChild(gl);
     });
 
-    // the vendor's raw LiveCyc ladder, dashed: it sits behind the exchange's
-    // own prices, which are the solid lines in front
+    // the vendor's LiveCyc ladder, dashed: one line per strike from the
+    // delivery it first carried a figure on, through the interim if there is
+    // one, and at settlement a snap to 100 or 0 for how the strike resolved
+    const kf = cols.length - 1;
+    let anyHit = false, anyMiss = false, ri = 0;
     thr.forEach((t, i) => {
       const col = rung(i, thr.length);
-      // a rung starts at the delivery it first carried a probability on and runs forward
       const pts = [];
-      cyc.forEach((s, k) => {
-        const arr = s.sites && s.sites[sid];
+      cols.forEach((c, k) => {
+        if (!c.step || c.kind === 'final') return;
+        const arr = c.step.sites && c.step.sites[sid];
         const p = arr && arr.length > i ? arr[i] : null;
         if (p == null) return;
         if (!pts.length && p <= 0) return;
         pts.push([k, p]);
       });
       if (!pts.length) return;
-      const d = pts.map((p, k) => (k ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
-      // the whole rung stays drawn, faintly, and the part up to the cursor is drawn
-      // over it at full strength: what was known by that delivery reads first, and
-      // what came afterwards is still visible rather than hidden
-      const faint = el('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 1.4, 'stroke-dasharray': '4 3', opacity: .22, 'pointer-events': 'none' });
-      const solid = el('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 1.4, 'stroke-dasharray': '4 3', 'pointer-events': 'none' });
-      svg.appendChild(faint); svg.appendChild(solid);
+      const d = pts.map((p, j) => (j ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
+      svg.appendChild(el('path', { class: 'lcline', d: d, fill: 'none', stroke: col, 'stroke-width': 1.7,
+                                   'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
       // one point per delivery: the vendor issues these at set times and nothing
       // is measured between them, so each reading is marked rather than implied
-      if (pts.length > 1) {
-        const gap = Math.abs(x(pts[pts.length - 1][0]) - x(pts[0][0])) / (pts.length - 1);
-        if (gap >= 5) pts.forEach(v => svg.appendChild(el('circle',
-          { class: 'rdot', cx: x(v[0]).toFixed(1), cy: y(v[1]).toFixed(1), r: Math.min(2.6, gap / 4),
-            fill: col, 'pointer-events': 'none' })));
-      }
-      const last = pts[pts.length - 1];
-      rungs.push({ t, col, pts, last, solid });
-      // ticks and crosses only once a settled gust exists to compare against
+      if (pts.length > 1 && wcol >= 5) pts.forEach(v => svg.appendChild(el('circle',
+        { class: 'ldot', cx: x(v[0]).toFixed(1), cy: y(v[1]).toFixed(1), r: Math.min(2.6, wcol / 4),
+          fill: col, 'pointer-events': 'none' })));
       if (fin && fin[sid] != null) {
-        const hit = fin[sid] >= t;
-        svg.appendChild(txt(hit ? '✓' : '✕', { x: SETTLE - 8, y: y(last[1]) + 3.5, 'font-size': 10, fill: hit ? 'var(--yes)' : 'var(--muted)' }));
+        const hit = fin[sid] >= t, last = pts[pts.length - 1];
+        const xr = x(kf) - 4 + (ri % 5) * 2, yr = y(hit ? 100 : 0);
+        svg.appendChild(el('path', { class: 'lcline', d: 'M' + x(last[0]).toFixed(1) + ',' + y(last[1]).toFixed(1)
+          + 'L' + xr.toFixed(1) + ',' + yr.toFixed(1), fill: 'none', stroke: col, 'stroke-width': 1,
+          'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
+        svg.appendChild(el('circle', { class: 'ldot', cx: xr.toFixed(1), cy: yr.toFixed(1), r: 2.6, fill: col, 'pointer-events': 'none' }));
+        if (hit) anyHit = true; else anyMiss = true;
+        ri++;
       }
     });
+    if (anyHit) svg.appendChild(txt('✓', { x: x(kf) + 8, y: y(100) + 4, 'font-size': 10, fill: 'var(--yes)' }));
+    if (anyMiss) svg.appendChild(txt('✕', { x: x(kf) + 8, y: y(0) + 1, 'font-size': 10, fill: 'var(--muted)' }));
 
-    // the exchange's own prices, solid and in front: one line per threshold
-    // through the price recorded at each delivery. The dashed vendor ladder is
-    // the raw calculation; these are what the market actually says.
+    // the exchange's price, solid and in the same colour: one line per strike
+    // through the price recorded with each delivery, a square at each reading
     thr.forEach((t, i) => {
       const col = rung(i, thr.length);
       const pp = [];
-      cyc.forEach((s, k) => {
-        const v = ((s.prices || {})[sid] || {})[String(t)];
+      cols.forEach((c, k) => {
+        if (!c.step) return;
+        const v = ((c.step.prices || {})[sid] || {})[String(t)];
         if (v != null) pp.push([k, v]);
       });
-      if (!pp.length) return;
-      if (pp.length > 1) {
-        svg.appendChild(el('path', { class: 'pxline',
-          d: pp.map((q, j) => (j ? 'L' : 'M') + x(q[0]).toFixed(1) + ',' + y(q[1]).toFixed(1)).join(''),
-          fill: 'none', stroke: col, 'stroke-width': 2.4, opacity: .95, 'pointer-events': 'none' }));
-      } else {
-        svg.appendChild(el('rect', { class: 'pxline', x: x(pp[0][0]) - 2.5, y: y(pp[0][1]) - 2.5,
-          width: 5, height: 5, fill: col, 'pointer-events': 'none' }));
-      }
+      if (pp.length > 1) svg.appendChild(el('path', { class: 'pxline',
+        d: pp.map((q, j) => (j ? 'L' : 'M') + x(q[0]).toFixed(1) + ',' + y(q[1]).toFixed(1)).join(''),
+        fill: 'none', stroke: col, 'stroke-width': 2.4, 'pointer-events': 'none' }));
+      pp.forEach(q => svg.appendChild(el('rect', { class: 'pxdot', x: (x(q[0]) - 2.2).toFixed(1), y: (y(q[1]) - 2.2).toFixed(1),
+        width: 4.4, height: 4.4, fill: col, 'pointer-events': 'none' })));
+      // the price now is fresher than the one recorded when the newest delivery
+      // landed: a hollow square beside that column, hollow to read as the market's
+      const live = mk && lastLc != null ? priceAt(mk, t) : null;
+      if (live != null) svg.appendChild(el('rect', { class: 'pxnow', x: x(lastLc) + 5, y: y(live) - 3.5, width: 7, height: 7,
+        fill: 'transparent', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
     });
 
-    // the cursor: a line at the delivery being read, a dot on each rung that had a
-    // value there, and the exchange's price as it stood at that same delivery
+    // the cursor: a line at the delivery being read and a dot on each series there
     const cline = el('line', { class: 'scur', y1: T, y2: B, stroke: 'var(--ink)', 'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: .6, 'pointer-events': 'none' });
     svg.appendChild(cline);
     const marks = el('g');
     svg.appendChild(marks);
     function setCursor(ti) {
-      const k = Math.max(0, Math.min(ti, cyc.length - 1));
+      const s = cyc[Math.max(0, Math.min(ti, cyc.length - 1))] || {};
+      const k = colOf[s.id];
+      if (k == null) return;
       cline.setAttribute('x1', x(k)); cline.setAttribute('x2', x(k));
       marks.innerHTML = '';
-      const step = cyc[k] || {};
-      const arr = (step.sites && step.sites[sid]) || [];
-      const pr = (step.prices && step.prices[sid]) || {};
-      rungs.forEach(r => {
-        const upto = r.pts.filter(p => p[0] <= k);
-        r.solid.setAttribute('d', upto.length > 1
-          ? upto.map((p, j) => (j ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('')
-          : '');
-        const i = thr.indexOf(r.t);
+      const arr = (s.sites && s.sites[sid]) || [];
+      const pr = (s.prices && s.prices[sid]) || {};
+      thr.forEach((t, i) => {
+        if (!used[t]) return;
+        const col = rung(i, thr.length);
         const v = arr.length > i ? arr[i] : null;
-        if (v != null && v > 0) marks.appendChild(el('circle', { cx: x(k), cy: y(v), r: 2.6, fill: r.col, 'pointer-events': 'none' }));
-        // at the newest delivery the live quote is the current price and is fresher
-        // than the one recorded when the delivery landed; further back, only the
-        // recorded price belongs beside that delivery's ladder. A delivery that
-        // arrived before prices were being recorded simply has no square.
-        const live = k === cyc.length - 1 ? priceAt(mk, r.t) : null;
-        const price = live != null ? live : pr[String(r.t)];
-        if (price == null) return;
-        // hollow, to read as the market's price rather than the vendor's line, but
-        // painted transparent so the pointer lands on it instead of the band beneath
-        const sq = el('rect', { x: x(k) + 5, y: y(price) - 3.5, width: 7, height: 7, fill: 'transparent', stroke: r.col, 'stroke-width': 1.6, 'pointer-events': 'all' });
-        bind(sq, () => tip.rows(esc(meta.name || sid) + ' — above ' + r.t + ' mph',
-          [[live != null ? 'The exchange, now' : 'The exchange, at that delivery', Math.round(price) + '¢'],
-           ['The vendor', (v == null ? '—' : v + '%')],
-           ['Difference', v == null ? null : (price - v > 0 ? '+' : '') + Math.round((price - v) * 10) / 10 + ' points'],
-           ['Delivery', label(step)]],
-          (live != null ? 'the price as it stands now, against the latest ladder'
-                        : 'both as they stood at that delivery') + '; a price in cents and a probability in percent share the same scale · '
-          + esc((RK && RK.attribution) || 'Powered by Reask')));
-        marks.appendChild(sq);
+        if (v != null && v > 0) marks.appendChild(el('circle', { cx: x(k), cy: y(v), r: 2.8, fill: col, 'pointer-events': 'none' }));
+        const p = pr[String(t)];
+        if (p != null) marks.appendChild(el('rect', { x: x(k) - 3.2, y: y(p) - 3.2, width: 6.4, height: 6.4, fill: 'var(--panel)',
+          stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
       });
     }
-    if (fin && fin[sid] != null) svg.appendChild(txt(fin[sid] + ' mph', { x: SETTLE - 8, y: B - 2, 'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
+    if (fin && fin[sid] != null) svg.appendChild(txt(fin[sid] + ' mph', { x: x(kf) - 6, y: B - 3, 'text-anchor': 'end',
+      'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
 
-    const wrap = h('div', { class: 'scardwrap' }, [
-      h('div', { class: 'lt', text: (meta.name || sid) + ' (' + sid + ')' }),
-      h('div', { class: 'cap', style: 'margin:0 0 4px', text: mk ? 'contracts listed · ' + mk.symbol : 'no contracts listed for this location yet' }),
-    ]);
+    const wrap = h('div', { class: 'scardwrap' });
+    // the key and the switch travel with the card when it fills the window
+    wrap.appendChild(h('div', { class: 'xhdr' }, [controls(), legend(thr, used)]));
+    const title = h('div', { class: 'lth' }, [h('div', { class: 'lt', text: (meta.name || sid) + ' (' + sid + ')' })]);
+    title.appendChild(WXC.expander(wrap, 'Expand'));
+    wrap.appendChild(title);
+    if (!ruled) wrap.appendChild(h('div', { class: 'cap', style: 'margin:0 0 4px',
+      text: listed ? 'contracts listed · ' + listed.symbol : 'no contracts listed for this location yet' }));
+    else if (listed) wrap.appendChild(h('div', { class: 'cap', style: 'margin:0 0 4px', text: listed.symbol }));
     wrap.appendChild(svg);
-    return { node: wrap, setCursor };
+    return { node: wrap, setCursor, used };
   }
 
   const label = s => (s.kind === 'interim' ? 'interim settlement' : s.kind === 'final' ? 'final settlement' : String(s.id || '').replace(/^(\d{4})(\d{2})(\d{2})(\d{2})$/, '$2/$3 $4Z'));
@@ -541,9 +670,10 @@ window.WXStorm = (() => {
   // ---- the pool's panel: the chart on the left, the market's ladder on the
   // right, the same shape as the count contracts. In the chart the exchange's
   // price is solid and in front, the raw calculation dashed behind it; one
-  // column per LiveCyc delivery, with the price drawn continuously between
-  // columns at the pace it actually moved, because the market trades between
-  // deliveries even though the calculation cannot.
+  // column per LiveCyc delivery on the same axis as the location cards, with
+  // the price drawn continuously between columns at the pace it actually
+  // moved, because the market trades between deliveries even though the
+  // calculation cannot.
   async function poolSeries(m, ledger) {
     const cyc = ((ledger && ledger.steps) || []).filter(s => s.kind === 'livecyc' && s.pwin);
     if (!cyc.length) return null;
@@ -557,6 +687,9 @@ window.WXStorm = (() => {
     });
     let doc = null;
     try { doc = (await WXD.get('lhl/' + m.symbol + '.json', 10)).data; } catch (e) { doc = null; }
+    // a pool under the owner's ruling: the series is the ruling's points, one
+    // per delivery, and the book now is the last of them
+    const ruled = !!(doc && doc.override);
     // A recorded price is both sides of the book. Older points hold a single
     // midpoint, which is read as a book of no width rather than dropped.
     const book = v => {
@@ -569,12 +702,17 @@ window.WXStorm = (() => {
     const rec = ((doc && doc.points) || []).map(q => ({ t: Date.parse(q.t), p: q.p || {} }))
       .filter(q => isFinite(q.t));
     const now = {};
-    (m.contracts || []).forEach(c => {
-      if (!c.label) return;
-      const b = book([c.bid == null ? null : Math.round(c.bid * 1000) / 10,
-                      c.ask == null ? null : Math.round(c.ask * 1000) / 10]);
-      if (b) now[c.label] = b;
-    });
+    if (ruled) {
+      const lp = rec.length ? rec[rec.length - 1].p : {};
+      Object.keys(lp).forEach(nm => { const b = book(lp[nm]); if (b) now[nm] = b; });
+    } else {
+      (m.contracts || []).forEach(c => {
+        if (!c.label) return;
+        const b = book([c.bid == null ? null : Math.round(c.bid * 1000) / 10,
+                        c.ask == null ? null : Math.round(c.ask * 1000) / 10]);
+        if (b) now[c.label] = b;
+      });
+    }
     const latestCalc = calc[calc.length - 1] || {};
     const names = (m.contracts || []).map(c => c.label).filter(Boolean)
       .sort((a, b) => (((now[b] || {}).mid || 0) - ((now[a] || {}).mid || 0))
@@ -583,16 +721,25 @@ window.WXStorm = (() => {
     const colOf = i => rung(names.length - 1 - i, Math.max(2, names.length));
 
     const W = 960, Hh = 250, L = 46, R = 600, T = 26, B = 186;
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'lhlserie' });
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'lhlserie emph-' + EMPH });
     reaskMark(svg, R - 4, B - 5);
-    const n = Math.max(cyc.length, 2);
-    const x = i => L + (i / (n - 1)) * (R - L);
+    // the same columns as the location cards, so the two read against each
+    // other; a delivery before the calculation existed has a column and no dot
+    const cols = columns(ledger, stormEntry({ name: ledger.name, year: ledger.year }));
+    const N = Math.max(cols.length, 2);
+    const x = i => L + (i / (N - 1)) * (R - L);
     const Y = p => B - (p / 100) * (B - T);
+    const wcol = (R - L) / (N - 1);
+    const kcol = cyc.map(s => cols.findIndex(c => c.step && c.step.id === s.id));
+    const X = k => x(kcol[k]);
     [0, 25, 50, 75, 100].forEach(p => {
       svg.appendChild(el('line', { x1: L, x2: R, y1: Y(p), y2: Y(p), class: 'grid' }));
       svg.appendChild(txt(p + '%', { x: L - 5, y: Y(p) + 3.5, 'text-anchor': 'end', class: 'ax' }));
     });
-    deliveryAxis(svg, cyc, x, B, 9, L - 2);
+    const pend = cols.findIndex(c => !c.step);
+    if (pend >= 0) svg.appendChild(el('rect', { class: 'pending', x: x(pend) - wcol / 2, y: T,
+      width: x(cols.length - 1) - x(pend) + wcol / 2, height: B - T, fill: 'var(--shade)', 'pointer-events': 'none' }));
+    deliveryAxis(svg, cols, x, B, 9, L - 2);
     // the legend, inside the frame
     svg.appendChild(el('line', { x1: L, x2: L + 20, y1: 11, y2: 11, stroke: 'var(--ink)', 'stroke-width': 2.4 }));
     svg.appendChild(txt('exchange price', { x: L + 25, y: 14, class: 'ax' }));
@@ -601,18 +748,22 @@ window.WXStorm = (() => {
     svg.appendChild(txt('calculation', { x: L + 135, y: 14, class: 'ax' }));
 
     // time anchors: a delivery sits at its column, and the price walks between
-    // columns at the pace it actually moved, running on toward the frame's edge
-    // until the next delivery adds a column. Quotes from before the first
-    // delivery have no column to hang from and are not drawn.
+    // columns at the pace it actually moved. Past the newest delivery it walks
+    // on toward the next column at the vendor's six-hour cadence, so a quote
+    // three hours after the last file sits halfway to where the next file will
+    // land. Quotes from before the first delivery have no column and are not
+    // drawn.
     const anchors = cyc.map(s => [s.ts, s.at].map(v => Date.parse(v || '')).find(isFinite));
-    const tN = Math.max(Date.now(), rec.length ? rec[rec.length - 1].t : 0);
+    const nextK = cols.findIndex(c => c.kind === 'next');
+    const CADENCE = 6 * 3600000;
     const tx = t => {
       if (anchors.some(a => a == null) || t < anchors[0]) return null;
       for (let k = 0; k + 1 < anchors.length; k++)
         if (t <= anchors[k + 1])
-          return x(k) + (t - anchors[k]) / Math.max(anchors[k + 1] - anchors[k], 1) * (x(k + 1) - x(k));
-      const lastX = x(cyc.length - 1), span = Math.max(tN - anchors[anchors.length - 1], 1);
-      return lastX + Math.min(1, Math.max(0, (t - anchors[anchors.length - 1]) / span)) * (R - 6 - lastX);
+          return X(k) + (t - anchors[k]) / Math.max(anchors[k + 1] - anchors[k], 1) * (X(k + 1) - X(k));
+      const lastX = X(cyc.length - 1);
+      if (nextK < 0) return lastX;
+      return lastX + Math.min(1, Math.max(0, (t - anchors[anchors.length - 1]) / CADENCE)) * (x(nextK) - lastX);
     };
 
     // a hover band per delivery
@@ -625,19 +776,20 @@ window.WXStorm = (() => {
       return Math.abs(best.t - t) <= NEAR ? best.p : {};
     };
     cyc.forEach((s, k) => {
-      const band = el('rect', { x: x(k) - (R - L) / (2 * (n - 1)), y: T,
-        width: Math.max((R - L) / (n - 1), 6), height: B - T, fill: 'transparent' });
+      const band = el('rect', { class: 'hband', x: X(k) - wcol / 2, y: T,
+        width: Math.max(wcol, 6), height: B - T, fill: 'transparent' });
       bind(band, () => {
         const pr = atDelivery(k);
-        return tip.rows(label(s) + (k === cyc.length - 1 ? ' (latest)' : ''),
-          names.map(nm => {
-            const b = book(pr[nm]);
-            return [esc(nm), (calc[k][nm] != null ? calc[k][nm] + '% calculated' : 'not calculated')
-              + (b ? ' · Yes bid ' + b.bid + '¢, No bid ' + Math.round(100 - b.ask) + '¢' : '')];
-          }),
-          'delivery ' + (k + 1) + ' of ' + cyc.length + ' · file '
-          + ((etTime(s.ts) || etTime(s.at)) ? (etTime(s.ts) || etTime(s.at)) + ' ET · ' : '')
-          + esc((RK && RK.attribution) || 'Powered by Reask'));
+        const head = ['location', 'calculation', 'exchange'];
+        const rows = names.map(nm => {
+          const b = book(pr[nm]);
+          return [esc(nm), calc[k][nm] != null ? calc[k][nm] + '%' : null,
+                  b == null ? null : (ruled || b.bid === b.ask ? Math.round(b.mid) + '¢'
+                                      : Math.round(b.mid) + '¢ (Yes bid ' + b.bid + ', No bid ' + Math.round(100 - b.ask) + ')')];
+        });
+        const et = etTime(s.ts) || etTime(s.at);
+        return colTip(label(s) + (k === cyc.length - 1 ? ' (latest)' : ''), et ? 'file ' + et + ' ET' : '',
+          head, rows, 'delivery ' + (k + 1) + ' of ' + cyc.length + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
       });
       svg.appendChild(band);
     });
@@ -648,10 +800,10 @@ window.WXStorm = (() => {
       const line = [];
       calc.forEach((by, k) => { if (by[nm] != null) line.push([k, by[nm]]); });
       if (line.length > 1) svg.appendChild(el('path', { class: 'calcline',
-        d: line.map((q, j) => (j ? 'L' : 'M') + x(q[0]).toFixed(1) + ' ' + Y(q[1]).toFixed(1)).join(''),
-        fill: 'none', stroke: col, 'stroke-width': 1.7, 'stroke-dasharray': '5 4', opacity: .9,
+        d: line.map((q, j) => (j ? 'L' : 'M') + X(q[0]).toFixed(1) + ' ' + Y(q[1]).toFixed(1)).join(''),
+        fill: 'none', stroke: col, 'stroke-width': 1.7, 'stroke-dasharray': '5 4',
         'pointer-events': 'none' }));
-      line.forEach(q => svg.appendChild(el('circle', { class: 'cdot', cx: x(q[0]).toFixed(1),
+      line.forEach(q => svg.appendChild(el('circle', { class: 'cdot', cx: X(q[0]).toFixed(1),
         cy: Y(q[1]).toFixed(1), r: 2.4, fill: col, 'pointer-events': 'none' })));
       // the exchange's price, solid and in front: the spread as a band, the
       // midpoint as the line
@@ -661,12 +813,14 @@ window.WXStorm = (() => {
         svg.appendChild(el('path', { class: 'pxband',
           d: seq.map((z, j) => (j ? 'L' : 'M') + z.X.toFixed(1) + ' ' + Y(z.b.ask).toFixed(1)).join('')
            + seq.slice().reverse().map(z => 'L' + z.X.toFixed(1) + ' ' + Y(z.b.bid).toFixed(1)).join('') + 'Z',
-          fill: col, opacity: .16, stroke: 'none', 'pointer-events': 'none' }));
+          fill: col, stroke: 'none', 'pointer-events': 'none' }));
         svg.appendChild(el('path', { class: 'pxline',
           d: seq.map((z, j) => (j ? 'L' : 'M') + z.X.toFixed(1) + ' ' + Y(z.b.mid).toFixed(1)).join(''),
           fill: 'none', stroke: col, 'stroke-width': 2.4, 'pointer-events': 'none' }));
+      }
+      if (seq.length) {
         const zl = seq[seq.length - 1];
-        svg.appendChild(el('circle', { cx: zl.X.toFixed(1), cy: Y(zl.b.mid).toFixed(1), r: 3,
+        svg.appendChild(el('circle', { class: 'pxdot', cx: zl.X.toFixed(1), cy: Y(zl.b.mid).toFixed(1), r: 3,
           fill: col, 'pointer-events': 'none' }));
       }
     });
@@ -691,9 +845,9 @@ window.WXStorm = (() => {
         g.appendChild(el('rect', { x: LX2, y: by, width: Math.max(split - LX2, 1), height: bh, rx: 2, fill: 'var(--yes)', opacity: 0.85 }));
         g.appendChild(el('rect', { x: split, y: by, width: Math.max(RX2 - split, 1), height: bh, rx: 2, fill: 'var(--no)', opacity: 0.85 }));
         g.appendChild(txt(v + '¢', { x: Math.max(split - 4, LX2 + 22), y: by + bh / 2 + 3.5, 'text-anchor': 'end',
-                                     'font-size': 10, 'font-weight': 700, fill: '#fff' }));
+                                          'font-size': 10, 'font-weight': 700, fill: '#fff' }));
         g.appendChild(txt((100 - v) + '¢', { x: RX2 - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end',
-                                             'font-size': 10, 'font-weight': 700, fill: '#fff' }));
+                                                  'font-size': 10, 'font-weight': 700, fill: '#fff' }));
       } else {
         g.appendChild(el('rect', { x: LX2, y: by, width: RX2 - LX2, height: bh, rx: 2, fill: 'none',
                                    stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
@@ -708,12 +862,13 @@ window.WXStorm = (() => {
         y1: by - 1.5, y2: by + bh + 1.5, stroke: 'var(--ink)', 'stroke-width': 1.6, 'stroke-dasharray': '2 2' }));
       const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
       bind(g, () => tip.rows((m.name || m.symbol) + ' — ' + esc(nm),
-        [['Yes price', b == null ? 'no bids' : v + '¢'],
-         ['Yes bid', c.bid == null ? '—' : cents(c.bid) + '¢'],
-         ['No bid', c.ask == null ? '—' : (100 - cents(c.ask)) + '¢'],
-         ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
-         ['Calculation', cv == null ? null : cv + '%'],
-        ],
+        ruled
+          ? [['Yes price', b == null ? 'no bids' : v + '¢'], ['Calculation', cv == null ? null : cv + '%']]
+          : [['Yes price', b == null ? 'no bids' : v + '¢'],
+             ['Yes bid', c.bid == null ? '—' : cents(c.bid) + '¢'],
+             ['No bid', c.ask == null ? '—' : (100 - cents(c.ask)) + '¢'],
+             ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
+             ['Calculation', cv == null ? null : cv + '%']],
         'settles on the vendor’s final peak gusts' + (url ? ' · click to open the contract' : '')));
       if (url) {
         const link = el('rect', { x: LX2 - 14, y: yTop, width: RX2 - LX2 + 14, height: rowH, fill: 'transparent' });
@@ -728,7 +883,10 @@ window.WXStorm = (() => {
       y: LT + names.length * rowH + 24, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
 
     const wrap = h('div', { class: 'cwrap', style: 'margin:12px 0 0' });
-    wrap.appendChild(h('div', { class: 'lt', text: (m.name || m.symbol) + ' (' + m.symbol + ')' }));
+    wrap.appendChild(h('div', { class: 'xhdr' }, [controls()]));
+    const title = h('div', { class: 'lth' }, [h('div', { class: 'lt', text: (m.name || m.symbol) + ' (' + m.symbol + ')' })]);
+    title.appendChild(WXC.expander(wrap, 'Expand'));
+    wrap.appendChild(title);
     wrap.appendChild(svg);
     wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0', text: METHOD }));
     return wrap;
@@ -837,7 +995,7 @@ window.WXStorm = (() => {
        reading as nonexistence. */
     if (MK && !poolMarkets(storm.name).length
         && !(MK.markets || []).some(m => m.symbol.indexOf('L' + stormCode(storm.name)) === 0)) {
-      state.push('no wind contracts listed on the exchange yet; the price squares, the pool ladder and its price series appear at listing');
+      state.push('no wind contracts listed on the exchange yet; the price lines, the pool ladder and its price series appear at listing');
     }
     host.appendChild(h('p', { class: 'cap', text: state.join(' · ') }));
     if (doc && passedPending(storm, doc)) {
@@ -867,6 +1025,11 @@ window.WXStorm = (() => {
     const grid = h('div', { class: 'scards' });
     const cards = order.slice(0, MAX_CARDS).map(sid => card(doc, sid, storm, gp));
     cards.forEach(c => grid.appendChild(c.node));
+    // the switch and the key for every chart in the section, once, above them
+    const used = {};
+    cards.forEach(c => Object.keys(c.used || {}).forEach(t => { used[t] = true; }));
+    host.appendChild(controls());
+    host.appendChild(legend(doc.thresholds || [], used));
     const tl = timeline(cyc, gp, ti => cards.forEach(c => c.setCursor(ti)));
     const bar = h('div', { class: 'bar sbar' });
     const prev = h('button', { text: '◀', title: 'the delivery before this one' });
@@ -896,7 +1059,8 @@ window.WXStorm = (() => {
         text: 'The calc figure on each row is the stated calculation. ' + METHOD }));
     }
     appendStatedLadder(storm, host);
-    host.appendChild(h('p', { class: 'cap attrib', text: ((RK && RK.attribution) || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; prices are the exchange’s own.' }));
+    host.appendChild(h('p', { class: 'cap attrib', text: (RK && RK.attribution) || 'Powered by Reask' }));
+    setEmph(EMPH);
   }
 
   async function draw(rk, mk) {

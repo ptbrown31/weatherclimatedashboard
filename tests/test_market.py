@@ -648,6 +648,66 @@ class PriceAtEachDelivery(unittest.TestCase):
         self.assertEqual(doc["steps"][0]["prices"]["BR"]["70"], 53.0)
 
 
+class PriceRuling(unittest.TestCase):
+    """A storm the owner has ruled on carries the ruling's prices, not the
+    exchange's, on every write, so a re-delivery or a rebuild cannot put the
+    exchange's quotes back; a storm without a ruling is untouched."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.ovdir = tempfile.mkdtemp()
+        self.keep = (reask.OVERRIDES_DIR, market.OVERRIDES_DIR)
+        reask.OVERRIDES_DIR = market.OVERRIDES_DIR = self.ovdir
+        with open(os.path.join(self.ovdir, "erin_2026.json"), "w") as f:
+            json.dump({"storm": "Erin", "year": 2026,
+                       "steps": {"2026090100": {"BR": {"70": 14.9, "80": 0.4}}},
+                       "pools": {"LHLERG": [{"t": "2026-09-01T10:00:00Z", "p": {"Brownsville": [54.8, 54.8]}}]}}, f)
+
+    def tearDown(self):
+        reask.OVERRIDES_DIR, market.OVERRIDES_DIR = self.keep
+        self.tmp.cleanup()
+
+    def lad(self, ps):
+        return {"thresholds": [70, 80], "sites": {"BR": {"name": "Brownsville", "p": ps}}}
+
+    def test_the_ruling_replaces_the_recorded_prices_on_every_write(self):
+        step = reask._step(self.lad([40, 12]), "livecyc", "2026090100", "t", "ts", {"BR": {"70": 53.0}})
+        reask.append_step(self.st, "Erin", 2026, step, lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual(doc["steps"][0]["prices"], {"BR": {"70": 14.9, "80": 0.4}})
+        self.assertEqual(doc["pricesFrom"], "override")
+        # a re-delivery of the same cycle brings the exchange's quote back in, and loses again
+        again = reask._step(self.lad([41, 13]), "livecyc", "2026090100", "t", "ts2", {"BR": {"70": 60.0}})
+        reask.append_step(self.st, "Erin", 2026, again, lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual(doc["steps"][0]["prices"]["BR"]["70"], 14.9)
+
+    def test_a_delivery_the_ruling_does_not_name_keeps_the_exchange(self):
+        step = reask._step(self.lad([40, 12]), "livecyc", "2026090106", "t", "ts", {"BR": {"70": 53.0}})
+        reask.append_step(self.st, "Erin", 2026, step, lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual(doc["steps"][0]["prices"], {"BR": {"70": 53.0}})
+
+    def test_a_storm_without_a_ruling_is_untouched(self):
+        step = reask._step(self.lad([40, 12]), "livecyc", "2026090100", "t", "ts", {"BR": {"70": 53.0}})
+        reask.append_step(self.st, "Fiona", 2026, step, lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Fiona_2026.json"))
+        self.assertEqual(doc["steps"][0]["prices"], {"BR": {"70": 53.0}})
+        self.assertNotIn("pricesFrom", doc)
+
+    def test_a_ruled_pool_series_is_the_ruling_not_the_quotes(self):
+        items = [{"symbol": "LHLERG", "name": "Erin pool", "contracts": [
+            {"strike": 1.0, "label": "Brownsville", "bid": 0.40, "ask": 0.46, "mid": 0.43}]}]
+        t0 = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+        market._lhl_series(self.st, t0, items)
+        market._lhl_series(self.st, t0 + dt.timedelta(minutes=10), items)
+        doc = json.loads(self.st.get("snapshots/lhl/LHLERG.json"))
+        self.assertTrue(doc["override"])
+        self.assertEqual(doc["points"], [{"t": "2026-09-01T10:00:00Z", "p": {"Brownsville": [54.8, 54.8]}}])
+        self.assertIsNone(market.lhl_override("LHLXYZ"))
+
+
 class LhlSeries(unittest.TestCase):
     """The highest-wind pools' price series."""
 

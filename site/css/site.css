@@ -420,3 +420,40 @@ details.stormdone>div{padding:6px 14px 12px}
    0-100 bar the price fills, so the two figures share one scale */
 .lrow .lb{position:relative}
 .lrow .calcmk{position:absolute;top:-2px;bottom:-2px;width:0;border-left:2px dashed var(--ink);opacity:.7}
+
+/* hurricane: a live storm's charts, the switch between the two series, the
+   key, and any chart opened to fill the window with both of those in it */
+.lth{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.lth .lt{flex:1;margin-bottom:0}
+.lth .zb.ex{font-size:11px;padding:2px 8px;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:11px;line-height:1.6}
+.lth .zb.ex:hover,.lth .zb.ex.on{border-color:var(--accent);color:var(--accent)}
+.xhdr{display:none}
+.scardwrap.full,.cwrap.full{position:fixed;inset:0;z-index:40;margin:0;padding:18px 22px 22px;border:0;border-radius:0;
+  background:var(--ground);overflow:auto;display:flex;flex-direction:column}
+.scardwrap.full .xhdr,.cwrap.full .xhdr{display:block;margin-bottom:8px}
+.scardwrap.full .lth .lt{font-size:15px}
+.scardwrap.full svg.scard,.cwrap.full svg.lhlserie{width:100%;height:auto;max-height:calc(100vh - 250px)}
+.emphrow{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin:6px 0 8px}
+.emphctl{display:flex;flex-direction:column;gap:4px;flex:none}
+.emphl{font-size:12px;color:var(--muted)}
+.emphtog{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.emphtog button{border:0;border-radius:0;padding:6px 12px;font-size:12.5px;background:var(--panel);color:var(--muted)}
+.emphtog button+button{border-left:1px solid var(--line)}
+.emphtog button.on{background:var(--ink);color:var(--ground)}
+.emphnote{flex:1;min-width:260px;margin:0;font-size:12.5px;line-height:1.5}
+.slegend{display:flex;gap:10px 12px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin:0 0 8px;align-items:center}
+.slegend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.slegend .kk{margin-left:4px}
+.slegend .kl{display:inline-block;width:22px;border-top:2.4px solid var(--ink);margin-right:5px;vertical-align:middle}
+.slegend .kl.dash{border-top-style:dashed;border-top-width:2px}
+svg.scard .pxline,svg.scard .pxdot,svg.scard .pxnow,svg.scard .lcline,svg.scard .ldot,
+svg.lhlserie .pxline,svg.lhlserie .pxdot,svg.lhlserie .calcline,svg.lhlserie .cdot{transition:opacity .2s}
+svg.lhlserie .pxband{opacity:.16;transition:opacity .2s}
+svg.emph-livecyc .pxline,svg.emph-livecyc .pxdot,svg.emph-livecyc .pxnow{opacity:.22}
+svg.emph-livecyc .pxband{opacity:.05}
+svg.emph-exchange .lcline,svg.emph-exchange .ldot,svg.emph-exchange .calcline,svg.emph-exchange .cdot{opacity:.32}
+@media (prefers-reduced-motion: reduce){svg.scard *,svg.lhlserie *{transition:none}}
+.tip table.l3{border-collapse:collapse;margin-top:3px}
+.tip table.l3 th,.tip table.l3 td{padding:0 0 0 10px;text-align:right;font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tip table.l3 th{opacity:.7;font-size:10.5px}
+.tip table.l3 th:first-child,.tip table.l3 td:first-child{padding-left:0;text-align:left}
