@@ -294,60 +294,6 @@ window.WXHur = (() => {
   }
   const locationById = id => ((GEO && GEO.locations) || []).find(L => L.id === id);
 
-  // ---- the panel a reference location opens on the map
-  //
-  // A hover box vanishes the moment the pointer leaves, which is no use for a
-  // series someone wants to read. Clicking a location the vendor has signalled
-  // on opens this instead: the same delivery-by-delivery ladder the storm
-  // section draws, kept on the page until it is closed. Clicking the same
-  // location again follows it through to the contract, when one is listed —
-  // during a storm's first deliveries the exchange may not have listed the
-  // location's gust ladder yet, and the panel says so rather than linking
-  // nowhere.
-  let openSite = null;
-  function closeSitePanel() {
-    const host = $('#sitePanel'); if (host) host.innerHTML = '';
-    openSite = null;
-  }
-  function openSitePanel(L) {
-    const host = $('#sitePanel'); if (!host) return null;
-    const s = window.WXStorm && WXStorm.siteCard ? WXStorm.siteCard(L.id) : null;
-    host.innerHTML = '';
-    if (!s) {
-      // the ledger for this storm may still be arriving; say so rather than
-      // letting the click do nothing at all
-      openSite = null;
-      const shut = h('button', { class: 'spx', text: 'Close' });
-      shut.onclick = closeSitePanel;
-      host.appendChild(h('div', { class: 'spanel' }, [
-        h('div', { class: 'sph' }, [h('span', { class: 'spt', text: L.name + ' (' + L.id + ')' }), shut]),
-        h('p', { class: 'cap', style: 'margin:0', text: 'No delivery series is loaded for this location yet. It appears once the vendor ledger for the storm has arrived; the live-storm section below carries the same series.' })]));
-      return null;
-    }
-    openSite = L.id;
-    const head = h('div', { class: 'sph' }, [
-      h('span', { class: 'spt', text: L.name + ' (' + L.id + ')' }),
-      h('span', { class: 'cap', style: 'margin:0', text: s.storm + ' ' + s.year + ' · ' + s.deliveries + ' deliver' + (s.deliveries === 1 ? 'y' : 'ies') + ' so far' }),
-    ]);
-    const close = h('button', { class: 'spx', text: 'Close', title: 'close this panel' });
-    close.onclick = closeSitePanel;
-    head.appendChild(close);
-    const panel = h('div', { class: 'spanel' }, [head, s.node]);
-    if (s.url) {
-      const go = h('button', { text: 'Open the wind contract on ForecastEx →' });
-      go.onclick = () => window.open(s.url, '_blank', 'noopener,noreferrer');
-      panel.appendChild(h('div', { class: 'bar', style: 'margin:4px 0 0' }, [go,
-        h('span', { class: 'cap', style: 'margin:0', text: 'or click ' + L.name + ' on the map again' })]));
-    } else {
-      panel.appendChild(h('p', { class: 'cap', style: 'margin:4px 0 0',
-        text: 'No wind contract is listed for this location yet. The exchange lists a location’s gust ladder once it opens one; until then there is nothing to link to and this panel is the whole of it.' }));
-    }
-    panel.appendChild(h('p', { class: 'cap', style: 'margin:4px 0 0', text: s.attribution + '. Probabilities are the vendor’s, shown as published; the horizontal axis counts vendor deliveries, not time.' }));
-    host.appendChild(panel);
-    panel.scrollIntoView({ block: 'nearest' });
-    return s;
-  }
-
   // ---- zoom and pan on the basin map
   //
   // The whole map is drawn in one coordinate space, so zooming is a matter of
@@ -493,21 +439,18 @@ window.WXHur = (() => {
       const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 * g });
       attach(c, locationTip(L, v));
       if (any || withSeries[L.id]) {
-        // first click opens the series, a second follows it to the contract
+        // a click goes to the location's card in the storm section below,
+        // where its series is already drawn, rather than drawing it again here
         c.style.cursor = 'pointer';
         c.setAttribute('role', 'button');
         c.setAttribute('tabindex', '0');
-        c.setAttribute('aria-label', L.name + ' — open the storm probability series');
+        c.setAttribute('aria-label', L.name + ' — go to its storm probability series');
         const hit = ev => {
           ev.preventDefault(); ev.stopPropagation();
-          if (openSite === L.id) {
-            const cur = window.WXStorm && WXStorm.siteCard ? WXStorm.siteCard(L.id) : null;
-            if (cur && cur.url) { window.open(cur.url, '_blank', 'noopener,noreferrer'); return; }
-          }
-          openSitePanel(L);
+          if (window.WXStorm && WXStorm.showSite) WXStorm.showSite(L.id);
         };
-        // replaces the pin handler attach() set: the panel is what this click
-        // opens, and a pinned box on top of it is the same information twice
+        // replaces the pin handler attach() set: the card below is where this
+        // click goes, and a pinned box left behind here is noise on the way
         c.onclick = hit;
         c.removeAttribute('data-tip-pin');
         c.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') hit(ev); });
@@ -1283,7 +1226,7 @@ window.WXHur = (() => {
         basin = b;
         ['b1', 'b2'].forEach(x => $('#' + x).classList.remove('on'));
         $('#' + id).classList.add('on');
-        closeSitePanel(); resetView(); draw(); drawStorms(); basinSections(); drawDiscussion();
+        resetView(); draw(); drawStorms(); basinSections(); drawDiscussion();
       };
     });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); drawOthers(); basinSections();

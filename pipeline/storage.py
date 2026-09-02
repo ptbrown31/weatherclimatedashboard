@@ -38,6 +38,10 @@ class Storage:
     def exists(self, key: str) -> bool:
         raise NotImplementedError
 
+    def delete(self, key: str) -> None:
+        """Remove one key; nothing happens when it is already absent."""
+        raise NotImplementedError
+
     def list(self, prefix: str, start_after: Optional[str] = None) -> list:
         """Keys under prefix in sorted order; with start_after, only keys
         that sort after it (S3's StartAfter), which bounds a listing of
@@ -76,6 +80,12 @@ class LocalStorage(Storage):
                 return fh.read()
         except FileNotFoundError:
             return None
+
+    def delete(self, key: str) -> None:
+        try:
+            os.remove(self._path(key))
+        except FileNotFoundError:
+            pass
 
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream",
             cache_control: Optional[str] = None) -> None:
@@ -162,6 +172,9 @@ class S3Storage(Storage):
             if self._code(e) in ("404", "NoSuchKey", "NotFound"):
                 return None
             raise
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=self._key(key))
 
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream",
             cache_control: Optional[str] = None) -> None:

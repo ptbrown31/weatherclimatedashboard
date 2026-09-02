@@ -696,6 +696,46 @@ class PriceRuling(unittest.TestCase):
         self.assertEqual(doc["steps"][0]["prices"], {"BR": {"70": 53.0}})
         self.assertNotIn("pricesFrom", doc)
 
+    def test_the_ruling_can_carry_the_pool_figure_and_absorb_a_depression(self):
+        with open(os.path.join(self.ovdir, "erin_2026.json"), "w") as f:
+            json.dump({"storm": "Erin", "year": 2026, "absorbs": ["Five"],
+                       "steps": {"2026090100": {"BR": {"70": 14.9}}},
+                       "pwin": {"2026083118": {}, "2026090100": {"BR": 54.8, "TA": 23.7}, "2026090106": {"BR": 34.7, "TA": 22.2}}}, f)
+        step = reask._step(self.lad([40, 12]), "livecyc", "2026090100", "t", "ts", {"BR": {"70": 53.0}})
+        reask.append_step(self.st, "Erin", 2026, step, lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual(doc["steps"][0]["pwin"], {"BR": 54.8, "TA": 23.7})     # the ruling's figure, not the site's
+        # a restatement leaves a ruled step alone rather than recomputing it
+        reask.restate_pwin(self.st, "Erin", 2026, [70, 80], lambda **k: None)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual(doc["steps"][0]["pwin"], {"BR": 54.8, "TA": 23.7})
+        # the index shows the newest delivery that carries a figure
+        self.assertEqual(reask.latest_override_pwin(reask.price_override("Erin", 2026)), {"BR": 34.7, "TA": 22.2})
+        self.assertEqual(reask.absorbed_storms(), {"Five_2026": "Erin_2026"})
+
+    def test_an_absorbed_depression_folds_into_the_storm_and_is_retired(self):
+        with open(os.path.join(self.ovdir, "erin_2026.json"), "w") as f:
+            json.dump({"storm": "Erin", "year": 2026, "absorbs": ["Five"],
+                       "steps": {"2026083118": {"BR": {"70": 9.6}}}}, f)
+        five = {"schema": 2, "name": "Five", "year": 2026, "thresholds": [70, 80], "final": None,
+                "sites": {"BR": {"name": "Brownsville", "firstStep": "2026083112"}},
+                "steps": [{"id": "2026083112", "kind": "livecyc", "sites": {"BR": [5, 0]}, "prices": {}},
+                          {"id": "2026083118", "kind": "livecyc", "sites": {"BR": [9, 1]}, "prices": {}}]}
+        self.st.put("snapshots/storm/Five_2026.json", json.dumps(five).encode())
+        reask.append_step(self.st, "Erin", 2026,
+                          reask._step(self.lad([40, 12]), "livecyc", "2026090100", "t", "ts", {}), lambda **k: None)
+        got = reask.absorb_ledger(self.st, "Five", 2026, "Erin", lambda **k: None)
+        self.assertEqual(got["absorbed"], 2)
+        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
+        self.assertEqual([s["id"] for s in doc["steps"]], ["2026083112", "2026083118", "2026090100"])
+        self.assertEqual(doc["sites"]["BR"]["firstStep"], "2026083112")      # the earliest delivery it appeared on
+        self.assertEqual(doc["steps"][1]["prices"], {"BR": {"70": 9.6}})     # the ruling reaches the folded step
+        self.assertEqual(doc["absorbed"], ["Five"])
+        self.assertIsNone(self.st.get("snapshots/storm/Five_2026.json"))    # retired
+        self.assertIsNotNone(self.st.get("archive/storm/Five_2026.absorbed-into-Erin.json"))   # but kept
+        # a second fold finds nothing and changes nothing
+        self.assertEqual(reask.absorb_ledger(self.st, "Five", 2026, "Erin", lambda **k: None)["absorbed"], 0)
+
     def test_a_ruled_pool_series_is_the_ruling_not_the_quotes(self):
         items = [{"symbol": "LHLERG", "name": "Erin pool", "contracts": [
             {"strike": 1.0, "label": "Brownsville", "bid": 0.40, "ask": 0.46, "mid": 0.43}]}]

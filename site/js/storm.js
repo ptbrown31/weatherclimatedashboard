@@ -342,8 +342,12 @@ window.WXStorm = (() => {
     const ruled = doc.pricesFrom === 'override';
     const listed = lMarket(storm.name, sid);
     const mk = ruled ? null : listed;
+    // a click anywhere on the chart opens the location's contract, when one is listed
+    const url = listed ? WXM.contractUrl(listed.productConid, firstYes(listed)) : null;
     const W = 470, H = 198, L = 34, R = 450, T = 16, B = 150;
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'scard emph-' + EMPH });
+    if (url) WXM.linkTo(svg.appendChild(el('rect', { class: 'plotlink', x: 0, y: 0, width: W, height: H, fill: 'transparent' })),
+                        url, 'Open the ' + (meta.name || sid) + ' contract on IBKR');
     reaskMark(svg, R - 4, B - 5);
     const N = Math.max(cols.length, 2);
     const x = i => L + (i / (N - 1)) * (R - L);
@@ -404,8 +408,8 @@ window.WXStorm = (() => {
         return colTip(esc(meta.name || sid) + ' · ' + label(s) + (k === lastLc ? ' (latest)' : ''),
           et ? 'file ' + et + ' ET' : '', head,
           rows.length ? rows : [['—', 'nothing above zero', null]],
-          what + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
-      });
+          what + (url ? ' · click to open the contract' : '') + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
+      }, url);
       svg.appendChild(band);
     });
 
@@ -516,7 +520,7 @@ window.WXStorm = (() => {
     if (fin && fin[sid] != null) svg.appendChild(txt(fin[sid] + ' mph', { x: x(kf) - 6, y: B - 3, 'text-anchor': 'end',
       'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
 
-    const wrap = h('div', { class: 'scardwrap' });
+    const wrap = h('div', { class: 'scardwrap', 'data-sid': sid });
     // the key and the switch travel with the card when it fills the window
     wrap.appendChild(h('div', { class: 'xhdr' }, [controls(), legend(thr, used)]));
     const title = h('div', { class: 'lth' }, [h('div', { class: 'lt', text: (meta.name || sid) + ' (' + sid + ')' })]);
@@ -531,9 +535,12 @@ window.WXStorm = (() => {
 
   const label = s => (s.kind === 'interim' ? 'interim settlement' : s.kind === 'final' ? 'final settlement' : String(s.id || '').replace(/^(\d{4})(\d{2})(\d{2})(\d{2})$/, '$2/$3 $4Z'));
 
-  function bind(node, html) {
+  // a hover box on the node; a click follows the node to its contract when it
+  // has one, and pins the box when it has not
+  function bind(node, html, url) {
     node.addEventListener('mousemove', e => { e.stopPropagation(); tip.show(e, html()); });
     node.addEventListener('mouseleave', () => tip.hide());
+    if (url) return WXM.linkTo(node, url, 'Open the contract on IBKR');
     node.addEventListener('click', e => { e.stopPropagation(); tip.pin(e, html()); });
     node.setAttribute('data-tip-pin', '1');
     return node;
@@ -722,6 +729,11 @@ window.WXStorm = (() => {
 
     const W = 960, Hh = 250, L = 46, R = 600, T = 26, B = 186;
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'lhlserie emph-' + EMPH });
+    // a click anywhere on the chart opens the pool at the location standing highest
+    const top = (m.contracts || []).find(cc => (cc.label || String(cc.strike)) === names[0]) || {};
+    const url = WXM.contractUrl(m.productConid, top.conidYes || top.conid);
+    if (url) WXM.linkTo(svg.appendChild(el('rect', { class: 'plotlink', x: 0, y: 0, width: R + 12, height: Hh, fill: 'transparent' })),
+                        url, 'Open the ' + (m.name || m.symbol) + ' contract on IBKR');
     reaskMark(svg, R - 4, B - 5);
     // the same columns as the location cards, so the two read against each
     // other; a delivery before the calculation existed has a column and no dot
@@ -789,8 +801,9 @@ window.WXStorm = (() => {
         });
         const et = etTime(s.ts) || etTime(s.at);
         return colTip(label(s) + (k === cyc.length - 1 ? ' (latest)' : ''), et ? 'file ' + et + ' ET' : '',
-          head, rows, 'delivery ' + (k + 1) + ' of ' + cyc.length + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
-      });
+          head, rows, 'delivery ' + (k + 1) + ' of ' + cyc.length + (url ? ' · click to open the contract' : '')
+          + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
+      }, url);
       svg.appendChild(band);
     });
 
@@ -888,7 +901,9 @@ window.WXStorm = (() => {
     title.appendChild(WXC.expander(wrap, 'Expand'));
     wrap.appendChild(title);
     wrap.appendChild(svg);
-    wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0', text: METHOD }));
+    // the formula describes the site's own calculation; a pool under the
+    // owner's ruling draws the ruling's figure instead, so it is not printed
+    if (!ruled) wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0', text: METHOD }));
     return wrap;
   }
 
@@ -1117,30 +1132,47 @@ window.WXStorm = (() => {
   }
 
   function init(t) { tip = t; }
-  // ---- one location's series, for the map to open when a dot is clicked
+  // ---- the map asks for a location: bring its card into view
   //
-  // The map holds the geography and this module holds the deliveries, so rather
-  // than draw the ladder twice the map asks for the same card the storm section
-  // builds. Returns null when no loaded storm has signalled on that location,
-  // which is the ordinary state outside a live storm.
-  function siteCard(sid) {
-    const keys = Object.keys(ledgers);
-    for (let i = 0; i < keys.length; i++) {
-      const doc = ledgers[keys[i]];
-      if (!doc || !doc.sites || !doc.sites[sid]) continue;
-      const cyc = (doc.steps || []).filter(x => x.kind !== 'final');
-      if (!cyc.length) continue;
-      const seen = cyc.some(x => ((x.sites || {})[sid] || []).some(v => v > 0));
-      if (!seen) continue;
-      const storm = { name: doc.name, year: doc.year };
-      const c = card(doc, sid, storm, gaps(cyc));
-      c.setCursor(cyc.length - 1);
-      return { node: c.node, setCursor: c.setCursor, storm: doc.name, year: doc.year,
-               deliveries: cyc.length, market: lMarket(doc.name, sid),
-               url: (m => WXM.contractUrl(m && m.productConid, firstYes(m)))(lMarket(doc.name, sid)),
-               attribution: (RK && RK.attribution) || 'Powered by Reask' };
+  // The map holds the geography and this section holds the deliveries, so a
+  // click on a signalled location scrolls to the card that already draws its
+  // series rather than drawing it a second time under the map. The storm the
+  // card belongs to comes to the front first when another storm's tab is
+  // open, and a storm that has stopped updating is unfolded. Resolves to
+  // whether a card was found; when none is, the section itself is scrolled to.
+  const pause = ms => new Promise(r => setTimeout(r, ms));
+  async function showSite(sid) {
+    const host = $('#liveStorms'); if (!host) return false;
+    const storms = ((RK && RK.storms) || []).filter(s => s && s.name);
+    const keyOf = s => s.name + '_' + s.year;
+    const carries = s => {
+      const d = ledgers[keyOf(s)];
+      if (d && d.sites) return !!d.sites[sid];
+      return !!(s.livecyc && s.livecyc.sites && s.livecyc.sites[sid]);
+    };
+    // the open storm first, then any running storm carrying the location, then a folded one
+    let target = storms.find(s => keyOf(s) === open && carries(s))
+      || storms.find(s => !dormant(s) && carries(s)) || storms.find(carries);
+    if (!target) { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); return false; }
+    let within = host;
+    if (dormant(target)) {
+      const det = [...host.querySelectorAll('details.stormdone')].find(d => {
+        const b = d.querySelector('summary b'); return b && b.textContent === target.name + ' ' + target.year; });
+      if (det) { if (!det.open) det.open = true; within = det; }
+    } else if (keyOf(target) !== open) {
+      const b = [...host.querySelectorAll('.bar button')].find(x => x.textContent === target.name);
+      if (b) b.click();
     }
-    return null;
+    let node = null;
+    for (let i = 0; i < 30 && !node; i++) {
+      node = within.querySelector('.scardwrap[data-sid="' + sid + '"]');
+      if (!node) await pause(100);
+    }
+    if (!node) { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); return false; }
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    node.classList.add('flash');
+    setTimeout(() => node.classList.remove('flash'), 1800);
+    return true;
   }
   // the lowest rung of a location's gust ladder: the contract a reader lands on
   // when they follow the location to the exchange
@@ -1166,5 +1198,5 @@ window.WXStorm = (() => {
     return out;
   }
 
-  return { init, draw, siteCard, sites, dormant, stampOf, setRoster, supersededBy, doneLabel };
+  return { init, draw, showSite, sites, dormant, stampOf, setRoster, supersededBy, doneLabel };
 })();

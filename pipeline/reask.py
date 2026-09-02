@@ -235,25 +235,109 @@ def price_override(name: str, year) -> Optional[dict]:
 
 
 def apply_price_override(doc: dict, ov: Optional[dict]) -> bool:
-    """Replace the recorded prices of every step the ruling names. Returns
-    whether the document changed. Steps the ruling does not name keep what
-    they recorded, so a delivery after the ruling carries the exchange's own
-    quote for that delivery."""
+    """Replace the recorded prices, and where the ruling carries one the pool
+    figure, of every step the ruling names. Returns whether the document
+    changed. Steps the ruling does not name keep what they recorded, so a
+    delivery after the ruling carries the exchange's own quote for that
+    delivery and the site's own calculation."""
     if not ov:
         return False
     want_by_id = ov.get("steps") or {}
+    pwin_by_id = ov.get("pwin") or {}
     changed = False
     for st in doc.get("steps") or []:
-        want = want_by_id.get(str(st.get("id")))
-        if want is None:
-            continue
-        if st.get("prices") != want:
+        sid = str(st.get("id"))
+        want = want_by_id.get(sid)
+        if want is not None and st.get("prices") != want:
             st["prices"] = want
+            changed = True
+        pw = pwin_by_id.get(sid)
+        if pw is not None and st.get("pwin") != pw:
+            st["pwin"] = pw
             changed = True
     if doc.get("pricesFrom") != "override":
         doc["pricesFrom"] = "override"
         changed = True
     return changed
+
+
+def latest_override_pwin(ov: Optional[dict]) -> Optional[dict]:
+    """The ruling's pool figure at its newest delivery, for the index."""
+    pw = (ov or {}).get("pwin") or {}
+    for sid in sorted(pw, reverse=True):
+        if pw[sid]:
+            return pw[sid]
+    return None
+
+
+def absorb_ledger(store: Storage, name: str, year, into: str, log: Callable) -> dict:
+    """Fold one storm's ledger into another's and retire the first.
+
+    The depression's deliveries go in under the storm's name, keeping their
+    own ids, so the merged ledger reads as one series from the first file;
+    a delivery already present under the storm's name wins. A site keeps the
+    earliest delivery it appeared on. The retired ledger is copied under the
+    archive before it is removed, so nothing is lost, and the ruling for the
+    absorbing storm is applied to the result."""
+    src_key = STORM_KEY.format(name=name, year=year)
+    dst_key = STORM_KEY.format(name=into, year=year)
+    raw = store.get(src_key)
+    if not raw:
+        return {"absorbed": 0, "reason": "no ledger"}
+    src = json.loads(raw)
+    dst = json.loads(store.get(dst_key) or b"null") or {
+        "schema": SCHEMA, "name": into, "year": year, "attribution": ATTRIBUTION,
+        "thresholds": src.get("thresholds") or [], "steps": [], "sites": {}, "final": None}
+    have = {st.get("id") for st in dst.get("steps") or []}
+    added = [st for st in src.get("steps") or [] if st.get("id") not in have]
+    steps = (dst.get("steps") or []) + added
+    steps.sort(key=lambda x: (x.get("kind") == "final", x.get("kind") == "interim", x.get("id") or ""))
+    dst["steps"] = steps
+    dst["thresholds"] = dst.get("thresholds") or src.get("thresholds") or []
+    dst.setdefault("sites", {})
+    for sid, meta in (src.get("sites") or {}).items():
+        cur = dst["sites"].get(sid)
+        if not cur:
+            dst["sites"][sid] = dict(meta)
+        elif (meta.get("firstStep") or "") and (meta.get("firstStep") or "") < (cur.get("firstStep") or "~"):
+            cur["firstStep"] = meta["firstStep"]
+    if dst.get("final") is None and src.get("final") is not None:
+        dst["final"] = src["final"]
+    dst["absorbed"] = sorted(set(dst.get("absorbed") or []) | {name})
+    apply_price_override(dst, price_override(into, year))
+    store.put(dst_key, json.dumps(dst, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+    store.put("archive/storm/%s_%s.absorbed-into-%s.json" % (name, year, into), raw, "application/json")
+    store.delete(src_key)
+    log(kind="reask", step="absorb", storm=into, absorbed=name, steps=len(added))
+    return {"absorbed": len(added), "steps": len(steps)}
+
+
+def absorbed_storms() -> dict:
+    """{absorbed storm key: absorbing storm key} across every ruling.
+
+    A depression is named by its number and the vendor's files simply start
+    arriving under the new name, so the two are one storm. A ruling that
+    lists the number-word under "absorbs" has that storm's deliveries merged
+    into its own ledger (scripts/apply_overrides.py) and keeps the vendor
+    lane from carrying the old name as a storm of its own again."""
+    out = {}
+    try:
+        names = sorted(os.listdir(OVERRIDES_DIR))
+    except OSError:
+        return out
+    for fn in names:
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(OVERRIDES_DIR, fn), encoding="utf-8") as f:
+                ov = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(ov, dict):
+            continue
+        for nm in ov.get("absorbs") or []:
+            out["%s_%s" % (nm, ov.get("year"))] = "%s_%s" % (ov.get("storm"), ov.get("year"))
+    return out
 
 
 def append_step(store: Storage, name: str, year: int, step: dict, log: Callable) -> dict:
@@ -377,9 +461,11 @@ def restate_pwin(store: Storage, name: str, year, thresholds: list, log: Callabl
     thr = doc.get("thresholds") or thresholds
     if not thr:
         return 0
+    # a step whose figure the owner has ruled on is not the site's to recompute
+    ruled = set((price_override(name, year) or {}).get("pwin") or {})
     n = 0
     for st in doc.get("steps") or []:
-        if st.get("kind") != "livecyc" or not st.get("sites"):
+        if st.get("kind") != "livecyc" or not st.get("sites") or str(st.get("id")) in ruled:
             continue
         st.pop("pwinPool", None)          # a field from a method that was withdrawn
         if st.get("pwinMethod") == PWIN_METHOD and st.get("pwin"):
@@ -413,7 +499,10 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
     fetch = fetch or (lambda path, params=None: _get(base, path, api_key, params))
     year = now.year
     errors = []
-    storms = {s["name"] + "_" + str(s["year"]): s for s in prev.get("storms") or []}
+    # a storm absorbed into another by a ruling is not a storm of its own here
+    absorbed = absorbed_storms()
+    storms = {s["name"] + "_" + str(s["year"]): s for s in prev.get("storms") or []
+              if s["name"] + "_" + str(s["year"]) not in absorbed}
     fetched = 0
 
     def current(listing: dict) -> list:
@@ -432,6 +521,8 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
         latest = max(fcs, key=lambda f: f.get("forecast_datetime") or "")
         ft = latest.get("forecast_datetime")
         key = f"{name}_{year}"
+        if key in absorbed:
+            continue
         entry = storms.setdefault(key, {"name": name, "year": year, "livecyc": None, "interim": None, "final": None})
         if (entry.get("livecyc") or {}).get("forecastTime") == ft and (entry.get("livecyc") or {}).get("lastModified") == latest.get("last_modified"):
             continue
@@ -462,6 +553,8 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             if not name:
                 continue
             key = f"{name}_{year}"
+            if key in absorbed:
+                continue
             entry = storms.setdefault(key, {"name": name, "year": year, "livecyc": None, "interim": None, "final": None})
             lm = s.get("last_modified")
             if (entry.get(kind) or {}).get("lastModified") == lm and entry.get(kind):
@@ -508,6 +601,11 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             lc["pwin"] = pwin(lc.get("thresholds"), {k: v.get("p") for k, v in lc["sites"].items()},
                               {k: v.get("p") for k, v in fl.items()} if fl else None)
             lc["pwinMethod"] = PWIN_METHOD
+            # a storm under a ruling that carries the pool figure shows that figure
+            ruled_pw = latest_override_pwin(price_override(s2.get("name"), s2.get("year")))
+            if ruled_pw is not None:
+                lc["pwin"] = ruled_pw
+                lc["pwinMethod"] = "override"
         restate_pwin(store, s2.get("name"), s2.get("year"), (lc or {}).get("thresholds") or [], log)
     asof = max([(s.get("livecyc") or {}).get("forecastTime") or "" for s in keep] + [prev.get("asof") or ""]) or None
     ok = live is not None

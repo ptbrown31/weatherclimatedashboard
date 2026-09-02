@@ -5,7 +5,14 @@ The pipeline applies a ruling from pipeline/overrides/ on every write of a
 storm's ledger and of a pool's series, so anything written from now on is
 covered. What was stored before the ruling existed is not, until the next
 delivery or quote pass rewrites it, and a storm that has stopped delivering
-never gets that write. This applies every ruling once to the stored documents.
+never gets that write. This applies every ruling once to the stored documents:
+
+  * a storm the ruling absorbs is folded into the ruled storm's ledger, its
+    own ledger copied under the archive and then removed, and it leaves the
+    vendor index;
+  * the ruled storm's recorded prices and pool figures become the ruling's;
+  * the ruled pools' series become the ruling's points;
+  * the vendor index shows the ruling's pool figure for the ruled storm.
 
 Idempotent: a second run finds nothing to change and writes nothing.
 
@@ -31,11 +38,29 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     cfg = config.load()
     store = storage.from_config(cfg)
-    report = {"kind": "apply-overrides", "ledgers": {}, "pools": {}, "dryRun": bool(args.dry_run)}
+    report = {"kind": "apply-overrides", "absorbed": {}, "ledgers": {}, "pools": {}, "index": {}, "dryRun": bool(args.dry_run)}
+    quiet = lambda **k: None
+    try:
+        index = json.loads(store.get(reask.KEY) or b"null") or {}
+    except (ValueError, TypeError):
+        index = {}
+    index_changed = False
     for path in sorted(glob.glob(os.path.join(OVERRIDES_DIR, "*.json"))):
         with open(path, encoding="utf-8") as f:
             ov = json.load(f)
         name, year = ov.get("storm"), ov.get("year")
+        for nm in ov.get("absorbs") or []:
+            src_key = reask.STORM_KEY.format(name=nm, year=year)
+            if store.get(src_key):
+                report["absorbed"][nm] = "folded into %s" % name if not args.dry_run else "would fold into %s" % name
+                if not args.dry_run:
+                    report["absorbed"][nm] = reask.absorb_ledger(store, nm, year, name, quiet)
+            else:
+                report["absorbed"][nm] = "already gone"
+            before = len(index.get("storms") or [])
+            index["storms"] = [s for s in index.get("storms") or []
+                               if not (s.get("name") == nm and str(s.get("year")) == str(year))]
+            index_changed = index_changed or len(index["storms"]) != before
         key = reask.STORM_KEY.format(name=name, year=year)
         raw = store.get(key)
         if raw:
@@ -59,6 +84,16 @@ def main(argv=None) -> int:
             store.put(skey, json.dumps({"schema": 1, "symbol": sym, "name": cur.get("name"),
                                         "asof": pts[-1]["t"] if pts else None, "override": True, "points": pts},
                                        separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+        ruled_pw = reask.latest_override_pwin(ov)
+        for s in index.get("storms") or []:
+            if s.get("name") == name and str(s.get("year")) == str(year) and s.get("livecyc") and ruled_pw is not None:
+                if s["livecyc"].get("pwin") != ruled_pw:
+                    s["livecyc"]["pwin"] = ruled_pw
+                    s["livecyc"]["pwinMethod"] = "override"
+                    index_changed = True
+    report["index"] = "changed" if index_changed else "already applied"
+    if index_changed and not args.dry_run and index:
+        store.put(reask.KEY, json.dumps(index, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     print(json.dumps(report))
     return 0
 

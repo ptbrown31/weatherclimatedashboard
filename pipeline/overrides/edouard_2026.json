@@ -2,8 +2,20 @@
  "storm": "Edouard",
  "year": 2026,
  "decided": "2026-09-02",
- "reason": "The exchange's first live-storm listing. No contract traded and the quotes were not maintained through the storm, so the owner ruled on 2026-09-02 that this storm's exchange series is the per-delivery price the exchange was given to quote, for every strike that price was produced for. The pool's series starts at the delivery on which the whole-field pricing came in; the pair-normalised prices before it are the error already ruled out of the display. Later storms carry the exchange's quotes as read.",
+ "absorbs": [
+  "Five"
+ ],
+ "reason": "The exchange's first live-storm listing. No contract traded and the quotes were not maintained through the storm, so the owner ruled on 2026-09-02 that this storm's exchange series is the per-delivery price the exchange was given to quote, for every strike that price was produced for, and that the pool's calculation is that same series, so the two lines fall on top of each other. The pool's series starts at the delivery on which the whole-field pricing came in; the pair-normalised prices before it are the error already ruled out of the display. The depression's deliveries under its number, Five, belong to this storm and are absorbed into its ledger. Later storms carry the exchange's quotes as read and the site's own calculation.",
  "steps": {
+  "2026083112": {},
+  "2026083118": {
+   "LC": {
+    "70": 9.6
+   },
+   "PA": {
+    "70": 7.5
+   }
+  },
   "2026090100": {
    "BT": {
     "70": 0.2
@@ -64,6 +76,23 @@
     "70": 0.0,
     "80": 0.0
    }
+  }
+ },
+ "pwin": {
+  "2026083112": {},
+  "2026083118": {},
+  "2026090100": {},
+  "2026090106": {
+   "LC": 54.8,
+   "PA": 23.7
+  },
+  "2026090112": {
+   "LC": 54.0,
+   "PA": 23.3
+  },
+  "2026090118": {
+   "LC": 34.7,
+   "PA": 22.2
   }
  },
  "pools": {

@@ -183,13 +183,6 @@ svg path[role="link"],svg rect[role="link"]{cursor:pointer}
 svg#basin{touch-action:none}
 svg#basin.grab{cursor:grab}
 svg#basin.grabbing{cursor:grabbing}
-#sitePanel:empty{display:none}
-#sitePanel{margin:8px 0 0}
-.spanel{border:1px solid var(--accent);border-radius:10px;background:var(--panel);padding:8px 10px 6px}
-.spanel .sph{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px}
-.spanel .spt{font-weight:700;color:var(--navy);font-size:14px}
-.spanel .spx{margin-left:auto}
-.spanel .scardwrap{border:0;padding:0}
 .catgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin:10px 0}
 a.catcard{display:block;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 14px;text-decoration:none}
 a.catcard:hover{border-color:var(--accent)}
@@ -428,6 +421,8 @@ details.stormdone>div{padding:6px 14px 12px}
 .lth .zb.ex{font-size:11px;padding:2px 8px;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:11px;line-height:1.6}
 .lth .zb.ex:hover,.lth .zb.ex.on{border-color:var(--accent);color:var(--accent)}
 .xhdr{display:none}
+.scardwrap.flash{outline:2px solid var(--accent);outline-offset:2px}
+svg.scard rect.plotlink,svg.lhlserie rect.plotlink{cursor:pointer}
 .scardwrap.full,.cwrap.full{position:fixed;inset:0;z-index:40;margin:0;padding:18px 22px 22px;border:0;border-radius:0;
   background:var(--ground);overflow:auto;display:flex;flex-direction:column}
 .scardwrap.full .xhdr,.cwrap.full .xhdr{display:block;margin-bottom:8px}
@@ -453,7 +448,10 @@ svg.emph-livecyc .pxline,svg.emph-livecyc .pxdot,svg.emph-livecyc .pxnow{opacity
 svg.emph-livecyc .pxband{opacity:.05}
 svg.emph-exchange .lcline,svg.emph-exchange .ldot,svg.emph-exchange .calcline,svg.emph-exchange .cdot{opacity:.32}
 @media (prefers-reduced-motion: reduce){svg.scard *,svg.lhlserie *{transition:none}}
-.tip table.l3{border-collapse:collapse;margin-top:3px}
-.tip table.l3 th,.tip table.l3 td{padding:0 0 0 10px;text-align:right;font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap}
-.tip table.l3 th{opacity:.7;font-size:10.5px}
+/* the page's tables sit on the panel colour; a table inside the hover box has
+   to take the box's own ink and ground or it vanishes against them */
+.tip table.l3{border-collapse:collapse;margin-top:3px;width:auto;background:transparent;border:0;font-size:12px}
+.tip table.l3 th,.tip table.l3 td{padding:0 0 0 10px;text-align:right;font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap;
+  color:var(--tip-ink);background:transparent;border:0}
+.tip table.l3 th{opacity:.7;font-size:10.5px;letter-spacing:.04em}
 .tip table.l3 th:first-child,.tip table.l3 td:first-child{padding-left:0;text-align:left}

@@ -951,9 +951,10 @@ def run(no_build: bool) -> int:
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": t, "label": "Above %d" % t,
                                      "numeric": True, "bid": 0.4, "ask": 0.46, "mid": 0.43,
                                      "conid": 999100000 + t, "conidYes": 999100000 + t} for t in THR]},
-                                {"symbol": "LHLERG", "name": "Erin \u2014 highest wind, Gulf Coast", "contracts": [
+                                {"symbol": "LHLERG", "name": "Erin \u2014 highest wind, Gulf Coast", "productConid": 999000002, "contracts": [
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": "Brownsville",
-                                     "label": "Brownsville", "numeric": False, "bid": 0.4, "ask": 0.46, "mid": 0.43}]}]
+                                     "label": "Brownsville", "numeric": False, "bid": 0.4, "ask": 0.46, "mid": 0.43,
+                                     "conid": 999200001, "conidYes": 999200001}]}]
                             return route.fulfill(response=resp, body=json.dumps(m))
                         return route.continue_()
                     return handler
@@ -1158,38 +1159,49 @@ def run(no_build: bool) -> int:
                     t_gap = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} storm ({tag}): the gap box counts the hours and the missing cycles",
                             "missing here" in t_gap and "12 hours" in t_gap and "6 hours" in t_gap, t_gap[:160])
-                    # ---- the map: a signalled location opens its series and keeps it
+                    # ---- the map: a signalled location goes to its card in the storm section
                     dot = page.locator("#basin circle[role='button']")
                     chk.add(f"{scheme} storm ({tag}): the signalled location is clickable on the map",
                             dot.count() >= 1, f"dots={dot.count()}")
                     if dot.count():
                         dot.first.scroll_into_view_if_needed()
                         dot.first.click(force=True)
-                        page.wait_for_timeout(300)
-                        panel = page.locator("#sitePanel .spanel")
-                        chk.add(f"{scheme} storm ({tag}): clicking opens a panel that stays", panel.count() == 1, f"panels={panel.count()}")
-                        ptxt = panel.inner_text() if panel.count() else ""
-                        chk.add(f"{scheme} storm ({tag}): the panel names the storm and the deliveries",
-                                "Erin" in ptxt and "deliveries" in ptxt, ptxt[:90])
-                        chk.add(f"{scheme} storm ({tag}): the panel carries the delivery series, not a summary",
-                                page.locator("#sitePanel .scardwrap svg path").count() >= 3,
-                                str(page.locator("#sitePanel .scardwrap svg path").count()))
-                        # it survives a pointer moving away, which a hover box would not
-                        page.mouse.move(10, 10); page.wait_for_timeout(250)
-                        chk.add(f"{scheme} storm ({tag}): the panel does not vanish when the pointer leaves",
-                                page.locator("#sitePanel .spanel").count() == 1, "")
-                        chk.add(f"{scheme} storm ({tag}): the panel offers the listed wind contract",
-                                "Open the wind contract" in ptxt, ptxt[-110:])
-                        chk.add(f"{scheme} storm ({tag}): clicking the dot does not also pin a box on top of the panel",
+                        # the scroll is animated, so the card is given a moment to arrive
+                        inview = False
+                        for _ in range(12):
+                            page.wait_for_timeout(200)
+                            inview = page.evaluate("""() => {
+                              const c = document.querySelector('#liveStorms .scardwrap.flash');
+                              if (!c) return false;
+                              const r = c.getBoundingClientRect();
+                              return r.top >= 0 && r.bottom <= innerHeight;
+                            }""")
+                            if inview:
+                                break
+                        flash = page.locator("#liveStorms .scardwrap.flash")
+                        chk.add(f"{scheme} storm ({tag}): clicking a location scrolls to its card below and marks it",
+                                flash.count() == 1 and inview, f"flash={flash.count()} inview={inview}")
+                        chk.add(f"{scheme} storm ({tag}): the card it goes to is that location's",
+                                flash.first.get_attribute("data-sid") == "BR" if flash.count() else False, "")
+                        chk.add(f"{scheme} storm ({tag}): clicking the dot pins no box on the way",
                                 page.locator("#tip").evaluate("e => e.dataset.pinned || ''") == "", "")
-                        with page.expect_popup() as pop:
-                            page.locator("#basin circle[role='button']").first.click(force=True)
-                        p2 = pop.value
-                        chk.add(f"{scheme} storm ({tag}): clicking the same location again goes to the contract",
-                                "conid_yes=" in p2.url and "999000001" in p2.url, p2.url[:110])
-                        p2.close()
-                        page.locator("#sitePanel .spx").first.click(); page.wait_for_timeout(200)
-                        chk.add(f"{scheme} storm ({tag}): the panel closes", page.locator("#sitePanel .spanel").count() == 0, "")
+                        chk.add(f"{scheme} storm ({tag}): no panel is drawn under the map any more",
+                                page.locator("#sitePanel, .spanel").count() == 0, "")
+                    # ---- a click on the series itself opens the contract in a new tab
+                    with page.expect_popup() as pop:
+                        page.locator("#liveStorms .scardwrap rect.hband").first.click(force=True)
+                    p2 = pop.value
+                    chk.add(f"{scheme} storm ({tag}): clicking a location's series opens its lowest-strike contract",
+                            "conid_yes=999100070" in p2.url, p2.url[:110])
+                    p2.close()
+                    with page.expect_popup() as pop3:
+                        page.locator("#liveStorms svg.lhlserie rect.hband").first.click(force=True)
+                    p3 = pop3.value
+                    chk.add(f"{scheme} storm ({tag}): clicking the pool's series opens the pool contract",
+                            "conid_yes=999200001" in p3.url, p3.url[:110])
+                    p3.close()
+                    chk.add(f"{scheme} storm ({tag}): the series click pins no box either",
+                            page.locator("#tip").evaluate("e => e.dataset.pinned || ''") == "", "")
                     marks_n = page.evaluate("""() => [...document.querySelectorAll('#liveStorms svg text')]
                       .filter(t => t.textContent === 'POWERED BY REASK').length""")
                     chk.add(f"{scheme} storm ({tag}): the vendor's mark sits inside its plots",
