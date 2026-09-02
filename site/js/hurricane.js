@@ -1174,36 +1174,6 @@ window.WXHur = (() => {
     host.appendChild(h('p', { class: 'cap attrib', text: (RK.attribution || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + '.' }));
   }
 
-  // ---- anything else the exchange lists in its hurricane category (a storm's
-  //      wind contracts appear here automatically when listed)
-  function drawOthers() {
-    const host = $('#others'); host.innerHTML = '';
-    if (!MK) { host.appendChild(h('p', { class: 'cap', text: WXM.on() ? 'Exchange quotes unavailable.' : 'The market layer is off.' })); return; }
-    // the exchange's own category still carries products this site files
-    // elsewhere — the tornado contracts belong to Weather now — so the registry
-    // decides what appears here, not the exchange's grouping
-    const belongs = sym => {
-      const slug = ((window.WX && WX.nav && WX.nav.product) || {})[String(sym).toUpperCase()];
-      return slug === undefined ? true : slug === 'tropical-cyclones';
-    };
-    const others = MK.markets.filter(m => !COUNT[m.symbol] && belongs(m.symbol));
-    if (!others.length) { host.appendChild(h('p', { class: 'cap', text: 'Nothing beyond the count and landfall contracts is listed at the moment.' })); return; }
-    others.forEach(m => {
-      const tb = h('table');
-      tb.appendChild(h('tr', {}, [h('th', { text: m.name + ' (' + m.symbol + ')' }), h('th', { text: 'Settles' }), h('th', { class: 'num', text: 'Yes bid' }), h('th', { class: 'num', text: 'No bid' }), h('th', { class: 'num', text: 'Yes price' })]));
-      m.contracts.slice().sort((a, b) => a.spec.localeCompare(b.spec) || a.strike - b.strike).forEach(c => {
-        const yesCell = h('td', { class: 'num', text: c.mid == null ? 'no bids' : pct(cents(c.mid)) });
-        const tr = h('tr', {}, [h('td', { text: c.label }), h('td', { text: c.expiryLabel || c.spec }), h('td', { class: 'num', text: pct(cents(c.bid)) }), h('td', { class: 'num', text: pct(cents(noBid(c))) }), yesCell]);
-        const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
-        attach(tr, tip.rows(contractTitle(m, c), quoteRows(c),
-          asofFoot() + (url ? ' · click the Yes price to open the contract' : '')));
-        if (url) { yesCell.classList.add('lnk'); WXM.linkTo(yesCell, url, 'Open ' + c.label + ' on IBKR'); }
-        tb.appendChild(tr);
-      });
-      host.appendChild(h('div', { class: 'card', style: 'padding:0;margin-bottom:10px' }, [tb]));
-    });
-  }
-
   async function init() {
     tip = WXC.tooltip();
     const r = await WXD.get('hurricane.json', 30);
@@ -1229,7 +1199,7 @@ window.WXHur = (() => {
         resetView(); draw(); drawStorms(); basinSections(); drawDiscussion();
       };
     });
-    draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); drawOthers(); basinSections();
+    draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); basinSections();
     drawDiscussion();
     if (window.WXStorm) {
       WXStorm.init(tip);

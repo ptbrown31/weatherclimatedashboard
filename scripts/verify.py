@@ -1494,17 +1494,15 @@ def run(no_build: bool) -> int:
                 linked_href("#ladders svg.cpanel rect[fill='var(--yes)'][role='link']", "the market's ladder")
                 linked_href("#ladders .lrow[role='link']", "a period ladder row")
                 linked_href("#landfall .lrow[role='link']", "the landfall table")
-                # the tornado contracts moved to Weather, so this section is often
-                # empty on the cyclone page; when it is, it must say so
-                if page.locator("#others td.num.lnk").count():
-                    linked_href("#others td.num.lnk", "the other-contracts table")
-                else:
-                    chk.add(f"{scheme} hurricane link: an empty other-contracts section explains itself",
-                            "Nothing beyond the count and landfall" in page.locator("#others").inner_text(),
-                            page.locator("#others").inner_text()[:80])
+                # a storm's wind contracts are drawn in full by the live-storm
+                # section, so the page carries no catch-all contract table any
+                # more, and the tornado contracts belong to Weather
+                body = page.locator(".wrap").inner_text()
+                chk.add(f"{scheme} hurricane: no catch-all contract table is drawn",
+                        page.locator("#others").count() == 0
+                        and "OTHER TROPICAL CYCLONE CONTRACTS" not in body, "")
                 chk.add(f"{scheme} hurricane: the tornado contracts are not on the cyclone page",
-                        "SWTUS" not in page.locator("#others").inner_text(),
-                        page.locator("#others").inner_text()[:70])
+                        "SWTUS" not in body, body[:70])
                 linked_href("#cat4 .lrow[role='link']", "the category 4 board")
                 # the remaining-season curve, and what it must not claim
                 chk.add(f"{scheme} cat4: the remaining-season curve is drawn",
