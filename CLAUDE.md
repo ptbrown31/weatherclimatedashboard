@@ -59,18 +59,18 @@ hurricane and climate groups), `off` in the embed unless `?market=on`, `placehol
 reference package's synthetic ladders. Prices are the exchange's, in cents, with their as-of time,
 never fee adjusted. Exchange language: there are no sellers, only bids to buy Yes or No that sum to $1;
 the feed's "ask" on a Yes contract is one dollar less the No bid and the pages never say "ask", "sell"
-or "offer". The pages never compute a fair value, a model probability or a disagreement
-score (those are internal systems and stay out of this repo). One documented exception (owner's
-decision 2026-09-01): the highest-wind pool's stated calculation, `pwin` in `pipeline/reask.py` —
-an independence argmax over the vendor's published exceedance ladders, floored by published interim
-settlements — shown only with its formula printed beside it and never a desk number. A second, narrower
-exception (owner's decision 2026-09-02): a storm the owner has ruled on carries, as its exchange series,
-the per-delivery prices the exchange was given to quote instead of the quotes it showed. The ruling is a
-file under `pipeline/overrides/` (Edouard 2026, the first listing: no contract traded and the quotes were
-not maintained), applied on every write of the ledger and of the pool series so a rebuild cannot undo it;
+or "offer". The pages never compute a fair value, a model probability, a disagreement score, or a
+figure of their own for the highest-wind pool (those are internal systems and stay out of this repo;
+the pool's calculation is done once per cycle on the desk and reaches the exchange through the market
+maker, so the page shows the exchange's price). An earlier exception for a site-computed pool figure
+(2026-09-01) was withdrawn by the owner on 2026-09-02. The one documented exception (owner's decision
+2026-09-02): a storm the owner has ruled on carries, as its exchange series and as its pool figure,
+the desk's per-delivery output instead of the quotes the exchange showed. The ruling is a file under
+`pipeline/overrides/` (Edouard 2026, the first listing: no contract traded and the quotes were not
+maintained), applied on every write of the ledger and of the pool series so a rebuild cannot undo it;
 `scripts/apply_overrides.py` applies it once to what is already stored. Storms without a file carry the
-exchange's quotes as read, and the pages draw them with no note either way. When off, the layout reserves no
-space for market elements.
+exchange's quotes as read and no figure, and the pages draw them with no note either way. When off, the
+layout reserves no space for market elements.
 
 ## Decisions taken 2026-08-21
 

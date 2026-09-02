@@ -88,8 +88,8 @@ window.WXStorm = (() => {
      drawn before the data so every line and label sits over it and nothing
      is displaced. The internal dashboards carry the vendor's raster badge in
      their page header; a chart corner takes a quiet vector line instead. */
-  function reaskMark(svg, x, y) {
-    svg.appendChild(txt('POWERED BY REASK', { x, y, 'text-anchor': 'end', 'font-size': 7.5,
+  function reaskMark(svg, x, y, anchor) {
+    svg.appendChild(txt('POWERED BY REASK', { x, y, 'text-anchor': anchor || 'end', 'font-size': 7.5,
       'letter-spacing': '0.12em', fill: 'var(--muted)', opacity: 0.5, 'pointer-events': 'none' }));
   }
 
@@ -97,25 +97,15 @@ window.WXStorm = (() => {
   const rung = (i, n) => 'hsl(' + Math.round(210 - 210 * (i / Math.max(1, n - 1))) + ' 70% 45%)';
   const stormCode = n => String(n || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
 
-  /* The stated calculation's wording, printed beside every display of the
-     number, because a probability the site computes exists only together
-     with the formula that computed it. */
-  const METHOD = 'Each figure is the chance that a location records this storm’s single highest gust, '
-    + 'computed from the vendor’s published per-location gust probabilities. The calculation treats each '
-    + 'location’s ladder as a distribution over gusts, assumes locations are independent, and computes the '
-    + 'probability of coming out on top exactly on a one-mph grid, with each ladder uniform within its '
-    + 'published bins. All 163 reference locations are included, so the percentages for the locations '
-    + 'shown need not add to one hundred; the remainder belongs to those not shown.';
-
-  /* The current stated-calculation figure per location NAME for one storm.
-     One field everywhere: the pool's candidates are all the reference
-     locations (the owner's call, 2026-09-01), so each figure is the chance
-     of beating the whole field, and the listed strikes need not sum to one;
-     the remainder is the chance a location outside them takes it. */
+  /* The pool figure per location NAME for one storm, when there is one to
+     show. The site computes none of its own: the pool's calculation is the
+     desk's and reaches the exchange through the market maker, so the page
+     shows the exchange's price. A storm the owner has ruled on carries the
+     ruling's figure, and that is the only figure drawn. */
   function calcByName(stormName) {
     const s = ((RK && RK.storms) || []).find(x => x.name === stormName);
     const lc = s && s.livecyc;
-    if (!lc || !lc.pwin) return null;
+    if (!lc || !lc.pwin || lc.pwinMethod !== 'override') return null;
     const out = {};
     // a candidate the interim settled high can be absent from the newest
     // cycle, so its name is looked for on the interim's rows as well
@@ -376,7 +366,9 @@ window.WXStorm = (() => {
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'scard emph-' + EMPH });
     if (url) WXM.linkTo(svg.appendChild(el('rect', { class: 'plotlink', x: 0, y: 0, width: W, height: H, fill: 'transparent' })),
                         url, 'Open the ' + (meta.name || sid) + ' contract on IBKR');
-    reaskMark(svg, R - 4, B - 5);
+    // the vendor's mark in the top left, above the plot, where no column or
+    // shading can cover it
+    reaskMark(svg, L + 2, T - 5, 'start');
     const N = Math.max(cols.length, 2);
     const x = i => L + (i / (N - 1)) * (R - L);
     const y = p => B - (p / 100) * (B - T);
@@ -705,7 +697,7 @@ window.WXStorm = (() => {
       });
       [0, 25, 50, 75, 100].forEach(cc => svg.appendChild(txt(String(cc), { x: px(cc / 100),
         y: T2 + rows.length * rowH + 12, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 })));
-      svg.appendChild(txt('Yes green, No red · ¢ · dashed tick: the calculation', { x: (LX + RX) / 2,
+      svg.appendChild(txt('Yes green, No red · ¢' + (calc ? ' · dashed tick: the calculation' : ''), { x: (LX + RX) / 2,
         y: H2 - 4, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
       div.appendChild(svg);
       out.push(div);
@@ -715,20 +707,19 @@ window.WXStorm = (() => {
 
   // ---- the pool's panel: the chart on the left, the market's ladder on the
   // right, the same shape as the count contracts. In the chart the exchange's
-  // price is solid and in front, the raw calculation dashed behind it; one
-  // column per LiveCyc delivery on the same axis as the location cards, with
-  // the price drawn continuously between columns at the pace it actually
-  // moved, because the market trades between deliveries even though the
-  // calculation cannot.
+  // price is solid, one column per delivery on the same axis as the location
+  // cards, with the price drawn continuously between columns at the pace it
+  // actually moved, because the market trades between deliveries. The site
+  // draws no calculation of its own behind it; a storm the owner has ruled
+  // on carries the ruling's figure, dashed, and that is the only case.
   async function poolSeries(m, ledger) {
-    // every delivery that carries the figure: the cycles, and the interim,
-    // whose figure is the fold of the newest cycle with what it settled
-    const cyc = delivered(ledger).filter(s => s.pwin && (s.kind === 'livecyc' || s.kind === 'interim'));
+    const cyc = delivered(ledger).filter(s => s.kind === 'livecyc' || s.kind === 'interim');
     if (!cyc.length) return null;
-    // the calculation at each delivery, under the location's name
+    const ruledCalc = !!(ledger && ledger.pricesFrom === 'override');
+    // the ruling's figure at each delivery, under the location's name
     const calc = cyc.map(s => {
       const by = {};
-      Object.keys(s.pwin).forEach(sid => {
+      Object.keys((ruledCalc && s.pwin) || {}).forEach(sid => {
         by[(s.siteMeta && s.siteMeta[sid] && s.siteMeta[sid].name) || sid] = s.pwin[sid];
       });
       return by;
@@ -778,7 +769,8 @@ window.WXStorm = (() => {
     const url = WXM.contractUrl(m.productConid, top.conidYes || top.conid);
     if (url) WXM.linkTo(svg.appendChild(el('rect', { class: 'plotlink', x: 0, y: 0, width: R + 12, height: Hh, fill: 'transparent' })),
                         url, 'Open the ' + (m.name || m.symbol) + ' contract on IBKR');
-    reaskMark(svg, R - 4, B - 5);
+    // the vendor's mark in the top left, between the legend line and the plot
+    reaskMark(svg, L + 2, T - 4, 'start');
     // the same columns as the location cards, so the two read against each
     // other; a delivery before the calculation existed has a column and no dot
     const cols = columns(ledger, stormEntry({ name: ledger.name, year: ledger.year }));
@@ -799,9 +791,11 @@ window.WXStorm = (() => {
     // the legend, inside the frame, with what the axis rows are
     svg.appendChild(el('line', { x1: L, x2: L + 20, y1: 11, y2: 11, stroke: 'var(--ink)', 'stroke-width': 2.4 }));
     svg.appendChild(txt('exchange price', { x: L + 25, y: 14, class: 'ax' }));
-    svg.appendChild(el('line', { x1: L + 110, x2: L + 130, y1: 11, y2: 11, stroke: 'var(--ink)',
-      'stroke-width': 1.7, 'stroke-dasharray': '5 4' }));
-    svg.appendChild(txt('calculation', { x: L + 135, y: 14, class: 'ax' }));
+    if (ruledCalc) {
+      svg.appendChild(el('line', { x1: L + 110, x2: L + 130, y1: 11, y2: 11, stroke: 'var(--ink)',
+        'stroke-width': 1.7, 'stroke-dasharray': '5 4' }));
+      svg.appendChild(txt('calculation', { x: L + 135, y: 14, class: 'ax' }));
+    }
     svg.appendChild(txt('axis rows, the NHC cycle over the file’s arrival in ET', { x: R, y: 14, 'text-anchor': 'end',
       class: 'ax', opacity: .75 }));
 
@@ -838,12 +832,12 @@ window.WXStorm = (() => {
         width: Math.max(wcol, 6), height: B - T, fill: 'transparent' });
       bind(band, () => {
         const pr = atDelivery(k);
-        const head = ['location', 'calculation', 'exchange'];
+        const head = ruledCalc ? ['location', 'calculation', 'exchange'] : ['location', 'exchange'];
         const rows = names.map(nm => {
           const b = book(pr[nm]);
-          return [esc(nm), calc[k][nm] != null ? calc[k][nm] + '%' : null,
-                  b == null ? null : (ruled || b.bid === b.ask ? Math.round(b.mid) + '¢'
-                                      : Math.round(b.mid) + '¢ (Yes bid ' + b.bid + ', No bid ' + Math.round(100 - b.ask) + ')')];
+          const px = b == null ? null : (ruled || b.bid === b.ask ? Math.round(b.mid) + '¢'
+                                         : Math.round(b.mid) + '¢ (Yes bid ' + b.bid + ', No bid ' + Math.round(100 - b.ask) + ')');
+          return ruledCalc ? [esc(nm), calc[k][nm] != null ? calc[k][nm] + '%' : null, px] : [esc(nm), px];
         });
         const et = etTime(s.ts) || etTime(s.at);
         return colTip(label(s) + (k === cyc.length - 1 ? ' (latest)' : ''), et ? 'file ' + et + ' ET' : '',
@@ -938,7 +932,7 @@ window.WXStorm = (() => {
     });
     [0, 25, 50, 75, 100].forEach(cc => lad.appendChild(txt(String(cc), { x: px2(cc),
       y: LT + names.length * rowH + 12, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 })));
-    lad.appendChild(txt('Yes green, No red · ¢ · dashed tick: the calculation', { x: (LX2 + RX2) / 2,
+    lad.appendChild(txt('Yes green, No red · ¢' + (ruledCalc ? ' · dashed tick: the calculation' : ''), { x: (LX2 + RX2) / 2,
       y: LT + names.length * rowH + 24, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
 
     const wrap = h('div', { class: 'cwrap', style: 'margin:12px 0 0' });
@@ -947,9 +941,6 @@ window.WXStorm = (() => {
     title.appendChild(WXC.expander(wrap, 'Expand'));
     wrap.appendChild(title);
     wrap.appendChild(svg);
-    // the formula describes the site's own calculation; a pool under the
-    // owner's ruling draws the ruling's figure instead, so it is not printed
-    if (!ruled) wrap.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0', text: METHOD }));
     return wrap;
   }
 
@@ -1006,28 +997,6 @@ window.WXStorm = (() => {
     return hit;
   }
 
-  /* Before the exchange lists the pool there is no price to draw, but the
-     stated calculation exists from the first delivery, so it stands alone
-     with its formula until the prices join it at listing. */
-  function appendStatedLadder(storm, host) {
-    if (poolMarkets(storm.name).length) return;
-    const calc = calcByName(storm.name);
-    if (!calc) return;
-    const names = Object.keys(calc).sort((a, b) => calc[b] - calc[a]);
-    const div = h('div', { class: 'ladder' }, [
-      h('div', { class: 'lt', text: 'Highest-wind location (LHL) — the stated calculation, awaiting listing' })]);
-    names.forEach(nm => {
-      div.appendChild(h('div', { class: 'lrow' }, [
-        h('span', { class: 'lk', text: nm }),
-        h('span', { class: 'lb' }, [h('i', { style: 'width:' + calc[nm] + '%' })]),
-        h('span', { class: 'lv', text: calc[nm] + '%' })]));
-    });
-    const g = h('div', { class: 'ladders' }); g.appendChild(div);
-    host.appendChild(g);
-    host.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
-      text: 'The exchange has not listed this pool yet; its prices join this display at listing. ' + METHOD }));
-  }
-
   // ---- one storm
   async function drawStorm(storm, host) {
     const key = storm.name + '_' + storm.year;
@@ -1072,9 +1041,6 @@ window.WXStorm = (() => {
     }
     if (!doc || !cyc.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
-      // the stated calculation needs only the index's current ladder, so it
-      // does not wait for the delivery ledger
-      appendStatedLadder(storm, host);
       return;
     }
     // the locations worth showing: the strongest so far, which can only look backwards
@@ -1104,22 +1070,13 @@ window.WXStorm = (() => {
     host.appendChild(grid);
     tl.place();
     if (order.length > MAX_CARDS) host.appendChild(h('p', { class: 'cap', text: order.length - MAX_CARDS + ' further locations have signalled and are not drawn; the strongest ' + MAX_CARDS + ' are shown.' }));
-    let seriesShown = false;
     const shown = [];
     for (const m of poolMarkets(storm.name)) {
       const ser = await poolSeries(m, doc);
-      if (ser) { host.appendChild(ser); seriesShown = true; shown.push(m.symbol); }
+      if (ser) { host.appendChild(ser); shown.push(m.symbol); }
     }
     const p = pools(storm, shown);
     if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
-    /* The calculation never appears without its formula. The chart's caption
-       carries it wherever a chart is drawn; a listed pool with no deliveries
-       behind it yet has no chart, so the formula goes here instead. */
-    if (!seriesShown && poolMarkets(storm.name).length && calcByName(storm.name)) {
-      host.appendChild(h('p', { class: 'cap', style: 'margin:2px 0 0',
-        text: 'The calc figure on each row is the stated calculation. ' + METHOD }));
-    }
-    appendStatedLadder(storm, host);
     host.appendChild(h('p', { class: 'cap attrib', text: (RK && RK.attribution) || 'Powered by Reask' }));
     setEmph(EMPH);
   }

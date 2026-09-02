@@ -149,23 +149,27 @@ def _group_snapshot(name: str, now: dt.datetime, items: List[dict]) -> dict:
 
 
 LHL_MAX_POINTS = 3000          # a storm's pool lives days; this holds weeks at the quote cadence
+LHL_MAX_AGE_DAYS = 60          # and a pool symbol comes round again with its storm's name, years later
 
 # One pool's opening quotes ruled out of the public display (the owner's call,
 # 2026-09-01): Edouard's market opened on a pair-normalised 95/5 book that had
 # nothing to do with the field and was corrected within hours. Points at or
 # before the cutoff are dropped on every write, so a rebuild cannot put them
 # back.
-LHL_DROP_BEFORE = {"LHLED": "2026-09-01T17:30:00Z"}
+LHL_DROP_BEFORE = {("LHLED", 2026): "2026-09-01T17:30:00Z"}
 
 # A pool whose series is not the exchange's quotes at all: the same ruling
 # that governs a storm's ledger (pipeline/reask.py, OVERRIDES_DIR) can carry
 # a "pools" block, one point per delivery, and that block is the series,
 # written in place of the quotes on every pass so nothing can overwrite it.
+# A pool symbol is the storm's first two letters and carries no year, and
+# the name list comes round again every six years, so a ruling reaches a
+# pool only in the year the ruling names.
 OVERRIDES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overrides")
 
 
-def lhl_override(symbol: str) -> Optional[list]:
-    """The points a ruling substitutes for one pool's series, or None."""
+def lhl_override(symbol: str, year) -> Optional[list]:
+    """The points a ruling substitutes for one pool's series in one year, or None."""
     try:
         names = sorted(os.listdir(OVERRIDES_DIR))
     except OSError:
@@ -178,7 +182,9 @@ def lhl_override(symbol: str) -> Optional[list]:
                 ov = json.load(f)
         except (OSError, ValueError):
             continue
-        pts = ((ov if isinstance(ov, dict) else {}).get("pools") or {}).get(symbol)
+        if not isinstance(ov, dict) or str(ov.get("year")) != str(year):
+            continue
+        pts = (ov.get("pools") or {}).get(symbol)
         if isinstance(pts, list):
             return pts
     return None
@@ -204,7 +210,7 @@ def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
         if not str(m.get("symbol", "")).startswith("LHL"):
             continue
         key = f"snapshots/lhl/{m['symbol']}.json"
-        ruled = lhl_override(m["symbol"])
+        ruled = lhl_override(m["symbol"], now.year)
         if ruled is not None:
             store.put(key, json.dumps({"schema": 1, "symbol": m["symbol"], "name": m.get("name"),
                                        "asof": _iso(now), "override": True, "points": ruled},
@@ -232,10 +238,12 @@ def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
         if not prices:
             continue
         stamp = _iso(now)
-        pts = [q for q in pts if q.get("t") != stamp]
+        # points from another season under the same symbol are another storm's
+        floor = _iso(now - dt.timedelta(days=LHL_MAX_AGE_DAYS))
+        pts = [q for q in pts if q.get("t") != stamp and (q.get("t") or "") >= floor]
         pts.append({"t": stamp, "p": prices})
         pts.sort(key=lambda q: q["t"])
-        cut = LHL_DROP_BEFORE.get(m["symbol"])
+        cut = LHL_DROP_BEFORE.get((m["symbol"], now.year))
         if cut:
             pts = [q for q in pts if q.get("t", "") > cut]
         if len(pts) > LHL_MAX_POINTS:

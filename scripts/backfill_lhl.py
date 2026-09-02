@@ -100,10 +100,10 @@ def main(argv=None) -> int:
 
     out = {}
     for sym, byt in series.items():
-        cut = LHL_DROP_BEFORE.get(sym, "")
+        cut = LHL_DROP_BEFORE.get((sym, today.year), "")
         pts = [{"t": t, "p": p} for t, p in sorted(byt.items()) if p and t > cut][-LHL_MAX_POINTS:]
         # a pool under the owner's ruling is that ruling's points, never the archive's
-        ruled = lhl_override(sym)
+        ruled = lhl_override(sym, today.year)
         if ruled is not None:
             pts = ruled
         out[sym] = len(pts)

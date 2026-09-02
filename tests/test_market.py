@@ -193,7 +193,7 @@ class VendorLane(unittest.TestCase):
         led = json.loads(self.st.get("snapshots/storm/Milton_2026.json"))
         int_step = next(x for x in led["steps"] if x["kind"] == "interim")
         self.assertEqual(sorted(int_step["sites"]), ["BR"])
-        self.assertEqual(int_step["pwinMethod"], reask.PWIN_METHOD)      # the fold rides on the interim
+        self.assertNotIn("pwin", int_step)                                 # no figure of the site's own
         self.assertEqual(snap["asof"], "2026-08-23T06:00:00Z")
         self.assertEqual(snap["attribution"], "Powered by Reask")
         self.assertTrue(self.st.exists("archive/reask/Milton_2026/livecyc_2026082306.csv.gz"))
@@ -717,7 +717,7 @@ class ReparsingTheInterim(unittest.TestCase):
         self.assertEqual(int_step["sites"], {"LC": [0.0, 0.0]})
         self.assertEqual(int_step["prices"], {"LC": {"70": 15.0}})       # what stood when it landed, not today's book
         self.assertEqual(int_step["ts"], "2026-09-02T14:54:48Z")
-        self.assertIn("pwin", int_step)
+        self.assertNotIn("pwin", int_step)
         snap = json.loads(st.get(reask.KEY))
         self.assertEqual(sorted(snap["storms"][0]["interim"]["sites"]), ["LC"])
         # a second run finds the step as it would write it
@@ -741,9 +741,7 @@ class InterimInTheLedger(unittest.TestCase):
     def test_zero_rows_stay_only_for_sites_the_ledger_already_has(self):
         reask.append_step(self.st, "Erin", 2026, reask._step(self.lad({"LC": [20, 5]}), "livecyc", "2026090100", "t", "ts"), self.quiet)
         interim = self.lad({"LC": [0, 0], "BR": [0, 0], "TA": [99, 50]})
-        got = reask.append_step(self.st, "Erin", 2026,
-                                reask.interim_step(interim, "lm", "ts2", {}, {"thresholds": [60, 70], "sites": {"LC": {"p": [20, 5]}}}),
-                                self.quiet)
+        got = reask.append_step(self.st, "Erin", 2026, reask._step(interim, "interim", "INT", "lm", "ts2", {}), self.quiet)
         doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
         st = doc["steps"][-1]
         self.assertEqual(st["kind"], "interim")
@@ -752,65 +750,13 @@ class InterimInTheLedger(unittest.TestCase):
         self.assertEqual(sorted(doc["sites"]), ["LC", "TA"])        # TA enters on its figure; BR does not enter at all
         self.assertTrue(st["siteMeta"]["LC"]["covered"])
         self.assertEqual(st["sites"]["LC"], [0, 0])
-
-    def test_the_interims_pool_figure_folds_the_forecast_with_what_settled(self):
-        live = {"thresholds": [60, 70], "sites": {"A": {"p": [10, 2]}, "B": {"p": [50, 20]}}}
-        st = reask.interim_step(self.lad({"A": [100, 100], "B": [0, 0]}), "lm", "ts", {}, live)
-        # A is settled above both rungs, so it holds the storm's highest gust unless B's
-        # remaining 20% above 70 lands on top, which the uniform bin splits evenly: 90
-        self.assertEqual(st["pwinMethod"], reask.PWIN_METHOD)
-        self.assertAlmostEqual(st["pwin"]["A"], 90.0, delta=0.1)
-        self.assertGreater(st["pwin"]["A"], st["pwin"]["B"])
-        # without a cycle to fold there is no figure to carry
-        self.assertNotIn("pwin", reask.interim_step(self.lad({"A": [100, 100]}), "lm", "ts", {}, None))
-
-    def test_a_cycle_after_the_interim_carries_the_fold_and_one_before_does_not(self):
-        lad = self.lad({"A": [10, 2], "B": [50, 20]})
-        before = reask._step(lad, "livecyc", "2026090100", "t", "ts")
-        after = reask._step(lad, "livecyc", "2026090106", "t", "ts", floor={"A": [100, 100]})
-        self.assertGreater(before["pwin"]["B"], before["pwin"]["A"])   # the forecast alone favours B
-        self.assertGreater(after["pwin"]["A"], after["pwin"]["B"])     # what the interim settled favours A
+        self.assertNotIn("pwin", st)
 
     def test_a_nan_or_negative_cell_is_no_figure(self):
         head = "ID,Display Location,Latitude,Longitude,covered,prob_60mph,prob_70mph\n"
         for cells in ("nan,0.0", "-1,0.0", "inf,0.0"):
             lad = reask.parse_ladder_csv(head + "BR,Brownsville,25.9,-97.5,True," + cells + "\n", keep_zero=True)
             self.assertEqual(lad["sites"], {}, cells)
-
-    def test_two_files_with_different_rungs_are_joined_by_value(self):
-        # the cycle carries a 60 mph rung the interim lacks; A's 100% at 70 is read at 70, not shifted
-        live = {"thresholds": [60, 70, 80], "sites": {"A": {"p": [90, 10, 2]}, "B": {"p": [95, 50, 20]}}}
-        interim = {"thresholds": [70, 80], "rows": 2,
-                   "sites": {"A": {"name": "a", "covered": True, "p": [100, 100]},
-                             "B": {"name": "b", "covered": True, "p": [0, 0]}}}
-        st = reask.interim_step(interim, "lm", "ts", {}, live)
-        self.assertGreater(st["pwin"]["A"], st["pwin"]["B"])
-        self.assertEqual(reask._aligned({"A": [90, 10, 2]}, [60, 70, 80], [70, 80]), {"A": [10, 2]})
-        self.assertEqual(reask._aligned({"A": [10, 2]}, [70, 80], [60, 70, 80]), {"A": [0.0, 10, 2]})
-
-    def test_restating_brings_the_interim_and_the_cycles_after_it_to_the_fold(self):
-        doc = {"thresholds": [60, 70], "steps": [
-            {"kind": "livecyc", "id": "a", "ts": "2026-09-01T00:00Z", "sites": {"A": [10, 2], "B": [50, 20]}},
-            {"kind": "interim", "id": "INT", "ts": "2026-09-01T06:00Z", "sites": {"A": [100, 100], "B": [0, 0]}},
-            {"kind": "livecyc", "id": "b", "ts": "2026-09-01T12:00Z", "sites": {"A": [0, 0], "B": [50, 20]}}]}
-        self.st.put("snapshots/storm/Erin_2026.json", json.dumps(doc).encode())
-        n = reask.restate_pwin(self.st, "Erin", 2026, [], self.quiet)
-        self.assertEqual(n, 3)
-        out = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
-        a, i, b = out["steps"]
-        self.assertGreater(a["pwin"]["B"], a["pwin"]["A"])      # before the interim, the forecast alone
-        self.assertGreater(i["pwin"]["A"], i["pwin"]["B"])      # the interim's figure is the fold
-        self.assertGreater(b["pwin"]["A"], b["pwin"]["B"])      # and so is a cycle that came after it
-        self.assertEqual(reask.restate_pwin(self.st, "Erin", 2026, [], self.quiet), 0)   # idempotent
-
-    def test_a_location_the_forecast_zeroed_but_the_interim_settled_is_a_candidate(self):
-        got = reask.pwin([60, 70], {"A": [50, 10], "B": [0, 0]}, {"B": [100, 100]})
-        self.assertIn("B", got)
-        self.assertGreater(got["B"], got["A"])
-        # and a location only the interim names is a candidate too
-        got = reask.pwin([60, 70], {"A": [50, 10]}, {"B": [100, 100]})
-        self.assertGreater(got["B"], 90)
-
 
 class PriceRuling(unittest.TestCase):
     """A storm the owner has ruled on carries the ruling's prices, not the
@@ -868,11 +814,7 @@ class PriceRuling(unittest.TestCase):
         step = reask._step(self.lad([40, 12]), "livecyc", "2026090100", "t", "ts", {"BR": {"70": 53.0}})
         reask.append_step(self.st, "Erin", 2026, step, lambda **k: None)
         doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
-        self.assertEqual(doc["steps"][0]["pwin"], {"BR": 54.8, "TA": 23.7})     # the ruling's figure, not the site's
-        # a restatement leaves a ruled step alone rather than recomputing it
-        reask.restate_pwin(self.st, "Erin", 2026, [70, 80], lambda **k: None)
-        doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
-        self.assertEqual(doc["steps"][0]["pwin"], {"BR": 54.8, "TA": 23.7})
+        self.assertEqual(doc["steps"][0]["pwin"], {"BR": 54.8, "TA": 23.7})     # the ruling's figure, the only kind there is
         # the index shows the newest delivery that carries a figure
         self.assertEqual(reask.latest_override_pwin(reask.price_override("Erin", 2026)), {"BR": 34.7, "TA": 22.2})
         self.assertEqual(reask.absorbed_storms(), {"Five_2026": "Erin_2026"})
@@ -909,8 +851,7 @@ class PriceRuling(unittest.TestCase):
                           reask._step(self.lad([40, 12]), "livecyc", "2026090100", "t", "ts", {"BR": {"70": 53.0}}), lambda **k: None)
         interim = {"thresholds": [70, 80], "rows": 1, "sites": {"BR": {"name": "b", "covered": True, "p": [0, 0]}}}
         reask.append_step(self.st, "Erin", 2026,
-                          reask.interim_step(interim, "lm", "ts2", {"BR": {"70": 15.0}}, {"thresholds": [70, 80], "sites": {"BR": {"p": [40, 12]}}}),
-                          lambda **k: None)
+                          reask._step(interim, "interim", "INT", "lm", "ts2", {"BR": {"70": 15.0}}), lambda **k: None)
         doc = json.loads(self.st.get("snapshots/storm/Erin_2026.json"))
         int_step = doc["steps"][-1]
         self.assertEqual(int_step["prices"], {})                         # the exchange's stale book does not show
@@ -927,7 +868,14 @@ class PriceRuling(unittest.TestCase):
         doc = json.loads(self.st.get("snapshots/lhl/LHLERG.json"))
         self.assertTrue(doc["override"])
         self.assertEqual(doc["points"], [{"t": "2026-09-01T10:00:00Z", "p": {"Brownsville": [54.8, 54.8]}}])
-        self.assertIsNone(market.lhl_override("LHLXYZ"))
+        self.assertIsNone(market.lhl_override("LHLXYZ", 2026))
+        # the name list comes round every six years: the 2026 ruling reaches no 2032 pool
+        self.assertIsNone(market.lhl_override("LHLERG", 2032))
+        later = dt.datetime(2032, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+        market._lhl_series(self.st, later, items)
+        doc = json.loads(self.st.get("snapshots/lhl/LHLERG.json"))
+        self.assertNotIn("override", doc)
+        self.assertEqual([q["p"]["Brownsville"] for q in doc["points"]], [[40.0, 46.0]])
 
 
 class LhlSeries(unittest.TestCase):
@@ -977,7 +925,7 @@ class LhlSeries(unittest.TestCase):
         # put those points back
         st = self.Store()
         t0 = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
-        keep, market.LHL_DROP_BEFORE = market.LHL_DROP_BEFORE, {"LHLERG": "2026-09-01T12:05:00Z"}
+        keep, market.LHL_DROP_BEFORE = market.LHL_DROP_BEFORE, {("LHLERG", 2026): "2026-09-01T12:05:00Z"}
         try:
             market._lhl_series(st, t0, self.ITEMS)
             market._lhl_series(st, t0 + dt.timedelta(minutes=10), self.ITEMS)
@@ -992,6 +940,17 @@ class LhlSeries(unittest.TestCase):
         pts = [{"t": (t0 + dt.timedelta(minutes=10 * i)).isoformat().replace("+00:00", "Z"),
                 "p": {"Brownsville": [1.0, 2.0]}} for i in range(market.LHL_MAX_POINTS + 50)]
         st.d["snapshots/lhl/LHLERG.json"] = json.dumps({"points": pts}).encode()
-        market._lhl_series(st, t0 + dt.timedelta(days=90), self.ITEMS)
+        market._lhl_series(st, t0 + dt.timedelta(days=22), self.ITEMS)
         self.assertEqual(len(json.loads(st.d["snapshots/lhl/LHLERG.json"])["points"]),
                          market.LHL_MAX_POINTS)
+
+    def test_points_from_another_season_under_the_same_symbol_are_dropped(self):
+        # a pool symbol is the storm's two letters and the name list comes round
+        # again, so a series left over from an earlier storm is not this one's
+        st = self.Store()
+        t0 = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+        st.d["snapshots/lhl/LHLERG.json"] = json.dumps({"points": [
+            {"t": "2026-09-01T12:00:00Z", "p": {"Brownsville": [1.0, 2.0]}}]}).encode()
+        market._lhl_series(st, t0 + dt.timedelta(days=90), self.ITEMS)
+        pts = json.loads(st.d["snapshots/lhl/LHLERG.json"])["points"]
+        self.assertEqual([q["t"][:10] for q in pts], ["2026-11-30"])

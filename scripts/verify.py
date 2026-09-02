@@ -1034,12 +1034,13 @@ def run(no_build: bool) -> int:
                                no: svg.querySelectorAll("rect[fill='var(--no)']").length,
                                calcTicks: svg.querySelectorAll('line.calcmk').length };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): the pool ladder draws the site's Yes/No bars with the calculation ticked",
+                    chk.add(f"{scheme} storm ({tag}): the pool ladder draws the site's Yes/No bars and no tick of the site's own",
                             bool(plad and plad["rows"] >= 1 and plad["yes"] >= 1 and plad["no"] >= 1
-                                 and plad["calcTicks"] >= 1), str(plad))
-                    # the pool chart: the exchange's price solid and in front,
-                    # the raw calculation dashed behind it, both on the delivery
-                    # axis with a reserved column for the book now
+                                 and plad["calcTicks"] == 0), str(plad))
+                    # the pool chart: the exchange's price solid on the delivery
+                    # axis, and nothing of the site's own behind it, since the pool's
+                    # calculation is the desk's and reaches the exchange through
+                    # the market maker
                     lhl = page.evaluate(r"""() => {
                       const svg = document.querySelector('#liveStorms svg.lhlserie');
                       if (!svg) return null;
@@ -1052,7 +1053,7 @@ def run(no_build: bool) -> int:
                         calcDots: svg.querySelectorAll('circle.cdot').length,
                         ladderRows: svg.querySelectorAll('g.plad g.prow').length,
                         ladderTitle: labels.some(t => /market’s ladder/.test(t)),
-                        legend: labels.includes('exchange price') && labels.includes('calculation'),
+                        legend: labels.includes('exchange price') && !labels.includes('calculation'),
                         cycleTicks: labels.filter(t => /^\d\dZ$/.test(t)).length,
                         etTicks: labels.filter(t => /^\d{1,2}:\d\d[ap]$/.test(t)).length,
                         axisNote: labels.some(t => /^axis rows, the NHC cycle/.test(t)),
@@ -1063,16 +1064,16 @@ def run(no_build: bool) -> int:
                                 && /need not add to one hundred/.test(cap),
                       };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): the pool's price is solid and in front, the calculation dashed behind",
-                            bool(lhl and lhl["priceSolid"] >= 1 and lhl["calcDashed"] >= 1
-                                 and lhl["calcDots"] >= 2 and lhl["legend"]
+                    chk.add(f"{scheme} storm ({tag}): the pool's price is solid and no calculation of the site's own is drawn",
+                            bool(lhl and lhl["priceSolid"] >= 1 and lhl["calcDashed"] == 0
+                                 and lhl["calcDots"] == 0 and lhl["legend"]
                                  and "(LHL" in lhl["title"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the market's ladder sits to the right of the chart",
                             bool(lhl and lhl["ladderRows"] >= 1 and lhl["ladderTitle"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the pool's axis names the NHC cycle and the file's arrival in ET",
                             bool(lhl and lhl["cycleTicks"] >= 2 and lhl["etTicks"] >= 2 and lhl["axisNote"]), str(lhl))
-                    chk.add(f"{scheme} storm ({tag}): the formula is the only prose under the chart",
-                            bool(lhl and lhl["stated"] and lhl["capCount"] == 1), str(lhl))
+                    chk.add(f"{scheme} storm ({tag}): no prose under the chart and no formula, there being no figure of the site's own",
+                            bool(lhl and not lhl["stated"] and lhl["capCount"] == 0), str(lhl))
                     # ---- the key, the switch between the two series, and the note beside it
                     # the section's own key and switch, as against the copies each
                     # card keeps out of sight for when it fills the window
@@ -1430,8 +1431,8 @@ def run(no_build: bool) -> int:
                   return { lt, joined: /join this display at listing/.test(caps),
                            stated: /Each figure is the chance/.test(caps) };
                 }""")
-                chk.add(f"{scheme} hurricane: before listing the stated calculation stands alone with its formula",
-                        bool(pre and pre["lt"] and pre["joined"] and pre["stated"]), str(pre))
+                chk.add(f"{scheme} hurricane: before listing there is no figure of the site's own to stand in for a price",
+                        bool(pre and pre["lt"] is None and not pre["joined"] and not pre["stated"]), str(pre))
                 # a decayed ladder with no interim file raises the pending note,
                 # so the sag reads as settlement data pending rather than as the
                 # threat having vanished

@@ -63,7 +63,7 @@ def reparse(store, dry_run: bool = False) -> dict:
             report["storms"][name] = "ledger has no interim step"
             continue
         parsed = reask.parse_ladder_csv(gzip.decompress(raw).decode("utf-8", "replace"), keep_zero=True)
-        st = reask.interim_step(parsed, stored.get("at", im["lastModified"]), stored.get("ts"), stored.get("prices"), s.get("livecyc"))
+        st = reask._step(parsed, "interim", "INT", stored.get("at", im["lastModified"]), stored.get("ts"), stored.get("prices"))
         if dry_run:
             cand = _as_written(name, year, doc, st)
             same = json.dumps(cand, sort_keys=True) == json.dumps(stored, sort_keys=True)
