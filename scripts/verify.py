@@ -972,10 +972,17 @@ def run(no_build: bool) -> int:
                     # in miles per hour, which is a different quantity from the ladder
                     ix = _index_for(interim)
                     if final:
+                        # the vendor's final carries every reference location, not the
+                        # affected ones: Milton's lists Brownsville at 18.6 mph. The
+                        # parser drops a blank, so a null here is belt and braces.
                         ix["storms"][0]["final"] = {
                             "lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                            "sites": {"BR": {"name": "Brownsville", "peakGustMph": 96.0},
-                                      "GA": {"name": "Galveston", "peakGustMph": 41.0}}}
+                            "sites": dict({"BR": {"name": "Brownsville", "peakGustMph": 96.0},
+                                           "GA": {"name": "Galveston", "peakGustMph": 41.0},
+                                           "ZZ": {"name": "Far Away", "peakGustMph": None},
+                                           "ZY": {"name": "Calm Harbour", "peakGustMph": 0.0}},
+                                          **{"X%02d" % i: {"name": "Elsewhere %d" % i, "peakGustMph": 20.0 - i * 0.1}
+                                             for i in range(20)})}
                     return ix
 
                 def _storm_routes(interim, final, index_final=False):
@@ -1354,6 +1361,24 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} vendor: the final's rows run highest gust first",
                         bool(vf and len(vf["rows"]) >= 2 and "Brownsville" in vf["rows"][0] and "Galveston" in vf["rows"][1]),
                         str(vf and vf["rows"][:2])[:120])
+                # the file is the whole reference list, so the cap and the ranking are
+                # what make it readable and the count has to say which list it counts
+                vcap = page.evaluate("""() => {
+                  const det = document.querySelector('#vendor details.stormdone');
+                  if (det) det.open = true;
+                  const caps = [...document.querySelectorAll('#vendor p.cap')].map(c => c.textContent).join(' ');
+                  const rows = [...document.querySelectorAll('#vendor table tr')].slice(1)
+                    .map(r => r.textContent.replace(/\s+/g, ' ').trim());
+                  return { caps, rows, n: rows.length };
+                }""")
+                chk.add(f"{scheme} vendor: the final's cap is stated and says the file spans the whole list",
+                        bool(vcap and "of 24 reference locations" in vcap["caps"]
+                             and "not only those the storm reached" in vcap["caps"]
+                             and vcap["n"] == 16), str(vcap and [vcap["n"], vcap["caps"][:110]])[:200])
+                chk.add(f"{scheme} vendor: a location the vendor published no value for is not shown at all",
+                        bool(vcap and not any("Far Away" in r for r in vcap["rows"])
+                             and any("Calm Harbour" not in r for r in vcap["rows"])),
+                        str(vcap and [r for r in vcap["rows"] if "Far" in r])[:120])
                 page.unroute("**/data/snapshots/**")
 
                 # ---- the page's order, the standing links, and a storm that

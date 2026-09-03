@@ -1237,7 +1237,8 @@ window.WXHur = (() => {
         /* The final file is a different quantity: the gust each location
            recorded, in miles per hour, with no ladder behind it. It replaces
            the probabilities rather than joining them. */
-        rows = all.slice().sort((a, b) => (b[1].peakGustMph || 0) - (a[1].peakGustMph || 0)
+        const gust = r => (r.peakGustMph == null ? -Infinity : r.peakGustMph);
+        rows = all.slice().sort((a, b) => gust(b[1]) - gust(a[1])
                                        || String(a[1].name || '').localeCompare(String(b[1].name || ''))).slice(0, VENDOR_ROWS);
         tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' }), h('th', { class: 'num', text: 'Peak gust, mph' })]));
         rows.forEach(([id, r]) => {
@@ -1296,8 +1297,14 @@ window.WXHur = (() => {
       if (later) notes.push('A LiveCyc cycle has arrived since this file. LiveCyc looks forward from its own '
         + 'start, so it reads near zero where the peak has already passed; the interim is the vendor’s word on '
         + 'what happened and is the one shown.');
-      if (all.length > rows.length) notes.push('Showing the ' + rows.length + ' of ' + all.length
-        + ' locations in the file that stand highest.');
+      /* The final file carries every reference location, whatever the storm did.
+         Milton's lists Brownsville and Corpus Christi, neither of which the storm
+         went near, so the ranking and the cap are what make it readable and the
+         count has to say which list it is counting. */
+      if (all.length > rows.length) notes.push(shown.kind === 'final'
+        ? 'Showing the ' + rows.length + ' of ' + all.length + ' reference locations that recorded the highest gusts. '
+          + 'The final file carries every location on the vendor’s list, not only those the storm reached.'
+        : 'Showing the ' + rows.length + ' of ' + all.length + ' locations in the file that stand highest.');
       if (notes.length) into.appendChild(h('p', { class: 'cap', text: notes.join(' ') }));
     });
     host.appendChild(h('p', { class: 'cap attrib', text: (RK.attribution || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + '.' }));
