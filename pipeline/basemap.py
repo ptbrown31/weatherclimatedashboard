@@ -39,11 +39,19 @@ HBOX = [-101.0, 4.0, -40.0, 48.0]         # the Atlantic hurricane box: lon0, la
 # (state FIPS, county name) -> the label the landfall contract uses
 COUNTIES = {("48", "Harris"): "Harris, Texas", ("12", "Broward"): "Broward, Florida",
             ("12", "Palm Beach"): "Palm Beach, Florida", ("12", "Miami-Dade"): "Miami-Dade, Florida",
-            ("12", "Hillsborough"): "Hillsborough, Florida", ("12", "Lee"): "Lee, Florida"}
+            ("12", "Hillsborough"): "Hillsborough, Florida", ("12", "Lee"): "Lee, Florida",
+            # Hawaii's four counties, drawn on the Pacific view (Kalawao, the fifth, is a
+            # 5 km peninsula on Molokai's north shore and no contract names it)
+            ("15", "Hawaii"): "Hawaii, Hawaii", ("15", "Honolulu"): "Honolulu, Hawaii",
+            ("15", "Kauai"): "Kauai, Hawaii", ("15", "Maui"): "Maui, Hawaii"}
+# the states a landfall contract can name: the Atlantic and Gulf coast, and Hawaii
 COASTAL = {"Maine", "New Hampshire", "Massachusetts", "Rhode Island", "Connecticut",
            "New York", "New Jersey", "Pennsylvania", "Delaware", "Maryland", "Virginia",
            "North Carolina", "South Carolina", "Georgia", "Florida", "Alabama",
-           "Mississippi", "Louisiana", "Texas"}
+           "Mississippi", "Louisiana", "Texas", "Hawaii"}
+# the view of the hurricane page a region is drawn on: Hawaii and its counties on the
+# Pacific view, every other region on the Atlantic one
+PACIFIC = lambda name: name == "Hawaii" or name.endswith(", Hawaii")
 
 # Albers equal-area conic, standard parallels 29.5 / 45.5, origin 37.5N 96W
 P1, P2, LAT0, LON0 = map(math.radians, (29.5, 45.5, 37.5, -96.0))
@@ -283,6 +291,7 @@ def build_assets(cities: list) -> dict:
         if rr:
             counties[label] = rr
             cocent[label] = centroid(rr)
+    basins = {nm: "EP" for nm in list(states_ll) + list(counties) if PACIFIC(nm)}
 
     # the exchange's hurricane wind reference locations (the vendor's registry,
     # vendored as geo/reask_locations.csv): id, name and position only
@@ -318,7 +327,7 @@ def build_assets(cities: list) -> dict:
         json.dump({"bbox": HBOX, "asof": "Census Bureau cartographic boundaries (us-atlas) and Natural Earth (world-atlas), public domain",
                    "countries": countries, "states": states_ll, "counties": counties,
                    "centroids": {**ccent, **scent, **cocent}, "nation": nation,
-                   "locations": locations}, fh, separators=(",", ":"))
+                   "basins": basins, "locations": locations}, fh, separators=(",", ":"))
     with open(os.path.join(CONFIG, "cities.json"), "w") as fh:
         json.dump(roster, fh, indent=1)
     with open(os.path.join(CONFIG, "field_grid.json"), "w") as fh:
@@ -326,7 +335,7 @@ def build_assets(cities: list) -> dict:
     return {"rings": len(paths), "statePathsKB": round(len(state_paths) / 1024), "cells": len(cells),
             "nationRings": len(nation), "worldKB": round(len(" ".join(wpaths)) / 1024),
             "countries": len(countries), "coastalStates": len(states_ll), "counties": len(counties),
-            "locations": len(locations)}
+            "pacificRegions": len(basins), "locations": len(locations)}
 
 
 def load_roster() -> list:

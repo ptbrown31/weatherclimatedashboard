@@ -1653,6 +1653,40 @@ def run(no_build: bool) -> int:
                     t = page.locator("#tip").inner_text()
                     if "Landfall contract" in t: found = t; break
                 chk.add(f"{scheme} hover: a shaded landfall region shows its contract", "Yes bid" in found, found[:80])
+                # ---- the Pacific view: a landfall region there (Honolulu, Hawaii in the sample) is
+                # listed, drawn and priced on that view and kept off the Atlantic one
+                lf_txt = page.locator("#landfall").inner_text()
+                chk.add(f"{scheme} landfall: the Atlantic board lists no Pacific region",
+                        "Honolulu, Hawaii" not in lf_txt and page.locator("#landfall .lrow").count() >= 5, lf_txt[:60])
+                chk.add(f"{scheme} landfall: the caption carries the 50-mile border clause and the eye rule",
+                        "50 miles" in lf_txt and "eye crossing" in lf_txt and "Pacific view" in lf_txt, lf_txt[-160:])
+                page.locator("#b2").click(); page.wait_for_timeout(600)
+                ep_txt = page.locator("#landfall").inner_text()
+                ep_rows = page.locator("#landfall .lrow").count()
+                chk.add(f"{scheme} pacific: the landfall board lists only the Pacific region",
+                        page.locator("#landfallSect").is_visible() and ep_rows == 1 and "Honolulu, Hawaii" in ep_txt and "Atlantic view" in ep_txt,
+                        f"rows={ep_rows} {ep_txt[:60]}")
+                chk.add(f"{scheme} pacific: the count panels stay on the Atlantic view",
+                        not page.locator("#atlanticOnly").is_visible() and "listed above" in page.locator("#pacificNote").inner_text(),
+                        page.locator("#pacificNote").inner_text()[:80])
+                ep_links = page.locator("#basin path[role='link']").count()
+                chk.add(f"{scheme} pacific: a shaded region is clickable", ep_links >= 1, f"regions={ep_links}")
+                found_ep = ""
+                for i in range(min(ep_links, 60)):
+                    try:
+                        page.locator("#basin path[role='link']").nth(i).hover(force=True, timeout=1500); page.wait_for_timeout(40)
+                    except Exception:
+                        continue
+                    t = page.locator("#tip").inner_text()
+                    if "Honolulu, Hawaii" in t: found_ep = t; break
+                chk.add(f"{scheme} pacific hover: the Hawaii county shows its landfall contract",
+                        "Landfall contract" in found_ep and "Yes bid" in found_ep, found_ep[:80])
+                chk.add(f"{scheme} pacific: the map caption says the regions are shaded",
+                        "within 50 miles of its border" in page.locator("#basinCap").inner_text(), page.locator("#basinCap").inner_text()[:80])
+                page.locator("#b1").click(); page.wait_for_timeout(500)
+                chk.add(f"{scheme} atlantic: switching back restores the full board",
+                        page.locator("#landfall .lrow").count() >= 5 and "Honolulu, Hawaii" not in page.locator("#landfall").inner_text(),
+                        f"rows={page.locator('#landfall .lrow').count()}")
                 # ---- climate page: live contract markers
                 page.goto(f"{srv.url}/climate.html")
                 page.wait_for_timeout(900)

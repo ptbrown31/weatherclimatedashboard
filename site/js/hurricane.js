@@ -6,9 +6,9 @@
    Data in: hurricane.json (storms with NHC wind probabilities, outlook,
    season), market/hurricane.json through WXM (the quote job's hurricane
    group), reask.json (the vendor live-storm lane, usually off), and
-   assets/hurricane-geo.json (countries, coastal states, the six counties
-   the landfall contracts name, the nation coastline, and the 163 wind
-   reference locations). The drawn storm position is labelled from the
+   assets/hurricane-geo.json (countries, the coastal states and Hawaii, the
+   counties the landfall contracts name, the nation coastline, the 163 wind
+   reference locations, and which view each region is drawn on). The drawn storm position is labelled from the
    geometry's own point and advisory, because the GIS service can trail
    NHC's roster. Equirectangular fitted to the basin box with independent
    x/y scales so the panel fills its frame (a deliberate stretch).
@@ -123,6 +123,11 @@ window.WXHur = (() => {
     return out;
   }
   const regionKey = label => REGION_ALIAS[label] || label;
+  // the view a landfall region is drawn on: the geometry tags Hawaii's state and
+  // counties as Pacific, and every other region is an Atlantic one
+  const regionBasin = label => (GEO && GEO.basins && GEO.basins[regionKey(label)]) || 'AL';
+  // the landfall contracts whose region is on the view being looked at
+  const landfallHere = () => { const m = market('HLF'); return m ? m.contracts.filter(c => regionBasin(c.label) === basin) : []; };
 
   // ---- the map
   function drawNhc(svg, X, Y, b, g) {
@@ -409,8 +414,9 @@ window.WXHur = (() => {
     const svg = $('#basin'); svg.innerHTML = '';
     const g = GS();          // glyph scale at the current zoom, 1 at whole basin
     svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
-    const lf = basin === 'AL' ? landfallQuotes() : null;
+    const lf = landfallQuotes();
     const hlf = market('HLF');
+    let shadedHere = 0;      // regions drawn on this view that carry a listed contract
     const poly = (rr, fill, stroke, sw, html, url, nm) => {
       const p = el('path', { d: rr.map(r => 'M' + r.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join('L') + 'Z').join(' '), fill, stroke, 'stroke-width': sw });
       if (html) attach(p, html);
@@ -421,6 +427,7 @@ window.WXHur = (() => {
     // fill and tooltip for a region: shaded by the landfall contract's Yes price where one is listed with bids
     const fillFor = (label, nm) => {
       const c = lf ? lf[label] : null;
+      if (c) shadedHere++;
       const season = c && c.expiryLabel ? c.expiryLabel : (hlf && hlf.contracts[0] && hlf.contracts[0].expiryLabel) || 'season';
       const rows = c ? [['Landfall contract (' + esc(season) + ')', c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid))]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Yes price' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
       const url = c && hlf ? WXM.contractUrl(hlf.productConid, c.conidYes || c.conid) : null;
@@ -429,14 +436,24 @@ window.WXHur = (() => {
       return [c && c.mid != null ? ramp(c.mid) : 'var(--map-land)', html, url];
     };
     if (GEO) {
+      // a region is drawn only where some part of it is inside the view, so the
+      // Pacific view does not carry invisible, focusable copies of the Caribbean
+      const inView = rr => rr.some(r => r.some(q => q[0] >= b0 && q[0] <= b1 && q[1] >= la0 && q[1] <= la1));
+      // a country is shaded on the view its contract is listed on (the Atlantic
+      // board carries every country), so the Pacific view shows Mexico as land
+      // with a pointer to that board rather than as a priced region
       Object.entries(GEO.countries || {}).forEach(([nm, rr]) => {
+        if (!inView(rr)) return;
         const label = Object.keys(lf || {}).find(k => regionKey(k) === nm) || nm;
-        const [f, t, u] = fillFor(label, nm);
-        poly(rr, f, 'var(--map-line)', .6 * g, t, u, nm);
+        if (regionBasin(label) === basin) { const [f, t, u] = fillFor(label, nm); poly(rr, f, 'var(--map-line)', .6 * g, t, u, nm); return; }
+        const listed = lf && lf[label];
+        poly(rr, 'var(--map-land)', 'var(--map-line)', .6 * g,
+             tip.rows(esc(nm), [], listed ? 'its landfall contract is priced on the Atlantic view' : null));
       });
       (NATION || []).forEach(r => poly([r], 'var(--map-land)', 'var(--map-line)', .6 * g));
-      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7 * g, t, u, nm); });
-      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8 * g, t, u, nm); });
+      // a state or county is drawn on its own view only
+      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { if (regionBasin(nm) !== basin) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7 * g, t, u, nm); });
+      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { if (regionBasin(nm) !== basin) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8 * g, t, u, nm); });
     }
     const counts = drawNhc(svg, X, Y, basin, g);
     // the reference locations: small dots, scaled by the vendor's P(gust > 80 mph) when the lane is live
@@ -476,7 +493,7 @@ window.WXHur = (() => {
       svg.appendChild(c);
     });
     wireZoom(); applyView();
-    $('#modeTitle').textContent = B.name.toUpperCase() + ' · NHC forecast tracks, cones and formation odds' + (lf ? ' · landfall regions shaded by the exchange’s Yes price' : '');
+    $('#modeTitle').textContent = B.name.toUpperCase() + ' · NHC forecast tracks, cones and formation odds' + (shadedHere ? ' · landfall regions shaded by the exchange’s Yes price' : '');
     /* The map's caption, in two blocks: what is drawn and what a click does.
        The conditional sentences carry facts that are not always true, so a
        caption never describes shading or an outlook that is not there. */
@@ -488,20 +505,21 @@ window.WXHur = (() => {
         + 'storm is active. '
         + (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that '
                           + 'part of the map shows storms only. ' : '')
-        + (lf ? 'States, countries, and the six named counties are shaded by the Yes price of the Major '
-              + 'Hurricane (Category 3+) landfall contract for that region; clicking a shaded region opens '
+        + (shadedHere ? 'States, countries and the named counties are shaded by the Yes price of the Major '
+              + 'Hurricane (Category 3+) landfall contract for that region, which pays on a landfall in the region '
+              + 'or within 50 miles of its border; clicking a shaded region opens '
               + 'that contract on the exchange. ' : '')
         + 'The point locations are associated with the Live Hurricane contract.');
       para('During a live storm, clicking a red reference location opens its probability series below the '
         + 'map; clicking the same location again opens its wind contract.');
     }
-    if (lf || vendorShown) {
+    if (shadedHere || vendorShown) {
       const kg = el('g', { 'pointer-events': 'none' });
       const bx = 16, by = Hh - 84, bw = 132;
       kg.appendChild(el('rect', { x: bx - 8, y: by - 16, width: bw + 108, height: 76, rx: 5,
                                   fill: 'var(--panel)', 'fill-opacity': .88, stroke: 'var(--line)', 'stroke-width': .8 }));
       let yy = by;
-      if (lf) {
+      if (shadedHere) {
         kg.appendChild(txt('Landfall contract, Yes price', { x: bx, y: yy - 3, 'font-size': 10, 'font-weight': 700, fill: 'var(--ink)' }));
         for (let i = 0; i < 48; i++) {
           kg.appendChild(el('rect', { x: bx + i * (bw / 48), y: yy + 2, width: bw / 48 + .6, height: 9,
@@ -523,12 +541,22 @@ window.WXHur = (() => {
   }
 
   // ---- active storms with NHC wind speed probabilities
-  // the count and landfall contracts are Atlantic and United States contracts,
-  // so the Pacific view says so instead of showing an empty Atlantic section
+  // the count and Category 4 contracts are Atlantic and United States contracts,
+  // so the Pacific view says so instead of showing an empty section. The landfall
+  // board is on whichever view its regions are on: the Atlantic view always, and
+  // the Pacific view once the exchange lists a Pacific region such as Hawaii.
   function basinSections() {
-    const only = $('#atlanticOnly'), note = $('#pacificNote');
+    const only = $('#atlanticOnly'), note = $('#pacificNote'), lfs = $('#landfallSect');
     if (only) only.style.display = basin === 'AL' ? '' : 'none';
-    if (note) note.style.display = basin === 'AL' ? 'none' : '';
+    const here = landfallHere().length;
+    if (lfs) lfs.style.display = (basin === 'AL' || here) ? '' : 'none';
+    if (note) {
+      note.style.display = basin === 'AL' ? 'none' : '';
+      note.textContent = 'The season count and Category 4 contracts on this exchange are Atlantic and United States '
+        + 'contracts, so they are shown on the Atlantic view. '
+        + (here ? 'The landfall contracts on Pacific regions are listed above; the rest are on the Atlantic view.'
+                : 'No landfall contract names a Pacific region at the moment, so the landfall board is on the Atlantic view too.');
+    }
   }
 
   // the same split the map uses: the Atlantic view is AL, the Pacific view is
@@ -1058,9 +1086,13 @@ window.WXHur = (() => {
     const host = $('#landfall'); host.innerHTML = '';
     const m = market('HLF');
     if (!m) { host.appendChild(h('p', { class: 'cap', text: WXM.on() ? 'Landfall contracts not in the quote snapshot.' : 'The market layer is off.' })); return; }
-    const season = (m.contracts[0] && m.contracts[0].expiryLabel) || 'season';
+    // the regions on this view; the others are on the other view, and the caption says so
+    const rows = landfallHere();
+    const elsewhere = m.contracts.length - rows.length;
+    if (!rows.length) { host.appendChild(h('p', { class: 'cap', text: 'No landfall contract names a region on this view.' })); return; }
+    const season = (rows[0] && rows[0].expiryLabel) || 'season';
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: 'Major hurricane landfall, ' + season })]);
-    m.contracts.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
+    rows.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
       const k = regionKey(c.label);
       const drawn = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]);
       const onMap = !drawn ? 'not drawn' : (c.mid == null ? 'outline only (no bids)' : 'shaded');
@@ -1082,13 +1114,16 @@ window.WXHur = (() => {
     /* What this contract actually asks.
 
        The caption said "a hurricane", which is not the contract: the terms
-       require a Category 3 or higher hurricane at the moment of landfall, and
-       say that hurricane-force winds reaching the area do not count if the eye
-       stays offshore. Both conditions move the probability a long way, and the
+       require a Category 3 or higher hurricane at the moment of landfall, count
+       a landfall on land within 50 miles of the region's border, and say that
+       hurricane-force winds reaching the area do not count if the eye stays
+       offshore. Each condition moves the probability a long way, and the
        heading above the panel already said major. */
-    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region during the '
-      + 'season named while at Category 3 or stronger. The exchange\u2019s terms require the storm\u2019s centre to cross the coast, so one that stays offshore '
-      + 'has not made landfall for this contract even where hurricane-force winds reach the area. '
+    host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region, or on land within 50 miles of the '
+      + 'region\u2019s border, during the season named while at Category 3 or stronger. The exchange\u2019s terms define a landfall as the eye crossing '
+      + 'onto land, so a storm that stays offshore has not made landfall for this contract even where hurricane-force winds reach the area. '
+      + (elsewhere ? 'The ' + (elsewhere > 1 ? elsewhere + ' regions' : 'one region') + ' in the other basin '
+                     + (elsewhere > 1 ? 'are' : 'is') + ' listed on the ' + (basin === 'AL' ? 'Pacific' : 'Atlantic') + ' view. ' : '')
       + 'Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. Yes green, No red; the Yes price is midway between the Yes bid '
       + 'and one dollar less the No bid where both sides have bids, else the one side shown, and there are no sellers, only bids to buy '
       + 'Yes or No. “Pays” in the box is what a dollar of payout costs at the price a Yes could be bought at now, net of the '
@@ -1230,7 +1265,7 @@ window.WXHur = (() => {
         basin = b;
         ['b1', 'b2'].forEach(x => $('#' + x).classList.remove('on'));
         $('#' + id).classList.add('on');
-        resetView(); draw(); drawStorms(); basinSections(); drawDiscussion();
+        resetView(); draw(); drawStorms(); drawLandfall(); basinSections(); drawDiscussion();
       };
     });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); basinSections();
