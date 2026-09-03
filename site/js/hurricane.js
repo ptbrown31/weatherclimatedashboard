@@ -1380,7 +1380,7 @@ window.WXHur = (() => {
     const rk = await WXD.get('reask.json', 10);
     const sz = await WXD.get('season.json', 1440);
     const mk = await WXM.loadGroup('hurricane');
-    const geo = await fetch('assets/hurricane-geo.json').then(x => x.json()).catch(() => null);
+    const geo = await fetch(WXC.asset('hurricane-geo.json')).then(x => x.json()).catch(() => null);
     H = r.data; GEO = geo; NATION = geo ? geo.nation : null; RK = rk.data; SZN = sz.data; MK = WXM.hurricaneMarkets();
     // the roster is what lets the vendor lane see that a numbered depression
     // and the named storm it became are one system

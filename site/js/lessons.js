@@ -96,7 +96,7 @@ window.WXLessons = (function () {
   async function init() {
     const host = $('#lessons'); if (!host) return;
     let doc = null;
-    try { doc = await fetch('assets/lessons.json').then(r => r.json()); } catch (e) { doc = null; }
+    try { doc = await fetch(WXC.asset('lessons.json')).then(r => r.json()); } catch (e) { doc = null; }
     if (!doc || !doc.courses) {
       host.appendChild(h('p', { class: 'cap', text: 'The lessons could not be loaded.' }));
       return;

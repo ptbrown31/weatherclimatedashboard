@@ -398,8 +398,8 @@ window.WXMap = (() => {
     tip = WXC.tooltip();
     const r = await WXD.getAll(['summary.json', 'field.json']);
     const [bm, wd] = await Promise.all([
-      fetch('assets/basemap.json').then(x => x.json()).catch(() => null),
-      fetch('assets/world.json').then(x => x.json()).catch(() => null)]);
+      fetch(WXC.asset('basemap.json')).then(x => x.json()).catch(() => null),
+      fetch(WXC.asset('world.json')).then(x => x.json()).catch(() => null)]);
     summary = r['summary.json'].data; field = r['field.json'].data; base = bm; world = wd;
     await WXM.loadSummary();
     const st = $('#pageStatus'); st.innerHTML = ''; st.appendChild(WXC.statusEl([r['summary.json'], r['field.json']], 10));

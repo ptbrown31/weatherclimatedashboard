@@ -12,7 +12,7 @@ window.WXArtMap = (() => {
   async function init() {
     const svg = $('#artMap'); if (!svg) return;
     const [base, sum] = await Promise.all([
-      fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
+      fetch(WXC.asset('basemap.json')).then(r => r.json()).catch(() => null),
       WXD.get('summary.json').then(r => r.data).catch(() => null),
     ]);
     if (!base || !sum || !sum.cities) { svg.remove(); return; }

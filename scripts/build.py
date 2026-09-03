@@ -42,6 +42,21 @@ STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorec
 EMBED = ["embed/index.html", "js/chart-city.js"]
 
 
+def asset_versions() -> dict:
+    """{filename: short content hash} for every file in site/assets, so a page
+    can ask for one by a URL that changes exactly when the file does."""
+    out = {}
+    adir = os.path.join(SITE, "assets")
+    if not os.path.isdir(adir):
+        return out
+    for name in sorted(os.listdir(adir)):
+        p = os.path.join(adir, name)
+        if os.path.isfile(p):
+            with open(p, "rb") as fh:
+                out[name] = hashlib.md5(fh.read()).hexdigest()[:8]
+    return out
+
+
 def config_js(cfg: dict, target: str, data_base: str) -> str:
     market = (cfg.get("market_overlay") or {}).get(target, "off")
     wx = {
@@ -58,6 +73,15 @@ def config_js(cfg: dict, target: str, data_base: str) -> str:
         # listings the owner has said are coming but the exchange has not made:
         # the hurricane page draws them as pending on the matching basin view
         "expected": cfg.get("expected_listings") or {},
+        # Every projected asset, with a short hash of its own content.
+        #
+        # The scripts are cached for an hour and the assets for a day, so a
+        # deploy that changes both leaves a reader running today's code against
+        # yesterday's geometry: the hurricane page did exactly that, losing the
+        # Hawaii outline it needed and putting a Pacific contract on the
+        # Atlantic board. A page asks for an asset by this stamp, so the URL
+        # changes when the content does and never otherwise.
+        "assetV": asset_versions(),
     }
     # the category hierarchy travels in config.js so the header can be drawn on
     # the first paint rather than after a fetch: it is small, it changes only

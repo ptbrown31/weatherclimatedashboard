@@ -15,6 +15,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline import gov_weather as gw          # noqa: E402
 from pipeline import storage, config, archive    # noqa: E402
+from pipeline import hurricane                   # noqa: E402
 
 NBH_BULLETIN = """\
  K00F   NBM V5.0 NBH GUIDANCE    8/21/2026  2200 UTC
@@ -202,6 +203,35 @@ class CycleStamp(unittest.TestCase):
         self.assertEqual(archive.cycle_stamp({"updateTime": "2026-08-21T12:52:18-07:00"}), "20260821T195218Z")
         self.assertIsNone(archive.cycle_stamp({"generatedAt": "2026-08-21T22:20:08+00:00"}))
 
+
+
+class GeometryFreshness(unittest.TestCase):
+    """Whether the NHC cone package on hand still belongs to the advisory the
+    roster is on. Two apart is a service that has stopped issuing; one apart is
+    one that is catching up, and its cone is still the current forecast."""
+
+    def test_a_package_two_or_more_advisories_back_is_stale(self):
+        # Edouard: the roster reached 12 while the package stayed at its landfall
+        self.assertTrue(hurricane.geometry_is_stale("6A", "012"))
+        self.assertTrue(hurricane.geometry_is_stale("27", "029"))
+
+    def test_one_advisory_back_is_the_normal_publishing_lag(self):
+        # Lowell: a running category three, its package minutes behind the advisory
+        self.assertFalse(hurricane.geometry_is_stale("28", "029"))
+
+    def test_in_step_is_not_stale_however_the_number_is_written(self):
+        self.assertFalse(hurricane.geometry_is_stale("29", "029"))
+        self.assertFalse(hurricane.geometry_is_stale("10", "010"))
+        self.assertFalse(hurricane.geometry_is_stale("6A", "6A"))
+
+    def test_an_intermediate_advisory_counts_as_its_own_number(self):
+        # 12A follows 12, so a package at 12A is level with a roster on 12
+        self.assertFalse(hurricane.geometry_is_stale("12A", "012"))
+        self.assertFalse(hurricane.geometry_is_stale("12", "012A"))
+
+    def test_nothing_to_compare_is_never_called_stale(self):
+        for a, b in ((None, "012"), ("12", None), ("", "012"), ("A", "012"), (None, None)):
+            self.assertFalse(hurricane.geometry_is_stale(a, b), (a, b))
 
 if __name__ == "__main__":
     unittest.main()

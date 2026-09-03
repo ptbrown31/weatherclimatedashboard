@@ -47,6 +47,36 @@ ATCF_BTK = "https://ftp.nhc.noaa.gov/atcf/btk/"
 NAMED_TYPES = {"TS", "SS", "HU"}
 
 
+def _adv_num(v) -> Optional[int]:
+    """The number an advisory label carries. NHC's intermediate advisories add
+    a letter to the number before them ("6A" comes after 6), which is the
+    number the package belongs to."""
+    digits = ""
+    for ch in str(v or "").lstrip("0"):
+        if not ch.isdigit():
+            break
+        digits += ch
+    return int(digits) if digits else None
+
+
+def geometry_is_stale(geometry_advisory, roster_advisory) -> bool:
+    """True when the cone and track package trails the roster by two advisories
+    or more.
+
+    The GIS service stops issuing packages before NHC stops advising, so a
+    decaying storm keeps its last one while the roster advances: Edouard sat on
+    advisory 6A, its landfall, while the roster was on 12 and the storm was
+    inland and post-tropical two days later. Drawing that package is drawing a
+    forecast NHC has replaced.
+
+    One advisory behind is not that. A package is published minutes after the
+    advisory it belongs to, so a running storm sits a single advisory back for
+    part of every cycle: Lowell was on roster 029 with geometry 28 while a
+    category three, and calling that superseded took its cone off the map."""
+    g, r = _adv_num(geometry_advisory), _adv_num(roster_advisory)
+    return g is not None and r is not None and r - g >= 2
+
+
 def _round(x, nd=2):
     if isinstance(x, (int, float)):
         return round(x, nd)
@@ -264,14 +294,7 @@ def hurricane_pass(cfg: dict, store: Storage) -> int:
                     storm["geometryStale"] = True
                 else:
                     storm.update({"geometryAdvisory": None, "points": [], "track": [], "cone": [], "past": [], "geometryStale": True})
-        # A fetch that succeeds can still be behind. The GIS service stops
-        # issuing cone and track packages before NHC stops advising, so a
-        # decaying storm keeps its last package while the roster advances:
-        # Edouard sat on advisory 6A, its landfall, while the roster was on 12
-        # and the storm was inland and post-tropical two days later. That is
-        # stale even though nothing failed, and the page has to know.
-        gadv = str(storm.get("geometryAdvisory") or "").lstrip("0")
-        if gadv and gadv != str(adv or "").lstrip("0"):
+        if geometry_is_stale(storm.get("geometryAdvisory"), adv):
             storm["geometryStale"] = True
         snap["storms"].append(storm)
     if ok_roster:

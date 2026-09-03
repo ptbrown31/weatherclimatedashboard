@@ -97,8 +97,8 @@ WXC.chrome('city.html'); WXCityScore.init(); WXCityDays.init();
   const a = document.getElementById('allocLink');
   if (a && st) a.href = 'allocator.html?m=city:' + encodeURIComponent(st); })();
 WXAdv.init();
-Promise.all([fetch('assets/basemap.json').then(r => r.json()).catch(() => null),
-             fetch('assets/world.json').then(r => r.json()).catch(() => null)])
+Promise.all([fetch(WXC.asset('basemap.json')).then(r => r.json()).catch(() => null),
+             fetch(WXC.asset('world.json')).then(r => r.json()).catch(() => null)])
   .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null,
                                    onSelect: s => WXAdv.station(s) }));
 </script>

@@ -277,5 +277,35 @@ class ExpectedListings(unittest.TestCase):
                          .split("window.WX = ", 1)[1].rstrip().rstrip(";"))
         self.assertEqual(doc["expected"], {})
 
+
+class AssetStamps(unittest.TestCase):
+    """Every projected asset carries a hash of its own content, so a page can
+    ask for one by a url that changes exactly when the file does. Without it a
+    day-long asset cache serves yesterday's geometry to today's code."""
+
+    def test_config_js_carries_a_stamp_per_asset(self):
+        doc = json.loads(build.config_js({"site_title": "T"}, "standalone", "data")
+                         .split("window.WX = ", 1)[1].rstrip().rstrip(";"))
+        v = doc["assetV"]
+        self.assertIn("hurricane-geo.json", v)
+        self.assertIn("basemap.json", v)
+        for name, stamp in v.items():
+            self.assertRegex(stamp, r"^[0-9a-f]{8}$", name)
+
+    def test_the_stamp_follows_the_content(self):
+        first = build.asset_versions()["hurricane-geo.json"]
+        self.assertEqual(first, build.asset_versions()["hurricane-geo.json"])
+        path = os.path.join(ROOT, "site", "assets", "hurricane-geo.json")
+        with open(path, "rb") as fh:
+            body = fh.read()
+        try:
+            with open(path, "wb") as fh:
+                fh.write(body + b" ")
+            self.assertNotEqual(first, build.asset_versions()["hurricane-geo.json"])
+        finally:
+            with open(path, "wb") as fh:
+                fh.write(body)
+        self.assertEqual(first, build.asset_versions()["hurricane-geo.json"])
+
 if __name__ == "__main__":
     unittest.main()

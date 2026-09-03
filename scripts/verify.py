@@ -1874,6 +1874,18 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} stale geometry: the caption says why the cone is missing",
                         bool(st and "Lala is drawn at the position on the latest advisory" in st["cap"]
                              and "not shown" in st["cap"]), str(st and st["cap"][-150:]))
+                # the asset a page loads carries a stamp of its own content, so a
+                # day-long asset cache cannot serve an old one to newer code
+                av = page.evaluate("""() => {
+                  const reqs = performance.getEntriesByType("resource")
+                    .map(r => r.name).filter(n => n.indexOf("/assets/") >= 0);
+                  return { stamped: reqs.filter(n => /[?&]v=[0-9a-f]{8}/.test(n)),
+                           bare: reqs.filter(n => !/[?&]v=/.test(n)),
+                           has: !!(window.WX && WX.assetV && WX.assetV["hurricane-geo.json"]) };
+                }""")
+                chk.add(f"{scheme} assets: every asset is fetched with a stamp of its own content",
+                        bool(av and av["has"] and av["stamped"] and not av["bare"]),
+                        str(av and [av["stamped"][:1], av["bare"][:2]])[:170])
                 page.locator("#b1").click(); page.wait_for_timeout(500)
                 chk.add(f"{scheme} atlantic: switching back restores the full board",
                         page.locator("#landfall .lrow").count() >= 5 and "Hawaii" not in page.locator("#landfall").inner_text(),

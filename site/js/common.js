@@ -294,5 +294,16 @@ window.WXC = (() => {
     return city + '-' + String((c && c.station) || '').toLowerCase() + '.html';
   }
 
-  return { el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref };
+  /* An asset's url, stamped with a hash of its own content.
+
+     The scripts are cached for an hour and site/assets for a day, so a deploy
+     that changes both can leave a reader running new code against an old
+     asset. The build writes a hash per file and the url carries it, so the
+     address changes exactly when the content does. Without a stamp the plain
+     path is used, which is what local mode and any older build serve. */
+  const asset = name => 'assets/' + name
+    + (window.WX && WX.assetV && WX.assetV[name] ? '?v=' + WX.assetV[name] : '');
+
+  return {
+    asset, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref };
 })();
