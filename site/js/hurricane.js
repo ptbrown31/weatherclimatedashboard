@@ -608,7 +608,9 @@ window.WXHur = (() => {
       note.textContent = 'The season count and Category 4 contracts on this exchange are Atlantic and United States '
         + 'contracts, so they are shown on the Atlantic view. '
         + (here ? 'The landfall contracts on Pacific regions are listed above; the rest are on the Atlantic view.'
-                : 'No landfall contract names a Pacific region at the moment, so the landfall board is on the Atlantic view too.');
+                : (expectLandfall().length
+                    ? 'No landfall contract names a Pacific region yet. What the exchange is expected to list is above, without a price; the contracts it has listed are on the Atlantic view.'
+                    : 'No landfall contract names a Pacific region at the moment, so the landfall board is on the Atlantic view too.'));
     }
   }
 

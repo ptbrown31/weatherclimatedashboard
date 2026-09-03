@@ -1435,6 +1435,10 @@ def run(no_build: bool) -> int:
                         str(part and part["landfall"][:170]))
                 chk.add(f"{scheme} basins: the count panels stay off the Pacific view",
                         bool(part and part["counts"] == "none"), str(part and part["counts"]))
+                pnote = page.evaluate('() => ((document.querySelector("#pacificNote") || {}).textContent || "")')
+                chk.add(f"{scheme} basins: the note agrees with the board it is describing",
+                        "What the exchange is expected to list is above" in pnote
+                        and "landfall board is on the Atlantic view too" not in pnote, pnote[-150:])
                 page.locator("#b1").click(); page.wait_for_timeout(600)
                 back = page.evaluate('() => ((document.querySelector("#liveStorms") || {}).textContent || "")')
                 chk.add(f"{scheme} basins: switching back restores the Atlantic storm",
