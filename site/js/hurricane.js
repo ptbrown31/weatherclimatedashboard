@@ -308,7 +308,8 @@ window.WXHur = (() => {
          only a strong storm reaches, and five each when storms share the box. */
       const cap = list.length > 1 ? 5 : 8;
       list.forEach(v2 => {
-        rows.push(['Storm', esc(v2.storm) + ' · cycle ' + utc(v2.forecastTime)
+        rows.push(['Storm', esc(v2.storm) + ' · ' + esc(v2.file || 'LiveCyc')
+          + (v2.forecastTime ? ' cycle ' + utc(v2.forecastTime) : '')
           + (v2.received ? ', received ' + utc(v2.received) : '')]);
         v2.thresholds.map((t, i) => (v2.p[i] ? ['&gt; ' + t + ' mph', v2.p[i] + '%'] : null))
           .filter(Boolean).slice(0, cap).forEach(r => rows.push(r));
@@ -1145,6 +1146,36 @@ window.WXHur = (() => {
   }
 
   // ---- the vendor lane
+  //
+  /* One file on the table, not a stack of them.
+
+     Three kinds of file arrive for a storm. LiveCyc is a forecast from its own
+     start and lands four times a day while the storm runs; the Metryc interim
+     is the vendor's analysis of what has happened around the landfall; the
+     Metryc final carries the gust each location recorded, in miles per hour,
+     and is what the wind contracts settle on.
+
+     They are shown one at a time, latest first, with one ordering rule that
+     receipt time alone would get wrong: LiveCyc keeps arriving after an interim
+     has landed, and reads near zero at a location whose peak has passed, so a
+     later cycle must not print zeros over a landfall the interim has already
+     measured. The interim therefore supersedes later cycles and the final
+     supersedes everything. */
+  const VENDOR_ROWS = 16;
+  function shownFile(s) {
+    if (s.final && s.final.sites && Object.keys(s.final.sites).length) return { kind: 'final', label: 'Metryc final', file: s.final };
+    if (s.interim && s.interim.sites && Object.keys(s.interim.sites).length) return { kind: 'interim', label: 'Metryc interim', file: s.interim };
+    if (s.livecyc && s.livecyc.sites && Object.keys(s.livecyc.sites).length) return { kind: 'livecyc', label: 'LiveCyc', file: s.livecyc };
+    return null;
+  }
+  // the table always says which file it is and when that file arrived
+  function sourceLine(shown) {
+    const n = Object.keys(shown.file.sites || {}).length;
+    const got = shown.file.lastModified ? ' · file received ' + utc(shown.file.lastModified) : '';
+    if (shown.kind === 'final') return 'Metryc final' + got + ' · peak gust at ' + n + ' locations';
+    if (shown.kind === 'interim') return 'Metryc interim' + got + ' · ' + n + ' locations';
+    return 'LiveCyc cycle ' + utc(shown.file.forecastTime) + got + ' · ' + n + ' locations with non-zero probability';
+  }
   function drawVendor() {
     const host = $('#vendor'); host.innerHTML = '';
     if (!RK) { host.appendChild(h('p', { class: 'cap', text: 'Vendor lane status unavailable.' })); return; }
@@ -1184,75 +1215,90 @@ window.WXHur = (() => {
         det.appendChild(into);
         host.appendChild(det);
       }
+      const shown = shownFile(s);
+      const later = shown && shown.kind === 'interim' && s.livecyc && s.livecyc.lastModified
+                    && Date.parse(s.livecyc.lastModified) > Date.parse(s.interim.lastModified || 0);
       into.appendChild(h('div', { class: 'stormrow' }, [h('b', { text: s.name + ' ' + s.year }),
-        h('span', { text: lc ? 'LiveCyc cycle ' + utc(lc.forecastTime)
-          + (lc.lastModified ? ' · file received ' + utc(lc.lastModified) : '')
-          + ' · ' + Object.keys(lc.sites || {}).length + ' locations with non-zero probability' : 'no LiveCyc cycle yet' }),
-        h('span', { text: s.interim ? 'Metryc interim received' : '' }),
-        h('span', { text: s.final ? 'final settlement file received' : '' })]));
-      if (lc && lc.sites) {
+        h('span', { text: shown ? sourceLine(shown) : 'no vendor file published yet' })]));
+      if (!shown) return;
+      const code2 = String(s.name || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
+      // the exchange's wind contract for this storm and location, where one is
+      // listed, so a row opens its market the way every other priced surface does
+      const linkRow = (tr, id, nm) => {
+        const lm = MK && (MK.markets || []).find(m2 => m2.symbol === 'L' + code2 + String(id).toUpperCase());
+        const c0 = lm && (lm.contracts || [])[0];
+        const url = lm && c0 ? WXM.contractUrl(lm.productConid, c0.conidYes || c0.conid) : null;
+        if (url) WXM.linkTo(tr, url, 'Open the ' + nm + ' wind contract on IBKR');
+      };
+      const tb = h('table');
+      const all = Object.entries(shown.file.sites || {});
+      let rows;
+      if (shown.kind === 'final') {
+        /* The final file is a different quantity: the gust each location
+           recorded, in miles per hour, with no ladder behind it. It replaces
+           the probabilities rather than joining them. */
+        rows = all.slice().sort((a, b) => (b[1].peakGustMph || 0) - (a[1].peakGustMph || 0)
+                                       || String(a[1].name || '').localeCompare(String(b[1].name || ''))).slice(0, VENDOR_ROWS);
+        tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' }), h('th', { class: 'num', text: 'Peak gust, mph' })]));
+        rows.forEach(([id, r]) => {
+          const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' }),
+                                  h('td', { class: 'num', text: r.peakGustMph == null ? '—' : r.peakGustMph + ' mph' })]);
+          const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
+          attach(tr, tip.rows(esc(r.name) + ' (' + esc(id) + ')',
+            [['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)],
+             ['Storm', esc(s.name) + ' ' + s.year],
+             ['Peak gust', r.peakGustMph == null ? 'not covered' : r.peakGustMph + ' mph']],
+            esc((RK && RK.attribution) || 'Powered by Reask') + '; the final file, which the wind contracts settle on'));
+          linkRow(tr, id, r.name);
+          tb.appendChild(tr);
+        });
+      } else {
         /* The vendor's lowest rung is on the table.
 
-           It was left off, and on a tropical storm it is the only rung carrying
-           anything: Dolly's ladder was non-zero at 60 mph everywhere and at 70
-           almost nowhere, so three of the six locations printed as a row of
-           zeros underneath a line saying six locations had non-zero
-           probability. A threshold the vendor publishes and the cards already
-           draw does not belong only in the cards. */
-        const cols = [60, 70, 80, 90, 100, 110, 120, 130, 150].filter(t => lc.thresholds.includes(t));
-        const idx = cols.map(t => lc.thresholds.indexOf(t));
+           On a tropical storm it is the only rung carrying anything: Dolly's
+           ladder was non-zero at 60 mph everywhere and at 70 almost nowhere. */
+        const thr = shown.file.thresholds || [];
+        const cols = [60, 70, 80, 90, 100, 110, 120, 130, 150].filter(t => thr.includes(t));
+        const idx = cols.map(t => thr.indexOf(t));
         /* Rank by the ladder from the top rung down.
 
            Ordering on one fixed rung ranked nothing when no location reached it.
            A ladder is monotone, so comparing the highest threshold first and
            dropping to the next only to break ties puts the most exposed location
-           at the top whatever the storm's strength. */
+           at the top whatever the storm's strength; the name settles a file
+           whose rungs are all zero, as a storm that stayed offshore leaves. */
         const rank = (a, b) => {
           for (let i = idx.length - 1; i >= 0; i--) {
             const d = (b[1].p[idx[i]] || 0) - (a[1].p[idx[i]] || 0);
             if (d) return d;
           }
-          return 0;
+          return String(a[1].name || '').localeCompare(String(b[1].name || ''));
         };
-        // every location the newest cycle names, and every one the interim
-        // names that the cycle has since dropped, which reads zero on the
-        // cycle's row and carries the interim's figure underneath
-        const imSites = (s.interim && s.interim.sites) || {};
-        const union = Object.assign({}, Object.fromEntries(Object.keys(imSites).map(id =>
-          [id, { name: imSites[id].name, p: lc.thresholds.map(() => 0) }])), lc.sites);
-        const rows = Object.entries(union).sort(rank).slice(0, 16);
-        const tb = h('table');
+        rows = all.slice().sort(rank).slice(0, VENDOR_ROWS);
         tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
-        // the exchange's wind contract for this storm and location, where one
-        // is listed, so a probability row opens its market the way every
-        // other priced surface does
-        const code2 = String(s.name || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
         rows.forEach(([id, r]) => {
-          const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: r.p[i] + '%' }))));
+          const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: (r.p[i] != null ? r.p[i] : 0) + '%' }))));
           const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
-          attach(tr, locationTip(L, { storm: s.name, thresholds: lc.thresholds, p: r.p, forecastTime: lc.forecastTime, received: lc.lastModified }));
-          const lm = MK && (MK.markets || []).find(m2 => m2.symbol === 'L' + code2 + String(id).toUpperCase());
-          const c0 = lm && (lm.contracts || [])[0];
-          const url = lm && c0 ? WXM.contractUrl(lm.productConid, c0.conidYes || c0.conid) : null;
-          if (url) WXM.linkTo(tr, url, 'Open the ' + r.name + ' wind contract on IBKR');
+          attach(tr, locationTip(L, { storm: s.name, file: shown.label, thresholds: thr, p: r.p,
+                                      forecastTime: shown.kind === 'livecyc' ? shown.file.forecastTime : null,
+                                      received: shown.file.lastModified }));
+          linkRow(tr, id, r.name);
           tb.appendChild(tr);
-          // the interim's row for the same location under the cycle's, once
-          // it has landed, so the vendor's later word sits beside the earlier
-          const im = s.interim && s.interim.sites && s.interim.sites[id];
-          if (im) {
-            const tr2 = h('tr', { class: 'dim' }, [h('td', { text: '↳ Metryc interim' })]
-              .concat(idx.map(i => h('td', { class: 'num', text: (im.p[i] != null ? im.p[i] : 0) + '%' }))));
-            attach(tr2, locationTip(L, { storm: s.name, thresholds: lc.thresholds, p: r.p, forecastTime: lc.forecastTime,
-                                         received: lc.lastModified, interim: { p: im.p, received: s.interim.lastModified } }));
-            tb.appendChild(tr2);
-          }
         });
-        into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
       }
-      if (s.final && s.final.sites) {
-        const fin = Object.entries(s.final.sites).sort((a, b) => b[1].peakGustMph - a[1].peakGustMph).slice(0, 10);
-        into.appendChild(h('p', { class: 'cap', text: 'Final peak gusts, highest first. ' + fin.map(([id, r]) => r.name + ' ' + r.peakGustMph + ' mph').join(' · ') }));
-      }
+      into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
+      /* Why a later cycle is not the one on the table, where that applies, and
+         what was left off. LiveCyc is forward-looking from its own start, so a
+         location whose peak has already passed reads near zero on a cycle
+         issued after it while the interim holds the figure for the landfall
+         that happened. */
+      const notes = [];
+      if (later) notes.push('A LiveCyc cycle has arrived since this file. LiveCyc looks forward from its own '
+        + 'start, so it reads near zero where the peak has already passed; the interim is the vendor’s word on '
+        + 'what happened and is the one shown.');
+      if (all.length > rows.length) notes.push('Showing the ' + rows.length + ' of ' + all.length
+        + ' locations in the file that stand highest.');
+      if (notes.length) into.appendChild(h('p', { class: 'cap', text: notes.join(' ') }));
     });
     host.appendChild(h('p', { class: 'cap attrib', text: (RK.attribution || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + '.' }));
   }

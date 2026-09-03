@@ -950,6 +950,10 @@ def run(no_build: bool) -> int:
                 def _index_for(interim):
                     storm = {"name": "Erin", "year": 2026,
                              "livecyc": {"forecastTime": None, "thresholds": THR,
+                                         # a cycle that landed AFTER the interim: the trap the
+                                         # precedence rule exists for, since it looks forward
+                                         # from its own start and reads zero past the peak
+                                         "lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                                          "sites": {"BR": {"name": "Brownsville", "p": [60, 30, 10, 3, 1, 0]},
                                                    "GA": {"name": "Galveston", "p": [30, 10, 2, 0, 0, 0]}},
                                          "pwin": {"BR": 55.0, "GA": 45.0}}}
@@ -963,11 +967,22 @@ def run(no_build: bool) -> int:
                                                       "GA": {"name": "Galveston", "p": [0, 0, 0, 0, 0, 0]}}}
                     return {"schema": 2, "enabled": True, "attribution": "Powered by Reask", "year": 2026, "storms": [storm]}
 
-                def _storm_routes(interim, final):
+                def _index_ff(interim, final):
+                    # the same index, plus the final file once it has landed: peak gusts
+                    # in miles per hour, which is a different quantity from the ladder
+                    ix = _index_for(interim)
+                    if final:
+                        ix["storms"][0]["final"] = {
+                            "lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "sites": {"BR": {"name": "Brownsville", "peakGustMph": 96.0},
+                                      "GA": {"name": "Galveston", "peakGustMph": 41.0}}}
+                    return ix
+
+                def _storm_routes(interim, final, index_final=False):
                     def handler(route):
                         u = route.request.url
                         if u.endswith("/reask.json"):
-                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index_for(interim)))
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index_ff(interim, index_final)))
                         if "/storm/Erin_2026.json" in u:
                             return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(interim, final)))
                         if u.endswith("/lhl/LHLERG.json"):
@@ -1166,17 +1181,27 @@ def run(no_build: bool) -> int:
                         t_ga = page.locator("#tip").inner_text().lower()
                         chk.add(f"{scheme} storm ({tag}): the interim column names the file and prints the zero",
                                 "metryc interim" in t_ga and "0%" in t_ga and "the metryc interim file" in t_ga, t_ga[:160])
+                        # the table shows ONE file. Once the interim has landed it is the
+                        # interim's numbers alone, because a later cycle looks forward from
+                        # its own start and would print zeros over a landfall already measured.
                         vt = page.evaluate("""() => {
                           const rows = [...document.querySelectorAll('#vendor table tr')];
-                          const ga = rows.findIndex(r => /Galveston/.test(r.textContent));
-                          const nxt = rows[ga + 1];
-                          return { hasInterimRow: !!(nxt && /Metryc interim/.test(nxt.textContent)),
-                                   zeros: nxt ? [...nxt.querySelectorAll('td.num')].map(td => td.textContent).join(' ') : '',
+                          const ga = rows.find(r => /Galveston/.test(r.textContent));
+                          const br = rows.find(r => /Brownsville/.test(r.textContent));
+                          const cells = r => r ? [...r.querySelectorAll('td.num')].map(td => td.textContent).join(' ') : '';
+                          return { stacked: rows.some(r => /Metryc interim/.test(r.textContent) && r.querySelector('td.num')),
+                                   ga: cells(ga), br: cells(br), rows: rows.length,
+                                   source: (document.querySelector('#vendor .stormrow span') || {}).textContent || '',
                                    state: (document.querySelector('#vendor') || {}).textContent || '' };
                         }""")
-                        chk.add(f"{scheme} storm ({tag}): the vendor table carries the interim's row under the cycle's",
-                                bool(vt and vt["hasInterimRow"] and vt["zeros"].startswith("0% 0%")
-                                     and "Metryc interim received" in vt["state"]), str(vt and vt["zeros"])[:80])
+                        chk.add(f"{scheme} storm ({tag}): the vendor table shows one file, not a stack",
+                                bool(vt and not vt["stacked"]), str(vt and vt["stacked"]))
+                        chk.add(f"{scheme} storm ({tag}): once the interim has landed it is the file shown",
+                                bool(vt and "Metryc interim" in vt["source"] and "file received" in vt["source"]
+                                     and vt["br"].startswith("95% 75%") and vt["ga"].startswith("0% 0%")),
+                                str(vt and [vt["source"][:60], vt["br"][:20], vt["ga"][:20]]))
+                        chk.add(f"{scheme} storm ({tag}): it says why the later cycle is not the one shown",
+                                "reads near zero where the peak has already passed" in vt["state"], vt["state"][-160:])
                     # ---- a card opened to fill the window brings the key and the switch with it
                     page.locator("#liveStorms .scardwrap .zb.ex").first.click(); page.wait_for_timeout(200)
                     full = page.locator("#liveStorms .scardwrap.full")
@@ -1306,6 +1331,31 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
                     page.unroute("**/data/snapshots/**")
 
+                # ---- the vendor's final file, which the index carries once it lands.
+                # It is a different quantity from the ladder: the gust each location
+                # recorded, in miles per hour, and it supersedes every earlier file.
+                page.route("**/data/snapshots/**", _storm_routes(True, True, True))
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(1400)
+                vf = page.evaluate("""() => {
+                  const det = document.querySelector('#vendor details.stormdone');
+                  if (det) det.open = true;
+                  const head = [...document.querySelectorAll('#vendor table tr th')].map(t => t.textContent);
+                  const rows = [...document.querySelectorAll('#vendor table tr')].slice(1)
+                    .map(r => r.textContent.replace(/\\s+/g, ' ').trim());
+                  return { head, rows, source: (document.querySelector('#vendor .stormrow span') || {}).textContent || '' };
+                }""")
+                chk.add(f"{scheme} vendor: once the final has landed the table is peak gusts, not probabilities",
+                        bool(vf and vf["head"] == ["Reference location", "Peak gust, mph"]
+                             and "Metryc final" in vf["source"] and "file received" in vf["source"]
+                             and any("96 mph" in r for r in vf["rows"])
+                             and not any("%" in r for r in vf["rows"])),
+                        str(vf and [vf["head"], vf["rows"][:2], vf["source"][:60]])[:200])
+                chk.add(f"{scheme} vendor: the final's rows run highest gust first",
+                        bool(vf and len(vf["rows"]) >= 2 and "Brownsville" in vf["rows"][0] and "Galveston" in vf["rows"][1]),
+                        str(vf and vf["rows"][:2])[:120])
+                page.unroute("**/data/snapshots/**")
+
                 # ---- the page's order, the standing links, and a storm that
                 #      has stopped updating alongside one still running
                 # the running storms are stamped relative to now: a storm folds
@@ -1378,13 +1428,16 @@ def run(no_build: bool) -> int:
                   const kids = [...document.querySelectorAll('.wrap > *')];
                   const at = id => kids.findIndex(e => e.id === id || e.className === id);
                   const bl = document.querySelector('.biglinks');
-                  return { order: [at('biglinks'), at('vendor'), at('liveStorms'), at('storms')],
+                  return { order: [at('biglinks'), at('liveStorms'), at('vendor')],
+                           afterSeries: at('vendor') > at('liveStorms'),
                            links: bl ? [...bl.querySelectorAll('a')].map(a => a.getAttribute('href')) : [] };
                 }""")
                 chk.add(f"{scheme} hurricane: the LiveCyc sections sit under the map, links first",
                         bool(lay and all(x >= 0 for x in lay["order"])
                              and lay["order"] == sorted(lay["order"])),
                         str(lay and lay["order"]))
+                chk.add(f"{scheme} hurricane: the vendor's file table sits below the delivery series",
+                        bool(lay and lay["afterSeries"]), str(lay and lay["order"]))
                 chk.add(f"{scheme} hurricane: the two standing links are present and correct",
                         bool(lay and len(lay["links"]) == 2
                              and "live-hurricane-wind-gust-prediction-markets-at-forecastex" in lay["links"][0]
@@ -1475,7 +1528,7 @@ def run(no_build: bool) -> int:
                 # question a careful outside reader actually asked
                 clocks = page.evaluate("""() => {
                   const cap = [...document.querySelectorAll('.secttl')]
-                    .find(t => /REASK LIVECYC/.test(t.textContent));
+                    .find(t => /LATEST FILE/.test(t.textContent));
                   const p = cap && cap.nextElementSibling;
                   const txt = (p && p.textContent) || '';
                   const row = (document.querySelector('#vendor .stormrow span') || {}).textContent || '';
