@@ -140,6 +140,20 @@ window.WXHur = (() => {
   // the view a landfall region is drawn on: the geometry tags Hawaii's state and
   // counties as Pacific, and every other region is an Atlantic one
   const regionBasin = label => (GEO && GEO.basins && GEO.basins[regionKey(label)]) || 'AL';
+  /* Nothing from one ocean on the other's view.
+
+     A basin is a different question, so the Pacific view carries no Atlantic
+     storm and no Atlantic contract, and the other way round. A storm's ocean
+     comes from the NHC roster, matched by name, and anything the roster does
+     not name is treated as Atlantic, which is where this lane has run. */
+  const stormBasin = nm => {
+    const r = ((H && H.storms) || []).find(x => String(x.name).toLowerCase() === String(nm || '').toLowerCase());
+    return r && r.basin ? r.basin : 'AL';
+  };
+  const inBasin = nm => (basin === 'AL' ? stormBasin(nm) === 'AL' : stormBasin(nm) !== 'AL');
+  // what the owner has said the exchange will list but it has not listed yet
+  const EXPECT = (window.WX && WX.expected) || {};
+  const expectLandfall = () => (EXPECT.landfall || []).filter(e => (e.basin || 'AL') === basin);
   // the landfall contracts whose region is on the view being looked at
   const landfallHere = () => { const m = market('HLF'); return m ? m.contracts.filter(c => regionBasin(c.label) === basin) : []; };
 
@@ -166,12 +180,24 @@ window.WXHur = (() => {
     const storms = (H.storms || []).filter(s => b === 'AL' ? s.basin === 'AL' : s.basin !== 'AL');
     storms.forEach(s => {
       const adv = s.geometryAdvisory || s.advisory;
-      const geomRows = [['Advisory', esc(adv)], ['Geometry', s.geometryStale ? 'stale (trails the roster)' : null]];
+      /* A superseded forecast is not drawn as though it were current.
+
+         The GIS service stops issuing cone and track packages before NHC stops
+         advising, so a decaying storm keeps its last package while the roster
+         moves on: Edouard's cone was still the one from its landfall advisory
+         two days after it went inland, and its landfall point was labelled the
+         current position. When the geometry trails the roster the cone and the
+         forecast track belong to an advisory NHC has replaced, so they are left
+         off; the past track is history and stays; and the storm is drawn where
+         the roster says it is now. */
+      const stale = !!s.geometryStale;
+      const advNow = stale ? s.advisory : adv;
+      const geomRows = [['Advisory', esc(adv)], ['Geometry', stale ? 'stale (trails advisory ' + esc(s.advisory) + ')' : null]];
       const fetchedFoot = 'fetched ' + utc(s.geometryFetched);
       const name = esc(s.name);
       // a line is hard to hover at 2px, so each track gets an invisible wide twin for the pointer
       const hitLine = (d, html) => { const q = el('path', { d, fill: 'none', stroke: '#000', 'stroke-opacity': 0, 'stroke-width': 9 * g, 'pointer-events': 'stroke' }); attach(q, html); svg.appendChild(q); };
-      (s.cone || []).forEach(c => rings(c).forEach(r => {
+      if (!stale) (s.cone || []).forEach(c => rings(c).forEach(r => {
         // the cone lets the pointer through: the landfall regions beneath it carry the bids,
         // and the cone's advisory and fetch time are on every track point
         svg.appendChild(el('path', { d: path(r, true), fill: 'rgba(100,116,139,.14)', stroke: '#64748b', 'stroke-width': 1 * g, 'pointer-events': 'none' }));
@@ -180,15 +206,20 @@ window.WXHur = (() => {
         svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.3 * g, 'stroke-dasharray': (3 * g) + ' ' + (3 * g) }));
         hitLine(path(r), tip.rows(name + ' — past track', geomRows, fetchedFoot));
       }));
-      (s.track || []).forEach(c => rings(c).forEach(r => {
+      if (!stale) (s.track || []).forEach(c => rings(c).forEach(r => {
         svg.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--navy)', 'stroke-width': 2 * g }));
         hitLine(path(r), tip.rows(name + ' — NHC forecast track', geomRows, fetchedFoot));
       }));
       const hits = [];
-      (s.points || []).forEach((p, i) => {
+      // where the roster says the storm is now, when the geometry's own points
+      // are an advisory or more out of date
+      const pts = !stale ? (s.points || [])
+        : (s.lat != null && s.lon != null
+            ? [{ lon: s.lon, lat: s.lat, kt: s.intensityKt, type: s.classification, tau: 0, label: null }] : []);
+      pts.forEach((p, i) => {
         svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: (p.tau === 0 ? 6 : 4.5) * g, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 * g }));
         if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + p.kt + 'kt' : ''), { x: X(p.lon) + 8 * g, y: Y(p.lat) + (i % 2 ? 14 : -8) * g, 'font-size': 9 * g, fill: 'var(--ink)', class: 'lbl', style: halo }));
-        if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · ' + (p.kt != null ? p.kt : s.intensityKt) + 'kt · adv ' + (s.geometryAdvisory || s.advisory) + (s.geometryStale ? ' (stale)' : ''),
+        if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · ' + (p.kt != null ? p.kt : s.intensityKt) + 'kt · adv ' + advNow,
           { x: X(p.lon) + 10 * g, y: Y(p.lat) - 20 * g, 'font-size': 12.5 * g, 'font-weight': 700, fill: 'var(--navy)', class: 'lbl', style: halo }));
         // the hover target: an invisible circle wider than the drawn point
         const now = p.tau === 0;
@@ -197,14 +228,15 @@ window.WXHur = (() => {
           ['Wind', p.kt != null ? p.kt + ' kt (' + mph(p.kt) + ' mph)' : '—'],
           ['Type', typeText(p.type || s.classification)],
           ['Position', position(p.lat, p.lon)],
-          ['Advisory', esc(adv)],
+          ['Advisory', esc(advNow)],
           now ? null : ['Lead', (p.tau != null ? p.tau : '—') + ' h'],
           now ? ['Pressure', s.pressureMb ? esc(s.pressureMb) + ' mb' : '—'] : null,
           now ? ['Movement', s.movementDir != null ? s.movementDir + '° (' + compass(s.movementDir) + ')' + (s.movementKt != null ? ' at ' + s.movementKt + ' kt' : '') : '—'] : null,
           now ? ['NHC last update', utc(s.updated)] : null,
         ];
         const html = tip.rows(esc(p.type || s.classification) + ' ' + name + ' — ' + (now ? 'current position' : 'forecast point'), rows,
-          (s.geometryStale ? 'geometry trails the roster (stale) · ' : '') + (now && s.advisoryUrl ? 'NHC advisory → opens in a new tab' : 'lead time from the advisory'));
+          (stale ? 'the cone and forecast track from advisory ' + esc(adv) + ' have been superseded and are not drawn · ' : '')
+          + (now && s.advisoryUrl ? 'NHC advisory → opens in a new tab' : 'lead time from the advisory'));
         const hit = el('circle', { cx: X(p.lon), cy: Y(p.lat), r: (now ? 11 : 9) * g, fill: '#000', 'fill-opacity': 0, 'pointer-events': 'all', style: 'cursor:pointer' });
         if (now && s.advisoryUrl) {
           hit.onmousemove = e => tip.show(e, html);
@@ -216,7 +248,8 @@ window.WXHur = (() => {
       // the current position's target goes on top, so a slow storm's +12 h point cannot cover it
       hits.sort((a, b) => a[0] - b[0]).forEach(([, hit]) => svg.appendChild(hit));
     });
-    return { storms: storms.length, areas: outl.length };
+    return { storms: storms.length, areas: outl.length,
+             stale: storms.filter(s2 => s2.geometryStale).map(s2 => s2.name) };
   }
 
   /* The two feeds' clocks. NHC issues full advisories at 03, 09, 15 and 21Z.
@@ -524,7 +557,12 @@ window.WXHur = (() => {
               + 'Hurricane (Category 3+) landfall contract for that region, which pays on a landfall in the region '
               + 'or within 50 miles of its border; clicking a shaded region opens '
               + 'that contract on the exchange. ' : '')
-        + 'The point locations are associated with the Live Hurricane contract.');
+        + 'The point locations are associated with the Live Hurricane contract.'
+        + ((counts.stale || []).length
+            ? ' ' + counts.stale.join(' and ') + (counts.stale.length > 1 ? ' are' : ' is')
+              + ' drawn at the position on the latest advisory: the cone service has stopped updating '
+              + (counts.stale.length > 1 ? 'them' : 'it') + ', so the superseded cone and forecast track are not shown.'
+            : ''));
       para('During a live storm, clicking a red reference location opens its probability series below the '
         + 'map; clicking the same location again opens its wind contract.');
     }
@@ -564,7 +602,7 @@ window.WXHur = (() => {
     const only = $('#atlanticOnly'), note = $('#pacificNote'), lfs = $('#landfallSect');
     if (only) only.style.display = basin === 'AL' ? '' : 'none';
     const here = landfallHere().length;
-    if (lfs) lfs.style.display = (basin === 'AL' || here) ? '' : 'none';
+    if (lfs) lfs.style.display = (basin === 'AL' || here || expectLandfall().length) ? '' : 'none';
     if (note) {
       note.style.display = basin === 'AL' ? 'none' : '';
       note.textContent = 'The season count and Category 4 contracts on this exchange are Atlantic and United States '
@@ -1100,11 +1138,29 @@ window.WXHur = (() => {
   function drawLandfall() {
     const host = $('#landfall'); host.innerHTML = '';
     const m = market('HLF');
-    if (!m) { host.appendChild(h('p', { class: 'cap', text: WXM.on() ? 'Landfall contracts not in the quote snapshot.' : 'The market layer is off.' })); return; }
+    if (!m && !expectLandfall().length) {
+      host.appendChild(h('p', { class: 'cap', text: WXM.on() ? 'Landfall contracts not in the quote snapshot.' : 'The market layer is off.' })); return;
+    }
     // the regions on this view; the others are on the other view, and the caption says so
     const rows = landfallHere();
-    const elsewhere = m.contracts.length - rows.length;
-    if (!rows.length) { host.appendChild(h('p', { class: 'cap', text: 'No landfall contract names a region on this view.' })); return; }
+    const elsewhere = (m ? m.contracts.length : 0) - rows.length;
+    if (!rows.length) {
+      /* Expected, not listed. The owner has said the exchange will carry these,
+         so the view says so rather than reading as though nothing is coming;
+         they carry no price, because there is no book to take one from. */
+      const exp = expectLandfall();
+      if (!exp.length) { host.appendChild(h('p', { class: 'cap', text: 'No landfall contract names a region on this view.' })); return; }
+      const ed = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: 'Major hurricane landfall, expected' })]);
+      exp.forEach(e => ed.appendChild(h('div', { class: 'lrow' }, [
+        h('span', { class: 'lk', text: e.label + (e.note ? ' (' + e.note + ')' : '') }),
+        h('span', { class: 'lb', style: 'background:transparent;border:1px dashed var(--rule)' }, [h('i', { style: 'width:0' })]),
+        h('span', { class: 'lv dim', text: 'not listed' }),
+      ])));
+      host.appendChild(ed);
+      host.appendChild(h('p', { class: 'cap', text: 'The exchange has not listed a landfall contract for this ocean yet. '
+        + exp.map(e => e.label).join(' and ') + ' is expected, so there is no book and no price to show.' }));
+      return;
+    }
     const season = (rows[0] && rows[0].expiryLabel) || 'season';
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: 'Major hurricane landfall, ' + season })]);
     rows.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
@@ -1183,7 +1239,7 @@ window.WXHur = (() => {
       host.appendChild(h('p', { class: 'cap', text: 'Not enabled on this site (' + (RK.reason || 'off') + '). When a storm is active and the lane is on, this section shows the vendor’s probability that the peak gust exceeds each threshold at the reference locations, as published, four times a day.' }));
       return;
     }
-    const storms = (RK.storms || []).slice().sort((a, b) => {
+    const storms = (RK.storms || []).filter(s => inBasin(s.name)).slice().sort((a, b) => {
       const ta = WXStorm.stampOf(a), tb = WXStorm.stampOf(b);
       return (tb == null ? Infinity : tb) - (ta == null ? Infinity : ta);
     });
@@ -1194,7 +1250,10 @@ window.WXHur = (() => {
                                   - LIVECYC_LAG_H * 3600000).getUTCHours()).padStart(2, '0')
           + 'Z cycle; this season’s files have landed 4 to 6 hours after their cycle, once the NHC advisory they take their track from is out'));
     }
-    if (!storms.length) {
+    if (!storms.length && basin !== 'AL') {
+      host.appendChild(h('p', { class: 'cap', text: 'No storm in this ocean has published probabilities. A storm appears here on its first vendor delivery.' }));
+    }
+    if (!storms.length && basin === 'AL') {
       host.appendChild(h('p', { class: 'cap', text: 'Lane on; no storm with published probabilities this year yet (last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + ').' }));
     }
     storms.forEach(s => {
@@ -1238,17 +1297,20 @@ window.WXHur = (() => {
            recorded, in miles per hour, with no ladder behind it. It replaces
            the probabilities rather than joining them. */
         const gust = r => (r.peakGustMph == null ? -Infinity : r.peakGustMph);
+        // the vendor publishes a full float; a tenth of a mile an hour is the
+        // precision the figure carries and the settlement is read at
+        const mph = v => (v == null ? null : v.toFixed(1) + ' mph');
         rows = all.slice().sort((a, b) => gust(b[1]) - gust(a[1])
                                        || String(a[1].name || '').localeCompare(String(b[1].name || ''))).slice(0, VENDOR_ROWS);
         tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' }), h('th', { class: 'num', text: 'Peak gust, mph' })]));
         rows.forEach(([id, r]) => {
           const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' }),
-                                  h('td', { class: 'num', text: r.peakGustMph == null ? '—' : r.peakGustMph + ' mph' })]);
+                                  h('td', { class: 'num', text: mph(r.peakGustMph) || '—' })]);
           const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
           attach(tr, tip.rows(esc(r.name) + ' (' + esc(id) + ')',
             [['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)],
              ['Storm', esc(s.name) + ' ' + s.year],
-             ['Peak gust', r.peakGustMph == null ? 'not covered' : r.peakGustMph + ' mph']],
+             ['Peak gust', mph(r.peakGustMph) || 'not covered']],
             esc((RK && RK.attribution) || 'Powered by Reask') + '; the final file, which the wind contracts settle on'));
           linkRow(tr, id, r.name);
           tb.appendChild(tr);
@@ -1332,13 +1394,18 @@ window.WXHur = (() => {
         basin = b;
         ['b1', 'b2'].forEach(x => $('#' + x).classList.remove('on'));
         $('#' + id).classList.add('on');
-        resetView(); draw(); drawStorms(); drawLandfall(); basinSections(); drawDiscussion();
+        resetView(); draw(); drawStorms(); drawLandfall(); drawVendor(); basinSections(); drawDiscussion();
+        if (window.WXStorm && WXStorm.setBasin) {
+          WXStorm.setBasin(b);
+          Promise.resolve(WXStorm.draw(RK, MK)).then(() => draw()).catch(() => {});
+        }
       };
     });
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); basinSections();
     drawDiscussion();
     if (window.WXStorm) {
       WXStorm.init(tip);
+      if (WXStorm.setBasin) WXStorm.setBasin(basin);
       // the map's dots ask this module for a location's series, so the map is
       // drawn again once the ledgers have landed and the dots can answer
       Promise.resolve(WXStorm.draw(RK, MK)).then(() => draw()).catch(() => {});

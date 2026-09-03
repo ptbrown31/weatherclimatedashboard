@@ -985,7 +985,7 @@ def run(no_build: bool) -> int:
                                              for i in range(20)})}
                     return ix
 
-                def _storm_routes(interim, final, index_final=False):
+                def _storm_routes(interim, final, index_final=False, drop_hlf=False):
                     def handler(route):
                         u = route.request.url
                         if u.endswith("/reask.json"):
@@ -1001,6 +1001,13 @@ def run(no_build: bool) -> int:
                         if u.endswith("/market/hurricane.json"):
                             resp = route.fetch()
                             m = json.loads(resp.text())
+                            # with no landfall market at all, the Pacific view has to fall
+                            # back on what the owner says is coming but is not listed
+                            if drop_hlf:
+                                for x in m.get("markets") or []:
+                                    if x.get("symbol") == "HLF":
+                                        x["contracts"] = [c for c in (x.get("contracts") or [])
+                                                          if not str(c.get("label", "")).endswith(", Hawaii")]
                             m["markets"] = (m.get("markets") or []) + [
                                 {"symbol": "LERBR", "name": "Erin \u2014 Brownsville peak gust", "productConid": 999000001, "contracts": [
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": t, "label": "Above %d" % t,
@@ -1209,6 +1216,30 @@ def run(no_build: bool) -> int:
                                 str(vt and [vt["source"][:60], vt["br"][:20], vt["ga"][:20]]))
                         chk.add(f"{scheme} storm ({tag}): it says why the later cycle is not the one shown",
                                 "reads near zero where the peak has already passed" in vt["state"], vt["state"][-160:])
+                    if _final:
+                        # the pool pays one location: at the final column one series
+                        # stands at a dollar and every other at nothing
+                        pool = page.evaluate("""() => {
+                          const svg = document.querySelector('#liveStorms svg.lhlserie');
+                          if (!svg) return null;
+                          return { dots: [...svg.querySelectorAll('circle.setdot')].map(c => +c.getAttribute('cy')),
+                                   lines: svg.querySelectorAll('path.setline').length };
+                        }""")
+                        chk.add(f"{scheme} storm ({tag}): the pool's series ends at the outcome, a dollar or nothing",
+                                bool(pool and pool["dots"] and pool["lines"] >= 1
+                                     and all(abs(d - 26) < 0.6 or abs(d - 186) < 0.6 for d in pool["dots"])
+                                     and min(pool["dots"]) < 30), str(pool))
+                        # the vendor publishes a full float; the settled figure reads to a tenth
+                        gust = page.evaluate("""() => {
+                          const t = [...document.querySelectorAll('#liveStorms svg.scard text')]
+                            .map(e => e.textContent).filter(x => / mph$/.test(x));
+                          return t;
+                        }""")
+                        one_dp = lambda g: (g.endswith(" mph") and g.count(".") == 1
+                                            and len(g[:-4].split(".")[1]) == 1
+                                            and g[:-4].replace(".", "").isdigit())
+                        chk.add(f"{scheme} storm ({tag}): the settled gust reads to one decimal place",
+                                bool(gust) and all(one_dp(g) for g in gust), str(gust)[:100])
                     # ---- a card opened to fill the window brings the key and the switch with it
                     page.locator("#liveStorms .scardwrap .zb.ex").first.click(); page.wait_for_timeout(200)
                     full = page.locator("#liveStorms .scardwrap.full")
@@ -1341,7 +1372,7 @@ def run(no_build: bool) -> int:
                 # ---- the vendor's final file, which the index carries once it lands.
                 # It is a different quantity from the ladder: the gust each location
                 # recorded, in miles per hour, and it supersedes every earlier file.
-                page.route("**/data/snapshots/**", _storm_routes(True, True, True))
+                page.route("**/data/snapshots/**", _storm_routes(True, True, True, drop_hlf=True))
                 page.goto(f"{srv.url}/hurricane.html")
                 page.wait_for_timeout(1400)
                 vf = page.evaluate("""() => {
@@ -1355,7 +1386,7 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} vendor: once the final has landed the table is peak gusts, not probabilities",
                         bool(vf and vf["head"] == ["Reference location", "Peak gust, mph"]
                              and "Metryc final" in vf["source"] and "file received" in vf["source"]
-                             and any("96 mph" in r for r in vf["rows"])
+                             and any("96.0 mph" in r for r in vf["rows"])
                              and not any("%" in r for r in vf["rows"])),
                         str(vf and [vf["head"], vf["rows"][:2], vf["source"][:60]])[:200])
                 chk.add(f"{scheme} vendor: the final's rows run highest gust first",
@@ -1379,6 +1410,35 @@ def run(no_build: bool) -> int:
                         bool(vcap and not any("Far Away" in r for r in vcap["rows"])
                              and any("Calm Harbour" not in r for r in vcap["rows"])),
                         str(vcap and [r for r in vcap["rows"] if "Far" in r])[:120])
+                                # ---- the two oceans are partitioned: nothing Atlantic on the Pacific
+                # view, and what the owner says is coming but is not listed yet is named
+                page.locator("#b2").click(); page.wait_for_timeout(700)
+                part = page.evaluate("""() => {
+                  const t = id => (document.querySelector(id) || {}).textContent || "";
+                  return { vendor: t("#vendor"), live: t("#liveStorms"), landfall: t("#landfall"),
+                           lfShown: !!(document.querySelector("#landfallSect")
+                             && document.querySelector("#landfallSect").style.display !== "none"),
+                           counts: (document.querySelector("#atlanticOnly") || {}).style
+                             ? document.querySelector("#atlanticOnly").style.display : "" };
+                }""")
+                chk.add(f"{scheme} basins: no Atlantic storm on the Pacific view",
+                        bool(part and "Erin" not in part["vendor"] and "Erin" not in part["live"]),
+                        str(part and [part["vendor"][:50], part["live"][:50]])[:150])
+                chk.add(f"{scheme} basins: the Pacific view names the storm whose contracts are expected",
+                        bool(part and "Lowell" in part["live"] and "Honolulu" in part["live"]
+                             and "Nothing is listed or quoted for Lowell" in part["live"]),
+                        str(part and part["live"][:170]))
+                chk.add(f"{scheme} basins: an expected landfall region is shown without a price",
+                        bool(part and part["lfShown"] and "Hawaii" in part["landfall"]
+                             and "not listed" in part["landfall"] and "no price to show" in part["landfall"]
+                             and "\u00a2" not in part["landfall"]),
+                        str(part and part["landfall"][:170]))
+                chk.add(f"{scheme} basins: the count panels stay off the Pacific view",
+                        bool(part and part["counts"] == "none"), str(part and part["counts"]))
+                page.locator("#b1").click(); page.wait_for_timeout(600)
+                back = page.evaluate('() => ((document.querySelector("#liveStorms") || {}).textContent || "")')
+                chk.add(f"{scheme} basins: switching back restores the Atlantic storm",
+                        "Erin" in back and "Lowell" not in back, back[:90])
                 page.unroute("**/data/snapshots/**")
 
                 # ---- the page's order, the standing links, and a storm that
@@ -1795,6 +1855,23 @@ def run(no_build: bool) -> int:
                         "Landfall contract" in found_ep and "Yes bid" in found_ep, found_ep[:80])
                 chk.add(f"{scheme} pacific: the map caption says the regions are shaded",
                         "within 50 miles of its border" in page.locator("#basinCap").inner_text(), page.locator("#basinCap").inner_text()[:80])
+                # ---- a storm whose cone service has stopped updating: the superseded
+                # cone and forecast track are not drawn, and the storm is placed and
+                # labelled from the roster's own advisory instead
+                st = page.evaluate("""() => {
+                  const cones = [...document.querySelectorAll('#basin path')]
+                    .filter(p => (p.getAttribute('fill') || '').indexOf('rgba(100,116,139') === 0).length;
+                  const labels = [...document.querySelectorAll('#basin text')].map(t => t.textContent);
+                  return { cones, cap: (document.querySelector('#basinCap') || {}).textContent || '',
+                           lala: labels.find(t => t.indexOf('Lala') >= 0) || '' };
+                }""")
+                chk.add(f"{scheme} stale geometry: the superseded cone is not drawn",
+                        bool(st and st["cones"] == 1), str(st and st["cones"]))
+                chk.add(f"{scheme} stale geometry: the storm is labelled with the roster's advisory, not the old one",
+                        bool(st and "adv 056" in st["lala"] and "adv 48" not in st["lala"]), str(st and st["lala"])[:90])
+                chk.add(f"{scheme} stale geometry: the caption says why the cone is missing",
+                        bool(st and "Lala is drawn at the position on the latest advisory" in st["cap"]
+                             and "not shown" in st["cap"]), str(st and st["cap"][-150:]))
                 page.locator("#b1").click(); page.wait_for_timeout(500)
                 chk.add(f"{scheme} atlantic: switching back restores the full board",
                         page.locator("#landfall .lrow").count() >= 5 and "Honolulu, Hawaii" not in page.locator("#landfall").inner_text(),

@@ -1,65 +1,91 @@
 {
-  "site_name": "weather-tools-site",
-  "domain": "weather.weatherclimatehumansystems.org",
-  "data_base_url": "/data",
-  "user_agent": "weather-tools-site/0.1 (ptbrown31@gmail.com)",
-  "storage": {
-    "backend": "local",
-    "root": "./data",
-    "bucket": "",
-    "endpoint": "",
-    "prefix": "",
-    "region": ""
-  },
-  "cadence_minutes": {
-    "obs": 10,
-    "forecast": 30,
-    "archive": 30,
-    "hurricane": 30,
-    "market": 10
-  },
-  "daily_utc": "09:30",
-  "sources": {
-    "nws": true,
-    "nbm": true,
-    "lamp": true,
-    "mav": true,
-    "obs_record": false,
-    "exchange": true,
-    "reask": true
-  },
-  "_sources_note": "obs_record is owned by the 10-minute obs job; set it true only when running the archive job alone. reask needs WX_REASK_API_KEY in the environment as well.",
-  "market_overlay": {
-    "standalone": "live",
-    "embed": "off",
-    "source": "live"
-  },
-  "disclosure": "Built by Patrick Brown, a Trend Analytics, LLC employee (a subsidiary of Interactive Brokers) working with ForecastEx. Not an Interactive Brokers or ForecastEx product. Not investment advice.",
-  "site_title": "Weather tools",
-  "exchange": {
-    "base_url": "https://forecasttrader.interactivebrokers.com",
-    "quote_workers": 4,
-    "fee_per_side": 0.005
-  },
-  "reask": {
-    "base_url": "",
-    "api_key": ""
-  },
-  "_reask_note": "both values come from the environment (WX_REASK_BASE_URL, WX_REASK_API_KEY); leave them empty here",
-  "season_forecast": {
-    "named": 9,
-    "hurricanes": 4,
-    "majors": 1,
-    "source": "Colorado State University Tropical Meteorology Project",
-    "label": "CSU, 5 Aug 2026"
-  },
-  "_season_forecast_note": "A seasonal hurricane forecast is not a government product, so this is an owner's choice and is attributed wherever it is drawn. Empty values fall back to the climatological pace alone. Update the numbers and the label together when CSU revises.",
-  "_exchange_fee_note": "Dollars per contract each side pays at execution, used only to state payout multiples net of fees. The exchange's FAQ words it as '$0.01 per contract, charged to each side'; the owner's published newsletter and reference code both compute 1/(price + 0.005). This follows the published convention and every multiple names the fee it used.",
-  "traffic": {
-    "log_bucket": "",
-    "log_prefix": "cf"
-  },
-  "eia": {
-    "api_key": ""
-  }
+ "site_name": "weather-tools-site",
+ "domain": "weather.weatherclimatehumansystems.org",
+ "data_base_url": "/data",
+ "user_agent": "weather-tools-site/0.1 (ptbrown31@gmail.com)",
+ "storage": {
+  "backend": "local",
+  "root": "./data",
+  "bucket": "",
+  "endpoint": "",
+  "prefix": "",
+  "region": ""
+ },
+ "cadence_minutes": {
+  "obs": 10,
+  "forecast": 30,
+  "archive": 30,
+  "hurricane": 30,
+  "market": 10
+ },
+ "daily_utc": "09:30",
+ "sources": {
+  "nws": true,
+  "nbm": true,
+  "lamp": true,
+  "mav": true,
+  "obs_record": false,
+  "exchange": true,
+  "reask": true
+ },
+ "_sources_note": "obs_record is owned by the 10-minute obs job; set it true only when running the archive job alone. reask needs WX_REASK_API_KEY in the environment as well.",
+ "market_overlay": {
+  "standalone": "live",
+  "embed": "off",
+  "source": "live"
+ },
+ "disclosure": "Built by Patrick Brown, a Trend Analytics, LLC employee (a subsidiary of Interactive Brokers) working with ForecastEx. Not an Interactive Brokers or ForecastEx product. Not investment advice.",
+ "site_title": "Weather tools",
+ "exchange": {
+  "base_url": "https://forecasttrader.interactivebrokers.com",
+  "quote_workers": 4,
+  "fee_per_side": 0.005
+ },
+ "reask": {
+  "base_url": "",
+  "api_key": ""
+ },
+ "_reask_note": "both values come from the environment (WX_REASK_BASE_URL, WX_REASK_API_KEY); leave them empty here",
+ "season_forecast": {
+  "named": 9,
+  "hurricanes": 4,
+  "majors": 1,
+  "source": "Colorado State University Tropical Meteorology Project",
+  "label": "CSU, 5 Aug 2026"
+ },
+ "_season_forecast_note": "A seasonal hurricane forecast is not a government product, so this is an owner's choice and is attributed wherever it is drawn. Empty values fall back to the climatological pace alone. Update the numbers and the label together when CSU revises.",
+ "_exchange_fee_note": "Dollars per contract each side pays at execution, used only to state payout multiples net of fees. The exchange's FAQ words it as '$0.01 per contract, charged to each side'; the owner's published newsletter and reference code both compute 1/(price + 0.005). This follows the published convention and every multiple names the fee it used.",
+ "traffic": {
+  "log_bucket": "",
+  "log_prefix": "cf"
+ },
+ "eia": {
+  "api_key": ""
+ },
+ "expected_listings": {
+  "_note": "Listings the owner has said the exchange will carry but which it has not listed yet. Shown on the matching basin view as pending, never with a price. Delete an entry once the exchange lists it.",
+  "landfall": [
+   {
+    "basin": "EP",
+    "label": "Hawaii",
+    "note": "the whole state"
+   }
+  ],
+  "storms": [
+   {
+    "basin": "EP",
+    "name": "Lowell",
+    "products": [
+     "wind gust contracts",
+     "a highest-wind pool"
+    ],
+    "locations": [
+     "Honolulu",
+     "Hilo",
+     "Kahului",
+     "Kapa'a"
+    ]
+   }
+  ]
+ }
 }

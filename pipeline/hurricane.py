@@ -264,6 +264,15 @@ def hurricane_pass(cfg: dict, store: Storage) -> int:
                     storm["geometryStale"] = True
                 else:
                     storm.update({"geometryAdvisory": None, "points": [], "track": [], "cone": [], "past": [], "geometryStale": True})
+        # A fetch that succeeds can still be behind. The GIS service stops
+        # issuing cone and track packages before NHC stops advising, so a
+        # decaying storm keeps its last package while the roster advances:
+        # Edouard sat on advisory 6A, its landfall, while the roster was on 12
+        # and the storm was inland and post-tropical two days later. That is
+        # stale even though nothing failed, and the page has to know.
+        gadv = str(storm.get("geometryAdvisory") or "").lstrip("0")
+        if gadv and gadv != str(adv or "").lstrip("0"):
+            storm["geometryStale"] = True
         snap["storms"].append(storm)
     if ok_roster:
         try:

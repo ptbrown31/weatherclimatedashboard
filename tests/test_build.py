@@ -258,5 +258,24 @@ class StationPage(unittest.TestCase):
         self.assertLess(out.index("window.WX_STATION"), out.index("js/chart-city.js"))
 
 
+
+class ExpectedListings(unittest.TestCase):
+    """Listings the owner has said are coming travel in config.js, so the
+    hurricane page can name them on the right ocean without a fetch."""
+
+    def test_config_js_carries_the_expected_listings(self):
+        cfg = {"site_title": "T", "expected_listings": {
+            "landfall": [{"basin": "EP", "label": "Hawaii"}],
+            "storms": [{"basin": "EP", "name": "Lowell", "locations": ["Honolulu"]}]}}
+        js = build.config_js(cfg, "standalone", "data")
+        doc = json.loads(js.split("window.WX = ", 1)[1].rstrip().rstrip(";"))
+        self.assertEqual(doc["expected"]["landfall"][0]["label"], "Hawaii")
+        self.assertEqual(doc["expected"]["storms"][0]["name"], "Lowell")
+
+    def test_no_expected_listings_is_an_empty_object(self):
+        doc = json.loads(build.config_js({"site_title": "T"}, "standalone", "data")
+                         .split("window.WX = ", 1)[1].rstrip().rstrip(";"))
+        self.assertEqual(doc["expected"], {})
+
 if __name__ == "__main__":
     unittest.main()

@@ -55,6 +55,9 @@ def config_js(cfg: dict, target: str, data_base: str) -> str:
         "disclosure": cfg.get("disclosure", ""),
         "cadenceMinutes": cfg.get("cadence_minutes", {}),
         "decode": {"TEMP_SOURCE": None, "INCLUDE_SPECI": None},
+        # listings the owner has said are coming but the exchange has not made:
+        # the hurricane page draws them as pending on the matching basin view
+        "expected": cfg.get("expected_listings") or {},
     }
     # the category hierarchy travels in config.js so the header can be drawn on
     # the first paint rather than after a fetch: it is small, it changes only

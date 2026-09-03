@@ -50,6 +50,14 @@ window.WXStorm = (() => {
   const numOf = name => { const i = NUMWORD.indexOf(String(name || '').trim()); return i > 0 ? i : null; };
   let ROSTER = [];
   function setRoster(list) { ROSTER = list || []; }
+  // the ocean being looked at: a storm belongs to one, and so does its section
+  let BASIN = 'AL';
+  function setBasin(b) { BASIN = b || 'AL'; }
+  const stormBasin = nm => {
+    const r = ROSTER.find(x => String(x.name).toLowerCase() === String(nm || '').toLowerCase());
+    return r && r.basin ? r.basin : 'AL';
+  };
+  const inBasin = nm => (BASIN === 'AL' ? stormBasin(nm) === 'AL' : stormBasin(nm) !== 'AL');
   function supersededBy(s) {
     const n = numOf(s && s.name);
     if (n == null) return null;
@@ -60,6 +68,9 @@ window.WXStorm = (() => {
     return hit ? hit.name : null;
   }
   // what a folded storm's summary says about why it is folded
+  // the vendor publishes a full float; a tenth of a mile an hour is the
+  // precision the figure carries and the settlement is read at
+  const mph = v => (v == null ? null : v.toFixed(1) + ' mph');
   const doneLabel = s => (s.final ? 'settled'
     : supersededBy(s) ? 'now named ' + supersededBy(s)
     : 'no longer updating');
@@ -429,7 +440,7 @@ window.WXStorm = (() => {
           rows.push(r);
         });
         const et = etTime(s.ts) || etTime(s.at);
-        const what = c.kind === 'final' ? 'final settlement' + (fin && fin[sid] != null ? ' · ' + fin[sid] + ' mph' : '')
+        const what = c.kind === 'final' ? 'final settlement' + (fin && fin[sid] != null ? ' · ' + mph(fin[sid]) : '')
           : c.kind === 'interim' ? 'the Metryc interim file'
               + (arr.length ? '' : ' · it carries no figure for this location')
           : 'delivery ' + (k + 1) + ' of ' + (lastLc + 1) + ' so far';
@@ -548,7 +559,7 @@ window.WXStorm = (() => {
           stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
       });
     }
-    if (fin && fin[sid] != null) svg.appendChild(txt(fin[sid] + ' mph', { x: x(kf) - 6, y: B - 3, 'text-anchor': 'end',
+    if (fin && fin[sid] != null) svg.appendChild(txt(mph(fin[sid]), { x: x(kf) - 6, y: B - 3, 'text-anchor': 'end',
       'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
 
     const wrap = h('div', { class: 'scardwrap', 'data-sid': sid });
@@ -761,6 +772,17 @@ window.WXStorm = (() => {
     // newest delivery carries and the one a ruling governs; failing that,
     // the newest delivery that carried a figure at all
     const latestCalc = calcByName(ledger.name) || calc.slice().reverse().find(by => Object.keys(by).length) || {};
+    /* The pool settles on one location, so at the final column one series is at
+       a dollar and every other at nothing.
+
+       The winner is the candidate with the highest gust in the final file, not
+       the highest gust in the file, since the pool asks which of ITS locations
+       recorded the highest wind. The file is keyed by location id and the pool's
+       strikes are place names, so the ledger's own site list joins the two. */
+    const finalGusts = (ledger && ledger.final) || null;
+    const idByName = {};
+    Object.entries((ledger && ledger.sites) || {}).forEach(([id, v]) => { if (v && v.name) idByName[v.name] = id; });
+    const gustOf = nm => (finalGusts ? finalGusts[idByName[nm]] : null);
     const names = (m.contracts || []).map(c => c.label).filter(Boolean)
       .sort((a, b) => ((now[b] && !now[b].empty ? now[b].mid : 0) - (now[a] && !now[a].empty ? now[a].mid : 0))
                    || ((latestCalc[b] || 0) - (latestCalc[a] || 0))).slice(0, 8);
@@ -779,6 +801,12 @@ window.WXStorm = (() => {
     // the same columns as the location cards, so the two read against each
     // other; a delivery before the calculation existed has a column and no dot
     const cols = columns(ledger, stormEntry({ name: ledger.name, year: ledger.year }));
+    const kf = cols.findIndex(c => c.kind === 'final');
+    let winner = null, bestGust = -Infinity;
+    if (kf >= 0 && finalGusts) names.forEach(nm => {
+      const g = gustOf(nm);
+      if (g != null && g > bestGust) { bestGust = g; winner = nm; }
+    });
     const N = Math.max(cols.length, 2);
     const x = i => L + (i / (N - 1)) * (R - L);
     const Y = p => B - (p / 100) * (B - T);
@@ -880,6 +908,22 @@ window.WXStorm = (() => {
         const zl = seq[seq.length - 1];
         svg.appendChild(el('circle', { class: 'pxdot', cx: zl.X.toFixed(1), cy: Y(zl.b.mid).toFixed(1), r: 3,
           fill: col, 'pointer-events': 'none' }));
+      }
+      /* Settlement. The pool pays one location, so at the final column this
+         location's series stands at a dollar if it recorded the highest gust of
+         the candidates and at nothing if it did not. Both series run to it: the
+         price and the calculation were each answering the question this column
+         settles. */
+      if (kf >= 0 && winner) {
+        const ys = Y(nm === winner ? 100 : 0);
+        const ends = [];
+        if (seq.length) ends.push([seq[seq.length - 1].X, Y(seq[seq.length - 1].b.mid)]);
+        if (line.length) ends.push([X(line[line.length - 1][0]), Y(line[line.length - 1][1])]);
+        ends.forEach(([ex, ey]) => svg.appendChild(el('path', { class: 'setline',
+          d: 'M' + ex.toFixed(1) + ',' + ey.toFixed(1) + 'L' + x(kf).toFixed(1) + ',' + ys.toFixed(1),
+          fill: 'none', stroke: col, 'stroke-width': 1.2, 'stroke-dasharray': '2 2', 'pointer-events': 'none' })));
+        svg.appendChild(el('circle', { class: 'setdot', cx: x(kf).toFixed(1), cy: ys.toFixed(1), r: 3.4,
+          fill: col, stroke: 'var(--panel)', 'stroke-width': 1, 'pointer-events': 'none' }));
       }
     });
 
@@ -1090,13 +1134,24 @@ window.WXStorm = (() => {
     RK = rk; MK = mk;
     const host = $('#liveStorms'); if (!host) return;
     host.innerHTML = '';
-    const storms = ((rk && rk.storms) || []).filter(s => s && s.name).sort(byRecency);
+    const storms = ((rk && rk.storms) || []).filter(s => s && s.name && inBasin(s.name)).sort(byRecency);
     if (!rk || !rk.enabled) {
       host.appendChild(h('p', { class: 'cap', text: 'The live-storm wind lane is not enabled on this site' + (rk && rk.reason ? ' (' + esc(rk.reason) + ')' : '') + '. When it is on and a storm is active, each reference location the vendor signals on appears here, delivery by delivery, beside the exchange’s price for the same contract.' }));
       return;
     }
     if (!storms.length) {
-      host.appendChild(h('p', { class: 'cap', text: 'No storm with published probabilities at the moment. A storm appears here on its first vendor delivery.' }));
+      /* Expected, not listed. The owner has said the exchange will carry these
+         for a storm the vendor has not delivered on yet, so the view names them
+         rather than reading as though nothing is coming. No price, no series:
+         there is no book and no delivery behind either. */
+      const exp = ((window.WX && WX.expected && WX.expected.storms) || []).filter(e => (e.basin || 'AL') === BASIN);
+      exp.forEach(e => host.appendChild(h('div', { class: 'stormrow' }, [h('b', { text: e.name }),
+        h('span', { text: 'expected: ' + (e.products || []).join(' and ')
+          + ((e.locations || []).length ? ' at ' + e.locations.join(', ') : '') })])));
+      host.appendChild(h('p', { class: 'cap', text: exp.length
+        ? 'Nothing is listed or quoted for ' + exp.map(e => e.name).join(' and ')
+          + ' yet, and the vendor has published no probabilities for it, so there is no series to draw.'
+        : 'No storm with published probabilities at the moment. A storm appears here on its first vendor delivery.' }));
       return;
     }
     /* Storms still delivering come first, newest delivery first, each with its
@@ -1206,5 +1261,5 @@ window.WXStorm = (() => {
     return out;
   }
 
-  return { init, draw, showSite, sites, dormant, stampOf, setRoster, supersededBy, doneLabel };
+  return { init, draw, showSite, sites, dormant, stampOf, setRoster, setBasin, supersededBy, doneLabel };
 })();
