@@ -1007,7 +1007,8 @@ def run(no_build: bool) -> int:
                                 for x in m.get("markets") or []:
                                     if x.get("symbol") == "HLF":
                                         x["contracts"] = [c for c in (x.get("contracts") or [])
-                                                          if not str(c.get("label", "")).endswith(", Hawaii")]
+                                                          if str(c.get("label", "")) != "Hawaii"
+                                                          and not str(c.get("label", "")).endswith(", Hawaii")]
                             m["markets"] = (m.get("markets") or []) + [
                                 {"symbol": "LERBR", "name": "Erin \u2014 Brownsville peak gust", "productConid": 999000001, "contracts": [
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": t, "label": "Above %d" % t,
@@ -1428,17 +1429,14 @@ def run(no_build: bool) -> int:
                         bool(part and "Lowell" in part["live"] and "Honolulu" in part["live"]
                              and "Nothing is listed or quoted for Lowell" in part["live"]),
                         str(part and part["live"][:170]))
-                chk.add(f"{scheme} basins: an expected landfall region is shown without a price",
-                        bool(part and part["lfShown"] and "Hawaii" in part["landfall"]
-                             and "not listed" in part["landfall"] and "no price to show" in part["landfall"]
-                             and "\u00a2" not in part["landfall"]),
-                        str(part and part["landfall"][:170]))
+                chk.add(f"{scheme} basins: with nothing listed for this ocean the landfall board is not shown",
+                        bool(part and not part["lfShown"]), str(part and part["landfall"][:150]))
                 chk.add(f"{scheme} basins: the count panels stay off the Pacific view",
                         bool(part and part["counts"] == "none"), str(part and part["counts"]))
                 pnote = page.evaluate('() => ((document.querySelector("#pacificNote") || {}).textContent || "")')
                 chk.add(f"{scheme} basins: the note agrees with the board it is describing",
-                        "What the exchange is expected to list is above" in pnote
-                        and "landfall board is on the Atlantic view too" not in pnote, pnote[-150:])
+                        "landfall board is on the Atlantic view too" in pnote
+                        and "listed above" not in pnote, pnote[-150:])
                 page.locator("#b1").click(); page.wait_for_timeout(600)
                 back = page.evaluate('() => ((document.querySelector("#liveStorms") || {}).textContent || "")')
                 chk.add(f"{scheme} basins: switching back restores the Atlantic storm",
@@ -1829,34 +1827,34 @@ def run(no_build: bool) -> int:
                     t = page.locator("#tip").inner_text()
                     if "Landfall contract" in t: found = t; break
                 chk.add(f"{scheme} hover: a shaded landfall region shows its contract", "Yes bid" in found, found[:80])
-                # ---- the Pacific view: a landfall region there (Honolulu, Hawaii in the sample) is
+                # ---- the Pacific view: a landfall region there (Hawaii, as the exchange lists it) is
                 # listed, drawn and priced on that view and kept off the Atlantic one
                 lf_txt = page.locator("#landfall").inner_text()
                 chk.add(f"{scheme} landfall: the Atlantic board lists no Pacific region",
-                        "Honolulu, Hawaii" not in lf_txt and page.locator("#landfall .lrow").count() >= 5, lf_txt[:60])
+                        "Hawaii" not in lf_txt and page.locator("#landfall .lrow").count() >= 5, lf_txt[:60])
                 chk.add(f"{scheme} landfall: the caption carries the 50-mile border clause and the eye rule",
                         "50 miles" in lf_txt and "eye crossing" in lf_txt and "Pacific view" in lf_txt, lf_txt[-160:])
                 page.locator("#b2").click(); page.wait_for_timeout(600)
                 ep_txt = page.locator("#landfall").inner_text()
                 ep_rows = page.locator("#landfall .lrow").count()
                 chk.add(f"{scheme} pacific: the landfall board lists only the Pacific region",
-                        page.locator("#landfallSect").is_visible() and ep_rows == 1 and "Honolulu, Hawaii" in ep_txt and "Atlantic view" in ep_txt,
+                        page.locator("#landfallSect").is_visible() and ep_rows == 1 and "Hawaii" in ep_txt and "Atlantic view" in ep_txt,
                         f"rows={ep_rows} {ep_txt[:60]}")
                 chk.add(f"{scheme} pacific: the count panels stay on the Atlantic view",
                         not page.locator("#atlanticOnly").is_visible() and "listed above" in page.locator("#pacificNote").inner_text(),
                         page.locator("#pacificNote").inner_text()[:80])
                 ep_links = page.locator("#basin path[role='link']").count()
                 chk.add(f"{scheme} pacific: a shaded region is clickable", ep_links >= 1, f"regions={ep_links}")
-                found_ep = ""
-                for i in range(min(ep_links, 60)):
-                    try:
-                        page.locator("#basin path[role='link']").nth(i).hover(force=True, timeout=1500); page.wait_for_timeout(40)
-                    except Exception:
-                        continue
-                    t = page.locator("#tip").inner_text()
-                    if "Honolulu, Hawaii" in t: found_ep = t; break
-                chk.add(f"{scheme} pacific hover: the Hawaii county shows its landfall contract",
-                        "Landfall contract" in found_ep and "Yes bid" in found_ep, found_ep[:80])
+                # the state is drawn as one path over eight islands, so its bounding-box
+                # centre is ocean: the tooltip is asked for on the element itself
+                ep_tip = page.evaluate("""() => {
+                  const p = document.querySelector('#basin path[aria-label*="Hawaii"]');
+                  if (!p) return "";
+                  p.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 200, clientY: 300 }));
+                  return (document.querySelector("#tip") || {}).textContent || "";
+                }""")
+                chk.add(f"{scheme} pacific hover: the Hawaii region shows its landfall contract",
+                        "Landfall contract" in ep_tip and "Yes bid" in ep_tip and "Hawaii" in ep_tip, ep_tip[:110])
                 chk.add(f"{scheme} pacific: the map caption says the regions are shaded",
                         "within 50 miles of its border" in page.locator("#basinCap").inner_text(), page.locator("#basinCap").inner_text()[:80])
                 # ---- a storm whose cone service has stopped updating: the superseded
@@ -1878,7 +1876,7 @@ def run(no_build: bool) -> int:
                              and "not shown" in st["cap"]), str(st and st["cap"][-150:]))
                 page.locator("#b1").click(); page.wait_for_timeout(500)
                 chk.add(f"{scheme} atlantic: switching back restores the full board",
-                        page.locator("#landfall .lrow").count() >= 5 and "Honolulu, Hawaii" not in page.locator("#landfall").inner_text(),
+                        page.locator("#landfall .lrow").count() >= 5 and "Hawaii" not in page.locator("#landfall").inner_text(),
                         f"rows={page.locator('#landfall .lrow').count()}")
                 # ---- climate page: live contract markers
                 page.goto(f"{srv.url}/climate.html")

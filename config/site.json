@@ -63,14 +63,8 @@
   "api_key": ""
  },
  "expected_listings": {
-  "_note": "Listings the owner has said the exchange will carry but which it has not listed yet. Shown on the matching basin view as pending, never with a price. Delete an entry once the exchange lists it.",
-  "landfall": [
-   {
-    "basin": "EP",
-    "label": "Hawaii",
-    "note": "the whole state"
-   }
-  ],
+  "_note": "Listings the owner has said the exchange will carry but which it has not listed yet. Shown on the matching basin view as pending, never with a price. Delete an entry once the exchange lists it: the Hawaii landfall contract was listed on 2026-09-03 and its entry was removed then.",
+  "landfall": [],
   "storms": [
    {
     "basin": "EP",
