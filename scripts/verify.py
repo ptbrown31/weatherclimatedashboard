@@ -1612,6 +1612,40 @@ def run(no_build: bool) -> int:
                 # the map: a shaded landfall region is a contract
                 shaded = page.locator("#basin path[role='link']").count()
                 chk.add(f"{scheme} hurricane link: shaded map regions are clickable", shaded >= 3, f"regions={shaded}")
+                # ---- an empty book (both sides bidding the minimum) is not a fifty-cent price.
+                # The fixture's top hurricane count carries one, as the live board does.
+                lad_txt = page.locator("#ladders").inner_text()
+                chk.add(f"{scheme} empty book: the count ladder says no price, not 50c",
+                        "no price" in lad_txt and "50\u00a2" not in lad_txt, lad_txt[:110])
+                chk.add(f"{scheme} empty book: a contract with no bids at all still reads no bids",
+                        "no bids" in lad_txt, lad_txt[:110])
+                chk.add(f"{scheme} empty book: the ladder caption says an empty book carries no price",
+                        "both sides bid the minimum" in page.locator("#laddersCap").inner_text(),
+                        page.locator("#laddersCap").inner_text()[-120:])
+                # the landfall board carries one too (The Bahamas, as the live board does),
+                # and a board row has a tooltip where a panel's unpriced bar does not
+                lf_all = page.locator("#landfall").inner_text()
+                chk.add(f"{scheme} empty book: the landfall board says no price for it",
+                        "no price" in lf_all and "50\u00a2" not in lf_all, lf_all[:110])
+                empty_tip = ""
+                for i in range(min(page.locator("#landfall .lrow").count(), 40)):
+                    page.locator("#landfall .lrow").nth(i).hover(force=True); page.wait_for_timeout(50)
+                    t = page.locator("#tip").inner_text()
+                    if "no price" in t: empty_tip = t; break
+                chk.add(f"{scheme} empty book: its tooltip still shows both bids and says why there is no price",
+                        "both sides bid the minimum" in empty_tip and "Yes bid" in empty_tip, empty_tip[:150])
+                bah = page.locator('#basin path[aria-label*="Bahamas"]')
+                bah_fill, bah_tip = "", ""
+                if bah.count():
+                    bah_fill = bah.first.get_attribute("fill") or ""
+                    try:
+                        bah.first.hover(force=True, timeout=2000); page.wait_for_timeout(80)
+                        bah_tip = page.locator("#tip").inner_text()
+                    except Exception:
+                        pass
+                chk.add(f"{scheme} empty book: its map region is left unshaded and says no price",
+                        bah.count() >= 1 and bah_fill == "var(--map-land)" and "no price" in bah_tip,
+                        f"n={bah.count()} fill={bah_fill} tip={bah_tip[:90]}")
                 linked_href("#basin path[role='link']", "a shaded map region")
                 # ---- the map zooms and pans
                 vb0 = page.locator("#basin").get_attribute("viewBox")

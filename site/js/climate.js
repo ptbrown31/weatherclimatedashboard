@@ -423,7 +423,9 @@ window.WXClimate = (() => {
       ? Math.max(3, Math.min(8, gaps.length ? Math.min(...gaps) * 0.62 : 8))
       : (opts.markerRadius || 8);
     cs.forEach(c => {
-      const col = priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
+      // an empty book carries no price, so its marker is drawn as unpriced
+      // rather than at the fifty-cent colour its midpoint would give
+      const col = c.yes == null ? 'var(--muted)' : priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
       const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' })
                      : el('circle', { cx, cy, r: rad, fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' });
       const url = WXM.contractUrl(product.productConid, c.conidYes || c.conid);
@@ -451,6 +453,7 @@ window.WXClimate = (() => {
               ? 'Yes bid ' + cents(c.bid) + ' · No bid ' + cents(c.ask == null ? null : 1 - c.ask)
                 + ' · they buy, they do not sell, and the two sum to a dollar'
               : 'no bids on either side')
+           + (c.empty ? ' · both sides bid the minimum, so no price is shown' : '')
            + (WXM.termsUrl(product.id) ? ' · ' + WXM.termsLink(product.id, 'terms') : ''));
       m.onmousemove = e => tip.show(e, html());
       m.onmouseleave = () => tip.hide();

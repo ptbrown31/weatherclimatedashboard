@@ -57,7 +57,11 @@ only place the exchange is called. `market_overlay` per target: `live` on the st
 quote job's snapshots: Yes bid, No bid and Yes price midpoint per listed strike, two-day quote history, implied medians,
 hurricane and climate groups), `off` in the embed unless `?market=on`, `placeholder` for the
 reference package's synthetic ladders. Prices are the exchange's, in cents, with their as-of time,
-never fee adjusted. Exchange language: there are no sellers, only bids to buy Yes or No that sum to $1;
+never fee adjusted. A book whose two sides both bid the minimum (one cent against one cent) is
+empty, and its midpoint of fifty cents is not a price: outside the daily temperature ladders every
+board shows no price for one and leaves its map region unshaded (`WXM.realMid`, owner's decision
+2026-09-03). The daily temperature ladders are deliberately excluded and quote every book they are
+sent; a book with bids on one side only is a real resting bid everywhere and keeps its price. Exchange language: there are no sellers, only bids to buy Yes or No that sum to $1;
 the feed's "ask" on a Yes contract is one dollar less the No bid and the pages never say "ask", "sell"
 or "offer". The pages never compute a fair value, a model probability, a disagreement score, or a
 figure of their own for the highest-wind pool (those are internal systems and stay out of this repo;

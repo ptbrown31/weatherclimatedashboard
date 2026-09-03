@@ -71,6 +71,17 @@ window.WXHur = (() => {
   // the feed's "ask" on a Yes contract is one dollar less the No bid, shown as such.
   const side = (p, sz) => (p == null ? '—' : cents(p) + '¢' + (sz != null ? ' ×' + Math.round(sz) : ''));
   const noBid = c => (c && c.ask != null ? Math.round((1 - c.ask) * 100) / 100 : null);
+  /* An empty book is not a price.
+
+     Both sides bidding the minimum leaves a midpoint of fifty cents that says
+     nothing about the contract, and on a shaded map it would outrank every
+     real price on the board. These boards show no price for one. A book with
+     bids on one side only is a real resting bid and keeps its price. */
+  const priced = c => !!(c && WXM.realMid(c));
+  const oneSided = c => !!(c && c.mid != null && (c.bid == null || c.ask == null));
+  // what a row prints where there is no price: an empty book and a contract
+  // nobody has bid on are different states and say so
+  const noPrice = c => (WXM.emptyBook(c) ? 'no price' : 'no bids');
   function bidsNote(c) {
     if (!c || c.mid == null) return null;
     const notes = [];
@@ -93,7 +104,8 @@ window.WXHur = (() => {
 
   const quoteRows = c => (!c ? [] : [
     ['Yes bid', side(c.bid, c.bidSize)], ['No bid', side(noBid(c), c.askSize)],
-    ['Yes price', c.mid == null ? 'no bids' : pct(cents(c.mid)) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')],
+    ['Yes price', priced(c) ? pct(cents(c.mid)) + (c.bid != null && c.ask != null ? ' (midpoint)' : '')
+                            : (WXM.emptyBook(c) ? 'no price (both sides bid the minimum)' : 'no bids')],
     ['Buy Yes now at', c.ask == null ? null : pct(cents(c.ask)) + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
     ['Buy No now at', c.bid == null ? null : pct(100 - cents(c.bid)) + (WXM.payoutText(100 - cents(c.bid)) ? ' · pays ' + WXM.payoutText(100 - cents(c.bid)) : '')],
     ['Bids', bidsNote(c)], ['Settles', expDate(c.expiration)]]);
@@ -114,8 +126,10 @@ window.WXHur = (() => {
 
   // ---- the exchange's hurricane group, by symbol
   const market = sym => (MK ? MK.markets.find(m => m.symbol === sym) : null);
-  const yes = c => (c && c.mid != null ? cents(c.mid) : null);
-  const quoteText = c => (!c ? 'not listed' : (c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid)) + ' (Yes bid ' + pct(cents(c.bid)) + ' · No bid ' + pct(cents(noBid(c))) + (c.from === 'no' ? ', quoted from the No contract' : '') + ')'));
+  const yes = c => (priced(c) ? cents(c.mid) : null);
+  // a ladder row's right-hand cell
+  const yesText = c => { const y = yes(c); return y == null ? noPrice(c) : y + '\u00a2' + (oneSided(c) ? '*' : ''); };
+  const quoteText = c => (!c ? 'not listed' : (!priced(c) ? noPrice(c) : 'Yes ' + pct(cents(c.mid)) + ' (Yes bid ' + pct(cents(c.bid)) + ' · No bid ' + pct(cents(noBid(c))) + (c.from === 'no' ? ', quoted from the No contract' : '') + ')'));
   function landfallQuotes() {
     const m = market('HLF'); if (!m) return null;
     const out = {};
@@ -429,11 +443,11 @@ window.WXHur = (() => {
       const c = lf ? lf[label] : null;
       if (c) shadedHere++;
       const season = c && c.expiryLabel ? c.expiryLabel : (hlf && hlf.contracts[0] && hlf.contracts[0].expiryLabel) || 'season';
-      const rows = c ? [['Landfall contract (' + esc(season) + ')', c.mid == null ? 'no bids' : 'Yes ' + pct(cents(c.mid))]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Yes price' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
+      const rows = c ? [['Landfall contract (' + esc(season) + ')', priced(c) ? 'Yes ' + pct(cents(c.mid)) : noPrice(c)]].concat(c.mid == null ? [] : quoteRows(c).filter(r => r[0] !== 'Yes price' && r[0] !== 'Settles')).concat([['As of', exAsof()]]) : [];
       const url = c && hlf ? WXM.contractUrl(hlf.productConid, c.conidYes || c.conid) : null;
       const html = tip.rows(esc(nm), rows,
         c ? (url ? 'click to open this contract' : null) : (lf ? 'no landfall contract listed for this region' : null));
-      return [c && c.mid != null ? ramp(c.mid) : 'var(--map-land)', html, url];
+      return [priced(c) ? ramp(c.mid) : 'var(--map-land)', html, url];
     };
     if (GEO) {
       // a region is drawn only where some part of it is inside the view, so the
@@ -624,11 +638,11 @@ window.WXHur = (() => {
     if (sub) div.appendChild(h('div', { class: 'cap', style: 'margin:0 0 6px', text: sub }));
     rows.forEach(r => {
       const y = yes(r.c);
-      const one = r.c && r.c.mid != null && (r.c.bid == null || r.c.ask == null);
+      const one = oneSided(r.c);
       const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
         h('span', { class: 'lk', text: r.label }),
         h('span', { class: 'lb' }, [h('i', { style: 'width:' + (y == null ? 0 : y) + '%' })]),
-        h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
+        h('span', { class: 'lv', text: yesText(r.c) }),
       ]);
       const url = r.c && WXM.contractUrl(prod, r.c.conidYes || r.c.conid);
       if (r.c) attach(bar, priceHead(r.c) + tip.rows(contractTitle({ name: mname }, r.c),
@@ -650,11 +664,11 @@ window.WXHur = (() => {
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: (m.name || 'Category 4 landfall') + ' (' + m.symbol + ')' })]);
     m.contracts.slice().sort((a, b) => String(a.spec).localeCompare(String(b.spec))).forEach(c => {
       const y = yes(c);
-      const one = c.mid != null && (c.bid == null || c.ask == null);
+      const one = oneSided(c);
       const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
         h('span', { class: 'lk', text: (c.label || '').replace(/^By /, 'by ') }),
         h('span', { class: 'lb' }, [h('i', { style: 'width:' + (y == null ? 0 : y) + '%' })]),
-        h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
+        h('span', { class: 'lv', text: yesText(c) }),
       ]);
       const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
       attach(bar, priceHead(c) + tip.rows(contractTitle(m, c),
@@ -712,7 +726,7 @@ window.WXHur = (() => {
 
     const W = 960, Hh = 300, L = 52, R = 900, T = 20, B = 234;
     const yr = String((H.season || {}).year || now.getUTCFullYear());
-    const here = (m.contracts || []).filter(c => String(c.expiration || '').slice(0, 4) === yr && c.mid != null);
+    const here = (m.contracts || []).filter(c => String(c.expiration || '').slice(0, 4) === yr && priced(c));
     const ymax = Math.max(0.06, cond(cum['11-30']) * (factor && factor > 1 ? factor : 1) * 1.25,
                           ...here.map(c => c.mid * 1.15));
     const x = i => L + (i / (days.length - 1)) * (R - L);
@@ -770,7 +784,7 @@ window.WXHur = (() => {
       if (e.length < 8 || e.slice(0, 4) !== thisYear) return;
       const k = e.slice(4, 6) + '-' + e.slice(6, 8);
       const i = days.findIndex(([d]) => d >= k);
-      if (i < 0 || c.mid == null) return;
+      if (i < 0 || !priced(c)) return;
       const dot = el('circle', { cx: x(i), cy: y(Math.min(c.mid, ymax)), r: 4.5, fill: 'var(--accent)', 'pointer-events': 'all' });
       const f = cond(cum[k] != null ? cum[k] : cum['11-30']);
       attach(dot, priceHead(c) + tip.rows(c.label || 'contract', [
@@ -792,7 +806,7 @@ window.WXHur = (() => {
   }
   // where the count ladder crosses fifty cents, which is the market's median
   function impliedCount(m) {
-    const rows = (m.contracts || []).filter(c => c.mid != null && c.numeric !== false)
+    const rows = (m.contracts || []).filter(c => priced(c) && c.numeric !== false)
       .map(c => [Number(c.strike), c.mid]).sort((a, b) => a[0] - b[0]);
     for (let i = 1; i < rows.length; i++) {
       const [k0, p0] = rows[i - 1], [k1, p1] = rows[i];
@@ -843,7 +857,7 @@ window.WXHur = (() => {
         }
       });
     });
-    $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids (hover shows both bids). There are no sellers on this exchange, only bids to buy Yes or No. Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
+    $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids (hover shows both bids). Where both sides bid the minimum the book is empty and no price is shown. There are no sellers on this exchange, only bids to buy Yes or No. Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
   }
 
   // ---- the season's count so far, beside the ladder that prices it
@@ -1023,12 +1037,12 @@ window.WXHur = (() => {
       if (v == null) {
         svg.appendChild(el('rect', { x: px(0), y: yy - 5, width: px(100) - px(0), height: 10, fill: 'transparent',
                                      stroke: 'var(--line)', 'stroke-width': .8, 'stroke-dasharray': '3 2', 'pointer-events': 'none' }));
-        svg.appendChild(txt('no bids', { x: (px(0) + px(100)) / 2, y: yy + 3.5, class: 'ax', 'text-anchor': 'middle' }));
+        svg.appendChild(txt(noPrice(b.c), { x: (px(0) + px(100)) / 2, y: yy + 3.5, class: 'ax', 'text-anchor': 'middle' }));
         return;
       }
       // the same Yes-green / No-red split the other ladders use: both sides of a
       // pair that sums to a dollar, rather than one bar and an empty remainder
-      const one = b.c.mid != null && (b.c.bid == null || b.c.ask == null);
+      const one = oneSided(b.c);
       const gw = px(v) - px(0);
       const yb = el('rect', { x: px(0), y: yy - 5, width: Math.max(gw, 1), height: 10, fill: 'var(--yes)', stroke: 'var(--panel)', 'stroke-width': .6 });
       const nb = el('rect', { x: px(0) + gw, y: yy - 5, width: Math.max(px(100) - px(0) - gw, 1), height: 10, fill: 'var(--no)', stroke: 'var(--panel)', 'stroke-width': .6 });
@@ -1095,13 +1109,13 @@ window.WXHur = (() => {
     rows.slice().sort((a, b) => (b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid)).forEach(c => {
       const k = regionKey(c.label);
       const drawn = GEO && ((GEO.states || {})[k] || (GEO.counties || {})[k] || (GEO.countries || {})[k]);
-      const onMap = !drawn ? 'not drawn' : (c.mid == null ? 'outline only (no bids)' : 'shaded');
+      const onMap = !drawn ? 'not drawn' : (priced(c) ? 'shaded' : 'outline only (' + noPrice(c) + ')');
       const y = yes(c);
-      const one = c.mid != null && (c.bid == null || c.ask == null);
+      const one = oneSided(c);
       const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
         h('span', { class: 'lk', text: c.label }),
         h('span', { class: 'lb' }, [h('i', { style: 'width:' + (y == null ? 0 : y) + '%' })]),
-        h('span', { class: 'lv', text: y == null ? 'no bids' : y + '¢' + (one ? '*' : '') }),
+        h('span', { class: 'lv', text: yesText(c) }),
       ]);
       const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
       attach(bar, priceHead(c) + tip.rows(contractTitle(m, c),
@@ -1126,7 +1140,7 @@ window.WXHur = (() => {
                      + (elsewhere > 1 ? 'are' : 'is') + ' listed on the ' + (basin === 'AL' ? 'Pacific' : 'Atlantic') + ' view. ' : '')
       + 'Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. Yes green, No red; the Yes price is midway between the Yes bid '
       + 'and one dollar less the No bid where both sides have bids, else the one side shown, and there are no sellers, only bids to buy '
-      + 'Yes or No. “Pays” in the box is what a dollar of payout costs at the price a Yes could be bought at now, net of the '
+      + 'Yes or No. A region whose book is empty, both sides bidding the minimum, shows no price and is left unshaded. “Pays” in the box is what a dollar of payout costs at the price a Yes could be bought at now, net of the '
       + WXM.feeCents() + '¢ per-side execution fee.' }));
   }
 

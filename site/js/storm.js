@@ -131,7 +131,7 @@ window.WXStorm = (() => {
   const priceAt = (m, threshold) => {
     if (!m) return null;
     const c = (m.contracts || []).find(x => Number(x.strike) === Number(threshold));
-    return c && c.mid != null ? cents(c.mid) : null;
+    return c && WXM.realMid(c) ? cents(c.mid) : null;
   };
 
   // ---- deliveries that never arrived
@@ -647,8 +647,10 @@ window.WXStorm = (() => {
         h('div', { class: 'cap', style: 'margin:0 0 6px', text: 'Which of these locations records the highest wind. The candidates are the strikes and the pool is fixed when it is opened.' })]);
       const calc = calcByName(storm.name);
       const cw = c => (calc && calc[c.label || String(c.strike)]) != null ? calc[c.label || String(c.strike)] : null;
+      // an empty book sorts as no price, not as the fifty cents its midpoint reads
+      const pv = c => (WXM.realMid(c) ? c.mid : -1);
       const rows = (m.contracts || []).slice().sort((a, b) =>
-        ((b.mid == null ? -1 : b.mid) - (a.mid == null ? -1 : a.mid))
+        (pv(b) - pv(a))
         || ((cw(b) || 0) - (cw(a) || 0)));
       if (!rows.length) { div.appendChild(h('div', { class: 'cap', text: 'No candidates listed yet.' })); out.push(div); return; }
       const W2 = 420, T2 = 6, rowH = 26, LX = 8, RX = 412;
@@ -659,7 +661,7 @@ window.WXStorm = (() => {
         const nm = c.label || String(c.strike);
         const yTop = T2 + i * rowH, bh = rowH - 8, by = yTop + 3;
         const g = el('g', { class: 'prow' });
-        const v = c.mid == null ? null : cents(c.mid);
+        const v = WXM.realMid(c) ? cents(c.mid) : null;
         const cv = cw(c);
         if (v != null) {
           const split = px(c.mid);
@@ -672,7 +674,7 @@ window.WXStorm = (() => {
         } else {
           g.appendChild(el('rect', { x: LX, y: by, width: RX - LX, height: bh, rx: 2, fill: 'none',
                                      stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
-          g.appendChild(txt('no bids', { x: RX - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end',
+          g.appendChild(txt(WXM.emptyBook(c) ? 'no price' : 'no bids', { x: RX - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end',
                                          'font-size': 9.5, fill: 'var(--muted)' }));
         }
         g.appendChild(txt(nm, { x: LX + 4, y: by + bh / 2 + 3.5, 'font-size': 10, 'font-weight': 700,
@@ -681,7 +683,7 @@ window.WXStorm = (() => {
           y1: by - 1.5, y2: by + bh + 1.5, stroke: 'var(--ink)', 'stroke-width': 1.6, 'stroke-dasharray': '2 2' }));
         const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
         bind(g, () => tip.rows((m.name || m.symbol) + ' — ' + esc(nm),
-          [['Yes price', v == null ? 'no bids' : v + '¢'],
+          [['Yes price', v == null ? (WXM.emptyBook(c) ? 'no price' : 'no bids') : v + '¢'],
            ['Yes bid', c.bid == null ? '—' : cents(c.bid) + '¢'],
            ['No bid', c.ask == null ? '—' : (100 - cents(c.ask)) + '¢'],
            ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],
@@ -736,7 +738,10 @@ window.WXStorm = (() => {
       const a = Array.isArray(v) ? v : [v, v];
       if (a[0] == null && a[1] == null) return null;
       const lo = a[0] == null ? a[1] : a[0], hi = a[1] == null ? a[0] : a[1];
-      return { bid: lo, ask: hi, mid: Math.round((lo + hi) * 5) / 10 };
+      // in cents here: both sides at the minimum is an empty book, and its
+      // midpoint is not a price the line or the ladder should carry
+      return { bid: lo, ask: hi, mid: Math.round((lo + hi) * 5) / 10,
+               empty: a[0] != null && a[1] != null && a[0] <= 1.1 && a[1] >= 98.9 };
     };
     const rec = ((doc && doc.points) || []).map(q => ({ t: Date.parse(q.t), p: q.p || {} }))
       .filter(q => isFinite(q.t));
@@ -757,7 +762,7 @@ window.WXStorm = (() => {
     // the newest delivery that carried a figure at all
     const latestCalc = calcByName(ledger.name) || calc.slice().reverse().find(by => Object.keys(by).length) || {};
     const names = (m.contracts || []).map(c => c.label).filter(Boolean)
-      .sort((a, b) => (((now[b] || {}).mid || 0) - ((now[a] || {}).mid || 0))
+      .sort((a, b) => ((now[b] && !now[b].empty ? now[b].mid : 0) - (now[a] && !now[a].empty ? now[a].mid : 0))
                    || ((latestCalc[b] || 0) - (latestCalc[a] || 0))).slice(0, 8);
     if (!names.length) return null;
     const colOf = i => rung(names.length - 1 - i, Math.max(2, names.length));
@@ -861,7 +866,7 @@ window.WXStorm = (() => {
       // the exchange's price, solid and in front: the spread as a band, the
       // midpoint as the line
       const seq = rec.map(q => ({ t: q.t, b: book(q.p[nm]), X: tx(q.t) }))
-        .filter(z => z.b && z.X != null);
+        .filter(z => z.b && !z.b.empty && z.X != null);
       if (seq.length > 1) {
         svg.appendChild(el('path', { class: 'pxband',
           d: seq.map((z, j) => (j ? 'L' : 'M') + z.X.toFixed(1) + ' ' + Y(z.b.ask).toFixed(1)).join('')
@@ -891,7 +896,7 @@ window.WXStorm = (() => {
       const yTop = LT + i * rowH, bh = rowH - 8, by = yTop + 3;
       const g = el('g', { class: 'prow' });
       const b = now[nm] || null;
-      const v = b ? Math.round(b.mid) : null;
+      const v = b && !b.empty ? Math.round(b.mid) : null;
       const cv = latestCalc[nm] != null ? latestCalc[nm] : null;
       if (v != null) {
         const split = px2(v);
@@ -904,7 +909,7 @@ window.WXStorm = (() => {
       } else {
         g.appendChild(el('rect', { x: LX2, y: by, width: RX2 - LX2, height: bh, rx: 2, fill: 'none',
                                    stroke: 'var(--rule)', 'stroke-dasharray': '3 3' }));
-        g.appendChild(txt('no bids', { x: RX2 - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end',
+        g.appendChild(txt(b && b.empty ? 'no price' : 'no bids', { x: RX2 - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end',
                                        'font-size': 9.5, fill: 'var(--muted)' }));
       }
       // the dot ties the row to its line in the chart
@@ -916,8 +921,8 @@ window.WXStorm = (() => {
       const url = WXM.contractUrl(m.productConid, c.conidYes || c.conid);
       bind(g, () => tip.rows((m.name || m.symbol) + ' — ' + esc(nm),
         ruled
-          ? [['Yes price', b == null ? 'no bids' : v + '¢'], ['Calculation', cv == null ? null : cv + '%']]
-          : [['Yes price', b == null ? 'no bids' : v + '¢'],
+          ? [['Yes price', v == null ? (b && b.empty ? 'no price' : 'no bids') : v + '¢'], ['Calculation', cv == null ? null : cv + '%']]
+          : [['Yes price', v == null ? (b && b.empty ? 'no price' : 'no bids') : v + '¢'],
              ['Yes bid', c.bid == null ? '—' : cents(c.bid) + '¢'],
              ['No bid', c.ask == null ? '—' : (100 - cents(c.ask)) + '¢'],
              ['Buy Yes now at', c.ask == null ? null : cents(c.ask) + '¢' + (WXM.payoutText(cents(c.ask)) ? ' · pays ' + WXM.payoutText(cents(c.ask)) : '')],

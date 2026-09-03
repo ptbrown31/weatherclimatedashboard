@@ -90,7 +90,8 @@ window.WXPanels = (() => {
       return { year: x, threshold: c.strike, label: c.label || ('Above ' + c.strike),
                expiration: c.expiration, expiryLabel: c.expiryLabel,
                conidYes: c.conidYes, conid: c.conidYes,
-               yes: q.mid != null ? q.mid : null,
+               // an empty book's widest-spread midpoint is not a price (WXM.realMid)
+               yes: WXM.realMid(q) ? q.mid : null,
                bid: q.bid != null ? q.bid : null, ask: q.ask != null ? q.ask : null,
                bidSize: q.bidSize, askSize: q.askSize, from: q.from };
     }).filter(Boolean);

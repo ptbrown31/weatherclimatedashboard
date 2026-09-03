@@ -309,7 +309,8 @@ window.WXM = (() => {
       asof: g.asof,
       contracts: (m.contracts || []).filter(c => c.mid != null && yearOf(c.spec)).map(c => ({
         year: yearOf(c.spec), threshold: c.strike, label: c.label, expiryLabel: c.expiryLabel || String(yearOf(c.spec)),
-        yes: c.mid, bid: c.bid, ask: c.ask, noBid: c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100, bidSize: c.bidSize, askSize: c.askSize, noBidSize: c.askSize, from: c.from, conid: c.conid, expiration: c.expiration, spec: c.spec,
+        yes: realMid(c) ? c.mid : null, empty: emptyBook(c),
+        bid: c.bid, ask: c.ask, noBid: c.ask == null ? null : Math.round((1 - c.ask) * 100) / 100, bidSize: c.bidSize, askSize: c.askSize, noBidSize: c.askSize, from: c.from, conid: c.conid, expiration: c.expiration, spec: c.spec,
         label2: 'ForecastEx quote, ' + asofText(S.groups.climate) })),
     })).filter(p => p.contracts.length);
   }
@@ -325,12 +326,19 @@ window.WXM = (() => {
      price: the midpoint of the widest possible spread says nothing. The test
      needs both sides present at the extremes, because a lone 1c bid with no
      opposite side is a one-sided book with a real resting bid, which the
-     ladders have always shown as a one-sided price. */
+     ladders have always shown as a one-sided price.
+
+     Owner's decision, 2026-09-03: every board outside the daily temperature
+     ladders shows no price for such a book, rather than its midpoint. The
+     daily ladders are untouched and keep quoting every book they are sent. */
   function realMid(r) {
     if (!r || r.mid == null) return false;
     return !(r.bid != null && r.ask != null && r.bid <= 0.011 && r.ask >= 0.989);
   }
+  // a book that exists but carries no price, which reads differently from a
+  // contract nobody has bid on at all
+  const emptyBook = r => !!(r && r.mid != null && !realMid(r));
 
-  return { realMid, mode, on, live, load, loadSummary, loadGroup, implied, ladder, pricePath, climateProducts, hurricaneMarkets, label,
+  return { realMid, emptyBook, mode, on, live, load, loadSummary, loadGroup, implied, ladder, pricePath, climateProducts, hurricaneMarkets, label,
            payout, payoutText, feeCents, contractUrl, linkTo, termsUrl, termsLink, get LABEL() { return label(); }, PLACEHOLDER };
 })();
