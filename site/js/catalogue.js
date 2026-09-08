@@ -122,7 +122,7 @@ window.WXCat = (() => {
     const mismatch = d.products.filter(p => p.active && p.state !== 'listed');
     host.appendChild(h('p', { class: 'cap' },
       [h('span', { text: listed + ' of ' + d.products.length + ' contracts in this category are listed on the exchange right now. '
-        + 'Rows in grey are part of the product family but not currently carried; they are shown so the family is complete. '
+        + 'Rows in gray are part of the product family but not currently carried; they are shown so the family is complete. '
         + (mismatch.length ? mismatch.length + ' of them are expected to be listed and are not yet. ' : '')
         + 'Strike counts and settlement dates are read from the exchange once a day.' })]));
   }
@@ -156,7 +156,7 @@ window.WXCat = (() => {
       $('#cBody').appendChild(h('p', { class: 'cap', text: STATE_NOTE[p.state] || 'This contract is not currently listed.' }));
       return;
     }
-    // prices first: the chart colours its strikes by them, and the ladder below
+    // prices first: the chart colors its strikes by them, and the ladder below
     // uses the same set
     let pr = null;
     try { pr = (await WXD.get(PRICE(p.id), 30)).data; } catch (e) { /* not quoted yet */ }

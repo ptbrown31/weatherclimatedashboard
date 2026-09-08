@@ -207,7 +207,7 @@ window.WXPanels = (() => {
     if (foot) {
       foot.textContent = (opts.source ? opts.source + ' ' : '')
         + (WXM.on() ? (WXM.live()
-            ? 'Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price; click one to open it on IBKR. '
+            ? 'Markers are the exchange\'s listed contracts at the Yes midpoint, colored by price; click one to open it on IBKR. '
             : 'Markers are placeholders, not market values. ') : '')
         + drawn + ' of these are drawn against their published series, '
         + evented + ' resolve on an event and are listed as ladders, '

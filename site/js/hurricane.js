@@ -8,7 +8,7 @@
    group), reask.json (the vendor live-storm lane, usually off), and
    assets/hurricane-geo.json (countries, the coastal states and Hawaii, the
    counties the landfall contracts name, the nation coastline, the 163 wind
-   reference locations, and which view each region is drawn on). The drawn storm position is labelled from the
+   reference locations, and which view each region is drawn on). The drawn storm position is labeled from the
    geometry's own point and advisory, because the GIS service can trail
    NHC's roster. Equirectangular fitted to the basin box with independent
    x/y scales so the panel fills its frame (a deliberate stretch).
@@ -185,7 +185,7 @@ window.WXHur = (() => {
          The GIS service stops issuing cone and track packages before NHC stops
          advising, so a decaying storm keeps its last package while the roster
          moves on: Edouard's cone was still the one from its landfall advisory
-         two days after it went inland, and its landfall point was labelled the
+         two days after it went inland, and its landfall point was labeled the
          current position. When the geometry trails the roster the cone and the
          forecast track belong to an advisory NHC has replaced, so they are left
          off; the past track is history and stays; and the storm is drawn where
@@ -1113,7 +1113,7 @@ window.WXHur = (() => {
       paces.push([y(climTarget), 'var(--muted)', (month == null ? 'an average season' : 'an average ' + MONTHS[month]) + ' ' + (Math.round(climTarget * 100) / 100)]);
     }
     /* The ladder is bars edge to edge, so a label on the line needs its own
-       ground to sit on. A small panel-coloured chip riding just above each
+       ground to sit on. A small panel-colored chip riding just above each
        dashed line keeps it legible without a key underneath. */
     paces.sort((a, b) => a[0] - b[0]);
     let lastY = -1e9;

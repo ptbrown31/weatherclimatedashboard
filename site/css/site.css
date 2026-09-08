@@ -1,4 +1,4 @@
-/* Weather tools site. Tokens first; every colour on the page comes from them
+/* Weather tools site. Tokens first; every color on the page comes from them
    so light and dark both resolve as a set. Light is the default on :root;
    dark is the same tokens redefined under prefers-color-scheme and under an
    explicit data-theme, so an explicit choice beats the system setting. */
@@ -201,7 +201,7 @@ svg.serieschart{width:100%;height:auto;display:block}
 .modegrid .mgh{font-size:12px;font-weight:700;color:var(--navy);letter-spacing:.04em;text-transform:uppercase}
 .modegrid .mgcol button{min-width:104px;text-align:left}
 
-/* The scored-days table on a city page. Each tool owns a colour, carried on its
+/* The scored-days table on a city page. Each tool owns a color, carried on its
    header and a rule down the left of its first column, so a reader following one
    tool can find it without counting across; temperatures are tinted by the cell
    itself. Numbers are tabular so columns line up on the decimal. */
@@ -312,8 +312,8 @@ svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);borde
    full-window rule above fits a chart inside the window, which for this image
    is height-bound, and the map is already as wide as the column, so on a short
    window it came out smaller than it started. chart-city.js does the fit and
-   floors it at the size the map already had; safe centring keeps the top of an
-   overflowing map reachable, falling back to the plain centring above. */
+   floors it at the size the map already had; safe centering keeps the top of an
+   overflowing map reachable, falling back to the plain centering above. */
 .expandable.full .locstack{display:block;margin:auto}
 .expandable.full .locstack img,.expandable.full svg.locov{
   width:100%;height:100%;max-width:none;max-height:none}
@@ -346,7 +346,7 @@ svg.loc{width:240px;height:auto;display:block;border:1px solid var(--line);borde
 .advrow{display:flex;gap:16px;align-items:flex-start}
 /* expanded, the panels' svg is not a direct child of the card the way the
    chart's is, and a viewBox-only svg given width:auto collapses to nothing.
-   The wrapper becomes the centring frame and the svg is sized by height,
+   The wrapper becomes the centering frame and the svg is sized by height,
    which an svg with a viewBox turns into a width by its own aspect. */
 .expandable.full #advPanels{display:flex;justify-content:center;width:100%}
 .expandable.full #advPanels svg{height:calc(100vh - 46px);width:auto;max-width:none;max-height:none}
@@ -448,7 +448,7 @@ svg.emph-livecyc .pxline,svg.emph-livecyc .pxdot,svg.emph-livecyc .pxnow{opacity
 svg.emph-livecyc .pxband{opacity:.05}
 svg.emph-exchange .lcline,svg.emph-exchange .ldot,svg.emph-exchange .calcline,svg.emph-exchange .cdot{opacity:.32}
 @media (prefers-reduced-motion: reduce){svg.scard *,svg.lhlserie *{transition:none}}
-/* the page's tables sit on the panel colour; a table inside the hover box has
+/* the page's tables sit on the panel color; a table inside the hover box has
    to take the box's own ink and ground or it vanishes against them */
 .tip table.l3{border-collapse:collapse;margin-top:3px;width:auto;background:transparent;border:0;font-size:12px}
 .tip table.l3 th,.tip table.l3 td{padding:0 0 0 10px;text-align:right;font-weight:400;font-variant-numeric:tabular-nums;white-space:nowrap;

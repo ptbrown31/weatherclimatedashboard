@@ -100,9 +100,9 @@ window.WXAccuracy = (() => {
     /* Each series named on its own line.
 
        The names were in a key under the figure, which is a look away from the
-       chart to learn which colour is which. The two lines are furthest apart
+       chart to learn which color is which. The two lines are furthest apart
        at the settlement end, so the labels sit there, each in its line's own
-       colour and nudged apart when the gap is too small to hold both. */
+       color and nudged apart when the gap is too small to hold both. */
     {
       /* At the long-lead end, where both lines have room above and below and
          no improvement figure is written. The right-hand end has neither. */
@@ -116,8 +116,8 @@ window.WXAccuracy = (() => {
     }
 
     // the improvement, called out every few hours rather than at every point:
-    // labelled densely it becomes a texture instead of a number. A bin where the
-    // market did worse is labelled the same way as one where it did better; the
+    // labeled densely it becomes a texture instead of a number. A bin where the
+    // market did worse is labeled the same way as one where it did better; the
     // page claims the market wins on average, not on every bin, and dropping the
     // exceptions would be arguing rather than measuring.
     pts.forEach(p => {

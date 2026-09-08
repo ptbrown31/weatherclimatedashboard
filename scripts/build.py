@@ -260,24 +260,6 @@ def station_intro(c: dict) -> str:
             '<a href="accuracy.html">accuracy page</a>.</p>' % (city, city, icao, city, unit, drawn))
 
 
-def station_index(cities: list) -> str:
-    """Every station's page linked by name.
-
-    A station is reached by its dot on the map, which serves a reader who is
-    already looking at the map and nobody else. This is the same set of pages
-    as a list of names, for a reader who knows which city they want and for
-    anything that cannot read a map at all.
-    """
-    def links(rows):
-        return " · ".join('<a href="%s">%s weather (%s)</a>'
-                          % (slug(c["city"], c["station"]) + ".html", c["city"], c["station"])
-                          for c in sorted(rows, key=lambda r: r["city"]))
-    us = [c for c in cities if us_station(c["station"])]
-    intl = [c for c in cities if not us_station(c["station"])]
-    return ('<h2>Stations on this board</h2>\n<p>%s</p>\n'
-            '<h2>Stations abroad</h2>\n<p>%s</p>' % (links(us), links(intl)))
-
-
 def station_page(tpl: str, c: dict, cfg: dict) -> str:
     """One station's own page, from the shared city template.
 
@@ -394,17 +376,6 @@ def identity(out: str, cfg: dict) -> tuple:
         for c in cities:
             with open(os.path.join(out, slug(c["city"], c["station"]) + ".html"), "w") as fh:
                 fh.write(station_page(tpl, c, cfg))
-        # and the board links to every one of them by name, from the same list
-        # the pages were written from, so the two cannot disagree
-        idx = os.path.join(out, "index.html")
-        with open(idx) as fh:
-            board = fh.read()
-        board, n_idx = re.subn(r'(<div class="prose" id="stationIndex"[^>]*>)(</div>)',
-                               lambda m: m.group(1) + station_index(cities) + m.group(2), board, count=1)
-        if not n_idx:
-            raise ValueError("index.html has no stationIndex block to fill")
-        with open(idx, "w") as fh:
-            fh.write(board)
     n = 0
     for name in sorted(os.listdir(out)):
         if not name.endswith(".html") or "og:title" in open(os.path.join(out, name)).read():

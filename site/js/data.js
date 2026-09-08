@@ -4,7 +4,7 @@
       still renders that object, with its as-of time visible and a stale
       state once the age exceeds twice the cadence.
    2. If the fetch itself fails (offline, CDN unreachable), the last good
-      copy this browser saved is rendered, labelled as such. With neither,
+      copy this browser saved is rendered, labeled as such. With neither,
       the page renders its frame and an explicit no-data state.
 
    Every result is {data, source: 'live'|'cache'|'none', asof, ageMin, stale}.

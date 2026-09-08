@@ -15,7 +15,7 @@
 </head>
 <body>
 <div class="wrap">
-<h1 id="boardTitle">US daily temperature stations</h1>
+<h1 id="mapTitle">US daily temperature stations</h1>
 <div class="bar modegrid">
   <div class="mgcol"><span class="mgh">Today</span>
     <button id="m1">Highs</button>
@@ -29,40 +29,10 @@
 </div>
 <div class="card"><svg id="map" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="legend"></div>
-<div class="how" style="margin:8px 0 0">
-<div><h3>DOTS</h3><p>Each dot represents a station. Its colour is the sign of the market-implied median minus the
-reference for the same day, and its size is the gap. A grey dot means no listed contracts or no bids yet. The
-market has sat below the NWS forecast on highs most days so far, so most dots are blue and the size is what
-varies.</p>
-<p><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p></div>
-<div><h3>SHADING</h3><p>The pale field is the reference level, cool blues to warm reds, interpolated between the
-listed stations. It is derived here; the official NWS field is the NDFD grid.</p></div>
-<div><h3>REFERENCE</h3><p>On the day-ahead views it is the NWS forecast. On the current-day views it is what the
-day is now expected to reach, which is what the station has already recorded taken with the NWS forecast for the
-hours left. A forecast starts at the current hour, so once the morning has set the day&rsquo;s low the forecast
-alone no longer holds it.</p></div>
-<div><h3>LABELS</h3><p><b>Philadelphia 88&deg; (&minus;5)</b> means 88&deg;, five degrees below the reference.
-Labels move out of each other&rsquo;s way and never cover another station&rsquo;s dot, so where two cities sit
-close together one of them may go unlabelled. Its dot is still there and still carries its numbers on hover.</p></div>
-</div>
-<div id="modeTitle" style="margin-top:8px"></div>
-<p class="sub">Each dot shows where the exchange&rsquo;s market-implied median sits against the National Weather
-Service forecast for the same day with a bias removed from the National Weather Service.</p>
-<p class="cap" style="margin:0 0 10px"><a href="daily-temperature-markets.html">How these contracts work and how they
-settle &rarr;</a></p>
+<p class="cap" id="dotKey" style="margin:8px 0 10px"><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p>
 <div class="pickttl" style="margin-top:14px">INTERNATIONAL STATIONS AND HONOLULU</div>
 <div class="card"><svg id="mapW" viewBox="0 60 960 320"></svg></div>
-<p class="cap">These stations settle in Celsius, so their labels carry the unit. They take the same encoding as the
-map above; a grey dot means the view has no value for that station, because US government feeds carry
-observations everywhere but forecasts only for the United States and, through the Blend of Models, Canada.
-Each station is named with its observed reading so far and, where the exchange has a listed board for it, the
-market&rsquo;s implied median for the day being shown. With no government forecast to compare against, those two
-numbers are the whole picture abroad. Click a station for its chart.</p>
 <div class="secttl" style="margin-top:26px">FORECAST SCORECARD</div>
-<p class="sub">Every station on one day, each forecast beside the temperature the station recorded. The
-colour is the error, so a system that ran warm reads as a red stripe down its column and a station nobody caught
-reads as a red row. The margins are mean absolute error, the right column per station and the bottom row per
-system. Pick either end of the day and any of the last seven scored days.</p>
 <div class="bar" id="divControls"><span id="scoreStatus"></span></div>
 <div id="divTitle" class="secttl"></div>
 <div class="card"><div id="divergence"></div></div>
@@ -71,37 +41,8 @@ system. Pick either end of the day and any of the last seven scored days.</p>
 
 <p class="cap">How each tool has scored over the last two weeks is on <a href="accuracy.html">the accuracy page</a>.</p>
 
-<div class="prose" style="margin-top:26px">
-<h2>Weather prediction markets on this board</h2>
-<p>A weather prediction market is a contract that pays one dollar if a stated weather outcome happens and
-nothing if it does not, so its price in cents is the market&rsquo;s probability of that outcome. The contracts
-behind this board ask whether the daily high, or the daily low, at one named weather station will finish above
-or below a stated whole-degree threshold. ForecastEx lists them at 25 stations across the United States and at
-12 more abroad, and each settles on that station&rsquo;s own record of the day.</p>
-<p>Every dot is one of those stations. Its colour and size come from the market-implied median for the day,
-the temperature the listed strikes price as an even chance, set against the National Weather Service forecast
-for the same station and day. Two public statements about the same afternoon sit beside each other, one from a
-forecast office and one from people with money on the answer, and the board shows where they stand furthest
-apart. Clicking a dot opens that station&rsquo;s own page, with its forecasts, its observations and the ladder
-of strikes listed on it.</p>
-<h2>How a temperature contract settles</h2>
-<p>Settlement runs on the station&rsquo;s METAR observations, the routine and special reports it publishes
-through the day, over the local calendar day from midnight to midnight. The highest reading settles the high
-contracts and the lowest settles the low contracts, in whole degrees Fahrenheit at the United States stations
-and whole degrees Celsius abroad. A high contract pays Yes only when the settled value is strictly above its
-threshold, and a low contract only when it is strictly below, so a day landing exactly on the threshold pays
-No. Worked examples are on the <a href="daily-temperature-markets.html">daily temperature markets page</a>.</p>
-<h2>Prices on these pages</h2>
-<p>This exchange has no sellers. A participant buys Yes or buys No, the two bids sum to one dollar, and the
-price shown here is the midpoint between them in cents, as published at the time stamped on the page and never
-adjusted for fees. Day by day scoring of the market against each forecast tool is on the
-<a href="accuracy.html">accuracy page</a>. The records behind the longer-dated contracts are on the
-<a href="weather.html">rain, drought and severe weather</a>, <a href="climate.html">climate</a>,
-<a href="hurricane.html">hurricane</a>, <a href="electricity-renewables.html">energy</a> and
-<a href="agriculture.html">crop yield</a> pages.</p>
-</div>
+<p class="cap" style="margin-top:26px"><a href="daily-temperature-markets.html">Daily temperature markets at ForecastEx &rarr;</a></p>
 
-<div class="prose" id="stationIndex" style="margin-top:22px"></div>
 
 </div>
 <script src="js/common.js"></script>

@@ -10,7 +10,7 @@
    thousand characters, with the office named, the issuance time given, and a
    link to the office's own page. It is a US government work in the public
    domain; the attribution is there because a reader should know whose words
-   these are, not because the licence demands it. */
+   these are, not because the license demands it. */
 window.WXDiscussion = (() => {
   const { h, $ } = WXC;
   let idx = null;

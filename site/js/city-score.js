@@ -7,9 +7,9 @@
    observation in black so the thing being predicted is never one line among
    equals.
 
-   Highs and lows are the same colour per tool and told apart by the dash, not
+   Highs and lows are the same color per tool and told apart by the dash, not
    by a second palette: a reader is comparing tools to the observation, not
-   highs to lows, so the colour is spent on the comparison that matters.
+   highs to lows, so the color is spent on the comparison that matters.
 
    A tool that has no value for a day leaves a gap rather than a straight line
    through it. Each archive lane started on a different date, so the gaps are
@@ -29,10 +29,10 @@ window.WXCityScore = (() => {
 
      A forecast that ran three degrees warm and one that ran three degrees cold
      are opposite mistakes, and on the temperature ramp they were near enough
-     the same colour. Warm errors run red, cold errors blue, and zero is the
+     the same color. Warm errors run red, cold errors blue, and zero is the
      paper — so the sign is visible before the number is read. The scale is
      fixed at five degrees rather than fitted to the table, so a column's
-     colour means the same thing on a calm week as on a wild one. */
+     color means the same thing on a calm week as on a wild one. */
   const ERR_MAX = 5;
   function errColor(v) {
     if (v == null || !isFinite(v)) return null;
@@ -121,7 +121,7 @@ window.WXCityScore = (() => {
 
        Within a day the tools are spread by a few pixels so a day where they all
        agree still shows every tool rather than one dot hiding four. A filled dot
-       is the daily high and a hollow one the daily low: the colour is spent on
+       is the daily high and a hollow one the daily low: the color is spent on
        which tool, because that is the comparison the panel is for.
 
        The observation is black and larger, drawn last, because it is the thing
@@ -190,12 +190,12 @@ window.WXCityScore = (() => {
 
      Two things carry meaning beyond the numbers. Every temperature is tinted on
      the same ramp the national map shades with, so a cold morning and a hot
-     afternoon are the same colours here as there and a column can be read down
-     without reading each figure. And each tool keeps its own colour from the
+     afternoon are the same colors here as there and a column can be read down
+     without reading each figure. And each tool keeps its own color from the
      chart above, carried on the header and a rule down the left of its columns,
      so a reader tracking one tool can find it without counting across.
 
-     Errors stay plain text. Tinting them too would put three colour scales in
+     Errors stay plain text. Tinting them too would put three color scales in
      one table and the eye would have nothing to hold on to. */
   const TRAMP = ['#c9dcec', '#d4e6ea', '#dcecd9', '#e9eecb', '#f4ecc1', '#f5ddb3', '#eec9a5', '#e3b49c', '#d8a098'];
   const hx = c => [1, 3, 5].map(k => parseInt(c.slice(k, k + 2), 16));
@@ -239,7 +239,7 @@ window.WXCityScore = (() => {
        it keeps the table on one screen. The chart above covers the last three
        complete days; this covers the two weeks around them. */
     const days = st.days.slice(0, TABLE_DAYS);
-    // one temperature scale for the whole table, so a cell's colour means the
+    // one temperature scale for the whole table, so a cell's color means the
     // same thing in every column
     const all = [];
     days.forEach(d => {

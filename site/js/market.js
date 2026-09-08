@@ -18,7 +18,7 @@
    and one dollar less the No bid. Pages call load()/loadSummary()/
    loadGroup() first and then the synchronous accessors below.
 
-   'placeholder' reproduces the reference package's labelled synthetic data:
+   'placeholder' reproduces the reference package's labeled synthetic data:
    deterministic ladders and a shaped price path so the layout has something
    to show. None of it is a market value. */
 window.WXM = (() => {

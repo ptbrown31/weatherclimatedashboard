@@ -21,7 +21,7 @@
    per-phase means of what is left, then the line again on the deseasonalised
    record, so a season that peaks late in the window cannot masquerade as
    trend. A series that has never been negative is never projected negative:
-   for a generic tool that is a fact about the quantity, not a modelling
+   for a generic tool that is a fact about the quantity, not a modeling
    choice.
 
    Nothing here is a fair value, a price, or a claim about a contract. It is
@@ -87,7 +87,7 @@ window.WXForecast = (() => {
     let fit = ols(win);
     if (!fit) return null;
 
-    // the season: the average deviation from the line at each phase, centred
+    // the season: the average deviation from the line at each phase, centered
     // so the season carries shape and the line carries level and slope
     const seasonal = m > 1 && win.length >= 2 * m;
     const seas = new Array(m).fill(0);
@@ -96,8 +96,8 @@ window.WXForecast = (() => {
       win.forEach(([x, y2]) => { const p = phaseOf(x, m); sum[p] += y2 - (fit.a + fit.b * x); cnt[p] += 1; });
       let tot = 0, ntot = 0;
       for (let p = 0; p < m; p++) if (cnt[p]) { seas[p] = sum[p] / cnt[p]; tot += seas[p] * cnt[p]; ntot += cnt[p]; }
-      const centre = ntot ? tot / ntot : 0;
-      for (let p = 0; p < m; p++) seas[p] -= centre;
+      const center = ntot ? tot / ntot : 0;
+      for (let p = 0; p < m; p++) seas[p] -= center;
       // pass two: the line again, on the deseasonalised record
       const refit = ols(win.map(([x, y2]) => [x, y2 - seas[phaseOf(x, m)]]));
       if (refit) fit = refit;

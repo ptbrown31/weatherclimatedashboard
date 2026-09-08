@@ -1,14 +1,14 @@
 /* The climate page: the settlement-basis series as NOAA and partners
    publish them, with a drag-to-fit trend tool. With the market layer on,
-   contract markers sit at (expiration, threshold), coloured by the Yes
+   contract markers sit at (expiration, threshold), colored by the Yes
    price. Hover: a dot on the series at the cursor's year with the value,
    the ten-year change and the latest point; markers carry the quote and
    pin on click; threshold lines list the expirations that carry them. */
 window.WXClimate = (() => {
   const { el, txt, h, $ } = WXC;
-  /* Price as colour: red at nothing, green at a dollar.
+  /* Price as color: red at nothing, green at a dollar.
 
-     A marker's colour is the Yes price, which on these contracts is the market's
+     A marker's color is the Yes price, which on these contracts is the market's
      probability that the series ends above that strike. So the scale runs from
      red at no chance to green at a certainty, which is the same green and red
      the Yes and No language uses everywhere else on the site.
@@ -257,7 +257,7 @@ window.WXClimate = (() => {
        Which years are still open needs no calendar, because the exchange states
        it: a contract is listed for a year only while that year can still resolve.
        So the record is solid up to the first year with a contract on it and
-       dashed from there, in the same colour, because it is the same source —
+       dashed from there, in the same color, because it is the same source —
        just not final.
 
        This is asked for rather than assumed, because a listed contract does not
@@ -390,7 +390,7 @@ window.WXClimate = (() => {
       }
     }
 
-    /* The key for that colour, on the panel rather than in a caption.
+    /* The key for that color, on the panel rather than in a caption.
 
        Without it a reader has to guess whether green is dear or likely. It is
        drawn only where there are priced markers to explain. */
@@ -424,7 +424,7 @@ window.WXClimate = (() => {
       : (opts.markerRadius || 8);
     cs.forEach(c => {
       // an empty book carries no price, so its marker is drawn as unpriced
-      // rather than at the fifty-cent colour its midpoint would give
+      // rather than at the fifty-cent color its midpoint would give
       const col = c.yes == null ? 'var(--muted)' : priceColor(c.yes), cx = X(c.year), cy = Y(c.threshold);
       const m = mono ? el('path', { d: 'M' + cx + ' ' + (cy - 8) + ' L' + (cx - 8) + ' ' + (cy + 6) + ' L' + (cx + 8) + ' ' + (cy + 6) + ' Z', fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' })
                      : el('circle', { cx, cy, r: rad, fill: col, stroke: 'var(--ink)', 'stroke-width': 1, 'data-tip': '1', 'data-tip-pin': '1' });
@@ -577,7 +577,7 @@ window.WXClimate = (() => {
     // as a sentence once the series is named
     const seriesName = k => (PANELS.find(p => p[0] === k) || [null, k])[1];
     const notes = Object.entries(D.notes || {}).map(([k, v]) => seriesName(k) + ' is ' + v).join('. ');
-    $('#foot').textContent = 'Series from NCEI Climate at a Glance global land and ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? (WXM.live() ? ' Markers are the exchange\'s listed contracts at the Yes midpoint, coloured by price.' : ' Markers are placeholders, not market values.') : '');
+    $('#foot').textContent = 'Series from NCEI Climate at a Glance global land and ocean anomalies (+' + off + ' °C to the preindustrial baseline, the convention the contracts use), NOAA GML Mauna Loa CO2, NOAA/NESDIS STAR sea level altimetry, and the RAPID AMOC monitoring project (UK NERC) annual means.' + (notes ? ' ' + notes + '.' : '') + (WXM.on() ? (WXM.live() ? ' Markers are the exchange\'s listed contracts at the Yes midpoint, colored by price.' : ' Markers are placeholders, not market values.') : '');
   }
   return { init, panel, priceColor };
 })();

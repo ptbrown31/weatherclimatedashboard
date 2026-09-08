@@ -126,7 +126,7 @@ window.WXScore = (() => {
       // a scored day is measured against what happened; a day still ahead has
       // nothing to measure against, so it is measured against the forecasts'
       // own middle
-      centre: actual != null ? actual : consensus,
+      center: actual != null ? actual : consensus,
       centreName: actual != null ? 'observed' : 'consensus median',
       spread: Math.round((hi - lo) * 10) / 10,
       err: actual == null ? null : Math.round((consensus - actual) * 10) / 10,
@@ -141,7 +141,7 @@ window.WXScore = (() => {
     const m = r.meta[s.k] || {};
     const rowsOut = [
       ['Forecast ' + v.side, degs(r.vals[s.k])],
-      ['From the ' + r.centreName, off(r.vals[s.k] - r.centre)],
+      ['From the ' + r.centreName, off(r.vals[s.k] - r.center)],
       ['Consensus median', degs(r.consensus)],
     ];
     if (r.actual != null) rowsOut.push(['Error against the day', signed(r.vals[s.k] - r.actual) + '°']);
@@ -167,7 +167,7 @@ window.WXScore = (() => {
   }
   function rowTip(r, v) {
     const rowsOut = SERIES.filter(s => r.vals[s.k] != null).map(s =>
-      ['<span class="sw" style="background:' + s.col + '"></span>' + s.name, degs(r.vals[s.k]) + '  (' + off(r.vals[s.k] - r.centre) + ')']);
+      ['<span class="sw" style="background:' + s.col + '"></span>' + s.name, degs(r.vals[s.k]) + '  (' + off(r.vals[s.k] - r.center) + ')']);
     rowsOut.push(['Consensus median', degs(r.consensus)]);
     rowsOut.push(['Spread', r.spread + '°']);
     if (r.actual != null) {
@@ -190,7 +190,7 @@ window.WXScore = (() => {
   /* The scorecard grid.
 
      One row per station, one column per system, each cell carrying the forecast
-     and its error against what the station recorded. The colour is the error, so
+     and its error against what the station recorded. The color is the error, so
      a column that ran warm reads as a red stripe down the grid and a station
      nobody caught reads as a red row. The margins are means of absolute error,
      the right column per station and the bottom row per system.
@@ -208,7 +208,7 @@ window.WXScore = (() => {
   const GRID = ORDER.concat(['fx']);
   const GRID_NAME = { nws: 'National\nWeather\nService', nbm: 'Blend of\nModels', lamp: 'Aviation\nguidance\n(LAMP)',
                       mav: 'GFS\nMOS', fx: 'ForecastEx\nimplied' };
-  const ERR_CAP = 6;                     // the colour saturates here, in degrees
+  const ERR_CAP = 6;                     // the color saturates here, in degrees
 
   function errFill(e) {
     if (e == null) return 'var(--shade)';
@@ -346,7 +346,7 @@ window.WXScore = (() => {
       { x: xMae + MW / 2, y: yb + RH / 2 + 4, 'text-anchor': 'middle', 'font-size': 11.5, 'font-weight': 700,
         fill: 'var(--navy)', 'pointer-events': 'none' }));
 
-    // the colour scale, on the figure
+    // the color scale, on the figure
     const rx = LW, ry = H - 12;
     for (let i = 0; i < 40; i++) {
       svg.appendChild(el('rect', { x: rx + i * 3, y: ry - 8, width: 3.4, height: 8,
@@ -360,12 +360,7 @@ window.WXScore = (() => {
     if (t) t.textContent = 'Forecast standing at six the evening before, for the '
       + (gridSide === 'high' ? 'high' : 'low') + ' on ' + dayLabel(gridDate);
     if (cap) {
-      cap.textContent = 'Every value in ' + (R[0].unit || '°F') + '. Each cell carries the forecast and, beside it, '
-        + 'its error against what the station recorded, red where the forecast ran warm and blue where it ran cold. '
-        + 'The right column is that station’s mean absolute error across the four forecast systems and the bottom '
-        + 'row is each system’s across the stations. The exchange’s implied median is drawn beside them and left out '
-        + 'of both margins, because it is a price rather than a forecast product. Stations run worst-forecast first. '
-        + R.length + ' stations scored on this day.';
+      cap.textContent = '';
     }
   }
 

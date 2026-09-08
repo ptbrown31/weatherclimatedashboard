@@ -4,7 +4,7 @@
    next question is which. This draws them: the contract stations on the map,
    each one a link to its own page.
 
-   No market data. The board with prices on it is the front page, and this is an
+   No market data. The weather map with prices on it is the front page, and this is an
    article — a reader who wants today's numbers is one click away and told so. */
 window.WXArtMap = (() => {
   const { el, txt, h, $ } = WXC;

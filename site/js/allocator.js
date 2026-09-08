@@ -20,7 +20,7 @@
    concentrates near the reader's value and pays big only if the value lands
    close. The Kelly-fraction-to-power-utility correspondence is the standard
    lognormal approximation (MacLean, Thorp and Ziemba). The payoff of a set of these contracts is
-   constant between neighbouring strike thresholds, so the expected utility is
+   constant between neighboring strike thresholds, so the expected utility is
    computed exactly on those intervals rather than on a sampled grid.
 
    Prices follow the exchange's structure: there are no sellers, only bids to
@@ -174,7 +174,7 @@ window.WXAlloc = (() => {
   /* The outcome intervals.
 
      Every instrument's payoff is decided by which side of its threshold the
-     value lands on, so between two neighbouring thresholds nothing changes.
+     value lands on, so between two neighboring thresholds nothing changes.
      The intervals between the sorted thresholds are therefore the exact
      outcome space, and each carries its normal probability mass. Intervals
      the curve gives less than a billionth of a chance are dropped: they are
@@ -217,7 +217,7 @@ window.WXAlloc = (() => {
      arithmetic finite in intervals no buyable contract covers, where the
      term is constant in f and moves nothing.
 
-     Projected gradient with backtracking finds the neighbourhood; pairwise
+     Projected gradient with backtracking finds the neighborhood; pairwise
      transfers polished by golden section finish the job, because adjacent
      strikes make near-equivalent instruments and gradient steps crawl along
      the nearly flat ridge between them, stopping with the right objective
@@ -429,7 +429,7 @@ window.WXAlloc = (() => {
 
   // ---------------------------------------------------------- ladder sources
   /* The teaching ladder. Made up: a plausible daily-high board whose prices
-     centre a degree and a half below the default belief, so the page opens on
+     center a degree and a half below the default belief, so the page opens on
      a case with something to tilt toward. Every price is invented and says so. */
   function teachingLadder() {
     const mu0 = 86.5, s0 = 2.2, rows = [];
@@ -810,7 +810,7 @@ window.WXAlloc = (() => {
          dollars to return sixty looked much the same as one that ties up
          twenty to return thirty. On one scale the payout bar is longer than
          the collateral bar by exactly the multiple, which is the fact the
-         column exists to show. The spine sits left of centre because the
+         column exists to show. The spine sits left of center because the
          payout is always the longer of the two. */
       const spine = P3.x0 + (P3.x1 - P3.x0) * 0.26;
       const maxPay = Math.max(1e-9, ...SCEN.map(s2 => R.scen[s2.key].hold.reduce((a, x) => Math.max(a, x.n), 0)));
@@ -851,7 +851,7 @@ window.WXAlloc = (() => {
     // ---- 4: the whole set, outcome by outcome
     head(P4.x0, ['WHAT THE ENTIRE ALLOCATION PAYS', 'BY WHERE THE NUMBER LANDS'], 'net of the capital committed');
     {
-      /* Centred on the capital committed, like the column beside it.
+      /* Centered on the capital committed, like the column beside it.
 
          Drawn from zero, every band was a long bar and the eye had to find the
          committed line and judge each bar against it. Zero is not the question
@@ -891,7 +891,7 @@ window.WXAlloc = (() => {
       /* One bar per outcome band, not a line.
 
          What the set returns is a step: it is one number for every value
-         between two neighbouring thresholds and jumps at each of them. Drawn
+         between two neighboring thresholds and jumps at each of them. Drawn
          as a bar per band that reads immediately; drawn as a line it invited
          the eye to interpolate across jumps that cannot be interpolated. */
       const ts = Array.from(new Set(R.instr.map(i => i.thr))).sort((a, b) => a - b).filter(t => t > vLo && t < vHi);

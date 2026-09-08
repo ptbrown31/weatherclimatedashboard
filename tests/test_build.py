@@ -119,30 +119,6 @@ class Metadata(unittest.TestCase):
             self.assertTrue(build.title_of(s), f"{n} has no title")
 
 
-class StationIndex(unittest.TestCase):
-    """The board links every station by name, for readers and crawlers that
-    cannot use the map."""
-
-    ROWS = [{"station": "KSFO", "city": "San Francisco", "unit": "F"},
-            {"station": "KATL", "city": "Atlanta", "unit": "F"},
-            {"station": "YSSY", "city": "Sydney", "unit": "C"}]
-
-    def test_every_station_is_linked_by_the_name_it_would_be_looked_up_under(self):
-        out = build.station_index(self.ROWS)
-        self.assertIn('<a href="san-francisco-ksfo.html">San Francisco weather (KSFO)</a>', out)
-        self.assertIn('<a href="atlanta-katl.html">Atlanta weather (KATL)</a>', out)
-        self.assertLess(out.index("Atlanta"), out.index("San Francisco"))      # by city name
-
-    def test_stations_abroad_are_listed_apart_from_the_board(self):
-        out = build.station_index(self.ROWS)
-        self.assertLess(out.index("Stations on this board"), out.index("Stations abroad"))
-        self.assertLess(out.index("San Francisco"), out.index("Sydney"))
-        self.assertNotIn("Sydney", out[:out.index("Stations abroad")])
-
-    def test_the_board_has_somewhere_to_put_it(self):
-        self.assertIn('<div class="prose" id="stationIndex"', read("site", "index.html"))
-
-
 class StructuredData(unittest.TestCase):
     """The same facts once more, in the vocabulary a search engine parses."""
 

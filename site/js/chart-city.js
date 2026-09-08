@@ -178,9 +178,9 @@ window.WXCity = (() => {
     const svg = $('#pick'); if (!svg) return;
     const pt = $('#pickTitle');
     if (pt) pt.textContent = WXM.on()
-      ? (WXM.live() ? 'United States — dot colour and size: the market-implied high (ForecastEx) against tomorrow’s NWS forecast'
-                    : 'United States — dot colour and size: the placeholder implied high against tomorrow’s NWS forecast (not a market value)')
-      : 'United States — dot colour and size: observed so far against the NWS high issued for the day';
+      ? (WXM.live() ? 'United States — dot color and size: the market-implied high (ForecastEx) against tomorrow’s NWS forecast'
+                    : 'United States — dot color and size: the placeholder implied high against tomorrow’s NWS forecast (not a market value)')
+      : 'United States — dot color and size: observed so far against the NWS high issued for the day';
     svg.innerHTML = '';
     svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': 1 }));
     summary.cities.filter(c => c.onConus).forEach(c => pickDot(svg, c, c.px, c.py, 1));
@@ -243,7 +243,7 @@ window.WXCity = (() => {
       // two stay registered when the box grows to the window on expand
       const stack = h('div', { class: 'locstack' });
       const img = h('img', { src: WXD.base() + '/snapshots/locator/' + c.station + (region ? '_region' : '') + '.png',
-                             alt: 'Aerial and topographic map centred on ' + (c.city || c.station),
+                             alt: 'Aerial and topographic map centered on ' + (c.city || c.station),
                              loading: 'lazy', width: String(m.w || 760), height: String(m.h || 475) });
       stack.appendChild(img);
       box.appendChild(stack);
@@ -277,7 +277,7 @@ window.WXCity = (() => {
            disappears into the roads; the pad is what lifts a station off the
            map. It is separate from the glyph because the drawing happens in
            passes: pads, then the numbers, then the glyphs and their barbs,
-           so a staff crosses a neighbour's temperature rather than hiding
+           so a staff crosses a neighbor's temperature rather than hiding
            under it. */
         const RAD = big => (big ? 7.5 : 5.5);
         const pad = (g, x2, y2, big) => g.appendChild(el('circle', {
@@ -373,7 +373,7 @@ window.WXCity = (() => {
         const vis = near.map(n => ({ n, x: px(n.lon), y: py(n.lat) }))
           .filter(q => q.x >= 8 && q.x <= W2 - 8 && q.y >= 10 && q.y <= H2 - 6);
 
-        // pass one: every pad, so no glyph lands on a neighbour's backing
+        // pass one: every pad, so no glyph lands on a neighbor's backing
         vis.forEach(q => pad(svg, q.x, q.y, false));
         pad(svg, CX, CY, true);
 
@@ -495,7 +495,7 @@ window.WXCity = (() => {
         }
         stack.appendChild(svg);
       } else {
-        // the image is centred on the station, so the marker is the middle of it
+        // the image is centered on the station, so the marker is the middle of it
         stack.appendChild(h('span', { class: 'locpin' }));
       }
       box.classList.add('expandable');
@@ -551,10 +551,10 @@ window.WXCity = (() => {
                     + 'around it, each drawn as a station model: temperature upper-left, dewpoint lower-left, '
                     + 'the circle filled by cloud cover, and a wind barb pointing where the wind comes from, a '
                     + 'half barb five knots, a full barb ten and a pennant fifty. A city\u2019s temperature varies '
-                    + 'with land cover, distance from the centre, shade and water, so where each thermometer sits '
+                    + 'with land cover, distance from the center, shade and water, so where each thermometer sits '
                     + 'matters.'
                   : 'The contract settles on this one station, and a city\u2019s temperature varies with land cover, '
-                    + 'distance from the centre, shade and water, so where it sits matters.')
+                    + 'distance from the center, shade and water, so where it sits matters.')
         + esc(asof) + ' Imagery: '
         + '<a href="https://basemap.nationalmap.gov/" target="_blank" rel="noopener noreferrer">USGS The '
         + 'National Map</a>, a work of the United States government.';
@@ -744,7 +744,7 @@ window.WXCity = (() => {
     if (showYday) {
       const yObs = rows(ob && ob.rows).filter(p => p.t >= w0 - DAY && p.t < d0).map(p => ({ t: p.t + DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1);
       // asking for yesterday makes yesterday the subject: it comes in at full
-      // strength in the sources' own colours and today drops back to a
+      // strength in the sources' own colors and today drops back to a
       // reference behind it, which is the comparison the button is for
       if (yObs.length) ySeries.push({ nm: 'Yesterday observed', pts: yObs, col: COL.obs, w: 2.4, dash: null, op: 1 });
       [['nws', 'Yesterday NWS as issued', COL.nws], ['nbm', 'Yesterday NBM as issued', COL.nbm],
@@ -1186,7 +1186,7 @@ window.WXCity = (() => {
 
            Drawing only what had been picked meant an empty panel until a reader
            knew there was something to pick, and gave no sense of how this strike
-           sits against its neighbours. All of them are drawn now — the whole
+           sits against its neighbors. All of them are drawn now — the whole
            ladder is the shape of the market's opinion — and choosing one brings
            it forward rather than summoning it. */
         const chosen = new Set(picked.filter(pk => pk.side === side).map(pk => pk.K));

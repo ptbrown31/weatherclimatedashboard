@@ -239,14 +239,14 @@ def run(no_build: bool) -> int:
 
                 # ---- the board's heading: which board, which side, which day
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1600)
-                t1 = page.locator("#boardTitle").inner_text()
+                t1 = page.locator("#mapTitle").inner_text()
                 import re as _re2
                 chk.add(f"{scheme} board title: names the market, the side and the day",
                         t1.startswith("ForecastEx Weather Prediction Market for")
                         and _re2.search(r"(Today's|Tomorrow's) (Highs|Lows) \w+day, \w+ \d{1,2}$", t1) is not None,
                         t1[:110])
                 page.locator("#m4").click(); page.wait_for_timeout(700)
-                t2 = page.locator("#boardTitle").inner_text()
+                t2 = page.locator("#mapTitle").inner_text()
                 chk.add(f"{scheme} board title: follows the selector, not just the clock",
                         "Tomorrow's Lows" in t2, t2[:110])
                 # full city names, not airport codes a reader has to decode
@@ -257,8 +257,8 @@ def run(no_build: bool) -> int:
                 # the map comes directly after the heading
                 order = page.eval_on_selector_all(".wrap > *", "e=>e.map(x=>x.id||x.className||x.tagName)")
                 body = [o for o in order if o != "site"]
-                chk.add(f"{scheme} landing page: heading first, map above the explanation",
-                        body[0] == "boardTitle" and body.index("card") < body.index("modeTitle"),
+                chk.add(f"{scheme} landing page: heading first, then the map",
+                        body[0] == "mapTitle" and body.index("card") < body.index("dotKey"),
                         str(body[:5]))
 
                 # abroad there is no government forecast to compare against, so the
@@ -419,7 +419,7 @@ def run(no_build: bool) -> int:
                 # highs are filled and lows hollow, so one palette serves both
                 hollow = page.eval_on_selector_all("#cityScore circle",
                     "e=>e.filter(x=>x.getAttribute('fill')==='var(--panel)').length")
-                chk.add(f"{scheme} city record: lows are hollow so the colour can mean the tool",
+                chk.add(f"{scheme} city record: lows are hollow so the color can mean the tool",
                         hollow >= 5, f"hollow={hollow}")
                 bands = page.locator("#cityScore rect[fill='transparent']").count()
                 chk.add(f"{scheme} city record: one hover band per day", 1 <= bands <= 7, f"bands={bands}")
@@ -542,7 +542,7 @@ def run(no_build: bool) -> int:
                             page.locator("#cBody table").count() == 0, "")
                 page.goto(f"{srv.url}/contract.html?id=GCYCO"); page.wait_for_timeout(1600)
                 cols = page.eval_on_selector_all("#cBody svg.ts circle[data-tip]", "e=>e.map(x=>x.getAttribute('fill'))")
-                chk.add(f"{scheme} crops: the strikes are coloured by price, not one colour",
+                chk.add(f"{scheme} crops: the strikes are colored by price, not one color",
                         len(set(cols)) > 5, f"{len(set(cols))} distinct of {len(cols)}")
                 rs = page.eval_on_selector_all("#cBody svg.ts circle[data-tip]", "e=>e.map(x=>+x.getAttribute('r'))")
                 chk.add(f"{scheme} crops: markers are sized so a dense ladder stays legible",
@@ -617,16 +617,16 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} scorecard: the standings are not on it, and it says where they are",
                         page.locator("#standings").count() == 0
                         and page.locator("a[href='accuracy.html']").count() >= 1, "")
-                chk.add(f"{scheme} map: the whole key sits under the map it explains",
+                chk.add(f"{scheme} map: the color key sits under the map and carries nothing else",
                         page.evaluate("""() => { const m = document.querySelector('#map').getBoundingClientRect();
-                          const k = document.querySelector('.how');
-                          if (!k) return false;
+                          const k = document.querySelector('#dotKey');
+                          if (!k || document.querySelector('.how')) return false;
                           const t = k.textContent;
-                          return k.getBoundingClientRect().top - m.bottom < 160
-                                 && t.includes('DOTS') && t.includes('SHADING') && t.includes('LABELS'); }"""), "")
+                          return k.getBoundingClientRect().top - m.bottom < 200
+                                 && t.includes('running warmer') && t.includes('running cooler'); }"""), "")
                 chk.add(f"{scheme} scorecard: the map keeps its own status strip",
                         page.locator("#pageStatus .status").count() >= 1, "")
-                chk.add(f"{scheme} roster: Colorado Springs is off the board",
+                chk.add(f"{scheme} roster: Colorado Springs is off the map",
                         "KCOS" not in page.locator("#map").inner_html()
                         and "KCOS" not in page.locator("#mapW").inner_html(), "")
                 chk.add(f"{scheme} standalone: no script errors", not errs, "; ".join(errs)[:300])
@@ -676,51 +676,48 @@ def run(no_build: bool) -> int:
                     on = pg2.locator(".bar button.on").first.inner_text() if pg2.locator(".bar button.on").count() else ""
                     col = pg2.eval_on_selector_all(".modegrid .mgcol",
                                                    "e=>e.filter(c=>c.querySelector('button.on')).map(c=>c.querySelector('.mgh').textContent)")
-                    title = pg2.locator("#modeTitle").inner_text()
+                    title = pg2.locator("#mapTitle").inner_text()
                     chk.add(f"{scheme} map default at {hour}:30 ET: opens on {want.lower()}'s highs",
                             col == [want] and on == "Highs" and want.upper() in title.upper(),
                             f"column={col} button={on} title={title[:40]}")
                     chk.add(f"{scheme} map default at {hour}:30 ET: the other day is one click away",
                             pg2.locator(".bar button").count() >= 4, str(pg2.locator(".bar button").count()))
                     ctx2.close()
-                # ---- the dots are centred on the board's typical gap
+                # ---- the dots are centered on the board's typical gap
                 #
                 # The market sits below the NWS forecast on highs nearly every
-                # day, so a raw-sign colouring paints the board one colour and
-                # tells a reader nothing. Centred, both colours must appear.
+                # day, so a raw-sign coloring paints the board one color and
+                # tells a reader nothing. Centered, both colors must appear.
                 # the today board is the one populated through the morning: the
                 # day-ahead contracts list around midday Eastern, so before then
-                # the tomorrow views legitimately have nothing to centre on
+                # the tomorrow views legitimately have nothing to center on
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1000)
                 page.locator("#m1").click(); page.wait_for_timeout(500)
                 warm = page.locator("#map circle[fill='var(--warm)']").count()
                 cool = page.locator("#map circle[fill='var(--cool)']").count()
-                chk.add(f"{scheme} map colour: centring splits the board instead of painting it one colour",
+                chk.add(f"{scheme} map color: centering splits the map instead of painting it one color",
                         warm > 0 and cool > 0, f"warm={warm} cool={cool}")
                 leg = page.locator("#legend").inner_text()
-                chk.add(f"{scheme} map colour: the legend states the typical gap it centred on",
+                chk.add(f"{scheme} map color: the legend states the typical gap it centered on",
                         "typical gap today" in leg.lower() and "°" in leg, leg[:110])
-                chk.add(f"{scheme} map colour: the legend says colour is distance from typical, not from zero",
-                        "not from zero" in leg, leg[-90:])
+                chk.add(f"{scheme} map color: the legend says color is distance from typical, not from zero",
+                        "not from zero" in leg and "raw gap" not in leg, leg[-90:])
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_enc = page.locator("#tip").inner_text()
-                # the day-ahead views read against the NWS forecast; the
-                # current-day views read against the day's expected extreme,
-                # which folds in what the station has already recorded
-                for want in ("Gap to", "The board", "against that"):
-                    chk.add(f"{scheme} map colour: the box shows '{want}'", want in t_enc, t_enc[-140:])
-                chk.add(f"{scheme} map colour: the raw gap is still shown, not replaced",
-                        "Gap to" in t_enc and ("typical" in t_enc), t_enc[-140:])
-                # m1 is today's highs, m2 tomorrow's. A current-day low that has
-                # already been recorded is out of the standing forecast, so the
-                # today views read against the day's expected extreme instead.
-                chk.add(f"{scheme} map: the current-day view reads against what the day is expected to reach",
-                        "Gap to expected" in t_enc, t_enc[-140:])
+                chk.add(f"{scheme} map hover: no dot-encoding block and nothing claiming to expect a high",
+                        "Dot encoding" not in t_enc and "Expected high" not in t_enc
+                        and "Expected low" not in t_enc and "Forecasts" in t_enc, t_enc[-140:])
+                # m1 is today's highs, m2 tomorrow's. The current-day hover names the
+                # forecast the office issued and what the station has recorded, and
+                # attributes neither to an expectation of the page's own.
+                chk.add(f"{scheme} map: the current-day view names the issued forecast and the record so far",
+                        "NWS high issued for today" in t_enc and "Observed high so far" in t_enc, t_enc[-140:])
                 page.locator("#m2").click(); page.wait_for_timeout(400)
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_tmw = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} map: the day-ahead view reads against the NWS forecast",
-                        "Gap to NWS" in t_tmw, t_tmw[-140:])
+                chk.add(f"{scheme} map: the day-ahead view names the forecasts standing for that day",
+                        "NWS high" in t_tmw and "Blend of Models" in t_tmw
+                        and "Expected" not in t_tmw, t_tmw[-140:])
                 page.locator("#m3").click(); page.wait_for_timeout(400)
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_lo = page.locator("#tip").inner_text()
@@ -753,36 +750,36 @@ def run(no_build: bool) -> int:
                         tt["todayHigh"].split("\n")[1].startswith("Implied high"), tt["todayHigh"][:90])
                 chk.add(f"{scheme} map tip: only the side and day the buttons select",
                         "low" not in tt["todayHigh"].lower().replace("Implied high", "")
-                        and "tomorrow" not in tt["todayHigh"].lower().split("Dot encoding")[0].replace("today", "")
-                        and "high" not in tt["todayLow"].lower().replace("Implied low", "").split("Dot encoding")[0],
+                        and "tomorrow" not in tt["todayHigh"].lower().replace("today", "")
+                        and "high" not in tt["todayLow"].lower().replace("Implied low", ""),
                         tt["todayLow"][:110])
                 chk.add(f"{scheme} map tip: tomorrow shows the day-ahead forecasts, not today's record",
                         "Blend of Models" in tt["tomorrowHigh"] and "Observed" not in tt["tomorrowHigh"],
                         tt["tomorrowHigh"][:110])
-                chk.add(f"{scheme} map tip: an unlisted board says when the contracts list",
+                chk.add(f"{scheme} map tip: an unlisted station says when its contracts list",
                         "not listed yet" in tt["unlisted"] and "Contracts list" in tt["unlisted"],
                         tt["unlisted"][:130])
                 chk.add(f"{scheme} map tip: the countdown counts down, and stops at zero",
                         tt["cdFuture"] is not None and "h " in tt["cdFuture"] and tt["cdPast"] is None,
                         f"future={tt['cdFuture']} past={tt['cdPast']}")
-                chk.add(f"{scheme} map: today's lows name both the expected low and what has been recorded",
-                        "Expected low today" in t_lo and "Observed low so far" in t_lo, t_lo[:200])
+                chk.add(f"{scheme} map: today's lows name the issued forecast and what has been recorded",
+                        "NWS low issued for today" in t_lo and "Observed low so far" in t_lo
+                        and "Expected low" not in t_lo, t_lo[:200])
                 page.locator("#m1").click(); page.wait_for_timeout(400)
                 # observed-versus-issued is not a market gap and keeps the plain sign
                 chk.add(f"{scheme} map: the observed-versus-issued view is gone",
                         page.locator("#m5").count() == 0, "")
-                chk.add(f"{scheme} map: no headline boxes above the board",
+                chk.add(f"{scheme} map: no headline boxes above the map",
                         page.locator("#cards .tile").count() == 0, "")
                 cols = page.eval_on_selector_all(".modegrid .mgh", "e=>e.map(x=>x.textContent)")
                 per = page.eval_on_selector_all(".modegrid .mgcol", "e=>e.map(c=>c.querySelectorAll('button').length)")
                 chk.add(f"{scheme} map: the four views sit in a today/tomorrow grid",
                         cols == ["Today", "Tomorrow"] and per == [2, 2], f"{cols} {per}")
-                chk.add(f"{scheme} map: the opening paragraph is the one asked for",
-                        "with a bias removed from the National Weather Service" in page.locator("p.sub").first.inner_text(),
-                        page.locator("p.sub").first.inner_text()[:80])
+                chk.add(f"{scheme} map: the map carries no explanatory paragraphs above it",
+                        page.locator(".wrap p.sub").count() == 0, str(page.locator(".wrap p.sub").count()))
                 chk.add(f"{scheme} map: it links to the trading article",
                         page.locator("p.cap a[href='daily-temperature-markets.html']").count() == 1, "")
-                chk.add(f"{scheme} map: the legend no longer repeats the colour key below it",
+                chk.add(f"{scheme} map: the legend no longer repeats the color key below it",
                         "Warmer than the board" not in page.locator("#legend").inner_text(),
                         page.locator("#legend").inner_text()[:80])
                 # every view shades now, not only the day-ahead ones
@@ -801,14 +798,14 @@ def run(no_build: bool) -> int:
                 # switching to today keeps it a market view, not observed-vs-issued
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
                 page.locator("#m1").click(); page.wait_for_timeout(400)
-                t_today = page.locator("#modeTitle").inner_text()
+                t_today = page.locator("#mapTitle").inner_text()
                 chk.add(f"{scheme} map today view: the current day, against the NWS forecast rather than what was issued",
                         "TODAY" in t_today.upper() and "observed" not in t_today.lower(), t_today[:80])
                 dots_today = page.locator("#map circle").count()
                 chk.add(f"{scheme} map today view: dots are drawn", dots_today > 0, f"circles={dots_today}")
                 page.locator("#m2").click(); page.wait_for_timeout(400)
                 chk.add(f"{scheme} map tomorrow view: still available and shaded",
-                        "TOMORROW" in page.locator("#modeTitle").inner_text().upper(), page.locator("#modeTitle").inner_text()[:60])
+                        "TOMORROW" in page.locator("#mapTitle").inner_text().upper(), page.locator("#mapTitle").inner_text()[:60])
 
                 # ---- market overlay: on by config on the standalone site; off reserves no space
                 page.goto(f"{srv.url}/city.html?station=KLGA&market=off")
@@ -825,7 +822,7 @@ def run(no_build: bool) -> int:
                         vb_on == "0 0 960 655" and ladder_on == 1 and picks >= 6,
                         f"viewBox={vb_on} ladder={ladder_on} switches={picks}")
                 live_lbl = page.locator("#chart text", has_text="ForecastEx quotes").count()
-                chk.add(f"{scheme} market on: ladder labelled with the exchange and its as-of time", live_lbl == 1, f"count={live_lbl}")
+                chk.add(f"{scheme} market on: ladder labeled with the exchange and its as-of time", live_lbl == 1, f"count={live_lbl}")
                 price_paths = page.locator("#chart path[stroke-width='1.8']").count()
                 chk.add(f"{scheme} market on: quote history drawn for the default strikes", price_paths >= 1, f"paths={price_paths}")
                 # ---- contract links: the price goes to that contract on the exchange
@@ -1109,7 +1106,7 @@ def run(no_build: bool) -> int:
                     # card keeps out of sight for when it fills the window
                     leg = page.locator("#liveStorms div:not(.xhdr) > .slegend")
                     leg_t = leg.first.inner_text() if leg.count() else ""
-                    chk.add(f"{scheme} storm ({tag}): one key names the strikes' colours and the two line styles",
+                    chk.add(f"{scheme} storm ({tag}): one key names the strikes' colors and the two line styles",
                             leg.count() == 1 and "≥70" in leg_t and "LiveCyc" in leg_t and "exchange price" in leg_t
                             and "NHC cycle" in leg_t and "ET" in leg_t, leg_t[:100])
                     tog = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphtog button")
@@ -1125,7 +1122,7 @@ def run(no_build: bool) -> int:
                             emph() and set(emph()) == {"L"} and tog.nth(1).evaluate("b => b.classList.contains('on')"), emph())
                     tog.nth(0).click(); page.wait_for_timeout(120)
                     chk.add(f"{scheme} storm ({tag}): and back", emph() and set(emph()) == {"X"}, emph())
-                    # ---- both series, dashed and solid, in the strike's colour
+                    # ---- both series, dashed and solid, in the strike's color
                     styles = page.evaluate("""() => {
                       const svg = document.querySelector('#liveStorms svg.scard');
                       const dash = [...svg.querySelectorAll('path.lcline')].filter(p => p.getAttribute('stroke-dasharray'));
@@ -1134,7 +1131,7 @@ def run(no_build: bool) -> int:
                                same: !!(dash[0] && solid[0] && dash[0].getAttribute('stroke') === solid[0].getAttribute('stroke')),
                                pending: svg.querySelectorAll('rect.pending').length };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): LiveCyc dashed and the exchange solid, one colour per strike",
+                    chk.add(f"{scheme} storm ({tag}): LiveCyc dashed and the exchange solid, one color per strike",
                             styles["dashed"] >= 3 and styles["solid"] >= 3 and styles["same"], str(styles))
                     # ---- the hover: the strikes down the side, both series across
                     # six cycles and the interim are delivered columns; once settled the
@@ -1714,7 +1711,7 @@ def run(no_build: bool) -> int:
                 nbars = page.locator("#ladders svg.cpanel rect[fill='var(--no)'][role='link']").count()
                 chk.add(f"{scheme} market's ladder: Yes and No bars are drawn in equal number",
                         ybars > 0 and ybars == nbars, f"yes={ybars} no={nbars}")
-                chk.add(f"{scheme} market's ladder: the single-colour bar is gone",
+                chk.add(f"{scheme} market's ladder: the single-color bar is gone",
                         page.locator("#ladders svg.cpanel rect[fill='var(--accent)']").count() == 0,
                         str(page.locator("#ladders svg.cpanel rect[fill='var(--accent)']").count()))
                 axis = page.locator("#ladders svg.cpanel text", has_text="Yes green, No red").count()
@@ -1846,7 +1843,7 @@ def run(no_build: bool) -> int:
                 ep_links = page.locator("#basin path[role='link']").count()
                 chk.add(f"{scheme} pacific: a shaded region is clickable", ep_links >= 1, f"regions={ep_links}")
                 # the state is drawn as one path over eight islands, so its bounding-box
-                # centre is ocean: the tooltip is asked for on the element itself
+                # center is ocean: the tooltip is asked for on the element itself
                 ep_tip = page.evaluate("""() => {
                   const p = document.querySelector('#basin path[aria-label*="Hawaii"]');
                   if (!p) return "";
@@ -1859,7 +1856,7 @@ def run(no_build: bool) -> int:
                         "within 50 miles of its border" in page.locator("#basinCap").inner_text(), page.locator("#basinCap").inner_text()[:80])
                 # ---- a storm whose cone service has stopped updating: the superseded
                 # cone and forecast track are not drawn, and the storm is placed and
-                # labelled from the roster's own advisory instead
+                # labeled from the roster's own advisory instead
                 st = page.evaluate("""() => {
                   const cones = [...document.querySelectorAll('#basin path')]
                     .filter(p => (p.getAttribute('fill') || '').indexOf('rgba(100,116,139') === 0).length;
@@ -1869,7 +1866,7 @@ def run(no_build: bool) -> int:
                 }""")
                 chk.add(f"{scheme} stale geometry: the superseded cone is not drawn",
                         bool(st and st["cones"] == 1), str(st and st["cones"]))
-                chk.add(f"{scheme} stale geometry: the storm is labelled with the roster's advisory, not the old one",
+                chk.add(f"{scheme} stale geometry: the storm is labeled with the roster's advisory, not the old one",
                         bool(st and "adv 056" in st["lala"] and "adv 48" not in st["lala"]), str(st and st["lala"])[:90])
                 chk.add(f"{scheme} stale geometry: the caption says why the cone is missing",
                         bool(st and "Lala is drawn at the position on the latest advisory" in st["cap"]
@@ -2031,14 +2028,14 @@ def run(no_build: bool) -> int:
                         str(blocks))
                 chk.add(f"{scheme} strike box: the prices are cents, not blank",
                         all(b["v"].endswith("\u00a2") for b in blocks), str([b["v"] for b in blocks]))
-                # and the colour those markers carry is explained on the panel
-                chk.add(f"{scheme} panel: a colour key explains the marker colour",
+                # and the color those markers carry is explained on the panel
+                chk.add(f"{scheme} panel: a color key explains the marker color",
                         page.locator("#panels linearGradient stop").count() >= 5
                         and any("chance it ends above the strike" in t for t in page.eval_on_selector_all(
                             "#panels text", "e=>e.map(x=>x.textContent)")),
                         str(page.locator("#panels linearGradient stop").count()))
                 # red at nothing, green at a dollar: a dear strike and a cheap one
-                # must not come out the same colour
+                # must not come out the same color
                 pairs = page.eval_on_selector_all("#panels .panel:first-child circle[data-tip]",
                     "e=>e.map(x=>({y:+x.getAttribute('cy'), f:x.getAttribute('fill')}))")
                 lowest = max(pairs, key=lambda r: r["y"])   # lowest strike sits lowest on screen
@@ -2119,15 +2116,15 @@ def run(no_build: bool) -> int:
                   const svg = document.querySelector('#locator .locbox svg');
                   if (!svg) return null;
                   const lbl = [...svg.querySelectorAll('text')].some(t => /settlement station/.test(t.textContent));
-                  // the centre hit circle sits over the ring; hover it and read the tip
+                  // the center hit circle sits over the ring; hover it and read the tip
                   const hits = [...svg.querySelectorAll("circle[fill='transparent']")];
-                  const centre = hits.find(c2 => +c2.getAttribute('r') >= 17);
-                  if (!centre) return { lbl, tip: null };
-                  centre.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 300, clientY: 300 }));
+                  const center = hits.find(c2 => +c2.getAttribute('r') >= 17);
+                  if (!center) return { lbl, tip: null };
+                  center.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 300, clientY: 300 }));
                   const t = document.querySelector('#tip');
                   return { lbl, tip: t ? t.innerText : null };
                 }""")
-                chk.add(f"{scheme} locator: the settlement station is labelled on the map",
+                chk.add(f"{scheme} locator: the settlement station is labeled on the map",
                         bool(sst and sst["lbl"]), str(sst and sst["lbl"]))
                 geom = page.evaluate("""() => {
                   const svg = document.querySelector('#locator .locbox svg.locov');
@@ -2140,7 +2137,7 @@ def run(no_build: bool) -> int:
                                      w: num(lab,'width'), h: num(lab,'height')} : null;
                   const vb = svg.getAttribute('viewBox').split(' ').map(Number);
                   const cx = vb[2] / 2, cy = vb[3] / 2;
-                  // the centre station's barb strokes: accent-coloured lines near it
+                  // the center station's barb strokes: accent-colored lines near it
                   const barb = [...svg.querySelectorAll('line')]
                     .filter(l => l.getAttribute('stroke') === 'var(--accent)')
                     .map(l => ({x1: num(l,'x1'), y1: num(l,'y1'), x2: num(l,'x2'), y2: num(l,'y2')}))
@@ -2518,7 +2515,7 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} severe: no probability or fair value appears on the count blocks",
                         not sw["probs"], "")
                 # a covered link is a broken promise: the element under the
-                # centre of a strike link rect must be the rect itself
+                # center of a strike link rect must be the rect itself
                 hit = page.evaluate('''() => {
                   const r = document.querySelector('#panels svg [data-contract-url]');
                   if (!r) return 'none';
@@ -2563,7 +2560,7 @@ def run(no_build: bool) -> int:
                 # the standings must compare tools over the same station-days, not
                 # over whatever each archive lane happens to have collected
                 # scored days are measured against what happened; days still ahead
-                # have nothing to measure against and keep the consensus centre
+                # have nothing to measure against and keep the consensus center
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(1600)
                 chk.add(f"{scheme} standings: they are on the accuracy page, beside the argument",
                         page.locator("#standChart rect[data-key]").count() >= 4,
@@ -2589,7 +2586,7 @@ def run(no_build: bool) -> int:
                 # the market is a price, so it must not be inside the skill margins
                 mae = page.evaluate("""() => { const S = document.querySelectorAll('#divsvg text');
                   return [...S].map(t => t.textContent); }""")
-                chk.add(f"{scheme} scorecard: the colour scale is on the figure",
+                chk.add(f"{scheme} scorecard: the color scale is on the figure",
                         any("too cold" in t for t in mae) and any("too warm" in t for t in mae), "")
                 # seven scored days and both ends of the day, all addressable
                 btns = page.eval_on_selector_all("#divControls button", "e=>e.map(x=>x.textContent)")
@@ -2673,7 +2670,7 @@ def run(no_build: bool) -> int:
             page = ctx.new_page()
             errs = errors_of(page)
             page.goto(f"{srv.url}/allocator.html"); page.wait_for_timeout(1800)
-            chk.add("allocator: opens on the teaching ladder, clearly labelled",
+            chk.add("allocator: opens on the teaching ladder, clearly labeled",
                     "made-up" in page.locator("#allocTitle").inner_text().lower(),
                     page.locator("#allocTitle").inner_text())
             chk.add("allocator: three scenario chips", page.locator(".allocChip").count() == 3,
@@ -2898,7 +2895,6 @@ def run(no_build: bool) -> int:
             # Every page below has to name in words what its contracts are
             # written on, and say it in the page rather than through a script.
             WORDS = {
-                "index.html": ["weather prediction market", "settles on that station", "no sellers"],
                 "weather.html": ["rainfall", "tornado", "hail", "thunderstorm", "wind speed", "drought"],
                 "climate.html": ["climate prediction market", "sea level", "carbon dioxide", "degree days"],
                 "electricity-renewables.html": ["energy prediction market", "wind", "solar", "nuclear", "fusion"],
@@ -2981,7 +2977,7 @@ def run(no_build: bool) -> int:
             page.reload()
             page.wait_for_timeout(900)
             status = page.locator(".status").first.inner_text()
-            chk.add("feed fails after a good load: last saved data shown and labelled", ok_first and "last data this browser saved" in status, status[:100])
+            chk.add("feed fails after a good load: last saved data shown and labeled", ok_first and "last data this browser saved" in status, status[:100])
             chk.add("feed fails after a good load: map still drawn from cache", page.locator("#map path").count() > 0)
             page.screenshot(path=os.path.join(OUT, "degraded-cached.png"), full_page=True)
             chk.add("feed fails after a good load: no script errors", not errs, "; ".join(errs)[:300])

@@ -190,7 +190,7 @@ window.WXCityDays = (() => {
 
     /* Each source named on its own level line, in the last day it drew one.
 
-       The colours meant nothing without a key underneath, which is a look away
+       The colors meant nothing without a key underneath, which is a look away
        from the figure to read it. */
     {
       const lastDay = shown[shown.length - 1];

@@ -11,7 +11,7 @@
 <style>
 svg.ts{width:100%;height:auto;display:block}
 /* the collateral-and-payout column: a red that is not the No red, and a return
-   colour that is not the Yes green, so neither is read as a side of a trade */
+   color that is not the Yes green, so neither is read as a side of a trade */
 :root{--collat:#7C3A2E;--payout:#1E5AA0}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--collat:#C98A7E;--payout:#7FB0EA}}
 :root[data-theme="dark"]{--collat:#C98A7E;--payout:#7FB0EA}
@@ -134,7 +134,7 @@ double-Kelly risk appetites, as set out in
 <p class="sub">A more risk-averse utility is less tolerant of outcomes that pay nothing, so it is more prone to buy
 the cheaper contracts on both flanks, which produces a smoother payout curve in the fourth column. A less
 risk-averse one accepts the possibility of loss and concentrates capital on the best-priced strikes near the
-centre of the prediction. When the participant&rsquo;s implied fair values and the market&rsquo;s agree, no
+center of the prediction. When the participant&rsquo;s implied fair values and the market&rsquo;s agree, no
 allocation split has an expected edge over another before the fee, and the differences between the scenarios are
 purely about payout smoothness. With the fee inside every cost, a split that buys more contracts gives up more to
 fees, which the expected values on the scenario cards show.</p>
@@ -164,7 +164,7 @@ The cost of a side is</p>
 <p class="eq"><var>c</var> = 1 &minus; (bid on the other side) + fee</p>
 <p class="sub">so a dollar on it buys 1/<var>c</var> contracts and returns 1/<var>c</var> dollars if it pays,
 which is the payout multiple printed in the third column.</p>
-<p class="sub">The thresholds cut the value axis into intervals, and between two neighbouring thresholds every
+<p class="sub">The thresholds cut the value axis into intervals, and between two neighboring thresholds every
 contract&rsquo;s outcome is fixed, so those intervals are the complete outcome space. A split is a set of
 fractions <var>f<sub>j</sub></var>&nbsp;&ge;&nbsp;0 summing to&nbsp;1, one per buyable side. When the value lands
 in interval <var>s</var>, each dollar committed returns</p>

@@ -6,7 +6,7 @@
    verify can watch those directly: if the blend's 82° needs unbroken sun and
    a late front, low cloud at noon is evidence before the thermometer has it.
    Each panel is one upstream variable, the tools' hourly lines under the
-   station's own METAR readings, in the same colours and line styles the main
+   station's own METAR readings, in the same colors and line styles the main
    chart uses for the same tools, over the same window the main chart shows,
    noon the day before to the end of the contract day.
 
@@ -28,7 +28,7 @@ window.WXAdv = (function () {
   'use strict';
   const { el, txt, h, $ } = WXC;
 
-  // colour, weight and dash per tool, exactly as the main chart draws them
+  // color, weight and dash per tool, exactly as the main chart draws them
   const TOOLS = [
     { k: 'nws', name: 'Weather Service', col: 'var(--nws)', w: 2.4, dash: null, op: 0.95 },
     { k: 'nbm', name: 'Blend of Models', col: 'var(--nbm)', w: 2, dash: '5 4', op: 0.9 },
@@ -302,7 +302,7 @@ window.WXAdv = (function () {
     let H = 32 + 4 * (G.panelH + G.gap) + (1 + TOOLS.length) * G.barbRow + 8 + 26;
     const svg = el('svg', { viewBox: '0 0 ' + G.W + ' ' + H, class: 'ts' });
 
-    // who is which colour and dash, once, along the top
+    // who is which color and dash, once, along the top
     let lx = G.W - 2;
     [{ name: 'Observed (METAR)', col: 'var(--obs)', dash: null, w: 2 }].concat(TOOLS.slice().reverse()).forEach(t => {
       svg.appendChild(txt(t.name, { x: lx, y: 10, 'text-anchor': 'end', 'font-size': 9.5, fill: t.col }));

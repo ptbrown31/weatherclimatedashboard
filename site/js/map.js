@@ -14,7 +14,7 @@
    shading under them are the same quantity.
 
    With the market layer on, the dots carry the gap between the
-   market-implied median (live: the exchange's ladder; else a labelled
+   market-implied median (live: the exchange's ladder; else a labeled
    placeholder) and that reference. */
 window.WXMap = (() => {
   const { el, txt, h, $, deg } = WXC;
@@ -43,13 +43,13 @@ window.WXMap = (() => {
   // Both days are interpolated into one field file, so every view has shading
   // under its dots. Columns 2 and 3 are tomorrow, 4 and 5 today.
   const MODES = {
-    hiT: { title: () => "TODAY'S HIGHS · shaded by the level now expected for " + tdy(), fld: 4, centred: true,
+    hiT: { fld: 4, centered: true,
            val: c => c.nwsHighToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divHigh : null },
-    loT: { title: () => "TODAY'S LOWS · shaded by the level now expected for " + tdy(), fld: 5, centred: true,
+    loT: { fld: 5, centered: true,
            val: c => c.nwsLowToday, when: 'today', div: c => WXM.on() ? (WXM.implied(c, 'today') || {}).divLow : null },
-    hi:  { title: () => "TOMORROW'S HIGHS · shaded by the National Weather Service forecast for " + tmw(), fld: 2, centred: true,
+    hi:  { fld: 2, centered: true,
            val: c => c.nwsHighTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divHigh : null },
-    lo:  { title: () => "TOMORROW'S LOWS · shaded by the National Weather Service forecast for " + tmw(), fld: 3, centred: true,
+    lo:  { fld: 3, centered: true,
            val: c => c.nwsLowTomorrow, when: 'tomorrow', div: c => WXM.on() ? (WXM.implied(c) || {}).divLow : null },
   };
   const tmw = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.tomorrow : ''; };
@@ -79,18 +79,18 @@ window.WXMap = (() => {
   // ---- the typical gap
   //
   // The market has sat below the NWS forecast on highs on every day measured so
-  // far, so colouring by the raw sign paints the whole board one colour and says
+  // far, so coloring by the raw sign paints the whole map one color and says
   // the same thing every morning. What a reader actually wants is which cities
-  // disagree UNUSUALLY, so the dots are centred on the median gap across the
-  // board for the view being shown, and colour is the sign of the deviation from
+  // disagree UNUSUALLY, so the dots are centered on the median gap across the
+  // map for the view being shown, and color is the sign of the deviation from
   // it. The raw gap is never hidden: it is in the label's tooltip and named in
   // the caption.
   //
   // The median is taken across stations within the view rather than from a
   // per-station history, because it is available on the first day and needs no
-  // accumulation. It answers "unusual relative to how the board is priced right
+  // accumulation. It answers "unusual relative to how the map is priced right
   // now", which is the question. Below five stations there is no useful median,
-  // so the centring switches off and the caption says so.
+  // so the centering switches off and the caption says so.
   const MIN_FOR_BASE = 5;
   let gapBase = 0, gapN = 0;
   function median(v) {
@@ -99,12 +99,12 @@ window.WXMap = (() => {
     return a.length % 2 ? a[i] : (a[i - 1] + a[i]) / 2;
   }
   function computeBase(M) {
-    if (!M.centred) { gapBase = 0; gapN = 0; return; }
+    if (!M.centered) { gapBase = 0; gapN = 0; return; }
     const v = (summary.cities || []).map(c => M.div(c)).filter(x => x != null);
     gapN = v.length;
     gapBase = v.length >= MIN_FOR_BASE ? Math.round(median(v) * 10) / 10 : 0;
   }
-  // what the colour and size encode: the gap less the board's typical gap
+  // what the color and size encode: the gap less the map's typical gap
   const dev = v => (v == null ? null : Math.round((v - gapBase) * 10) / 10);
   const tdy = () => { const c = summary.cities.find(x => x.onConus); return c && c.markers ? c.markers.day : ''; };
 
@@ -166,7 +166,7 @@ window.WXMap = (() => {
     return Math.max(1, Math.round(left / 60000)) + ' min from now';
   }
 
-  /* One dot, read for the board on screen.
+  /* One dot, read for the weather map on screen.
 
      The tooltip used to carry both days and both sides at once, twelve rows
      of which two answered the question the reader was asking. It now shows
@@ -207,32 +207,17 @@ window.WXMap = (() => {
 
     // ---- the forecasts behind it, this side and this day only
     const support = today
-      ? [['Expected ' + side + ' today',
-          dg(low ? c.nwsLowToday : c.nwsHighToday)
-            + ((low ? c.nwsLowTodayRunning : c.nwsHighTodayRunning) ? ' <span class="tk">(already recorded)</span>' : '')],
-         ['NWS ' + side + ' issued for today', low ? dg(c.nwsIssuedLow) : dg(c.nwsIssuedHigh)],
+      ? [['NWS ' + side + ' issued for today', low ? dg(c.nwsIssuedLow) : dg(c.nwsIssuedHigh)],
          ['Observed ' + side + ' so far', obsSoFar(c, low)],
          ['Latest METAR', latestOb(c, mk)]]
       : [['NWS ' + side, dg(low ? c.nwsLowTomorrow : c.nwsHighTomorrow)],
          ['Blend of Models', dg(low ? c.nbmLowTomorrow : c.nbmHighTomorrow)],
          ['GFS MOS', dg(low ? c.mavLowTomorrow : c.mavHighTomorrow)]];
 
-    // ---- what the dot itself is encoding
-    const raw = M.div(c);
-    const centred = M.centred && gapN >= MIN_FOR_BASE && raw != null;
-    const sgn = x => (x > 0 ? '+' : '') + x.toFixed(1) + '°';
-    const enc = centred ? [
-      [today ? 'Gap to expected' : 'Gap to NWS', sgn(raw)],
-      ['The board’s typical gap', sgn(gapBase) + ' (median of ' + gapN + ')'],
-      ['This station, against that', sgn(raw - gapBase) + (Math.abs(raw - gapBase) < 0.5 ? ', about typical' : (raw > gapBase ? ', warmer than typical' : ', cooler than typical'))],
-    ] : [];
-
     const head = c.city + ' (' + c.station + ') · ' + (today ? 'today' : 'tomorrow') + '’s ' + side
                + (dayIso ? ' ' + isoDate(dayIso) : '');
     return tip.rows(head, lead)
-      + tip.rows('<span class="tk" style="display:block;margin-top:5px">Forecasts</span>', support)
-      + (enc.length ? tip.rows('<span class="tk" style="display:block;margin-top:5px">Dot encoding</span>', enc, 'click → city chart')
-                    : tip.rows('', [], 'click → city chart'));
+      + tip.rows('<span class="tk" style="display:block;margin-top:5px">Forecasts</span>', support, 'click → city chart');
   }
 
   // the observed extreme so far on the side being shown, with its decode
@@ -282,8 +267,7 @@ window.WXMap = (() => {
     }
     svg.appendChild(el('path', { d: base.statePaths, class: 'state' }));
     svg.appendChild(el('path', { d: base.statePaths, class: 'state2' }));
-    $('#modeTitle').textContent = M.title();
-    const hEl = $('#boardTitle');
+    const hEl = $('#mapTitle');
     if (hEl) { hEl.textContent = pageTitle(mode); document.title = pageTitle(mode); }
 
     computeBase(M);
@@ -292,16 +276,16 @@ window.WXMap = (() => {
     legend.innerHTML = '';
     if (WXM.on()) {
       const w = WXM.live() ? 'ForecastEx implied median' : 'placeholder';
-      const centred = M.centred && gapN >= MIN_FOR_BASE;
+      const centered = M.centered && gapN >= MIN_FOR_BASE;
       const sgn = gapBase > 0 ? '+' : '';
-      // the colour key itself lives in the panel below the map; repeating it here
+      // the color key itself lives in the panel below the map; repeating it here
       // said the same thing twice, so this line carries only what that panel
-      // cannot know: the gap the dots are centred on today
+      // cannot know: the gap the dots are centered on today
       const ref = M.when === 'today' ? 'expected' : 'NWS';
-      legend.innerHTML = centred
+      legend.innerHTML = centered
         ? '<span>Typical gap today ' + sgn + gapBase.toFixed(1) + '° across ' + gapN + ' stations (' + w + ' minus ' + ref + '). '
-          + 'Colour and size are each station’s distance from that, not from zero. Hover for the raw gap.</span>'
-        : '<span>Too few stations priced to centre on a typical gap, so the dots show the raw gap against ' + ref + '.</span>';
+          + 'Color and size are each station’s distance from that, not from zero.</span>'
+        : '<span>Too few stations priced to center on a typical gap, so the dots show the raw gap against ' + ref + '.</span>';
     }
     else legend.innerHTML = '<span>Number is the ' + (M.when === 'today' ? 'expected' : 'NWS forecast') + ' level · pale shading is that level interpolated between stations (derived)</span>';
     drawWorld();
@@ -309,7 +293,7 @@ window.WXMap = (() => {
 
   // Dots and labels for one canvas. Both maps carry the same encoding, so the
   // international stations read the same way they do on the city page's picker:
-  // grey where the mode has no value for them, since US government feeds carry
+  // gray where the mode has no value for them, since US government feeds carry
   // observations everywhere but forecasts only for the US and, through NBM, Canada.
   const CANDS = [[9, 3], [9, -12], [-9, 3], [-9, -12], [9, 15], [9, -25], [-9, 15], [-9, -25], [0, 24], [0, -33], [18, 3], [-18, 3], [18, 15], [-18, 15], [18, -12], [-18, -12]];
   function plot(svg, cities, M, fx, fy, bounds, withUnit, opts) {
@@ -328,7 +312,7 @@ window.WXMap = (() => {
       } else {
         // deviations from the typical gap are a degree or two, not five, so the
         // radius runs to full scale over a narrower range than the raw gap did
-        const FULL = M.centred && gapN >= MIN_FOR_BASE ? 3 : 5;
+        const FULL = M.centered && gapN >= MIN_FOR_BASE ? 3 : 5;
         r = 5.5 + 8.5 * Math.min(Math.abs(v), FULL) / FULL;
         g.appendChild(el('circle', { cx: X, cy: Y, r: r + 3.5, fill: 'var(--panel)', 'fill-opacity': .95 }));
         g.appendChild(el('circle', { cx: X, cy: Y, r, fill: v > 0 ? 'var(--warm)' : (v < 0 ? 'var(--cool)' : 'var(--muted)'), 'fill-opacity': .97, stroke: 'var(--ink)', 'stroke-width': .6 }));
@@ -345,7 +329,7 @@ window.WXMap = (() => {
       // US government forecasts stop at the border, so abroad there is no
       // forecast value and the station would otherwise go unnamed
       if (!opts.label && av == null && v == null) return;
-      const big = v != null && Math.abs(v) >= (M.centred && gapN >= MIN_FOR_BASE ? 1 : 1.5);
+      const big = v != null && Math.abs(v) >= (M.centered && gapN >= MIN_FOR_BASE ? 1 : 1.5);
       // the international stations settle in Celsius, so their labels carry the unit
       // both canvases name their cities: a three-letter code is not something a
       // reader can be expected to decode, at home or abroad
@@ -413,7 +397,7 @@ window.WXMap = (() => {
     });
     draw();
     // international stations and Honolulu are not on this canvas; list them
-    // the international stations are labelled on the world canvas itself, so
+    // the international stations are labeled on the world canvas itself, so
     // there is no list under it any more
   }
   // the listing clock is exposed the way allocator.js exposes its maths, so

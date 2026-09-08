@@ -11,8 +11,8 @@
    not the clock, because nobody knows how many deliveries a storm will produce
    or when it will dissipate; a new delivery appends a column and never rescales
    what is already drawn. The rightmost column is reserved for settlement from
-   the first frame, and stays empty and labelled until the vendor's final file
-   arrives. Nothing is coloured, ranked or marked by an outcome that has not
+   the first frame, and stays empty and labeled until the vendor's final file
+   arrives. Nothing is colored, ranked or marked by an outcome that has not
    happened: ticks and crosses appear only once there is a settled gust to
    compare against, and a location enters the page when the exchange lists its
    contracts, which is public, rather than on any internal listing rule.
@@ -104,7 +104,7 @@ window.WXStorm = (() => {
       'letter-spacing': '0.12em', fill: 'var(--muted)', opacity: 0.5, 'pointer-events': 'none' }));
   }
 
-  // a colour per threshold, cold to hot across the ladder
+  // a color per threshold, cold to hot across the ladder
   const rung = (i, n) => 'hsl(' + Math.round(210 - 210 * (i / Math.max(1, n - 1))) + ' 70% 45%)';
   const stormCode = n => String(n || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
 
@@ -257,7 +257,7 @@ window.WXStorm = (() => {
   // The delivery axis, drawn the same way wherever the vendor's deliveries are
   // the x axis: the NHC cycle each file is built on in UTC, the moment the file
   // arrived on the Eastern clock, and the date where the day turns over. A
-  // column still to come is ticked dashed and labelled for what it waits on.
+  // column still to come is ticked dashed and labeled for what it waits on.
   // Cycle labels thin rather than overlap, so a storm that runs a week keeps
   // an axis that can still be read; the pending columns always show. What
   // the rows are is said once, in the section's key, because a heading on
@@ -333,7 +333,7 @@ window.WXStorm = (() => {
       h('div', { class: 'emphctl' }, [h('span', { class: 'emphl', text: 'Highlight' }), tog]),
       note]);
   }
-  // the key: a colour per strike, and the two line styles
+  // the key: a color per strike, and the two line styles
   function legend(thr, used) {
     const d = h('div', { class: 'slegend' });
     (thr || []).forEach((t, i) => {
@@ -357,7 +357,7 @@ window.WXStorm = (() => {
   // ---- one location's card: the two series through the deliveries.
   //
   // A dashed line per strike is the vendor's LiveCyc probability as published,
-  // a solid line in the same colour the exchange's Yes price for the same
+  // a solid line in the same color the exchange's Yes price for the same
   // contract, both on the delivery axis with the pending columns held open at
   // the end. Returns the node, a setCursor so scrubbing moves a line and a few
   // marks rather than rebuilding every card, and the strikes it drew.
@@ -513,7 +513,7 @@ window.WXStorm = (() => {
     if (anyHit) svg.appendChild(txt('✓', { x: x(kf) + 8, y: y(100) + 4, 'font-size': 10, fill: 'var(--yes)' }));
     if (anyMiss) svg.appendChild(txt('✕', { x: x(kf) + 8, y: y(0) + 1, 'font-size': 10, fill: 'var(--muted)' }));
 
-    // the exchange's price, solid and in the same colour: one line per strike
+    // the exchange's price, solid and in the same color: one line per strike
     // through the price recorded with each delivery, a square at each reading
     thr.forEach((t, i) => {
       const col = rung(i, thr.length);
@@ -621,7 +621,7 @@ window.WXStorm = (() => {
       cur.setAttribute('d', 'M' + px + ' 10L' + (px + 5) + ' 2L' + (px - 5) + ' 2Z');
       const s = cyc[ti] || {};
       lab.textContent = label(s) + '  ·  delivery ' + (ti + 1) + ' of ' + cyc.length + (ti === cyc.length - 1 ? ' (latest)' : '');
-      // centred under the cursor, then measured and pulled back inside the frame so
+      // centered under the cursor, then measured and pulled back inside the frame so
       // the reading never runs off the end at the newest delivery
       const w = lab.getComputedTextLength ? lab.getComputedTextLength() : 0;
       lab.setAttribute('x', Math.min(Math.max(px - w / 2, 4), Math.max(4, W - 4 - w)));
@@ -928,7 +928,7 @@ window.WXStorm = (() => {
     });
 
     // ---- the market's ladder, to the right of the chart: the same bars as
-    // the count contracts, rows in the chart's own order and colours
+    // the count contracts, rows in the chart's own order and colors
     const LX2 = 636, RX2 = 946, LT = 20, rowH = 26;
     const lad = el('g', { class: 'plad' });
     svg.appendChild(lad);
