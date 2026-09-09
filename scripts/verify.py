@@ -311,6 +311,23 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} city ladder box: the book is one line, not five rows",
                         "they buy, they do not sell" in lt and "Yes bid" in lt, lt[-90:])
 
+                # the two pickers sit side by side and finish at the same height,
+                # so neither pushes the chart off the first screen
+                pk = page.evaluate("""() => {
+                  const a = document.querySelector('#pick').getBoundingClientRect();
+                  const b = document.querySelector('#pickW').getBoundingClientRect();
+                  const chart = document.querySelector('#chartCard').getBoundingClientRect();
+                  return { sameRow: Math.abs(a.top - b.top) < 2, sameHeight: Math.abs(a.height - b.height) < 3,
+                           bothBelow: Math.abs(a.bottom - b.bottom) < 3, h: Math.round(a.height),
+                           chartTop: Math.round(chart.top) };
+                }""")
+                chk.add(f"{scheme} pickers: side by side, finishing at the same height",
+                        bool(pk and pk["sameRow"] and pk["sameHeight"] and pk["bothBelow"]), str(pk))
+                chk.add(f"{scheme} pickers: they do not push the chart off the first screen",
+                        bool(pk and pk["h"] <= 320 and pk["chartTop"] <= 700), str(pk))
+                chk.add(f"{scheme} pickers: the states are painted the way the landing map paints them",
+                        page.locator("#pick path.state").count() == 1
+                        and page.locator("#pick path.state2").count() == 1, "")
                 loccap = page.locator("#locator .cap").inner_text()
                 chk.add(f"{scheme} locator: a US station gets metro-scale imagery, pinned",
                         page.locator("#locator .locbox img").count() == 1

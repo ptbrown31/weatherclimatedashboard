@@ -213,7 +213,9 @@ window.WXCity = (() => {
       : 'United States — dot color and size: observed so far against the NWS high issued for the day';
     computeBase();
     svg.innerHTML = '';
-    svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': 1 }));
+    svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)' }));
+    svg.appendChild(el('path', { d: base.statePaths, class: 'state' }));
+    svg.appendChild(el('path', { d: base.statePaths, class: 'state2' }));
     summary.cities.filter(c => c.onConus).forEach(c => pickDot(svg, c, c.px, c.py, 1));
     const w = $('#pickW'); if (!w) return;
     w.innerHTML = '';

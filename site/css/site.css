@@ -95,12 +95,20 @@ text{font-family:inherit}
 .tip .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(128,128,128,.7)}
 @media (prefers-reduced-motion: reduce){.tip{transition:none}}
 /* city page */
-.pickwrap{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px}
-/* Each map takes the row it is on. Two fit only on a wide page, and there
-   they share the measure; below that they stack and each one fills it. The
-   flex item is the wrapper the title sits in, not the svg inside it. */
-.pickwrap > div{flex:1 1 560px;min-width:0}
+/* The two maps side by side, finishing at the same height.
+
+   They are different shapes: the states are 960 by 600 and the world strip 960
+   by 320. Giving them equal widths made the taller one twice the height of the
+   other and pushed the chart off the screen. Each takes the share of the row
+   its own aspect needs, 16 against 30, so both come out the same height and one
+   scale serves the pair. The columns stretch and the maps sit at the bottom of
+   them, which keeps the two aligned however many lines a title runs to. */
+.pickwrap{display:flex;gap:22px;align-items:stretch;margin-bottom:6px}
+.pickwrap > div{min-width:0;display:flex;flex-direction:column;justify-content:flex-end}
+.pickwrap > div:nth-child(1){flex:16 1 0}
+.pickwrap > div:nth-child(2){flex:30 1 0}
 #pick,#pickW{width:100%;max-width:100%;display:block}
+@media (max-width:640px){.pickwrap{flex-wrap:wrap}.pickwrap > div{flex:1 1 100%}}
 .pickttl{font-size:12px;color:var(--muted);margin:0 0 4px}
 #skRow{margin:12px 0 10px;font-size:12.5px}
 #skRow .lbl2{display:inline-block;width:88px;font-weight:620;color:var(--muted);font-size:12px}
