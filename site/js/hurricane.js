@@ -703,7 +703,9 @@ window.WXHur = (() => {
     host.innerHTML = '';
     if (!m) { host.appendChild(h('p', { class: 'cap', text: WXM.on() ? 'Not in the quote snapshot.' : 'The market layer is off.' })); return; }
     const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: (m.name || 'Category 4 landfall') + ' (' + m.symbol + ')' })]);
-    m.contracts.slice().sort((a, b) => String(a.spec).localeCompare(String(b.spec))).forEach(c => {
+    // nearest expiration on top: the dates are what separates these contracts,
+    // and a string sort on the spec put November 2026 above September 2026
+    m.contracts.slice().sort((a, b) => String(a.expiration || a.spec).localeCompare(String(b.expiration || b.spec))).forEach(c => {
       const y = yes(c);
       const one = oneSided(c);
       const bar = h('div', { class: 'lrow' + (one ? ' one' : '') }, [
@@ -722,12 +724,7 @@ window.WXHur = (() => {
     if (chart) { host.appendChild(h('div', { class: 'card' }, [chart])); }
     host.appendChild(div);
     host.appendChild(h('p', { class: 'cap', text: 'A Yes pays if a hurricane makes landfall in the United States at exactly '
-      + 'Category 4 on or before the date named. The exchange\u2019s terms are explicit that a higher or lower category does not '
-      + 'qualify, so a Category 5 landfall does not resolve this contract Yes. Each date is cumulative, asking whether at least '
-      + 'one qualifying landfall has happened by then. The climatology drawn against it counts landfalls on the continental '
-      + 'United States only: Maria crossed Puerto Rico at exactly Category 4 in 2017 and is not in the line. The exchange\u2019s '
-      + 'terms say \u201cthe United States\u201d without saying whether a Puerto Rico or Virgin Islands landfall counts, so a '
-      + 'reader taking the wider reading should treat this line as the low end.' }));
+      + 'Category 4 on or before the date named.' }));
   }
 
   // ---- how much of the season's chance is still ahead
@@ -795,10 +792,13 @@ window.WXHur = (() => {
        Both run the width of the panel and finish well separated, the scaled
        one always below the raw climatology, so the right-hand end holds the
        names without a key underneath. */
+    const taken = [];
     const endLabel = (scale, col, nm) => {
       const i = days.length - 1;
       const v = cond(cum[days[i][0]] != null ? cum[days[i][0]] : cum['11-30']);
       const yy = y(Math.min(1 - Math.pow(1 - v, scale), ymax));
+      const w = nm.length * 5.3;
+      taken.push({ x0: R - 4 - w, x1: R - 4, y0: yy - 13, y1: yy - 1 });
       svg.appendChild(txt(nm, { x: R - 4, y: yy - 5, 'text-anchor': 'end', 'font-size': 10,
                                 'font-weight': 700, fill: col, 'pointer-events': 'none' }));
     };
@@ -819,7 +819,7 @@ window.WXHur = (() => {
     // only this season's dates belong on this season's remaining-window curve;
     // a contract for next year is a different question and stays in the ladder
     const thisYear = String((H.season || {}).year || now.getUTCFullYear());
-    let firstDot = null;
+    const dotAt = [];
     (m.contracts || []).forEach(c => {
       const e = String(c.expiration || '');
       if (e.length < 8 || e.slice(0, 4) !== thisYear) return;
@@ -835,14 +835,27 @@ window.WXHur = (() => {
         ['Difference to climatology', ((c.mid - f) * 100 > 0 ? '+' : '') + ((c.mid - f) * 100).toFixed(1) + ' points'],
       ], 'the climatology is the share of past seasons whose first qualifying landfall fell in this window'));
       svg.appendChild(dot);
-      if (!firstDot) firstDot = { x: x(i), y: y(Math.min(c.mid, ymax)) };
+      dotAt.push({ x: x(i), y: y(Math.min(c.mid, ymax)), label: c.label || 'contract' });
     });
-    // the curves carry their own names; only the dots still need one, and it
-    // goes on the first of them rather than in a row underneath
-    if (firstDot) {
-      svg.appendChild(txt('a listed contract', { x: firstDot.x, y: firstDot.y - 9, 'text-anchor': 'middle',
-                          'font-size': 10, 'font-weight': 700, fill: 'var(--accent)', 'pointer-events': 'none' }));
-    }
+    /* The curves carry their own names, and each dot carries its date.
+
+       The label used to read "a listed contract", which named the kind of mark
+       rather than the contract under it; the date is what tells one strike from
+       the next, and it is what the ladder underneath is keyed on. A label at
+       either end of the panel is anchored inward so it stays inside the frame. */
+    dotAt.forEach(d => {
+      const anchor = d.x > R - 46 ? 'end' : d.x < L + 46 ? 'start' : 'middle';
+      const lx = d.x + (anchor === 'end' ? 5 : anchor === 'start' ? -5 : 0);
+      const w = d.label.length * 5.3;
+      const x0 = anchor === 'end' ? lx - w : anchor === 'start' ? lx : lx - w / 2;
+      // above the dot unless a curve's own name is already there, in which case
+      // below, so a strike near the end of the panel does not print over one
+      const hits = ly => taken.some(a => !(x0 + w < a.x0 || x0 > a.x1 || ly < a.y0 || ly - 12 > a.y1));
+      const ly = hits(d.y - 9) ? d.y + 17 : d.y - 9;
+      taken.push({ x0, x1: x0 + w, y0: ly - 12, y1: ly });
+      svg.appendChild(txt(d.label, { x: lx, y: ly, 'text-anchor': anchor, 'font-size': 10,
+                          'font-weight': 700, class: 'lbl', fill: 'var(--accent)', 'pointer-events': 'none' }));
+    });
     return svg;
   }
   // where the count ladder crosses fifty cents, which is the market's median
@@ -898,7 +911,7 @@ window.WXHur = (() => {
         }
       });
     });
-    $('#laddersCap').textContent = 'Exchange contracts as quoted ' + clockFull(Date.parse(MK.asof), local()) + (MK.stale ? ' (stale)' : '') + '; the bar is the Yes price in cents, midway between the Yes bid and one dollar less the No bid, or (*) the one side with bids (hover shows both bids). Where both sides bid the minimum the book is empty and no price is shown. There are no sellers on this exchange, only bids to buy Yes or No. Season counts are this site’s own reading of the best tracks, not the exchange’s settlement count.';
+    $('#laddersCap').textContent = '';
   }
 
   // ---- the season's count so far, beside the ladder that prices it
@@ -1002,18 +1015,39 @@ window.WXHur = (() => {
     band.addEventListener('mouseleave', () => tip.hide());
     svg.appendChild(band);
 
-    // both paces: the one that is filled is the one the ladder's marker follows
+    /* Both paces, each named on its own line where it ends.
+
+       The filled blue line is the one the ladder's marker follows: the
+       formation calendar scaled to the seasonal forecast total where one is
+       published, so it is the forecaster's season rather than an average one,
+       and the dashed line beside it is the average. Where no forecast is
+       configured the blue line is that average and says so. The names used to
+       sit in the corner of the plot with the count, which meant reading a
+       figure in one place and matching it to a line in another. */
     const lead = fcurve || curve;
+    const ends = [];
     if (lead) {
       const d = lead.map((p, i) => (i ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
       svg.appendChild(el('path', { d: d + 'L' + x(t1).toFixed(1) + ',' + y(0) + 'L' + x(t0).toFixed(1) + ',' + y(0) + 'Z', fill: 'var(--cool)', 'fill-opacity': .12, 'pointer-events': 'none' }));
       svg.appendChild(el('path', { d, fill: 'none', stroke: 'var(--cool)', 'stroke-width': 2, 'pointer-events': 'none' }));
+      ends.push({ y: y(lead[lead.length - 1][1]), col: 'var(--cool)',
+        name: fcurve ? esc(fc.label || fc.source || 'seasonal forecast') + ' forecast pace' : 'an average season' });
     }
     if (fcurve && curve) {
       svg.appendChild(el('path', { d: curve.map((p, i) => (i ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(''),
         fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.4, 'stroke-dasharray': '5 4', 'pointer-events': 'none' }));
-      svg.appendChild(txt('an average season', { x: x(t1) - 4, y: y(curve[curve.length - 1][1]) - 5, 'text-anchor': 'end', class: 'ax lbl', fill: 'var(--muted)' }));
+      ends.push({ y: y(curve[curve.length - 1][1]), col: 'var(--muted)', name: 'an average season' });
     }
+    // two lines that finish close together would print their names on top of
+    // each other, so the lower name drops far enough to clear the upper one
+    ends.sort((a, b) => a.y - b.y);
+    let lastEnd = -1e9;
+    ends.forEach(e => {
+      let ly = e.y - 5;
+      if (ly - lastEnd < 12) ly = lastEnd + 12;
+      lastEnd = ly;
+      svg.appendChild(txt(e.name, { x: x(t1) - 4, y: ly, 'text-anchor': 'end', class: 'ax lbl', fill: e.col }));
+    });
     if (month == null) for (let mo = new Date(t0).getUTCMonth(); mo <= new Date(t1).getUTCMonth(); mo++) {
       const tm = Date.UTC(year, mo, 1);
       if (tm < t0 || tm > t1) continue;
@@ -1050,20 +1084,13 @@ window.WXHur = (() => {
       svg.appendChild(el('line', { x1: x(now), x2: x(now), y1: T - 6, y2: B, stroke: 'var(--muted)', 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
       svg.appendChild(txt('today', { x: x(now) + 4, y: T + 4, class: 'ax' }));
     }
-    // the count so far, large, and what the pace says
-    const at = c => c ? (c.find(p => p[0] >= now) || c[c.length - 1])[1] : null;
-    const paceNow = at(lead), climNow = at(curve);
+    /* The count so far, and nothing else in the corner.
+
+       The two figures that used to sit under it, the forecast total and the
+       pace implied by today, are what the two named lines and the today marker
+       carry; the hover band gives both of them for any date on the plot. */
     svg.appendChild(txt(String(events.length), { x: L + 12, y: T + 34, 'font-size': 30, 'font-weight': 700, fill: 'var(--navy)' }));
-    const climTgt = climTarget == null ? null : Math.round(climTarget * 100) / 100;
-    const note = 'so far · ' + (fc[cfg.key] != null
-      ? esc(fc.label || fc.source || 'forecast') + ' ' + fc[cfg.key] + (month != null && fcTarget != null ? ', ' + MONTHS[month] + ' share ' + fcTarget : '')
-      : (climTgt == null ? 'no climatology for this period'
-         : month == null ? 'an average season ends near ' + climTgt
-         : 'an average ' + MONTHS[month] + ' has ' + climTgt));
-    svg.appendChild(txt(note, { x: L + 12, y: T + 56, class: 'ax' }));
-    if (paceNow != null) svg.appendChild(txt('pace implied by today: ' + (Math.round(paceNow * 10) / 10)
-      + (fcurve && climNow != null ? ' (an average season ' + (Math.round(climNow * 10) / 10) + ')' : ''),
-      { x: L + 12, y: T + 70, class: 'ax' }));
+    svg.appendChild(txt('so far', { x: L + 12, y: T + 50, class: 'ax' }));
 
     // the ladder, on the same count axis
     svg.appendChild(txt('The market’s ladder', { x: RL, y: T - 10, class: 'axl', 'font-weight': 700 }));
@@ -1194,18 +1221,12 @@ window.WXHur = (() => {
        heading above the panel already said major. */
     host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region, or on land within 50 miles of the '
       + 'region\u2019s border, during the season named while at Category 3 or stronger. The exchange\u2019s terms define a landfall as the eye crossing '
-      + 'onto land, so a storm that stays offshore has not made landfall for this contract even where hurricane-force winds reach the area. '
-      + (elsewhere ? 'The ' + (elsewhere > 1 ? elsewhere + ' regions' : 'one region') + ' in the other basin '
-                     + (elsewhere > 1 ? 'are' : 'is') + ' listed on the ' + (basin === 'AL' ? 'Pacific' : 'Atlantic') + ' view. ' : '')
-      + 'Prices as quoted ' + clockFull(Date.parse(MK.asof), local()) + '. Yes green, No red; the Yes price is midway between the Yes bid '
-      + 'and one dollar less the No bid where both sides have bids, else the one side shown, and there are no sellers, only bids to buy '
-      + 'Yes or No. A region whose book is empty, both sides bidding the minimum, shows no price and is left unshaded. “Pays” in the box is what a dollar of payout costs at the price a Yes could be bought at now, net of the '
-      + WXM.feeCents() + '¢ per-side execution fee.' }));
+      + 'onto land, so a storm that stays offshore has not made landfall for this contract even where hurricane-force winds reach the area.' }));
   }
 
   // ---- the vendor lane
   //
-  /* One file on the table, not a stack of them.
+  /* One file per storm, drawn inside the storm it belongs to.
 
      Three kinds of file arrive for a storm. LiveCyc is a forecast from its own
      start and lands four times a day while the storm runs; the Metryc interim
@@ -1218,15 +1239,21 @@ window.WXHur = (() => {
      has landed, and reads near zero at a location whose peak has passed, so a
      later cycle must not print zeros over a landfall the interim has already
      measured. The interim therefore supersedes later cycles and the final
-     supersedes everything. */
+     supersedes everything.
+
+     This used to be a section of its own, which meant every storm appeared
+     twice on the page, once for its deliveries and once for its latest file.
+     The storm module now asks for this panel and puts it inside the storm's
+     own record. */
   const VENDOR_ROWS = 16;
+  const GUST_LABELS = 12;                    // how many places on the map carry their number
   function shownFile(s) {
     if (s.final && s.final.sites && Object.keys(s.final.sites).length) return { kind: 'final', label: 'Metryc final', file: s.final };
     if (s.interim && s.interim.sites && Object.keys(s.interim.sites).length) return { kind: 'interim', label: 'Metryc interim', file: s.interim };
     if (s.livecyc && s.livecyc.sites && Object.keys(s.livecyc.sites).length) return { kind: 'livecyc', label: 'LiveCyc', file: s.livecyc };
     return null;
   }
-  // the table always says which file it is and when that file arrived
+  // the panel always says which file it is and when that file arrived
   function sourceLine(shown) {
     const n = Object.keys(shown.file.sites || {}).length;
     const got = shown.file.lastModified ? ' · file received ' + utc(shown.file.lastModified) : '';
@@ -1234,17 +1261,275 @@ window.WXHur = (() => {
     if (shown.kind === 'interim') return 'Metryc interim' + got + ' · ' + n + ' locations';
     return 'LiveCyc cycle ' + utc(shown.file.forecastTime) + got + ' · ' + n + ' locations with non-zero probability';
   }
-  function drawVendor() {
-    const host = $('#vendor'); host.innerHTML = '';
-    if (!RK) { host.appendChild(h('p', { class: 'cap', text: 'Vendor lane status unavailable.' })); return; }
-    if (!RK.enabled) {
-      host.appendChild(h('p', { class: 'cap', text: 'Not enabled on this site (' + (RK.reason || 'off') + '). When a storm is active and the lane is on, this section shows the vendor’s probability that the peak gust exceeds each threshold at the reference locations, as published, four times a day.' }));
-      return;
-    }
-    const storms = (RK.storms || []).filter(s => inBasin(s.name)).slice().sort((a, b) => {
-      const ta = WXStorm.stampOf(a), tb = WXStorm.stampOf(b);
-      return (tb == null ? Infinity : tb) - (ta == null ? Infinity : ta);
+  // the exchange's wind contract for this storm and location, where one is
+  // listed, so a row or a dot opens its market the way every other priced
+  // surface on the site does
+  function windUrl(storm, id) {
+    const code2 = String(storm.name || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
+    const lm = MK && (MK.markets || []).find(m2 => m2.symbol === 'L' + code2 + String(id).toUpperCase());
+    const c0 = lm && (lm.contracts || [])[0];
+    return lm && c0 ? WXM.contractUrl(lm.productConid, c0.conidYes || c0.conid) : null;
+  }
+  const mph1 = v => (v == null ? null : v.toFixed(1) + ' mph');
+
+  /* The settled gusts as a map, not a table.
+
+     The final file is the storm's record: the gust each reference location
+     recorded, which is what the wind contracts settle on. Sorted down a table
+     it says which places were hit hardest and nothing about where they are, so
+     the same numbers are drawn on the geography instead, fitted to the places
+     that recorded something. Every one of them is a dot, sized and shaded by
+     its gust; the strongest carry their figure, because 79 labels over one
+     coastline is not a map anyone can read. The rest answer on hover.
+
+     The projection is equirectangular with longitude squeezed by the cosine of
+     the middle latitude, so the coastline keeps its shape at this scale rather
+     than being stretched to fill the frame the way the basin map deliberately
+     is. */
+  function gustMap(storm, file) {
+    if (!GEO) return null;
+    const pts = Object.entries(file.sites || {}).map(([id, r]) => {
+      const L = locationById(id);
+      return { id, name: r.name || (L && L.name) || id, g: r.peakGustMph, L,
+               lat: L ? L.lat : null, lon: L ? L.lon : null };
+    }).filter(p => p.lat != null && p.g != null && p.g > 0);
+    if (pts.length < 2) return null;
+    /* The view follows the storm, not the vendor's list.
+
+       The file gives every reference location a number, so a Gulf landfall
+       still writes 0.6 mph against Richmond and Cape Hatteras. Fitting the
+       frame to all of them draws the whole seaboard and squeezes the places
+       that were actually hit into a thumbnail, so the frame is fitted to the
+       strongest twenty and everything inside it is drawn. The caption says how
+       many recorded a gust outside the view. */
+    const W = 960;
+    const all = pts.slice().sort((a, b) => b.g - a.g);
+    const top = all.slice(0, 20);
+    const latMid = top.reduce((a, p) => a + p.lat, 0) / top.length;
+    const k = Math.cos(latMid * Math.PI / 180) || 1;
+    const ux = p => p.lon * k, uy = p => -p.lat;
+    let x0 = Math.min.apply(null, top.map(ux)), x1 = Math.max.apply(null, top.map(ux));
+    let y0 = Math.min.apply(null, top.map(uy)), y1 = Math.max.apply(null, top.map(uy));
+    // room for the labels, and a floor on the span so two neighbouring places
+    // do not zoom the frame down to a stretch of water
+    const padX = Math.max((x1 - x0) * 0.14, 0.8), padY = Math.max((y1 - y0) * 0.16, 0.8);
+    x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
+    // the frame takes its height from the shape of the ground it covers, within
+    // bounds that keep a wide coastal strip readable and a compact one from
+    // filling the page
+    const Hh = Math.max(300, Math.min(560, Math.round(W * (y1 - y0) / (x1 - x0))));
+    const sc = Math.min(W / (x1 - x0), Hh / (y1 - y0));
+    const ox = (W - (x1 - x0) * sc) / 2, oy = (Hh - (y1 - y0) * sc) / 2;
+    const X = lon => ox + (lon * k - x0) * sc, Y = lat => oy + (-lat - y0) * sc;
+    const lo0 = x0 / k, lo1 = x1 / k, la0 = -y1, la1 = -y0;
+    const pts2 = all.filter(p => p.lon >= lo0 && p.lon <= lo1 && p.lat >= la0 && p.lat <= la1);
+    const outside = all.length - pts2.length;
+
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'gustmap' });
+    svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
+    const inView = rr => rr.some(r => r.some(q => q[0] >= lo0 && q[0] <= lo1 && q[1] >= la0 && q[1] <= la1));
+    const land = (rr, stroke, sw) => {
+      if (!inView(rr)) return;
+      svg.appendChild(el('path', { d: rr.map(r => 'M' + r.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join('L') + 'Z').join(' '),
+                                   fill: 'var(--map-land)', stroke, 'stroke-width': sw, 'pointer-events': 'none' }));
+    };
+    Object.values(GEO.countries || {}).forEach(rr => land(rr, 'var(--map-line)', .7));
+    (NATION || []).forEach(r => land([r], 'var(--map-line)', .7));
+    Object.values(GEO.states || {}).forEach(rr => land(rr, 'var(--map-line)', .5));
+
+    const gmax = Math.max.apply(null, pts2.map(p => p.g));
+    const rOf = g => 3 + 8 * Math.sqrt(Math.min(g / gmax, 1));
+    pts2.forEach(p => { p.px = X(p.lon); p.py = Y(p.lat); p.r = rOf(p.g); });
+    // faintest first, so the strongest sit on top where places crowd together
+    pts2.slice().reverse().forEach(p => {
+      const c = el('circle', { cx: p.px.toFixed(1), cy: p.py.toFixed(1), r: p.r.toFixed(1),
+                               fill: ramp(p.g / gmax), 'fill-opacity': .9, stroke: 'var(--ink)', 'stroke-width': .5 });
+      const L = p.L || { id: p.id, name: p.name, region: null, country: null, state: null };
+      const url = windUrl(storm, p.id);
+      attach(c, tip.rows(esc(p.name) + ' (' + esc(p.id) + ')',
+        [['Peak gust', mph1(p.g)], ['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)],
+         ['Storm', esc(storm.name) + ' ' + storm.year]],
+        esc((RK && RK.attribution) || 'Powered by Reask') + '; the final file, which the wind contracts settle on'
+          + (url ? ' · click to open this location’s contract' : '')));
+      if (url) WXM.linkTo(c, url, 'Open the ' + p.name + ' wind contract on IBKR');
+      svg.appendChild(c);
     });
+
+    /* The strongest places carry their figure on the map.
+
+       Each label takes the first free position on a ring around its dot,
+       working outwards, and is dropped if nothing on either ring is clear: a
+       number printed over another number is worse than one left to the hover.
+       A label pushed out to the second ring gets a hairline back to its dot,
+       because at that distance the pairing is no longer obvious. */
+    const placed = [];
+    const dots = pts2.map(p => ({ x0: p.px - p.r * .9, x1: p.px + p.r * .9, y0: p.py - p.r * .9, y1: p.py + p.r * .9 }));
+    const clash = (b, arr) => arr.some(a => !(b.x1 < a.x0 || b.x0 > a.x1 || b.y1 < a.y0 || b.y0 > a.y1));
+    let labeled = 0;
+    pts2.slice(0, GUST_LABELS).forEach(p => {
+      const val = p.g.toFixed(1);
+      const w = p.name.length * 5.3 + val.length * 6.2 + 6;
+      const spots = [];
+      [0, 1].forEach(ring => {
+        const d = p.r + 4 + ring * 15;
+        spots.push([p.px + d, p.py + 3.2, 'start', ring], [p.px - d, p.py + 3.2, 'end', ring],
+                   [p.px, p.py - d - 1, 'middle', ring], [p.px, p.py + d + 7.5, 'middle', ring],
+                   [p.px + d * .8, p.py - d * .8, 'start', ring], [p.px - d * .8, p.py - d * .8, 'end', ring],
+                   [p.px + d * .8, p.py + d * .8 + 5, 'start', ring], [p.px - d * .8, p.py + d * .8 + 5, 'end', ring]);
+      });
+      // first pass keeps clear of the dots as well as of the other labels;
+      // covering a place's own mark is only accepted when nothing else is free
+      let put = null;
+      for (let pass = 0; pass < 2 && !put; pass++) {
+        for (let i = 0; i < spots.length; i++) {
+          const lx = spots[i][0], ly = spots[i][1], anchor = spots[i][2], ring = spots[i][3];
+          const bx = anchor === 'start' ? lx : anchor === 'end' ? lx - w : lx - w / 2;
+          const box = { x0: bx - 2, x1: bx + w + 2, y0: ly - 9, y1: ly + 3 };
+          if (box.x0 < 2 || box.x1 > W - 2 || box.y0 < 2 || box.y1 > Hh - 2) continue;
+          if (clash(box, placed)) continue;
+          if (!pass && clash(box, dots)) continue;
+          put = { lx, ly, anchor, ring, box };
+          break;
+        }
+      }
+      if (put) {
+        const lx = put.lx, ly = put.ly, anchor = put.anchor, ring = put.ring, box = put.box;
+        placed.push(box);
+        labeled++;
+        if (ring) svg.appendChild(el('line', { x1: p.px.toFixed(1), y1: p.py.toFixed(1),
+          x2: (anchor === 'start' ? box.x0 : anchor === 'end' ? box.x1 : (box.x0 + box.x1) / 2).toFixed(1),
+          y2: ((box.y0 + box.y1) / 2).toFixed(1), stroke: 'var(--muted)', 'stroke-width': .7, 'pointer-events': 'none' }));
+        // the label sits on the sea as often as on the land; a panel-colored
+        // plate under it keeps both readable
+        svg.appendChild(el('rect', { x: box.x0.toFixed(1), y: box.y0.toFixed(1), width: (box.x1 - box.x0).toFixed(1),
+                                     height: (box.y1 - box.y0).toFixed(1), rx: 2.5, fill: 'var(--panel)',
+                                     'fill-opacity': .78, 'pointer-events': 'none' }));
+        const t = txt('', { x: lx.toFixed(1), y: ly.toFixed(1), 'text-anchor': anchor, 'font-size': 10.5,
+                            'pointer-events': 'none' });
+        const sp = (s2, at) => { const n = el('tspan', at); n.textContent = s2; t.appendChild(n); };
+        sp(val + ' ', { 'font-weight': 700, fill: 'var(--ink)' });
+        sp(p.name, { fill: 'var(--muted)' });
+        svg.appendChild(t);
+      }
+    });
+
+    // the key: what the shading and the size mean, in the units the file is in
+    const kg = el('g', { 'pointer-events': 'none' });
+    const bx = 16, by = Hh - 46, bw = 150;
+    kg.appendChild(el('rect', { x: bx - 8, y: by - 18, width: bw + 34, height: 46, rx: 5,
+                                fill: 'var(--panel)', 'fill-opacity': .9, stroke: 'var(--line)', 'stroke-width': .8 }));
+    kg.appendChild(txt('Peak gust recorded, mph', { x: bx, y: by - 5, 'font-size': 10, 'font-weight': 700, fill: 'var(--ink)' }));
+    for (let i = 0; i < 48; i++) kg.appendChild(el('rect', { x: bx + i * (bw / 48), y: by, width: bw / 48 + .6, height: 9, fill: ramp(i / 47) }));
+    kg.appendChild(txt('0', { x: bx, y: by + 20, 'font-size': 9, fill: 'var(--muted)' }));
+    kg.appendChild(txt(gmax.toFixed(1), { x: bx + bw, y: by + 20, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted)' }));
+    svg.appendChild(kg);
+    return { svg, drawn: pts2.length, labeled, outside };
+  }
+
+  /* The vendor's latest file for one storm, built for the storm module. */
+  function stormFile(storm, into) {
+    const shown = shownFile(storm);
+    into.appendChild(h('div', { class: 'filehd', text: shown ? shown.label : 'Vendor file' }));
+    if (!shown) { into.appendChild(h('p', { class: 'cap', style: 'margin:0', text: 'No vendor file published yet.' })); return; }
+    into.appendChild(h('p', { class: 'cap filesrc', style: 'margin:0 0 6px', text: sourceLine(shown) }));
+    const later = shown.kind === 'interim' && storm.livecyc && storm.livecyc.lastModified
+                  && Date.parse(storm.livecyc.lastModified) > Date.parse(storm.interim.lastModified || 0);
+    const all = Object.entries(shown.file.sites || {});
+    const notes = [];
+    let rows = all;
+    if (shown.kind === 'final') {
+      const map = gustMap(storm, shown.file);
+      if (map) {
+        into.appendChild(h('div', { class: 'card' }, [map.svg]));
+        /* The final file carries every reference location, whatever the storm
+           did. Milton's lists Brownsville and Corpus Christi, neither of which
+           the storm went near, so the count has to say which list it is
+           counting. */
+        notes.push('Every reference location inside the view, sized and shaded by the gust it recorded, the '
+          + 'strongest ' + map.labeled + ' carrying their figure and the rest on hover. '
+          + (map.outside ? map.outside + ' further location' + (map.outside === 1 ? '' : 's')
+              + ' recorded a lower gust outside the view. ' : '')
+          + 'The final file carries all ' + all.length + ' locations on the vendor’s list, whatever the storm did.');
+        if (notes.length) into.appendChild(h('p', { class: 'cap', text: notes.join(' ') }));
+        return;
+      }
+      // too few places recorded anything to make a map of: the figures themselves
+      const gust = r => (r.peakGustMph == null ? -Infinity : r.peakGustMph);
+      rows = all.slice().sort((a, b) => gust(b[1]) - gust(a[1])
+                                     || String(a[1].name || '').localeCompare(String(b[1].name || ''))).slice(0, VENDOR_ROWS);
+      const tb = h('table');
+      tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' }), h('th', { class: 'num', text: 'Peak gust, mph' })]));
+      rows.forEach(([id, r]) => {
+        const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' }),
+                                h('td', { class: 'num', text: mph1(r.peakGustMph) || '—' })]);
+        const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
+        attach(tr, tip.rows(esc(r.name) + ' (' + esc(id) + ')',
+          [['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)],
+           ['Storm', esc(storm.name) + ' ' + storm.year],
+           ['Peak gust', mph1(r.peakGustMph) || 'not covered']],
+          esc((RK && RK.attribution) || 'Powered by Reask') + '; the final file, which the wind contracts settle on'));
+        const url = windUrl(storm, id);
+        if (url) WXM.linkTo(tr, url, 'Open the ' + r.name + ' wind contract on IBKR');
+        tb.appendChild(tr);
+      });
+      into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
+    } else {
+      /* The vendor's lowest rung is on the table.
+
+         On a tropical storm it is the only rung carrying anything: Dolly's
+         ladder was non-zero at 60 mph everywhere and at 70 almost nowhere. */
+      const thr = shown.file.thresholds || [];
+      const cols = [60, 70, 80, 90, 100, 110, 120, 130, 150].filter(t => thr.includes(t));
+      const idx = cols.map(t => thr.indexOf(t));
+      /* Rank by the ladder from the top rung down.
+
+         Ordering on one fixed rung ranked nothing when no location reached it.
+         A ladder is monotone, so comparing the highest threshold first and
+         dropping to the next only to break ties puts the most exposed location
+         at the top whatever the storm's strength; the name settles a file
+         whose rungs are all zero, as a storm that stayed offshore leaves. */
+      const rank = (a, b) => {
+        for (let i = idx.length - 1; i >= 0; i--) {
+          const d = (b[1].p[idx[i]] || 0) - (a[1].p[idx[i]] || 0);
+          if (d) return d;
+        }
+        return String(a[1].name || '').localeCompare(String(b[1].name || ''));
+      };
+      rows = all.slice().sort(rank).slice(0, VENDOR_ROWS);
+      const tb = h('table');
+      tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
+      rows.forEach(([id, r]) => {
+        const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: (r.p[i] != null ? r.p[i] : 0) + '%' }))));
+        const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
+        attach(tr, locationTip(L, { storm: storm.name, file: shown.label, thresholds: thr, p: r.p,
+                                    forecastTime: shown.kind === 'livecyc' ? shown.file.forecastTime : null,
+                                    received: shown.file.lastModified }));
+        const url = windUrl(storm, id);
+        if (url) WXM.linkTo(tr, url, 'Open the ' + r.name + ' wind contract on IBKR');
+        tb.appendChild(tr);
+      });
+      into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
+    }
+    /* Why a later cycle is not the one shown, where that applies, and what was
+       left off. LiveCyc is forward-looking from its own start, so a location
+       whose peak has already passed reads near zero on a cycle issued after it
+       while the interim holds the figure for the landfall that happened. */
+    if (later) notes.push('A LiveCyc cycle has arrived since this file. LiveCyc looks forward from its own '
+      + 'start, so it reads near zero where the peak has already passed; the interim is the vendor’s word on '
+      + 'what happened and is the one shown.');
+    if (all.length > rows.length) notes.push('Showing the ' + rows.length + ' of ' + all.length
+      + (shown.kind === 'final' ? ' reference locations that recorded the highest gusts.' : ' locations in the file that stand highest.'));
+    if (notes.length) into.appendChild(h('p', { class: 'cap', text: notes.join(' ') }));
+  }
+
+  /* What the section says above the storms: when the next file is due while a
+     storm is running, and when the lane was last polled. The storm module
+     carries the rest, including what to say when the lane is off. */
+  function drawVendorNote() {
+    const host = $('#vendorNote'); if (!host) return;
+    host.innerHTML = '';
+    if (!RK || !RK.enabled) return;
+    const storms = (RK.storms || []).filter(s => inBasin(s.name));
     if (storms.some(s2 => !WXStorm.dormant(s2) && s2.livecyc)) {
       host.appendChild(scheduleLine('Next LiveCyc file expected about',
         [0, 6, 12, 18].map(hh => hh + LIVECYC_LAG_H),
@@ -1252,126 +1537,9 @@ window.WXHur = (() => {
                                   - LIVECYC_LAG_H * 3600000).getUTCHours()).padStart(2, '0')
           + 'Z cycle; this season’s files have landed 4 to 6 hours after their cycle, once the NHC advisory they take their track from is out'));
     }
-    if (!storms.length && basin !== 'AL') {
-      host.appendChild(h('p', { class: 'cap', text: 'No storm in this ocean has published probabilities. A storm appears here on its first vendor delivery.' }));
-    }
-    if (!storms.length && basin === 'AL') {
-      host.appendChild(h('p', { class: 'cap', text: 'Lane on; no storm with published probabilities this year yet (last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + ').' }));
-    }
-    storms.forEach(s => {
-      const lc = s.livecyc;
-      /* A storm that has stopped updating folds shut. Its ladder is a record
-         of the last delivery rather than a probability for today, so it does
-         not share the page with the running storms; the record stays one
-         click away. */
-      const over = WXStorm.dormant(s);
-      let into = host;
-      if (over) {
-        const t = WXStorm.stampOf(s);
-        const det = h('details', { class: 'stormdone' });
-        det.appendChild(h('summary', {}, [h('b', { text: s.name + ' ' + s.year }),
-          h('span', { text: WXStorm.doneLabel(s)
-            + (t ? ' · last delivery ' + new Date(t).toISOString().slice(0, 10) : '') + ' · click to view' })]));
-        into = h('div');
-        det.appendChild(into);
-        host.appendChild(det);
-      }
-      const shown = shownFile(s);
-      const later = shown && shown.kind === 'interim' && s.livecyc && s.livecyc.lastModified
-                    && Date.parse(s.livecyc.lastModified) > Date.parse(s.interim.lastModified || 0);
-      into.appendChild(h('div', { class: 'stormrow' }, [h('b', { text: s.name + ' ' + s.year }),
-        h('span', { text: shown ? sourceLine(shown) : 'no vendor file published yet' })]));
-      if (!shown) return;
-      const code2 = String(s.name || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
-      // the exchange's wind contract for this storm and location, where one is
-      // listed, so a row opens its market the way every other priced surface does
-      const linkRow = (tr, id, nm) => {
-        const lm = MK && (MK.markets || []).find(m2 => m2.symbol === 'L' + code2 + String(id).toUpperCase());
-        const c0 = lm && (lm.contracts || [])[0];
-        const url = lm && c0 ? WXM.contractUrl(lm.productConid, c0.conidYes || c0.conid) : null;
-        if (url) WXM.linkTo(tr, url, 'Open the ' + nm + ' wind contract on IBKR');
-      };
-      const tb = h('table');
-      const all = Object.entries(shown.file.sites || {});
-      let rows;
-      if (shown.kind === 'final') {
-        /* The final file is a different quantity: the gust each location
-           recorded, in miles per hour, with no ladder behind it. It replaces
-           the probabilities rather than joining them. */
-        const gust = r => (r.peakGustMph == null ? -Infinity : r.peakGustMph);
-        // the vendor publishes a full float; a tenth of a mile an hour is the
-        // precision the figure carries and the settlement is read at
-        const mph = v => (v == null ? null : v.toFixed(1) + ' mph');
-        rows = all.slice().sort((a, b) => gust(b[1]) - gust(a[1])
-                                       || String(a[1].name || '').localeCompare(String(b[1].name || ''))).slice(0, VENDOR_ROWS);
-        tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' }), h('th', { class: 'num', text: 'Peak gust, mph' })]));
-        rows.forEach(([id, r]) => {
-          const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' }),
-                                  h('td', { class: 'num', text: mph(r.peakGustMph) || '—' })]);
-          const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
-          attach(tr, tip.rows(esc(r.name) + ' (' + esc(id) + ')',
-            [['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)],
-             ['Storm', esc(s.name) + ' ' + s.year],
-             ['Peak gust', mph(r.peakGustMph) || 'not covered']],
-            esc((RK && RK.attribution) || 'Powered by Reask') + '; the final file, which the wind contracts settle on'));
-          linkRow(tr, id, r.name);
-          tb.appendChild(tr);
-        });
-      } else {
-        /* The vendor's lowest rung is on the table.
-
-           On a tropical storm it is the only rung carrying anything: Dolly's
-           ladder was non-zero at 60 mph everywhere and at 70 almost nowhere. */
-        const thr = shown.file.thresholds || [];
-        const cols = [60, 70, 80, 90, 100, 110, 120, 130, 150].filter(t => thr.includes(t));
-        const idx = cols.map(t => thr.indexOf(t));
-        /* Rank by the ladder from the top rung down.
-
-           Ordering on one fixed rung ranked nothing when no location reached it.
-           A ladder is monotone, so comparing the highest threshold first and
-           dropping to the next only to break ties puts the most exposed location
-           at the top whatever the storm's strength; the name settles a file
-           whose rungs are all zero, as a storm that stayed offshore leaves. */
-        const rank = (a, b) => {
-          for (let i = idx.length - 1; i >= 0; i--) {
-            const d = (b[1].p[idx[i]] || 0) - (a[1].p[idx[i]] || 0);
-            if (d) return d;
-          }
-          return String(a[1].name || '').localeCompare(String(b[1].name || ''));
-        };
-        rows = all.slice().sort(rank).slice(0, VENDOR_ROWS);
-        tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
-        rows.forEach(([id, r]) => {
-          const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: (r.p[i] != null ? r.p[i] : 0) + '%' }))));
-          const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
-          attach(tr, locationTip(L, { storm: s.name, file: shown.label, thresholds: thr, p: r.p,
-                                      forecastTime: shown.kind === 'livecyc' ? shown.file.forecastTime : null,
-                                      received: shown.file.lastModified }));
-          linkRow(tr, id, r.name);
-          tb.appendChild(tr);
-        });
-      }
-      into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
-      /* Why a later cycle is not the one on the table, where that applies, and
-         what was left off. LiveCyc is forward-looking from its own start, so a
-         location whose peak has already passed reads near zero on a cycle
-         issued after it while the interim holds the figure for the landfall
-         that happened. */
-      const notes = [];
-      if (later) notes.push('A LiveCyc cycle has arrived since this file. LiveCyc looks forward from its own '
-        + 'start, so it reads near zero where the peak has already passed; the interim is the vendor’s word on '
-        + 'what happened and is the one shown.');
-      /* The final file carries every reference location, whatever the storm did.
-         Milton's lists Brownsville and Corpus Christi, neither of which the storm
-         went near, so the ranking and the cap are what make it readable and the
-         count has to say which list it is counting. */
-      if (all.length > rows.length) notes.push(shown.kind === 'final'
-        ? 'Showing the ' + rows.length + ' of ' + all.length + ' reference locations that recorded the highest gusts. '
-          + 'The final file carries every location on the vendor’s list, not only those the storm reached.'
-        : 'Showing the ' + rows.length + ' of ' + all.length + ' locations in the file that stand highest.');
-      if (notes.length) into.appendChild(h('p', { class: 'cap', text: notes.join(' ') }));
-    });
-    host.appendChild(h('p', { class: 'cap attrib', text: (RK.attribution || 'Powered by Reask') + '. Probabilities are the vendor’s, shown as published; last poll ' + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + '.' }));
+    if (storms.length) host.appendChild(h('p', { class: 'cap', style: 'margin:0 0 6px',
+      text: 'The vendor’s figures, shown as published; last poll '
+        + (RK.polled ? clockFull(Date.parse(RK.polled), local()) : 'unknown') + '.' }));
   }
 
   async function init() {
@@ -1396,17 +1564,19 @@ window.WXHur = (() => {
         basin = b;
         ['b1', 'b2'].forEach(x => $('#' + x).classList.remove('on'));
         $('#' + id).classList.add('on');
-        resetView(); draw(); drawStorms(); drawLandfall(); drawVendor(); basinSections(); drawDiscussion();
+        resetView(); draw(); drawStorms(); drawLandfall(); drawVendorNote(); basinSections(); drawDiscussion();
         if (window.WXStorm && WXStorm.setBasin) {
           WXStorm.setBasin(b);
           Promise.resolve(WXStorm.draw(RK, MK)).then(() => draw()).catch(() => {});
         }
       };
     });
-    draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendor(); basinSections();
+    draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendorNote(); basinSections();
     drawDiscussion();
     if (window.WXStorm) {
       WXStorm.init(tip);
+      // the vendor's latest file belongs to the storm, not to a section of its own
+      if (WXStorm.setFilePanel) WXStorm.setFilePanel(stormFile);
       if (WXStorm.setBasin) WXStorm.setBasin(basin);
       // the map's dots ask this module for a location's series, so the map is
       // drawn again once the ledgers have landed and the dots can answer

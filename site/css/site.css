@@ -433,12 +433,16 @@ details.stormdone>div{padding:6px 14px 12px}
 .lth .zb.ex{font-size:11px;padding:2px 8px;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:11px;line-height:1.6}
 .lth .zb.ex:hover,.lth .zb.ex.on{border-color:var(--accent);color:var(--accent)}
 .xhdr{display:none}
+/* the vendor's latest file, inside the storm it belongs to */
+.filehd{font-size:12.5px;font-weight:700;color:var(--navy);margin:14px 0 2px}
+svg.gustmap{width:100%;height:auto;display:block}
 .scardwrap.flash{outline:2px solid var(--accent);outline-offset:2px}
 svg.scard rect.plotlink,svg.lhlserie rect.plotlink{cursor:pointer}
 .scardwrap.full,.cwrap.full{position:fixed;inset:0;z-index:40;margin:0;padding:18px 22px 22px;border:0;border-radius:0;
   background:var(--ground);overflow:auto;display:flex;flex-direction:column}
-.scardwrap.full .xhdr,.cwrap.full .xhdr{display:block;margin-bottom:8px}
+.scardwrap.full .xhdr,.cwrap.full .xhdr{display:block;margin-bottom:8px;padding-right:104px}
 .scardwrap.full .lth .lt{font-size:15px}
+.scardwrap.full .lth .zb.ex,.cwrap.full .lth .zb.ex{display:none}
 .scardwrap.full svg.scard,.cwrap.full svg.lhlserie{width:100%;height:auto;max-height:calc(100vh - 250px)}
 .emphrow{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin:6px 0 8px}
 .emphctl{display:flex;flex-direction:column;gap:4px;flex:none}

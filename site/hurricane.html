@@ -12,6 +12,14 @@
 <body>
 <div class="wrap">
 <h1>Hurricane tracking</h1>
+<div class="prose" style="margin:0 0 14px">
+<p>ForecastEx lists contracts on how many named storms and how many hurricanes form in the Atlantic season,
+how many major hurricanes form in a month, whether specific category storms make landfall in the United
+States, and major hurricane landfall by region.</p>
+<p>While a storm is active, ForecastEx also lists its flagship Live Hurricane wind gust contract at population
+centers in the storm&rsquo;s path and a contract on which location records the highest wind gust of the
+storm.</p>
+</div>
 <div class="bar">
   <button id="b1" class="on">Atlantic</button>
   <button id="b2">Pacific</button>
@@ -28,69 +36,48 @@
 <a href="https://data.forecastex.com/supplemental_data/hurricanes/2026/">Download live Reask LiveCyc probabilities &rarr;</a>
 </div>
 
-<div class="secttl">LIVECYC PROBABILITIES, DELIVERY BY DELIVERY</div>
+<div class="secttl">LIVE HURRICANE WIND GUST FORECASTS FROM REASK</div>
+<p class="cap" style="margin:0 0 6px">Wind gust probabilities at the exchange&rsquo;s reference locations,
+delivery by delivery, the peak gust each one recorded once the storm has passed, and the pool contract&rsquo;s
+prices through the storm.</p>
+<div id="vendorNote"></div>
 <div id="liveStorms"></div>
 
-<div class="secttl">VENDOR&rsquo;S LATEST FILE AT EACH REFERENCE LOCATION</div>
-<p class="cap" style="margin-top:0">One file, the most recent the vendor has published for the storm, named
-above the table with the time it arrived. Both the NHC and Reask LiveCyc pin the nominal 00, 06, 12, and 18
-UTC forecasting cycle hours. The standard times for the NHC tropical cyclone advisories are three hours after
-each of those forecasting cycle times at 03, 09, 15, and 21 UTC (or 11:00 PM, 5:00 AM, 11:00 AM, and
-5:00 PM EDT). LiveCyc initiates on NHC updates, so a LiveCyc file labeled 18 UTC would be associated with
-the 21 UTC NHC update.</p>
-<div id="vendor"></div>
-
 <div class="secttl">ACTIVE STORMS</div>
+<p class="cap" style="margin:0 0 6px">National Hurricane Center positions, intensities and five-day wind
+speed probabilities for each storm in this ocean.</p>
 <div id="storms"></div>
 
 <div id="atlanticOnly">
 <div class="secttl">NATIONAL HURRICANE CENTER DISCUSSION</div>
+<p class="cap" style="margin:0 0 6px">The forecaster&rsquo;s reasoning for each active storm, as issued.</p>
 <div id="stormDiscussion"></div>
 
 <div class="secttl">SEASON TO DATE AND COUNT CONTRACTS</div>
 <p class="cap" style="margin-top:0">Each count product gets one panel. On the left, how many have formed this
 season against the pace of an average season. On the right, the price of the Yes contract at each count, read
 across the same
-vertical axis. The pace curve is the 1991&ndash;2020 formation calendar in the NHC best tracks, so the
-blue line shows where an average season stands on this date.</p>
+vertical axis. The blue line is the 1991&ndash;2020 formation calendar in the NHC best tracks, scaled
+to the seasonal forecast total where one is published; the dashed line is that calendar unscaled, an
+average season.</p>
 <div class="tiles" id="tiles"></div>
 <div class="ladders" id="ladders"></div>
 <p class="cap" id="laddersCap"></p>
 
 <div class="secttl">CATEGORY 4 UNITED STATES LANDFALL</div>
+<p class="cap" style="margin:0 0 6px">Yes prices by date, drawn against how often a season has produced a
+Category 4 landfall by that date.</p>
 <div id="cat4"></div>
 
 </div>
 <div id="landfallSect">
 <div class="secttl">MAJOR HURRICANE LANDFALL</div>
+<p class="cap" style="margin:0 0 6px">Yes prices by region, for states, counties and countries, on a
+landfall at Category 3 or stronger.</p>
 <div id="landfall"></div>
 </div>
 <p class="cap" id="pacificNote" style="display:none">The season count and Category 4 contracts on this exchange
 are Atlantic and United States contracts, so they are shown on the Atlantic view.</p>
-
-<div class="prose" style="margin-top:26px">
-<h2>Hurricane prediction markets</h2>
-<p>ForecastEx lists contracts on how many named storms and how many hurricanes form in the Atlantic season, on
-how many major hurricanes form in a month, on whether a Category 4 hurricane makes landfall in the United
-States, and on major hurricane landfall by region. While a storm is running it also lists a wind gust contract
-at each reference location in the storm&rsquo;s path and a pool contract on which location records the highest
-gust of the storm. Each pays one dollar if its outcome happens.</p>
-<p>Season counts settle on the National Hurricane Center&rsquo;s record of the season, and the live storm wind
-contracts settle on the vendor&rsquo;s final peak gust for each location. Tracks, cones, wind probabilities and
-formation outlooks on this page are the National Hurricane Center&rsquo;s own, drawn as published.</p>
-<h2>Reading a live storm</h2>
-<p>A storm becomes tradeable location by location. The exchange settles its wind gust contracts at a fixed
-list of reference locations, and while a storm is running the vendor publishes a probability ladder for each
-one every six hours, on the same cycle the National Hurricane Center advisories run on. The sections above
-carry each delivery as it arrives, so a location&rsquo;s probabilities and the price of the contract written on
-it can be read side by side through the life of the storm. A gust probability looks forward from the cycle it
-was issued on, while the price covers the whole storm including what has already been recorded, which is why
-the two part company once the strongest winds have passed a place.</p>
-<p>Each contract pays one dollar if its outcome happens and nothing if it does not, so the price in cents is
-the market&rsquo;s probability of that outcome. There are no sellers on this exchange. A participant buys Yes
-or buys No, and the two bids sum to one dollar. Prices here are the exchange&rsquo;s own, as published at the
-time stamped on the page, and they are never adjusted for fees.</p>
-</div>
 
 </div>
 <script src="js/common.js"></script>

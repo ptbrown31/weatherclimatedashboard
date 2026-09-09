@@ -922,18 +922,60 @@ def run(no_build: bool) -> int:
                 tiles = page.locator("#tiles .tile").count()
                 ladders = page.locator("#ladders .ladder").count()
                 lf_rows = page.locator("#landfall .lrow").count()
-                vendor = page.locator("#vendor").inner_text()
+                lane = page.locator("#liveStorms").inner_text()
                 chk.add(f"{scheme} hurricane: tiles, count ladders and the landfall board", tiles >= 3 and ladders >= 2 and lf_rows >= 2, f"tiles={tiles} ladders={ladders} landfall rows={lf_rows}")
                 chk.add(f"{scheme} landfall: drawn as a Yes/No ladder, not a table",
                         page.locator("#landfall table").count() == 0 and lf_rows >= 5, f"rows={lf_rows}")
                 chk.add(f"{scheme} landfall: named as major hurricane landfall",
                         "Major hurricane landfall" in page.locator("#landfall .lt").inner_text(),
                         page.locator("#landfall .lt").inner_text()[:60])
-                chk.add(f"{scheme} hurricane: vendor lane reports its state", "Not enabled" in vendor or "Lane on" in vendor or "LiveCyc" in vendor, vendor[:80])
+                chk.add(f"{scheme} hurricane: the vendor lane reports its state",
+                        any(w in lane for w in ("not enabled", "No storm with published probabilities",
+                                                "There are no active live storms", "phase", "settlement")), lane[:90])
+                # one section for the vendor's lane, named for what it carries, with
+                # each storm behind one button rather than met twice on the page
+                sect = page.evaluate("""() => {
+                  const t = [...document.querySelectorAll('.secttl')].map(e => e.textContent);
+                  return { titles: t, reask: t.filter(x => /REASK|LIVECYC|VENDOR/.test(x)),
+                           sections: document.querySelectorAll('#vendor').length };
+                }""")
+                chk.add(f"{scheme} hurricane: one vendor section, named for the forecasts it carries",
+                        sect["reask"] == ["LIVE HURRICANE WIND GUST FORECASTS FROM REASK"] and sect["sections"] == 0,
+                        str(sect["reask"]))
+                # the markets paragraph leads the page, and the long explanations
+                # that sat under it came off at the owner's request
+                pr = page.evaluate("""() => {
+                  const kids = [...document.querySelectorAll('.wrap > *')];
+                  const at = sel => kids.findIndex(e => e.matches(sel));
+                  const body = document.body.textContent || '';
+                  return { first: at('.prose'), bar: at('.bar'), map: at('.card'),
+                           text: (document.querySelector('.wrap > .prose') || {}).textContent || '',
+                           gone: ['Reading a live storm', 'A storm becomes tradeable location by location',
+                                  'Season counts settle on', 'Exchange contracts as quoted'].filter(t => body.indexOf(t) >= 0) };
+                }""")
+                chk.add(f"{scheme} hurricane: the markets paragraph leads the page",
+                        pr["first"] >= 0 and pr["first"] < pr["bar"] and pr["first"] < pr["map"]
+                        and "ForecastEx lists contracts on how many named storms" in pr["text"]
+                        and "flagship Live Hurricane wind gust contract" in pr["text"],
+                        str([pr["first"], pr["bar"], pr["text"][:60]]))
+                chk.add(f"{scheme} hurricane: the explanations the owner cut are off the page",
+                        pr["gone"] == [], str(pr["gone"]))
                 # ---- the season-count panels: cumulative beside the ladder
                 panels = page.locator(".cwrap").count()
                 chk.add(f"{scheme} hurricane: a cumulative panel per count product", panels >= 2, f"panels={panels}")
                 if panels:
+                    # each pace is named on its own line, and the corner carries the
+                    # count and nothing the lines already say
+                    cp = page.evaluate("""() => {
+                      const svg = document.querySelector('.cwrap svg.cpanel');
+                      const t = [...svg.querySelectorAll('text')].map(e => e.textContent);
+                      return { texts: t, named: t.filter(x => /forecast pace|an average season/.test(x)),
+                               corner: t.filter(x => /^so far/.test(x)),
+                               stale: t.filter(x => /pace implied by today|so far ·/.test(x)) };
+                    }""")
+                    chk.add(f"{scheme} hurricane: the pace lines are named where they end",
+                            len(cp["named"]) >= 1 and cp["corner"] == ["so far"] and cp["stale"] == [],
+                            str([cp["named"], cp["corner"], cp["stale"]])[:170])
                     page.locator(".cwrap").first.locator("circle").first.hover(force=True); page.wait_for_timeout(150)
                     t_st = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} hover: a formation dot names the storm and the running count", "Reached the threshold" in t_st, t_st[:80])
@@ -944,6 +986,11 @@ def run(no_build: bool) -> int:
                 # in this repository, so the only way to prove these panels is to serve
                 # a synthetic storm to the browser and take it away again
                 THR = [70, 80, 90, 100, 110, 120]
+                # real reference locations, so the final file's map has coordinates to
+                # draw: the last two sit outside the view the strongest twenty set
+                FILLERS = ["CC", "PL", "HO", "PA", "LC", "LA", "BT", "NO", "GU", "MO",
+                           "PE", "FW", "PC", "AP", "TL", "ST", "CK", "GV", "TS", "CL",
+                           "NY", "SJ"]
 
                 # two locations: Brownsville climbs cycle by cycle and the interim
                 # settles it high; Galveston holds a flat forecast and the interim
@@ -1020,10 +1067,10 @@ def run(no_build: bool) -> int:
                             "lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                             "sites": dict({"BR": {"name": "Brownsville", "peakGustMph": 96.0},
                                            "GA": {"name": "Galveston", "peakGustMph": 41.0},
-                                           "ZZ": {"name": "Far Away", "peakGustMph": None},
-                                           "ZY": {"name": "Calm Harbour", "peakGustMph": 0.0}},
-                                          **{"X%02d" % i: {"name": "Elsewhere %d" % i, "peakGustMph": 20.0 - i * 0.1}
-                                             for i in range(20)})}
+                                           "SV": {"name": "Savannah", "peakGustMph": None},
+                                           "JA": {"name": "Jacksonville", "peakGustMph": 0.0}},
+                                          **{k: {"name": k, "peakGustMph": 20.0 - i * 0.1}
+                                             for i, k in enumerate(FILLERS)})}
                     return ix
 
                 def _storm_routes(interim, final, index_final=False, drop_hlf=False):
@@ -1151,13 +1198,15 @@ def run(no_build: bool) -> int:
                     leg = page.locator("#liveStorms div:not(.xhdr) > .slegend")
                     leg_t = leg.first.inner_text() if leg.count() else ""
                     chk.add(f"{scheme} storm ({tag}): one key names the strikes' colors and the two line styles",
-                            leg.count() == 1 and "≥70" in leg_t and "LiveCyc" in leg_t and "exchange price" in leg_t
+                            leg.count() == 1 and "≥70" in leg_t and "Forecasts from Reask" in leg_t
+                            and "exchange price" in leg_t
                             and "NHC cycle" in leg_t and "ET" in leg_t, leg_t[:100])
                     tog = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphtog button")
                     note_l = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphnote")
                     note_t = note_l.first.inner_text() if note_l.count() else ""
                     chk.add(f"{scheme} storm ({tag}): the switch offers the two series and the note explains why they differ",
-                            tog.count() == 2 and "looks forward" in note_t and "whole storm" in note_t, f"buttons={tog.count()} {note_t[:60]}")
+                            tog.count() == 2 and "forward-looking forecast only" in note_t
+                            and "entire course of the storm" in note_t, f"buttons={tog.count()} {note_t[:60]}")
                     emph = lambda: page.evaluate("() => [...document.querySelectorAll('#liveStorms svg.scard, #liveStorms svg.lhlserie')].map(s => s.classList.contains('emph-livecyc') ? 'L' : s.classList.contains('emph-exchange') ? 'X' : '?').join('')")
                     chk.add(f"{scheme} storm ({tag}): the exchange's price stands forward by default",
                             emph() and set(emph()) == {"X"}, emph())
@@ -1241,14 +1290,14 @@ def run(no_build: bool) -> int:
                         # interim's numbers alone, because a later cycle looks forward from
                         # its own start and would print zeros over a landfall already measured.
                         vt = page.evaluate("""() => {
-                          const rows = [...document.querySelectorAll('#vendor table tr')];
+                          const rows = [...document.querySelectorAll('#liveStorms table tr')];
                           const ga = rows.find(r => /Galveston/.test(r.textContent));
                           const br = rows.find(r => /Brownsville/.test(r.textContent));
                           const cells = r => r ? [...r.querySelectorAll('td.num')].map(td => td.textContent).join(' ') : '';
                           return { stacked: rows.some(r => /Metryc interim/.test(r.textContent) && r.querySelector('td.num')),
                                    ga: cells(ga), br: cells(br), rows: rows.length,
-                                   source: (document.querySelector('#vendor .stormrow span') || {}).textContent || '',
-                                   state: (document.querySelector('#vendor') || {}).textContent || '' };
+                                   source: (document.querySelector('#liveStorms .filesrc') || {}).textContent || '',
+                                   state: (document.querySelector('#liveStorms') || {}).textContent || '' };
                         }""")
                         chk.add(f"{scheme} storm ({tag}): the vendor table shows one file, not a stack",
                                 bool(vt and not vt["stacked"]), str(vt and vt["stacked"]))
@@ -1289,6 +1338,12 @@ def run(no_build: bool) -> int:
                     vis = full.locator(".xhdr").first.is_visible() if full.count() else False
                     chk.add(f"{scheme} storm ({tag}): a card expands to fill the window with its own key and switch",
                             full.count() == 1 and inner == 2 and vis, f"full={full.count()} inner={inner} visible={vis}")
+                    # one way out, not two: the corner close, with the button that
+                    # opened it hidden because it is inside the panel it closes
+                    closes = page.evaluate("""() => [...document.querySelectorAll('.scardwrap.full .zb.ex, .fullclose')]
+                      .filter(e => getComputedStyle(e).display !== 'none').map(e => e.textContent)""")
+                    chk.add(f"{scheme} storm ({tag}): the expanded card carries one close, not two",
+                            len(closes) == 1 and "Close" in closes[0], str(closes))
                     page.keyboard.press("Escape"); page.wait_for_timeout(200)
                     chk.add(f"{scheme} storm ({tag}): Escape closes it and the key goes back out of sight",
                             page.locator("#liveStorms .scardwrap.full").count() == 0
@@ -1345,8 +1400,11 @@ def run(no_build: bool) -> int:
                     breaks = page.locator("#liveStorms svg.stimeline g line").count()
                     chk.add(f"{scheme} storm ({tag}): the timeline carries the same break", breaks == 2, f"lines={breaks}")
                     head = page.locator("#liveStorms p").first.inner_text()
-                    chk.add(f"{scheme} storm ({tag}): the missing cycle is stated without hovering",
-                            "1 cycle the vendor did not deliver" in head, head[:140])
+                    want_phase = ("Final settlement received" if _final
+                                  else "Preliminary settlement phase (Metryc interim)" if _interim
+                                  else "Forecast phase (LiveCyc)")
+                    chk.add(f"{scheme} storm ({tag}): the storm's line names the phase it has reached, and nothing else",
+                            head.strip() == want_phase, head[:140])
                     page.locator("#liveStorms .scardwrap rect.sgap").first.hover(force=True)
                     page.wait_for_timeout(150)
                     t_gap = page.locator("#tip").inner_text()
@@ -1400,7 +1458,7 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} storm ({tag}): the vendor's mark sits inside its plots",
                             marks_n >= 1, f"marks={marks_n}")
                     vrow = page.evaluate("""() => {
-                      const tr = [...document.querySelectorAll('#vendor table tr')]
+                      const tr = [...document.querySelectorAll('#liveStorms table tr')]
                         .find(r => /Brownsville/.test(r.textContent));
                       return tr ? (tr.getAttribute('data-contract-url') || '') : null;
                     }""")
@@ -1414,50 +1472,48 @@ def run(no_build: bool) -> int:
                 # ---- the vendor's final file, which the index carries once it lands.
                 # It is a different quantity from the ladder: the gust each location
                 # recorded, in miles per hour, and it supersedes every earlier file.
+                # It is drawn on the geography rather than sorted down a table, because
+                # a settled storm's record is a field, not a ranking.
                 page.route("**/data/snapshots/**", _storm_routes(True, True, True, drop_hlf=True))
                 page.goto(f"{srv.url}/hurricane.html")
                 page.wait_for_timeout(1400)
+                page.evaluate("""() => { const d = document.querySelector('#liveStorms details.stormdone');
+                  if (d) d.open = true; }""")
+                page.wait_for_timeout(1200)
                 vf = page.evaluate("""() => {
-                  const det = document.querySelector('#vendor details.stormdone');
-                  if (det) det.open = true;
-                  const head = [...document.querySelectorAll('#vendor table tr th')].map(t => t.textContent);
-                  const rows = [...document.querySelectorAll('#vendor table tr')].slice(1)
-                    .map(r => r.textContent.replace(/\\s+/g, ' ').trim());
-                  return { head, rows, source: (document.querySelector('#vendor .stormrow span') || {}).textContent || '' };
+                  const svg = document.querySelector('#liveStorms svg.gustmap');
+                  const caps = [...document.querySelectorAll('#liveStorms p.cap')].map(c => c.textContent).join(' ');
+                  if (!svg) return { map: false, caps, tables: document.querySelectorAll('#liveStorms table').length };
+                  const labels = [...svg.querySelectorAll('text')].map(t => t.textContent);
+                  return { map: true, caps, dots: svg.querySelectorAll('circle').length, labels,
+                           tables: document.querySelectorAll('#liveStorms table').length,
+                           source: (document.querySelector('#liveStorms .filesrc') || {}).textContent || '' };
                 }""")
-                chk.add(f"{scheme} vendor: once the final has landed the table is peak gusts, not probabilities",
-                        bool(vf and vf["head"] == ["Reference location", "Peak gust, mph"]
-                             and "Metryc final" in vf["source"] and "file received" in vf["source"]
-                             and any("96.0 mph" in r for r in vf["rows"])
-                             and not any("%" in r for r in vf["rows"])),
-                        str(vf and [vf["head"], vf["rows"][:2], vf["source"][:60]])[:200])
-                chk.add(f"{scheme} vendor: the final's rows run highest gust first",
-                        bool(vf and len(vf["rows"]) >= 2 and "Brownsville" in vf["rows"][0] and "Galveston" in vf["rows"][1]),
-                        str(vf and vf["rows"][:2])[:120])
-                # the file is the whole reference list, so the cap and the ranking are
-                # what make it readable and the count has to say which list it counts
-                vcap = page.evaluate("""() => {
-                  const det = document.querySelector('#vendor details.stormdone');
-                  if (det) det.open = true;
-                  const caps = [...document.querySelectorAll('#vendor p.cap')].map(c => c.textContent).join(' ');
-                  const rows = [...document.querySelectorAll('#vendor table tr')].slice(1)
-                    .map(r => r.textContent.replace(/\s+/g, ' ').trim());
-                  return { caps, rows, n: rows.length };
-                }""")
-                chk.add(f"{scheme} vendor: the final's cap is stated and says the file spans the whole list",
-                        bool(vcap and "of 24 reference locations" in vcap["caps"]
-                             and "not only those the storm reached" in vcap["caps"]
-                             and vcap["n"] == 16), str(vcap and [vcap["n"], vcap["caps"][:110]])[:200])
-                chk.add(f"{scheme} vendor: a location the vendor published no value for is not shown at all",
-                        bool(vcap and not any("Far Away" in r for r in vcap["rows"])
-                             and any("Calm Harbour" not in r for r in vcap["rows"])),
-                        str(vcap and [r for r in vcap["rows"] if "Far" in r])[:120])
+                chk.add(f"{scheme} vendor: once the final has landed the storm carries a map of recorded gusts, not a table",
+                        bool(vf["map"] and vf["tables"] == 0 and "Metryc final" in vf["source"]
+                             and "file received" in vf["source"]),
+                        str([vf["map"], vf["tables"], vf["source"][:60]])[:160])
+                chk.add(f"{scheme} vendor: one dot per location that recorded a gust, and none for the rest",
+                        vf.get("dots") == 22, str(vf.get("dots")))
+                chk.add(f"{scheme} vendor: the strongest places carry their gust, to a tenth of a mile an hour",
+                        any(l.startswith("96.0 Brownsville") for l in vf.get("labels", []))
+                        and any(l.startswith("41.0 Galveston") for l in vf.get("labels", []))
+                        and any("Peak gust recorded, mph" == l for l in vf.get("labels", [])),
+                        str([l for l in vf.get("labels", []) if "Brownsville" in l or "Galveston" in l])[:120])
+                chk.add(f"{scheme} vendor: a location the vendor published no value for, or a zero, is not drawn",
+                        not any("Savannah" in l or "Jacksonville" in l for l in vf.get("labels", [])),
+                        str([l for l in vf.get("labels", []) if "Savannah" in l or "Jacksonville" in l])[:120])
+                # the file is the whole reference list, so the caption has to say which
+                # list it is counting and what the view leaves out
+                chk.add(f"{scheme} vendor: the map's caption says the file spans the whole list",
+                        "all 26 locations on the vendor" in vf["caps"]
+                        and "outside the view" in vf["caps"], vf["caps"][-170:])
                                 # ---- the two oceans are partitioned: nothing Atlantic on the Pacific
                 # view, and what the owner says is coming but is not listed yet is named
                 page.locator("#b2").click(); page.wait_for_timeout(700)
                 part = page.evaluate("""() => {
                   const t = id => (document.querySelector(id) || {}).textContent || "";
-                  return { vendor: t("#vendor"), live: t("#liveStorms"), landfall: t("#landfall"),
+                  return { vendor: t("#vendorNote"), live: t("#liveStorms"), landfall: t("#landfall"),
                            lfShown: !!(document.querySelector("#landfallSect")
                              && document.querySelector("#landfallSect").style.display !== "none"),
                            counts: (document.querySelector("#atlanticOnly") || {}).style
@@ -1556,23 +1612,22 @@ def run(no_build: bool) -> int:
                   const kids = [...document.querySelectorAll('.wrap > *')];
                   const at = id => kids.findIndex(e => e.id === id || e.className === id);
                   const bl = document.querySelector('.biglinks');
-                  return { order: [at('biglinks'), at('liveStorms'), at('vendor')],
-                           afterSeries: at('vendor') > at('liveStorms'),
+                  return { order: [at('biglinks'), at('vendorNote'), at('liveStorms')],
+                           inStorm: !!document.querySelector('#liveStorms .filehd'),
                            links: bl ? [...bl.querySelectorAll('a')].map(a => a.getAttribute('href')) : [] };
                 }""")
-                chk.add(f"{scheme} hurricane: the LiveCyc sections sit under the map, links first",
+                chk.add(f"{scheme} hurricane: the vendor section sits under the map, links first",
                         bool(lay and all(x >= 0 for x in lay["order"])
                              and lay["order"] == sorted(lay["order"])),
                         str(lay and lay["order"]))
-                chk.add(f"{scheme} hurricane: the vendor's file table sits below the delivery series",
-                        bool(lay and lay["afterSeries"]), str(lay and lay["order"]))
+                chk.add(f"{scheme} hurricane: the vendor's latest file sits inside the storm it belongs to",
+                        bool(lay and lay["inStorm"]), str(lay and lay["inStorm"]))
                 chk.add(f"{scheme} hurricane: the two standing links are present and correct",
                         bool(lay and len(lay["links"]) == 2
                              and "live-hurricane-wind-gust-prediction-markets-at-forecastex" in lay["links"][0]
                              and "data.forecastex.com/supplemental_data/hurricanes" in lay["links"][1]),
                         str(lay and lay["links"]))
                 mix = page.evaluate("""() => {
-                  const live = [...document.querySelectorAll('#liveStorms .bar button, #liveStorms > div > .cap')];
                   return { doneLS: document.querySelectorAll('#liveStorms details.stormdone').length,
                            doneV: document.querySelectorAll('#vendor details.stormdone').length,
                            doneOpen: document.querySelectorAll('details.stormdone[open]').length,
@@ -1580,8 +1635,8 @@ def run(no_build: bool) -> int:
                            doneText: [...document.querySelectorAll('#liveStorms details.stormdone summary')]
                              .map(x => x.textContent).join(' | ') };
                 }""")
-                chk.add(f"{scheme} hurricane: a stopped storm folds shut in both LiveCyc sections",
-                        bool(mix and mix["doneLS"] == 2 and mix["doneV"] == 2 and mix["doneOpen"] == 0
+                chk.add(f"{scheme} hurricane: a stopped storm folds shut behind one button, met once on the page",
+                        bool(mix and mix["doneLS"] == 2 and mix["doneV"] == 0 and mix["doneOpen"] == 0
                              and "no longer updating" in mix["doneText"]),
                         str(mix))
                 # the renamed depression: fresh files, but the roster says AL05
@@ -1643,7 +1698,7 @@ def run(no_build: bool) -> int:
                 # cycle plus four and a half hours, because every 2026 file has
                 # landed 4 to 6 hours after its cycle stamp
                 cd = page.evaluate("""() => {
-                  const e = document.querySelector('#vendor [data-cdt]');
+                  const e = document.querySelector('#vendorNote [data-cdt]');
                   if (!e) return null;
                   const t = +e.getAttribute('data-cdt'), left = t - Date.now();
                   const cyc = new Date(t - 4.5 * 3600000);
@@ -1651,23 +1706,18 @@ def run(no_build: bool) -> int:
                            onLagMark: cyc.getUTCHours() % 6 === 0 && cyc.getUTCMinutes() === 0,
                            line: e.parentElement.textContent };
                 }""")
-                # the section says what its three clocks are, and each storm row
-                # shows the cycle hour and the file's own arrival, which is the
-                # question a careful outside reader actually asked
+                # each storm's file line still names the cycle it was built on and
+                # when the file itself arrived, which is the question a careful
+                # outside reader asked; the paragraph that spelled out the three
+                # clocks came off the page at the owner's request
                 clocks = page.evaluate("""() => {
-                  const cap = [...document.querySelectorAll('.secttl')]
-                    .find(t => /LATEST FILE/.test(t.textContent));
-                  const p = cap && cap.nextElementSibling;
-                  const txt = (p && p.textContent) || '';
-                  const row = (document.querySelector('#vendor .stormrow span') || {}).textContent || '';
-                  const flat = txt.split(String.fromCharCode(10)).join(' ').replace(/  +/g, ' ');
-                  return { threeClocks: flat.indexOf('00, 06, 12, and 18 UTC') >= 0
-                             && flat.indexOf('03, 09, 15, and 21 UTC') >= 0
-                             && flat.indexOf('labeled 18 UTC would be associated with the 21 UTC') >= 0,
-                           rowBoth: /LiveCyc cycle .*Z/.test(row) };
+                  const row = (document.querySelector('#liveStorms .filesrc') || {}).textContent || '';
+                  const body = document.body.textContent || '';
+                  return { rowBoth: /LiveCyc cycle .*Z/.test(row),
+                           gone: body.indexOf('labeled 18 UTC would be associated with the 21 UTC') < 0 };
                 }""")
-                chk.add(f"{scheme} hurricane: the section explains its three clocks",
-                        bool(clocks and clocks["threeClocks"]), str(clocks))
+                chk.add(f"{scheme} hurricane: a storm's file line names the cycle it was built on",
+                        bool(clocks and clocks["rowBoth"] and clocks["gone"]), str(clocks))
                 chk.add(f"{scheme} hurricane: the LiveCyc countdown aims at the file, not the cycle stamp",
                         bool(cd and cd["onLagMark"] and 0 < cd["left"] <= 6 * 3600000
                              and ("in " in cd["text"] or cd["text"] == "due now")
@@ -1779,12 +1829,28 @@ def run(no_build: bool) -> int:
                         and page.locator("#cat4 svg.cpanel path").count() >= 2,
                         str(page.locator("#cat4 svg.cpanel path").count()))
                 c4 = page.locator("#cat4").inner_text()
-                chk.add(f"{scheme} cat4: the page says a higher category does not qualify",
-                        "higher or lower category does not qualify" in c4, c4[-120:])
+                chk.add(f"{scheme} cat4: the page says what the contract pays on and leaves the rest to the terms",
+                        "at exactly Category 4 on or before the date named" in c4
+                        and "Puerto Rico" not in c4, c4[-140:])
+                # the strikes on this board are dates, so the board runs by date with
+                # the nearest on top: a string sort on the spec put November above September
+                c4rows = page.eval_on_selector_all("#cat4 .lrow .lk", "e => e.map(x => x.textContent)")
+                MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+                def _c4key(lbl):
+                    m = re.search(r"([A-Z][a-z]{2}) (\d+), (\d{4})", lbl)
+                    return (int(m.group(3)), MON.index(m.group(1)), int(m.group(2))) if m else (9999, 99, 99)
+                chk.add(f"{scheme} cat4: the board runs by expiration, nearest first",
+                        len(c4rows) >= 2 and [_c4key(r) for r in c4rows] == sorted(_c4key(r) for r in c4rows),
+                        str(c4rows))
                 keys = page.eval_on_selector_all("#cat4 svg.cpanel text", "e=>e.map(x=>x.textContent)")
                 chk.add(f"{scheme} cat4: both curves are named, with the climatology window",
                         any("climatology 19" in k for k in keys) and any("count market" in k for k in keys),
                         str([k for k in keys if "clim" in k or "count" in k]))
+                chk.add(f"{scheme} cat4: a drawn contract is labeled with its own date",
+                        any(k.startswith("By ") and "," in k for k in keys)
+                        and not any(k == "a listed contract" for k in keys),
+                        str([k for k in keys if k.startswith("By ")]))
                 if page.locator("#cat4 svg.cpanel circle:not(.rdot)").count():
                     page.locator("#cat4 svg.cpanel circle:not(.rdot)").first.hover(force=True); page.wait_for_timeout(250)
                     t_c4 = page.locator("#tip").inner_text()
@@ -1800,9 +1866,9 @@ def run(no_build: bool) -> int:
                         "no price" in lad_txt and "50\u00a2" not in lad_txt, lad_txt[:110])
                 chk.add(f"{scheme} empty book: a contract with no bids at all still reads no bids",
                         "no bids" in lad_txt, lad_txt[:110])
-                chk.add(f"{scheme} empty book: the ladder caption says an empty book carries no price",
-                        "both sides bid the minimum" in page.locator("#laddersCap").inner_text(),
-                        page.locator("#laddersCap").inner_text()[-120:])
+                chk.add(f"{scheme} empty book: the ladder carries no caption to explain it away",
+                        page.locator("#laddersCap").inner_text().strip() == "",
+                        page.locator("#laddersCap").inner_text()[:120])
                 # the landfall board carries one too (The Bahamas, as the live board does),
                 # and a board row has a tooltip where a panel's unpriced bar does not
                 lf_all = page.locator("#landfall").inner_text()
@@ -1874,12 +1940,14 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} landfall: the Atlantic board lists no Pacific region",
                         "Hawaii" not in lf_txt and page.locator("#landfall .lrow").count() >= 5, lf_txt[:60])
                 chk.add(f"{scheme} landfall: the caption carries the 50-mile border clause and the eye rule",
-                        "50 miles" in lf_txt and "eye crossing" in lf_txt and "Pacific view" in lf_txt, lf_txt[-160:])
+                        "50 miles" in lf_txt and "eye crossing" in lf_txt
+                        and "per-side execution fee" not in lf_txt, lf_txt[-160:])
                 page.locator("#b2").click(); page.wait_for_timeout(600)
                 ep_txt = page.locator("#landfall").inner_text()
                 ep_rows = page.locator("#landfall .lrow").count()
                 chk.add(f"{scheme} pacific: the landfall board lists only the Pacific region",
-                        page.locator("#landfallSect").is_visible() and ep_rows == 1 and "Hawaii" in ep_txt and "Atlantic view" in ep_txt,
+                        page.locator("#landfallSect").is_visible() and ep_rows == 1 and "Hawaii" in ep_txt
+                        and "Atlantic view" in page.locator("#pacificNote").inner_text(),
                         f"rows={ep_rows} {ep_txt[:60]}")
                 chk.add(f"{scheme} pacific: the count panels stay on the Atlantic view",
                         not page.locator("#atlanticOnly").is_visible() and "listed above" in page.locator("#pacificNote").inner_text(),

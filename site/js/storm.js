@@ -313,12 +313,10 @@ window.WXStorm = (() => {
     });
     document.querySelectorAll('.emphtog button').forEach(b => b.classList.toggle('on', b.dataset.mode === EMPH));
   }
-  const NOTE = 'Each LiveCyc file looks forward from its own cycle and gives the chance that a gust above '
-    + 'the strike is still to come. The contract pays on the highest gust over the whole storm, so the '
-    + 'exchange prices what has already been recorded together with what is still ahead. Before the storm '
-    + 'reaches a location the two run close. Once the strongest winds have passed, LiveCyc falls toward '
-    + 'zero while the price keeps what has already happened, so a gap between the lines there is expected '
-    + 'rather than a disagreement.';
+  const NOTE = 'LiveCyc is a forward-looking forecast only, whereas the contract settles on the maximum wind '
+    + 'gust experienced over the entire course of the storm. After a storm has passed a location or dissipates, '
+    + 'the LiveCyc forward-looking wind gust probabilities will drop toward zero, regardless of what gusts have '
+    + 'been experienced at a given location.';
   function controls() {
     const tog = h('div', { class: 'emphtog', role: 'group', 'aria-label': 'which series stands forward' });
     [['exchange', 'Exchange price'], ['livecyc', 'LiveCyc']].forEach(([m, t]) => {
@@ -328,7 +326,7 @@ window.WXStorm = (() => {
       tog.appendChild(b);
     });
     const note = h('div', { class: 'note emphnote' });
-    note.innerHTML = '<b>LiveCyc looks forward. The price covers the whole storm.</b> ' + NOTE;
+    note.textContent = NOTE;
     return h('div', { class: 'emphrow' }, [
       h('div', { class: 'emphctl' }, [h('span', { class: 'emphl', text: 'Highlight' }), tog]),
       note]);
@@ -341,7 +339,7 @@ window.WXStorm = (() => {
       d.appendChild(h('span', {}, [h('i', { class: 'sw', style: 'background:' + rung(i, thr.length) }), '≥' + t]));
     });
     d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl' }), 'exchange price, the Yes midpoint']));
-    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'LiveCyc, and the Metryc interim once it lands, as published']));
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'Forecasts from Reask']));
     d.appendChild(h('span', { class: 'kk', text: 'axis rows, the NHC cycle over the file’s arrival in ET, dated where the day turns' }));
     return d;
   }
@@ -1046,6 +1044,29 @@ window.WXStorm = (() => {
     return hit;
   }
 
+  /* Where the storm is in the vendor's sequence, in one line.
+
+     Three kinds of file arrive and they arrive in order: LiveCyc while the
+     storm runs, the Metryc interim once the vendor has analysed what happened
+     around the landfall, and the Metryc final, which is what the wind
+     contracts settle on. The line names the phase the storm has reached and
+     nothing else; an earlier version counted deliveries and guessed at
+     whether the exchange had listed the storm, which read as fact and was
+     wrong once the exchange stopped carrying a resolved storm's contracts. */
+  function phase(doc) {
+    if (doc && doc.final) return 'Final settlement received';
+    if (doc && (doc.steps || []).some(x => x.kind === 'interim')) return 'Preliminary settlement phase (Metryc interim)';
+    return 'Forecast phase (LiveCyc)';
+  }
+
+  /* The vendor's latest file for the storm, drawn by the page that holds the
+     geography and the reference-location list. The two used to be separate
+     sections that both listed every storm, so a reader met each storm twice;
+     the panel is now built here, inside the storm it belongs to. */
+  let FILEPANEL = null;
+  function setFilePanel(fn) { FILEPANEL = fn; }
+  const filePanel = (storm, host) => { if (FILEPANEL) { try { FILEPANEL(storm, host); } catch (e) { /* the charts stand on their own */ } } };
+
   // ---- one storm
   async function drawStorm(storm, host) {
     const key = storm.name + '_' + storm.year;
@@ -1056,27 +1077,8 @@ window.WXStorm = (() => {
     const doc = ledgers[key];
     host.innerHTML = '';
     const cyc = delivered(doc);
-    const state = [];
-    state.push(cyc.length + ' vendor deliver' + (cyc.length === 1 ? 'y' : 'ies') + ' so far');
-    if (doc && (doc.steps || []).some(s => s.kind === 'interim')) state.push('Metryc interim received');
-    else state.push('Metryc interim pending');
-    if (doc && doc.final) state.push('final settlement received; the contracts have resolved');
-    else state.push('final settlement pending, and its timing is not known in advance');
     const gp = gaps(cyc);
-    if (gp.length) {
-      const miss = gp.reduce((a, g) => a + g.missing, 0);
-      state.push(miss + ' cycle' + (miss === 1 ? '' : 's') + ' the vendor did not deliver, marked on the charts');
-    }
-    /* Whether the exchange has listed this storm's wind contracts yet. The
-       vendor's probabilities usually run ahead of the listing, so a panel
-       with ladders and no prices is a storm the exchange has not opened,
-       not a storm without a market coming; saying so stops the absence
-       reading as nonexistence. */
-    if (MK && !poolMarkets(storm.name).length
-        && !(MK.markets || []).some(m => m.symbol.indexOf('L' + stormCode(storm.name)) === 0)) {
-      state.push('no wind contracts listed on the exchange yet; the price lines, the pool ladder and its price series appear at listing');
-    }
-    host.appendChild(h('p', { class: 'cap', text: state.join(' · ') }));
+    host.appendChild(h('p', { class: 'cap', text: phase(doc) }));
     if (doc && passedPending(storm, doc)) {
       const nt = h('div', { class: 'note warn' });
       nt.innerHTML = '<b>Settlement data pending.</b> This storm appears to have passed some of its '
@@ -1090,6 +1092,7 @@ window.WXStorm = (() => {
     }
     if (!doc || !cyc.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
+      filePanel(storm, host);
       return;
     }
     // the locations worth showing: the strongest so far, which can only look backwards
@@ -1126,6 +1129,7 @@ window.WXStorm = (() => {
     }
     const p = pools(storm, shown);
     if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
+    filePanel(storm, host);
     host.appendChild(h('p', { class: 'cap attrib', text: (RK && RK.attribution) || 'Powered by Reask' }));
     setEmph(EMPH);
   }
@@ -1174,7 +1178,7 @@ window.WXStorm = (() => {
       host.appendChild(panel);
       await drawStorm(live.find(s => s.name + '_' + s.year === open) || live[0], panel);
     } else {
-      host.appendChild(h('p', { class: 'cap', text: 'No storm is currently delivering. The storms below have stopped updating; open one to see its record.' }));
+      host.appendChild(h('p', { class: 'cap', text: 'There are no active live storms. The storms below have completed their lives.' }));
     }
     done.forEach(s => {
       const t = stampOf(s);
@@ -1261,5 +1265,5 @@ window.WXStorm = (() => {
     return out;
   }
 
-  return { init, draw, showSite, sites, dormant, stampOf, setRoster, setBasin, supersededBy, doneLabel };
+  return { init, draw, showSite, sites, dormant, stampOf, setRoster, setBasin, supersededBy, doneLabel, setFilePanel };
 })();
