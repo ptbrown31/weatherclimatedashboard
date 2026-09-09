@@ -21,9 +21,14 @@
 window.WXCityDays = (() => {
   const { el, txt, h, $ } = WXC;
   const DAYS = 3;
-  const COL = { nws: 'var(--nws)', nbm: 'var(--nbm)', lamp: 'var(--lamp)', mav: 'var(--mav)' };
+  /* The same five the week above marks, so a dot up there has a line down here.
+
+     The market was left out when this panel was only about forecast tools, which
+     made the two halves of one figure disagree about what was being compared. */
+  const COL = { nws: 'var(--nws)', nbm: 'var(--nbm)', lamp: 'var(--lamp)', mav: 'var(--mav)',
+                fx: 'var(--accent)' };
   const NAME = { nws: 'National Weather Service', nbm: 'Blend of Models',
-                 lamp: 'Aviation guidance (LAMP)', mav: 'GFS MOS' };
+                 lamp: 'Aviation guidance (LAMP)', mav: 'GFS MOS', fx: 'ForecastEx implied' };
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   let tip = null;
 
@@ -104,7 +109,31 @@ window.WXCityDays = (() => {
       if (!inDay.length) return;
       const a = x(inDay[0].t), b = x(inDay[inDay.length - 1].t);
       svg.appendChild(el('line', { x1: a, x2: a, y1: T, y2: B, class: 'grid' }));
-      svg.appendChild(txt(dayLabel(dd), { x: (a + b) / 2, y: B + 16, 'text-anchor': 'middle', class: 'ax' }));
+      svg.appendChild(txt(dayLabel(dd), { x: (a + b) / 2, y: B + 28, 'text-anchor': 'middle', class: 'ax' }));
+      /* The hours inside each day.
+
+         A trace three days long with only the dates under it left the reader
+         guessing where a morning ended. Every six hours is enough to place a
+         reading without crowding the axis at this width. */
+      const minsOf = ms => {
+        const p2 = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: 'numeric', hour12: false })
+          .formatToParts(new Date(ms));
+        const g = k => +(p2.find(z => z.type === k) || {}).value;
+        return (g('hour') % 24) * 60 + g('minute');
+      };
+      // a routine report lands near the end of its hour, so a tick is placed on
+      // the reading nearest each mark rather than on a whole hour that has none
+      [6, 12, 18].forEach(hr => {
+        let at = null;
+        inDay.forEach(r => { const dm = Math.abs(minsOf(r.t) - hr * 60);
+          if (dm <= 45 && (at == null || dm < Math.abs(minsOf(at.t) - hr * 60))) at = r; });
+        if (!at) return;
+        const px2 = x(at.t);
+        if (px2 < a + 10 || px2 > b - 10) return;
+        svg.appendChild(el('line', { x1: px2, x2: px2, y1: B, y2: B + 4, stroke: 'var(--rule)', 'stroke-width': .8 }));
+        svg.appendChild(txt((hr % 12 || 12) + (hr < 12 ? 'a' : 'p'),
+          { x: px2, y: B + 14, 'text-anchor': 'middle', class: 'ax' }));
+      });
 
       const d = byDay[dd];
       if (!d) return;
@@ -117,12 +146,16 @@ window.WXCityDays = (() => {
                                               dash ? { 'stroke-dasharray': '5 4' } : {}));
           const err = side === 'high' ? f.errHigh : f.errLow;
           const ob = side === 'high' ? d.obsHigh : d.obsLow;
+          const when = k === 'fx'
+            ? ['Quote read at', f.asof ? WXC.clockFull(Date.parse(f.asof), tz) + ' · ' + WXC.dateShort(Date.parse(f.asof), tz) : null]
+            : ['Standing at', f.lead != null ? f.lead + ' h to midnight' : null];
           ln.onmousemove = e => tip.show(e, tip.rows(NAME[k] + ' — ' + dayLabel(dd), [
-            [side === 'high' ? 'Forecast high' : 'Forecast low', WXC.deg(v)],
+            [k === 'fx' ? (side === 'high' ? 'Implied high' : 'Implied low')
+                        : (side === 'high' ? 'Forecast high' : 'Forecast low'), WXC.deg(v)],
             ['Observed', ob == null ? '—' : WXC.deg(ob)],
             ['Error', err == null ? '—' : (err > 0 ? '+' : '') + err.toFixed(1)],
-            ['Standing at', f.lead != null ? f.lead + ' h to midnight' : null],
-          ], 'as this source stood at six the evening before'));
+            when,
+          ], 'read at six the evening before'));
           ln.onmouseleave = () => tip.hide();
           svg.appendChild(ln);
         });
@@ -172,18 +205,15 @@ window.WXCityDays = (() => {
                                        'pointer-events': 'none' }); svg.appendChild(dot); }
       dot.setAttribute('cx', x(at.t)); dot.setAttribute('cy', y(at.v));
       const dd = dayOf(at.t), d = byDay[dd] || {};
+      /* The trace answers for the trace. Every forecast in the day was listed
+         here whatever the cursor was on, so the box said the same thing over the
+         whole panel and a line hovered directly had to compete with it. Each
+         line carries its own box; this one carries the reading. */
       const rows = [['Reading', WXC.deg(at.v)],
                     ['At', WXC.clockFull(at.t, tz) + ' \u00b7 ' + WXC.dateShort(at.t, tz)],
                     ['That day', (d.obsHigh == null ? '\u2014' : Math.round(d.obsHigh) + '\u00b0') + ' / '
                                  + (d.obsLow == null ? '\u2014' : Math.round(d.obsLow) + '\u00b0')]];
-      Object.keys(COL).forEach(k => {
-        const f = d[k]; if (!f) return;
-        const eh = f.errHigh == null ? '' : ' (' + (f.errHigh > 0 ? '+' : '') + f.errHigh.toFixed(1) + ')';
-        rows.push(['<span class="sw" style="background:' + COL[k] + '"></span>' + NAME[k],
-                   (f.high == null ? '\u2014' : Math.round(f.high) + '\u00b0' + eh)]);
-      });
-      tip.show(ev, tip.rows(dayLabel(dd), rows,
-        'the hourly record, and each source\u2019s forecast for that day as it stood at six the evening before'));
+      tip.show(ev, tip.rows(dayLabel(dd), rows, 'the hourly record; hover a level line for that forecast'));
     });
     band.addEventListener('mouseleave', () => { tip.hide(); if (dot) { dot.remove(); dot = null; } });
     svg.insertBefore(band, svg.firstChild);
@@ -208,7 +238,7 @@ window.WXCityDays = (() => {
           svg.appendChild(txt(NAME[k], { x: xEnd, y: yy - 3, 'font-size': 9, 'font-weight': 600,
                                          fill: COL[k], 'text-anchor': 'end', 'pointer-events': 'none' }));
         });
-        svg.appendChild(txt('solid is each source\u2019s forecast high, dashed its low', { x: L, y: B + 30,
+        svg.appendChild(txt('solid is each source\u2019s forecast high, dashed its low', { x: L, y: B + 46,
                             'font-size': 9, fill: 'var(--muted)' }));
       }
     }

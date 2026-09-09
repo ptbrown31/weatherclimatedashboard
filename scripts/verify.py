@@ -374,6 +374,28 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} three days: no caption repeating what the panel labels",
                         page.locator("#cityDaysCap").inner_text().strip() == ""
                         and page.locator("#cityDaysKey").inner_text().strip() == "", "")
+                di = page.evaluate("""() => {
+                  const svg = document.querySelector('#cityDays');
+                  const t = [...svg.querySelectorAll('text')].map(e => e.textContent);
+                  const hours = t.filter(x => /^[0-9]{1,2}(a|p)$/.test(x));
+                  const lines = [...svg.querySelectorAll('line')]
+                    .filter(l => (l.getAttribute('stroke') || '').indexOf('var(--') === 0
+                                 && l.getAttribute('pointer-events') === 'stroke');
+                  const cols = [...new Set(lines.map(l => l.getAttribute('stroke')))].sort();
+                  return { hours: hours.length, sampleHours: hours.slice(0, 4), cols };
+                }""")
+                chk.add(f"{scheme} three days: the hours are labeled along the axis",
+                        bool(di and di["hours"] >= 6), str(di and di["sampleHours"]))
+                chk.add(f"{scheme} three days: the market draws a level line like every other tool",
+                        bool(di and "var(--accent)" in di["cols"] and len(di["cols"]) >= 4), str(di and di["cols"]))
+                # the trace's own box carries the reading, and no model numbers:
+                # a level line answers for itself when the pointer is on it
+                box = page.locator("#cityDays rect[fill='transparent']")
+                box.hover(force=True, position={"x": 40, "y": 40}); page.wait_for_timeout(220)
+                t_tr = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} three days: the trace's box is the reading, not every forecast of the day",
+                        "Reading" in t_tr and "hover a level line" in t_tr
+                        and "Blend of Models" not in t_tr, t_tr[:120])
                 # the picker leads the page (owner's call 2026-08-31), then the chart
                 order = [o for o in page.eval_on_selector_all(".wrap > *", "e=>e.map(x=>x.id||x.className||x.tagName)")
                          if o != "site"]
@@ -2269,6 +2291,13 @@ def run(no_build: bool) -> int:
                 # the per-station prose block was removed on the owner's call
                 chk.add(f"{scheme} station page: no per-station prose block",
                         page.locator("#cityAbout").count() == 0, "")
+                # served text, titles rather than prose: the heading and one line
+                raw_sp = urllib.request.urlopen(f"{srv.url}/san-francisco-ksfo.html").read().decode()
+                chk.add(f"{scheme} station page: a served heading and one line naming what the page is",
+                        "San Francisco (KSFO)</h1>" in raw_sp
+                        and "San Francisco weather forecast, KSFO observations and daily high and low"
+                            " temperature prediction markets." in raw_sp,
+                        raw_sp[raw_sp.find("cityLede") - 40:raw_sp.find("cityLede") + 180] if "cityLede" in raw_sp else "no lede")
                 # the tag a search result reads, and the title the chart leaves
                 # behind once it has drawn, which a rendering crawler reads instead
                 chk.add(f"{scheme} station page: the title carries the city's weather and its market",

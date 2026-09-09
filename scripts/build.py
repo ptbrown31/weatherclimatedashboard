@@ -259,7 +259,15 @@ def station_page(tpl: str, c: dict, cfg: dict) -> str:
                      r'\g<1>%s (%s)\g<2>' % (city, icao), out, count=1)
     if not n:
         raise ValueError("city.html has no cityTitle h1 to fill")
-    # the station's own paragraph, in the page rather than in a snapshot
+    # A line under the heading naming what the page carries, for a page whose
+    # every figure is drawn by script and therefore invisible to a crawler.
+    # Titles rather than prose: the city, the state, the station, and the
+    # things a reader searches for, with nothing explained.
+    lede = "%s weather forecast, %s observations and daily high and low temperature prediction markets." % (
+        c["city"], icao)
+    out, nl = re.subn(r'(<p class="cap" id="cityLede"[^>]*>)(</p>)', r"\g<1>%s\g<2>" % lede, out, count=1)
+    if not nl:
+        raise ValueError("city.html has no cityLede line to fill")
     # which station this page is, for a page that has no query string to read
     out = out.replace("<script src=\"config.js\">",
                       "<script>window.WX_STATION = %s;</script>\n<script src=\"config.js\">"
