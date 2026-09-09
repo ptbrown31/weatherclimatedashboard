@@ -230,36 +230,6 @@ def head_meta(html: str, rel: str, cfg: dict, image: str = "") -> str:
     return html.replace("</head>", "\n".join(tags) + "\n</head>", 1)
 
 
-def station_intro(c: dict) -> str:
-    """The station's own facts, written into its page as text.
-
-    Everything else on a station page is drawn by script out of the snapshots,
-    so until that runs the page says almost nothing about the station it is
-    for. This is what a reader arriving from a search wants first and the only
-    part a crawler can read without running anything.
-    """
-    icao, city = c["station"], c["city"]
-    unit = "Celsius" if c.get("unit") == "C" else "Fahrenheit"
-    drawn = ("The chart above carries the National Weather Service forecast, the National Blend of Models "
-             "and the LAMP guidance against the readings the station has published so far, with the "
-             "exchange's prices for the same day on the same scale."
-             if us_station(icao) else
-             "The chart above carries the readings the station has published so far for the day, with the "
-             "exchange's prices for the same day on the same scale.")
-    return ('<h2>%s weather and the daily temperature contracts</h2>\n'
-            '<p>%s (%s) is the weather station the %s daily temperature contracts settle on, and everything '
-            'on this page is drawn against its record. ForecastEx lists a high contract and a low contract '
-            'for each day. Each one asks whether the day’s high, or the day’s low, will finish above or '
-            'below a stated whole-degree threshold, and it settles on the station’s own METAR record over '
-            'the local calendar day, in whole degrees %s. A high contract pays Yes only when the settled '
-            'value is strictly above its threshold, and a low contract only when it is strictly below. '
-            '%s</p>\n'
-            '<p>How a ladder of strikes is put together and what settles it is set out on the '
-            '<a href="daily-temperature-markets.html">daily temperature markets page</a>. How each forecast '
-            'tool has scored against the market at this station and the others is on the '
-            '<a href="accuracy.html">accuracy page</a>.</p>' % (city, city, icao, city, unit, drawn))
-
-
 def station_page(tpl: str, c: dict, cfg: dict) -> str:
     """One station's own page, from the shared city template.
 
@@ -290,10 +260,6 @@ def station_page(tpl: str, c: dict, cfg: dict) -> str:
     if not n:
         raise ValueError("city.html has no cityTitle h1 to fill")
     # the station's own paragraph, in the page rather than in a snapshot
-    out, n = re.subn(r'(<div class="prose" id="cityAbout"[^>]*>)(</div>)',
-                     lambda m: m.group(1) + station_intro(c) + m.group(2), out, count=1)
-    if not n:
-        raise ValueError("city.html has no cityAbout block to fill")
     # which station this page is, for a page that has no query string to read
     out = out.replace("<script src=\"config.js\">",
                       "<script>window.WX_STATION = %s;</script>\n<script src=\"config.js\">"

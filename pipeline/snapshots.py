@@ -153,7 +153,7 @@ def day_markers(city: dict, now: dt.datetime) -> dict:
     D = local_now.date()
     day_start = dt.datetime.combine(D, dt.time(0), tzinfo=tz)
     day_end = dt.datetime.combine(D + dt.timedelta(days=1), dt.time(0), tzinfo=tz)
-    win_start = dt.datetime.combine(D - dt.timedelta(days=1), dt.time(12), tzinfo=tz)
+    win_start = dt.datetime.combine(D - dt.timedelta(days=1), dt.time(12), tzinfo=tz)   # replaced below by the listing time when that is earlier
     yday_start = dt.datetime.combine(D - dt.timedelta(days=1), dt.time(0), tzinfo=tz)
     sr, ss = sun_times(city["lat"], city["lon"], D)
     out = {"day": D.isoformat(), "tomorrow": (D + dt.timedelta(days=1)).isoformat(),
@@ -174,12 +174,21 @@ def day_markers(city: dict, now: dt.datetime) -> dict:
     # can be open up to ten minutes before the marker.
     prev = D - dt.timedelta(days=1)
     et = ZoneInfo("America/New_York")
+    listed = None
     if city.get("unit") == "F":
-        out["listed"] = _iso(dt.datetime.combine(prev, dt.time(10, 30), tzinfo=et))
+        listed = dt.datetime.combine(prev, dt.time(10, 30), tzinfo=et)
     elif city["station"].startswith("CY"):
-        out["listed"] = _iso(dt.datetime.combine(prev, dt.time(11, 10), tzinfo=et))
+        listed = dt.datetime.combine(prev, dt.time(11, 10), tzinfo=et)
     elif city["station"] in ("EDDF", "LFPG"):
-        out["listed"] = _iso(dt.datetime.combine(prev, dt.time(22, 40), tzinfo=dt.timezone.utc))
+        listed = dt.datetime.combine(prev, dt.time(22, 40), tzinfo=dt.timezone.utc)
+    if listed is not None:
+        out["listed"] = _iso(listed)
+        # The chart's window starts where trading does. Noon local was a
+        # convention from when every board opened at noon Eastern; a Pacific
+        # city now lists at half past seven its own time, and a window opening
+        # at noon cut off four and a half hours of quoted market.
+        if listed < win_start:
+            out["winStart"] = _iso(listed)
     return out
 
 

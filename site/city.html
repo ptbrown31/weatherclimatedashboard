@@ -11,17 +11,17 @@
 </head>
 <body>
 <div class="wrap">
-<div class="secttl">STATION PICKER</div>
+<div class="secttl">PICK LOCATION</div>
 <div class="pickwrap">
   <div><div class="pickttl" id="pickTitle">United States. Dot color and size show observed so far against the NWS high issued for the day</div>
   <svg id="pick" viewBox="0 0 960 600"></svg></div>
-  <div><div class="pickttl">International stations and Honolulu</div>
+  <div><div class="pickttl">Global</div>
   <svg id="pickW" viewBox="0 60 960 320"></svg></div>
 </div>
 
 <h1 id="cityTitle" style="margin-top:18px">&nbsp;</h1>
 
-<div class="card expandable" id="chartCard"><svg id="chart" viewBox="0 0 960 390"></svg></div>
+<div class="card expandable" id="chartCard"><svg id="chart" viewBox="0 0 960 488"></svg></div>
 <div class="bar">
   <button id="dayToday" class="on">Today</button>
   <button id="dayTomorrow">Tomorrow</button>
@@ -36,12 +36,7 @@ calculator &rarr;</a></p>
 
 <div id="advSection" hidden>
 <div class="secttl" style="margin-top:22px">ADDITIONAL VARIABLES</div>
-<p class="cap" style="margin-top:0">A temperature forecast is the end of a chain that runs through moisture, cloud
-and wind, and these panels show the chain directly. Each tool&rsquo;s hourly temperature, dewpoint, sky cover and
-wind is drawn under the station&rsquo;s own METAR readings, so whether the day is following the forecast&rsquo;s
-physical script can be read before the temperature settles it. Heating running ahead under clearer skies than
-forecast argues the high is underestimated; persistent low cloud and an onshore breeze argue it will not be
-reached.</p>
+<p class="cap" style="margin-top:0">Other variables that are often upstream of temperature.</p>
 <div class="bar">
   <button id="advToday" class="on">Today</button>
   <button id="advTmw">Tomorrow</button>
@@ -76,11 +71,7 @@ temperature scale, so a height means the same thing in each.</p>
 <div class="key" id="cityDaysKey" hidden></div>
 
 <div class="secttl" style="margin-top:24px">EVERY SCORED DAY AT THIS STATION</div>
-<p class="cap" style="margin-top:0">Every tool is read at <b>one moment, six in the evening, this station&rsquo;s own time, the day before</b>, so none of them has seen any of the day and every one has the same lead. The hours under each name are how far that tool&rsquo;s standing run was from midnight at
-that moment.</p>
 <div id="scoredDays"></div>
-
-<div class="prose" id="cityAbout" style="margin-top:22px"></div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>

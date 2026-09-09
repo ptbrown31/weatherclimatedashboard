@@ -222,19 +222,7 @@ window.WXCityDays = (() => {
                                                                       'font-size': 9.5, fill: 'var(--accent)' }));
 
     const key = $('#cityDaysKey');
-    if (key) {
-      key.innerHTML = '<span><i style="border-color:var(--obs)"></i>Observed (METAR)</span>'
-        + Object.keys(COL).map(k => '<span><i style="border-color:' + COL[k] + '"></i>' + NAME[k] + '</span>').join('')
-        + '<span>solid is the forecast high, dashed the low</span>';
-    }
-    if (cap) {
-      cap.textContent = 'The last ' + shown.length + ' complete days at this station, end to end. Today is '
-        + 'still running and is not included. The trace is the hourly '
-        + 'METAR record, the same one settlement reads. The level lines are each source’s high and low for that '
-        + 'day as it stood at six in the evening the day before, one moment for every source and every day, so '
-        + 'the days can be compared with each other. The distance from a level line to the trace under it is that '
-        + 'day’s error. Hover a level for the number.';
-    }
+    // the panel labels its own lines, so a key under it says the same thing twice
   }
 
   function init() { tip = WXC.tooltip(); }

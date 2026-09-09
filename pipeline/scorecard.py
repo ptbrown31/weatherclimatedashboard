@@ -274,7 +274,7 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
             "method": "error = forecast minus observed (positive runs warm); pre-day cycle within 24 h of local midnight; "
                       "observed = METAR extreme over the local day; days with fewer than 12 reports not scored",
             "sources": {"nws": "NWS day/night product", "nbm": "NBM NBS TXN", "mav": "GFS MOS N/X", "lamp": "LAMP hourly extremes",
-                        "fx": "ForecastEx implied median, from the last quote before local midnight"},
+                        "fx": "ForecastEx implied median, from the last quote before the same evening anchor"},
             "overall": overall, "stations": stations}
     store.put("snapshots/scorecard.json", json.dumps(snap, separators=(",", ":")).encode(), "application/json",
               "public, max-age=600, stale-while-revalidate=3600, stale-if-error=604800")

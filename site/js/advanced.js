@@ -275,7 +275,7 @@ window.WXAdv = (function () {
         : (r.temp != null ? WXC.deg(r.temp) : '—') + ' · '
           + (r.dew != null ? WXC.deg(r.dew) : '—') + ' · '
           + (r.sky != null ? r.sky + '%' + (r.cover ? ' ' + r.cover : '') : '—') + ' · '
-          + (r.wspd != null ? (r.wdir != null ? Math.round(r.wdir) + '° at ' : '') + Math.round(r.wspd * 1.15078) + ' mph' : '—'));
+          + (r.wspd != null ? (r.wdir != null ? WXC.compass(r.wdir) + ' at ' : '') + Math.round(r.wspd * 1.15078) + ' mph' : '—'));
       const pack = rows => { const q = near(rows); return q && { temp: q.r.tempF, dew: q.r.dewF, sky: q.r.sky != null ? q.r.sky : OBS_PCT[q.r.cover], cover: q.r.cover, wdir: q.r.wdir, wspd: q.r.wspd }; };
       const lines = [['Observed (METAR)', fmtRow(pack(ob.rows))]]
         .concat(TOOLS.map(t => { const src = reading()[t.k]; return [t.name, fmtRow(src && pack(src.rows))]; }));
@@ -330,23 +330,7 @@ window.WXAdv = (function () {
 
     const src = reading();
     const cyc = TOOLS.map(t => src[t.k] ? t.name + ' ' + clockOf(src[t.k].cycle) : null).filter(Boolean).join(', ');
-    $('#advCap').textContent =
-      (day === 'today'
-        ? 'Each tool’s newest standing cycle under the station’s own METAR reports, over the same window as the '
-          + 'chart above. The dim dashed lines are the cycles that stood at six the evening before, carried across '
-          + 'the whole window so the hours a morning cycle has not reached still show the forecast that stood for '
-          + 'them; dimmed barbs are read the same way. '
-        : day === 'tomorrow'
-        ? 'The day-ahead board, from the same newest standing cycles the chart above draws. LAMP reaches only '
-          + 'twenty-five hours, so its line ends where its horizon does, and the observed line grows in from the '
-          + 'left as the day arrives. '
-        : 'The postmortem reads each tool as it stood at six the evening before, the same moment the standings judge, '
-          + 'under what the station then recorded. ')
-      + 'Temperature, dewpoint and wind compare directly; wind speed reads in mph while the barbs keep the knot '
-      + 'convention they are defined in, a half barb five, a full barb ten, a pennant fifty. Sky cover is percent '
-      + 'where a tool publishes percent, the band midpoint of its published code (FEW 19%, SCT 44%, BKN 75%, '
-      + 'OVC 100%) where it publishes a code, and the Weather Service’s own sky wording mapped to the same bands. '
-      + 'Issued ' + cyc + ', station time.';
+    $('#advCap').textContent = '';
   }
 
   async function load() {

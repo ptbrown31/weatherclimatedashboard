@@ -81,15 +81,26 @@ class DayBucketing(unittest.TestCase):
         self.assertEqual(mk["day"], "2026-08-21")
         self.assertEqual(mk["dayStart"], "2026-08-21T07:00:00Z")
         self.assertEqual(mk["dayEnd"], "2026-08-22T07:00:00Z")
-        self.assertEqual(mk["winStart"], "2026-08-20T19:00:00Z")
         # 10:30 am Eastern the day before, the schedule measured since the
         # 8/28 target (the exchange moved from noon on 2026-08-27)
         self.assertEqual(mk["listed"], "2026-08-20T14:30:00Z")
+        # the chart's window opens when the board does. A Pacific city lists at
+        # half past seven its own time, hours before the noon this used to use.
+        self.assertEqual(mk["winStart"], mk["listed"])
         self.assertEqual(mk["tzOffset"], -7.0)
         self.assertIsNotNone(mk["sunrise"])
         sr, ss = snapshots._parse_iso(mk["sunrise"]), snapshots._parse_iso(mk["sunset"])
         self.assertLess(abs((sr - dt.datetime(2026, 8, 21, 13, 20, tzinfo=U)).total_seconds()), 20 * 60)
         self.assertLess(abs((ss - dt.datetime(2026, 8, 22, 2, 35, tzinfo=U)).total_seconds()), 20 * 60)
+
+    def test_a_board_listing_after_noon_leaves_the_window_where_it_was(self):
+        # the European pair list at 22:40Z the evening before, which is after
+        # the window has already opened, so the window is not dragged forward
+        city = {"station": "EDDF", "city": "Frankfurt", "lat": 50.03, "lon": 8.56,
+                "tz": "Europe/Berlin", "unit": "C"}
+        mk = snapshots.day_markers(city, dt.datetime(2026, 8, 21, 17, 30, tzinfo=U))
+        self.assertEqual(mk["listed"], "2026-08-20T22:40:00Z")
+        self.assertLess(mk["winStart"], mk["listed"])
 
     def test_listing_markers_per_region(self):
         # the three schedules the capture measures: US and Canada on the

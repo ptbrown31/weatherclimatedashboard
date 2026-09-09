@@ -316,9 +316,9 @@ def run(no_build: bool) -> int:
                         page.locator("#locator .locbox img").count() == 1
                         and page.locator("#locator .locpin").count() == 1
                         and "KATL" in loccap, loccap[:70])
-                chk.add(f"{scheme} locator: the imagery is attributed and says why it matters",
+                chk.add(f"{scheme} locator: the imagery is attributed",
                         "USGS" in loccap and "United States government" in loccap
-                        and "where it sits matters" in loccap, loccap[-90:])
+                        and "km across" not in loccap, loccap[-90:])
                 chk.add(f"{scheme} locator: it is served from this site, not a government endpoint",
                         "nationalmap" not in (page.locator("#locator .locbox img").get_attribute("src") or ""),
                         page.locator("#locator .locbox img").get_attribute("src"))
@@ -371,9 +371,9 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} three days: the observations are marked, not just drawn",
                         page.locator("#cityDays circle.rdot").count() >= 10,
                         str(page.locator("#cityDays circle.rdot").count()))
-                dcap = page.locator("#cityDaysCap").inner_text()
-                chk.add(f"{scheme} three days: the pinned moment is stated",
-                        "six in the evening the day before" in dcap, dcap[:110])
+                chk.add(f"{scheme} three days: no caption repeating what the panel labels",
+                        page.locator("#cityDaysCap").inner_text().strip() == ""
+                        and page.locator("#cityDaysKey").inner_text().strip() == "", "")
                 # the picker leads the page (owner's call 2026-08-31), then the chart
                 order = [o for o in page.eval_on_selector_all(".wrap > *", "e=>e.map(x=>x.id||x.className||x.tagName)")
                          if o != "site"]
@@ -413,7 +413,7 @@ def run(no_build: bool) -> int:
                 big = page.eval_on_selector_all("#cityScore circle",
                     "e=>e.filter(x=>x.getAttribute('stroke')==='var(--ink)').map(x=>+x.getAttribute('r'))")
                 other = page.eval_on_selector_all("#cityScore circle",
-                    "e=>e.filter(x=>x.getAttribute('stroke')!=='var(--ink)').map(x=>+x.getAttribute('r'))")
+                    "e=>e.filter(x=>x.getAttribute('stroke')!=='var(--ink)' && x.getAttribute('fill')!=='transparent').map(x=>+x.getAttribute('r'))")
                 chk.add(f"{scheme} city record: the observation is weighted above the forecasts",
                         bool(big) and bool(other) and min(big) > max(other), f"obs={sorted(set(big))} tools={sorted(set(other))}")
                 # highs are filled and lows hollow, so one palette serves both
@@ -421,14 +421,19 @@ def run(no_build: bool) -> int:
                     "e=>e.filter(x=>x.getAttribute('fill')==='var(--panel)').length")
                 chk.add(f"{scheme} city record: lows are hollow so the color can mean the tool",
                         hollow >= 5, f"hollow={hollow}")
-                bands = page.locator("#cityScore rect[fill='transparent']").count()
-                chk.add(f"{scheme} city record: one hover band per day", 1 <= bands <= 7, f"bands={bands}")
-                if bands:
-                    page.locator("#cityScore rect[fill='transparent']").nth(min(3, bands - 1)).hover(force=True)
+                hits = page.locator("#cityScore circle[fill='transparent']").count()
+                chk.add(f"{scheme} city record: every mark is its own hover target, with no day band",
+                        hits >= 10 and page.locator("#cityScore rect[fill='transparent']").count() == 0, f"hits={hits}")
+                chk.add(f"{scheme} city record: the normal high and low are drawn across the week",
+                        page.locator("#cityScore text", has_text="normal high").count() >= 1
+                        and page.locator("#cityScore text", has_text="normal low").count() >= 1, "")
+                if hits:
+                    page.locator("#cityScore circle[fill='transparent']").nth(min(3, hits - 1)).hover(force=True)
                     page.wait_for_timeout(250)
                     t_cs = page.locator("#tip").inner_text()
-                    chk.add(f"{scheme} city record: the box gives each tool's value and its error",
-                            "Observed high / low" in t_cs and "National Weather Service" in t_cs, t_cs[:80])
+                    chk.add(f"{scheme} city record: a dot names its tool, its value, its error and when it was issued",
+                            ("Forecast high" in t_cs or "Forecast low" in t_cs or "Value" in t_cs)
+                            and ("Error" in t_cs or "settles" in t_cs), t_cs[:110])
 
                 # ---- the catalogue pages
                 page.goto(f"{srv.url}/section.html?s=energy"); page.wait_for_timeout(800)
@@ -812,14 +817,14 @@ def run(no_build: bool) -> int:
                 page.wait_for_timeout(900)
                 vb_off = page.locator("#chart").get_attribute("viewBox")
                 ladder_off = page.locator("#chart text", has_text="Strike ladders").count()
-                chk.add(f"{scheme} market off: weather-only height, no ladder", vb_off == "0 0 960 390" and ladder_off == 0, f"viewBox={vb_off} ladder={ladder_off}")
+                chk.add(f"{scheme} market off: weather-only height, no ladder", vb_off == "0 0 960 488" and ladder_off == 0, f"viewBox={vb_off} ladder={ladder_off}")
                 page.goto(f"{srv.url}/city.html?station=KLGA&market=on")
                 page.wait_for_timeout(900)
                 vb_on = page.locator("#chart").get_attribute("viewBox")
                 ladder_on = page.locator("#chart text", has_text="Strike ladders").count()
                 picks = page.locator("#chart text.strikepick").count()
                 chk.add(f"{scheme} market on: ladder layout, and every strike is a switch",
-                        vb_on == "0 0 960 655" and ladder_on == 1 and picks >= 6,
+                        vb_on == "0 0 960 819" and ladder_on == 1 and picks >= 6,
                         f"viewBox={vb_on} ladder={ladder_on} switches={picks}")
                 live_lbl = page.locator("#chart text", has_text="ForecastEx quotes").count()
                 chk.add(f"{scheme} market on: ladder labeled with the exchange and its as-of time", live_lbl == 1, f"count={live_lbl}")
@@ -2110,8 +2115,12 @@ def run(no_build: bool) -> int:
                 }""")
                 chk.add(f"{scheme} locator: the regional frame carries the live overlay",
                         bool(loc and loc["region"] and loc["dots"] >= 6 and loc["temps"] >= 3), str(loc)[:160])
-                chk.add(f"{scheme} locator: the resolving station is ringed and named as the one that settles",
-                        bool(loc and loc["ring"] and "settles on" in loc["cap"]), str(loc and loc["cap"])[:120])
+                chk.add(f"{scheme} locator: the resolving station is ringed and labeled on the map",
+                        bool(loc and loc["ring"]) and page.locator("#locator .locbox svg text", has_text="settlement station").count() >= 1,
+                        str(loc and loc["cap"])[:120])
+                chk.add(f"{scheme} locator: how far across the picture is, is drawn on the picture",
+                        page.locator("#locator .locbox svg text", has_text="miles").count() >= 1
+                        or page.locator("#locator .locbox svg text", has_text="mile").count() >= 1, "")
                 sst = page.evaluate("""() => {
                   const svg = document.querySelector('#locator .locbox svg');
                   if (!svg) return null;
@@ -2188,7 +2197,7 @@ def run(no_build: bool) -> int:
                         str(zo and {"natural": zo["natural"], "logical": zo["logical"]}))
                 chk.add(f"{scheme} locator: the key explains the glyph, the cover and the barbs",
                         bool(geom and geom["hasKey"]
-                             and "SKY COVER" in geom["keyText"] and "WIND, KNOTS" in geom["keyText"]
+                             and "SKY COVER" in geom["keyText"] and "WIND, MPH" in geom["keyText"]
                              and "Dew point" in geom["keyText"] and "Wind, from" in geom["keyText"]),
                         str(geom and geom["keyText"])[:110])
                 chk.add(f"{scheme} locator: the key sits where it covers no station",
@@ -2257,13 +2266,9 @@ def run(no_build: bool) -> int:
                         str(sp and {k: sp[k] for k in ('canon', 'card')})[:130])
                 chk.add(f"{scheme} station page: the calculator opens on this station",
                         bool(sp and sp["alloc"] and sp["alloc"].endswith("city:KSFO")), str(sp and sp["alloc"]))
-                # what the page says about its station in words, which is the
-                # part a search reaches and the only part readable without the
-                # scripts having run
-                about = page.locator("#cityAbout").inner_text()
-                chk.add(f"{scheme} station page: it names the city's weather and what settles the contracts",
-                        "San Francisco weather" in about and "KSFO) is the weather station" in about
-                        and "METAR" in about and "whole degrees Fahrenheit" in about, about[:120])
+                # the per-station prose block was removed on the owner's call
+                chk.add(f"{scheme} station page: no per-station prose block",
+                        page.locator("#cityAbout").count() == 0, "")
                 # the tag a search result reads, and the title the chart leaves
                 # behind once it has drawn, which a rendering crawler reads instead
                 chk.add(f"{scheme} station page: the title carries the city's weather and its market",
@@ -2293,7 +2298,7 @@ def run(no_build: bool) -> int:
                   document.querySelector('#dayTomorrow').click();
                   await new Promise(r => setTimeout(r, 400));
                   const tmwSynced = document.querySelector('#advTmw').classList.contains('on')
-                    && ((document.querySelector('#advCap') || {}).textContent || '').indexOf('day-ahead') >= 0
+                    && document.querySelector('#advTmw').classList.contains('on')
                     && !!svg();
                   document.querySelector('#dayToday').click();
                   await new Promise(r => setTimeout(r, 300));
@@ -2307,16 +2312,15 @@ def run(no_build: bool) -> int:
                            mph: texts.some(t => / mph$/.test(t)),
                            styles: [...dashes].sort(),
                            today: before, yday,
-                           anchored: cap.indexOf('six the evening before') >= 0 && cap.indexOf('Issued ') >= 0,
-                           issuedTimes: /Weather Service \d/.test(cap),
+                           noCap: cap.trim() === '',
                            discBeside: !!disc,
                            share: cardW / chartW };
                 }""")
                 chk.add(f"{scheme} advanced: the panels draw without a click, both days one toggle apart",
                         bool(av and av["today"] > 100 and av["yday"] > 100),
                         str(av and {k: av[k] for k in ('today', 'yday')}))
-                chk.add(f"{scheme} advanced: the postmortem says it reads the anchored cycle",
-                        bool(av and av["anchored"]), str(av and av["anchored"]))
+                chk.add(f"{scheme} advanced: no caption under the panels",
+                        bool(av and av["noCap"]), str(av and av["noCap"]))
                 chk.add(f"{scheme} advanced: the Weather Service draws with the guidance tools",
                         bool(av and av["nws"]), str(av and av["nws"]))
                 chk.add(f"{scheme} advanced: temperature appears once, at the top",
@@ -2326,8 +2330,6 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} advanced: the tools keep the main chart's line styles",
                         bool(av and "5 4" in av["styles"] and "1 3" in av["styles"]),
                         str(av and av["styles"]))
-                chk.add(f"{scheme} advanced: the caption names issuance times, not the bare word",
-                        bool(av and av["issuedTimes"]), "")
                 chk.add(f"{scheme} advanced: the chart's day-ahead button carries the panels with it",
                         bool(av and av["tmwSynced"]), str(av and av["tmwSynced"]))
                 chk.add(f"{scheme} advanced: every line carries dots at its own readings",
@@ -2943,7 +2945,7 @@ def run(no_build: bool) -> int:
             page.wait_for_timeout(900)
             chk.add("embed: city series render", page.locator("#chart path").count() > 0)
             chk.add("embed: no site chrome", page.locator("header.site").count() == 0 and page.locator("footer.site").count() == 0)
-            chk.add("embed: market off by default (weather-only height)", page.locator("#chart").get_attribute("viewBox") == "0 0 960 390")
+            chk.add("embed: market off by default (weather-only height)", page.locator("#chart").get_attribute("viewBox") == "0 0 960 488")
             chk.add("embed: theme parameter applied", page.evaluate("document.documentElement.getAttribute('data-theme')") == "light")
             page.screenshot(path=os.path.join(OUT, "embed-light.png"), full_page=True)
             page.goto(f"{emb.url}/?station=KPHX&theme=dark&market=on")

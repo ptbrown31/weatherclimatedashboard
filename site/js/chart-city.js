@@ -62,6 +62,11 @@ window.WXCity = (() => {
     const d = M && on === M.day ? 'T' : (M && on === M.yesterday ? 'Y' : '');
     return (h % 12 || 12) + (h < 12 ? 'a' : 'p') + (d ? ' ' + d : '');
   }
+  // a run's name: the tool, then when that run was issued
+  const runName = (base, cyc, tz, M) => {
+    const t = cyc ? issuedTag(parseStamp(cyc), tz, M) : '';
+    return t ? base + ' ' + t : base;
+  };
   const sw = col => '<span class="sw" style="background:' + col + '"></span>';
   const cents = v => (v == null ? '—' : v + '¢');
   const size = n => (n ? ' ×' + Math.round(n) : '');
@@ -116,17 +121,35 @@ window.WXCity = (() => {
 
   const impliedState = m => ({ unavailable: 'quotes unavailable', unlisted: 'no market listed', day: 'quote summary is for another day',
                                 'tomorrow-unlisted': 'tomorrow’s contracts not listed yet', 'no-bids': 'no bids yet' })[m && m.state] || null;
-  // a picker dot: tomorrow's numbers against the forecast, then today so far
+  /* The pickers read the way the landing map reads.
+
+     The market has sat below the NWS forecast on highs on nearly every day
+     measured, so coloring by the raw sign paints every dot one color and says
+     nothing. The landing map centers on the typical gap across the stations
+     priced that day and colors the deviation from it; these maps do the same,
+     off the same numbers, so a dot means one thing on both pages. */
+  const MIN_FOR_BASE = 5;
+  let gapBase = 0, gapN = 0;
+  function computeBase() {
+    const v = (summary.cities || []).map(c => (WXM.on() ? (WXM.implied(c) || {}).divHigh : null))
+      .filter(x => x != null);
+    gapN = v.length;
+    if (!v.length) { gapBase = 0; return; }
+    const a = v.slice().sort((x, y) => x - y), i = a.length >> 1;
+    gapBase = v.length >= MIN_FOR_BASE
+      ? Math.round((a.length % 2 ? a[i] : (a[i - 1] + a[i]) / 2) * 10) / 10 : 0;
+  }
+  // a picker dot: the same box the landing map shows for the same station
   function pickTip(c) {
     const m = WXM.on() ? WXM.implied(c) : null, mk = c.markers || {};
     const gap = (v, ref) => (v != null && ref != null ? ' (' + (v - ref > 0 ? '+' : '') + (Math.round((v - ref) * 10) / 10) + '°)' : '');
     const rows = [
       ['NWS high / low, tomorrow', c.nwsHighTomorrow != null || c.nwsLowTomorrow != null ? WXC.deg(c.nwsHighTomorrow) + ' / ' + WXC.deg(c.nwsLowTomorrow) : null],
-      ['NBM high / low, tomorrow', c.nbmHighTomorrow != null ? WXC.deg(c.nbmHighTomorrow) + ' / ' + WXC.deg(c.nbmLowTomorrow) : null],
+      ['Blend of Models high / low, tomorrow', c.nbmHighTomorrow != null ? WXC.deg(c.nbmHighTomorrow) + ' / ' + WXC.deg(c.nbmLowTomorrow) : null],
+      ['GFS MOS high, tomorrow', c.mavHighTomorrow != null ? WXC.deg(c.mavHighTomorrow) : null],
       ['Implied high (' + (WXM.live() ? 'ForecastEx' : 'placeholder') + ')', m ? (m.impliedHigh != null ? WXC.deg(m.impliedHigh) + gap(m.impliedHigh, c.nwsHighTomorrow) : (m.edgeHigh ? 'beyond the ladder (' + m.edgeHigh + ')' : impliedState(m))) : null],
       ['Implied low (' + (WXM.live() ? 'ForecastEx' : 'placeholder') + ')', m ? (m.impliedLow != null ? WXC.deg(m.impliedLow) + gap(m.impliedLow, c.nwsLowTomorrow) : (m.edgeLow ? 'beyond the ladder (' + m.edgeLow + ')' : impliedState(m))) : null],
       ['NWS high issued for today', c.nwsIssuedHigh != null ? WXC.deg(c.nwsIssuedHigh) : null],
-      ['Expected high today', c.nwsHighToday != null ? WXC.deg(c.nwsHighToday) + (c.nwsHighTodayRunning ? ' (already recorded)' : '') : null],
       ['Observed so far today', c.obsHighSoFar != null ? WXC.deg(c.obsHighSoFar) + ' / ' + WXC.deg(c.obsLowSoFar) : null],
       ['Latest report', c.obsLatest && c.obsLatest.t ? (c.obsLatest.type || 'METAR') + ' ' + WXC.clock(Date.parse(c.obsLatest.t), c.tz) : null],
     ];
@@ -139,13 +162,13 @@ window.WXCity = (() => {
   // the same forecast. It is the wider layout, not a different chart.
   function layout(market, full) {
     if (market && full) {
-      return { W: 960, H: 655, L: 52, R: 548, T: 36, B: 346, PH0: 404, PH1: 494, PL0: 526, PL1: 616,
+      return { W: 960, H: 819, L: 52, R: 548, T: 45, B: 433, PH0: 505, PH1: 618, PL0: 658, PL1: 770,
                GV: 552, GL0: 578, GL1: 594, GN: 598, LX: 726, LW: 96, LX2: 848, LW2: 96, full: true };
     }
     return market
-      ? { W: 960, H: 655, L: 52, R: 610, T: 36, B: 346, PH0: 404, PH1: 494, PL0: 526, PL1: 616,
+      ? { W: 960, H: 819, L: 52, R: 610, T: 45, B: 433, PH0: 505, PH1: 618, PL0: 658, PL1: 770,
           GV: 614, GL0: 646, GL1: 668, GN: 672, LX: 790, LW: 130 }
-      : { W: 960, H: 390, L: 52, R: 760, T: 36, B: 346, GV: 764, GL0: 796, GL1: 818, GN: 822 };
+      : { W: 960, H: 488, L: 52, R: 760, T: 45, B: 433, GV: 764, GL0: 796, GL1: 818, GN: 822 };
   }
 
   // ---- pickers: two small maps replace a dropdown. With the market layer
@@ -167,7 +190,12 @@ window.WXCity = (() => {
     svg.appendChild(g);
   }
   function dotValue(c) {
-    if (WXM.on()) { const m = WXM.implied(c); return m ? m.divHigh : null; }
+    if (WXM.on()) {
+      const m = WXM.implied(c);
+      const raw = m ? m.divHigh : null;
+      // the deviation from the day's typical gap, which is what the landing map draws
+      return raw == null ? null : (gapN >= MIN_FOR_BASE ? Math.round((raw - gapBase) * 10) / 10 : raw);
+    }
     // only the issued forecast, which is what the title claims. The standing
     // figure folds the observation into itself, so the difference would be zero
     // by construction rather than a comparison.
@@ -179,8 +207,11 @@ window.WXCity = (() => {
     const pt = $('#pickTitle');
     if (pt) pt.textContent = WXM.on()
       ? (WXM.live() ? 'United States — dot color and size: the market-implied high (ForecastEx) against tomorrow’s NWS forecast'
+                      + (gapN >= MIN_FOR_BASE ? ', measured from the typical gap of '
+                          + (gapBase > 0 ? '+' : '') + gapBase.toFixed(1) + '° across ' + gapN + ' stations' : '')
                     : 'United States — dot color and size: the placeholder implied high against tomorrow’s NWS forecast (not a market value)')
       : 'United States — dot color and size: observed so far against the NWS high issued for the day';
+    computeBase();
     svg.innerHTML = '';
     svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': 1 }));
     summary.cities.filter(c => c.onConus).forEach(c => pickDot(svg, c, c.px, c.py, 1));
@@ -256,9 +287,12 @@ window.WXCity = (() => {
         const py = lat => H2 / 2 - ((lat - c.lat) * 110.574) / m.halfHKm * (H2 / 2);
         const rows0 = (ob && ob.rows) || [];
         const centreTemp = rows0.length ? rows0[rows0.length - 1].tempF : null;
+        // the reports carry knots, which is the barb's own convention; the
+        // numbers a reader is given are the ones the rest of the page uses
+        const MPH = kt => Math.round(kt * 1.15078);
         const wind = n => (n.wspd == null ? null
-          : (n.wdir != null ? n.wdir + '\u00b0 at ' : '') + n.wspd + ' kt'
-            + (n.wgst ? ', gusting ' + n.wgst : ''));
+          : (n.wdir != null ? WXC.compass(n.wdir) + ' at ' : '') + MPH(n.wspd) + ' mph'
+            + (n.wgst ? ', gusting ' + MPH(n.wgst) : ''));
         const COVER_FRAC = { CLR: 0, SKC: 0, CAVOK: 0, FEW: 0.25, SCT: 0.5, BKN: 0.75, OVC: 1, OVX: 1, VV: 1 };
         const COVER_NAME = { CLR: 'clear', SKC: 'clear', CAVOK: 'clear', FEW: 'few clouds', SCT: 'scattered',
                              BKN: 'broken', OVC: 'overcast', OVX: 'sky obscured', VV: 'sky obscured' };
@@ -347,7 +381,7 @@ window.WXCity = (() => {
               seg(t1x, t1y, t1x + bx2 * bl * 0.55, t1y + by3 * bl * 0.55, 1.6);
             }
             if (n.wgst) {
-              g.appendChild(txt('G' + n.wgst, { x: ex + ux * 7, y: ey + uy * 7 + 3,
+              g.appendChild(txt('G' + MPH(n.wgst), { x: ex + ux * 7, y: ey + uy * 7 + 3,
                                                 'text-anchor': 'middle', 'font-size': big ? 9.5 : 8.5,
                                                 'font-weight': 700, fill: col, 'pointer-events': 'none' }));
             }
@@ -483,8 +517,9 @@ window.WXCity = (() => {
             });
 
           // and the barbs, at the quantities they are built from
-          lab('WIND, KNOTS', 10, 168, 9.5, 'var(--navy)');
-          [[0, 'calm'], [5, '5'], [10, '10'], [15, '15'], [50, '50'], [65, '65']]
+          lab('WIND, MPH', 10, 168, 9.5, 'var(--navy)');
+          // the barb is built in knots; the label is the same wind in mph
+          [[0, 'calm'], [5, '6'], [10, '12'], [15, '17'], [50, '58'], [65, '75']]
             .forEach(([kt, name], i) => {
               const cx2 = 24 + i * 39;
               pad(g, cx2, 186, false);
@@ -497,6 +532,29 @@ window.WXCity = (() => {
       } else {
         // the image is centered on the station, so the marker is the middle of it
         stack.appendChild(h('span', { class: 'locpin' }));
+      }
+      /* How far across the picture is, drawn on it.
+
+         This was a sentence under the map saying it was about so many km
+         across, which asked the reader to hold a number and apply it to a
+         picture. A bar on the image is the same fact where it is used. */
+      {
+        const halfW = m.halfWKm || 12, W3 = m.w || 760, H3 = m.h || 475;
+        const pxPerMile = (W3 / (2 * halfW)) * 1.609344;
+        const want = W3 * 0.22 / pxPerMile;
+        const miles = [1, 2, 5, 10, 20, 50, 100].reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a), 1);
+        const bw = miles * pxPerMile, x0 = 14, y0 = H3 - 16;
+        const sc = el('svg', { viewBox: '0 0 ' + W3 + ' ' + H3, class: 'locov',
+                               style: 'position:absolute;inset:0;pointer-events:none' });
+        sc.appendChild(el('rect', { x: x0 - 6, y: y0 - 15, width: bw + 12, height: 25, rx: 4,
+                                    fill: 'var(--panel)', opacity: 0.86 }));
+        sc.appendChild(el('line', { x1: x0, y1: y0, x2: x0 + bw, y2: y0, stroke: 'var(--ink)', 'stroke-width': 2 }));
+        [x0, x0 + bw].forEach(xx => sc.appendChild(el('line', { x1: xx, y1: y0 - 5, x2: xx, y2: y0 + 3,
+                                                                stroke: 'var(--ink)', 'stroke-width': 2 })));
+        sc.appendChild(txt(miles + (miles === 1 ? ' mile' : ' miles'),
+                           { x: x0 + bw / 2, y: y0 - 7, 'text-anchor': 'middle', 'font-size': 10.5,
+                             'font-weight': 700, fill: 'var(--ink)' }));
+        stack.appendChild(sc);
       }
       box.classList.add('expandable');
       host.appendChild(box);
@@ -537,7 +595,6 @@ window.WXCity = (() => {
       // the expander raises a resize on the way both in and out
       window.addEventListener('resize', fit);
       fit();
-      const across = Math.round((m.halfWKm || 12) * 2);
       const bits = [c.city, c.station];
       if (c.lat != null && c.lon != null) {
         bits.push(Math.abs(c.lat).toFixed(3) + '\u00b0' + (c.lat >= 0 ? 'N' : 'S') + ' '
@@ -546,15 +603,7 @@ window.WXCity = (() => {
       const asof = region && snaps.ob && snaps.ob.asof
         ? ' Readings as of ' + WXC.clockFull(snaps.ob.asof, c.tz) + ', from aviationweather.gov METARs through this site\u2019s own snapshots.' : '';
       const capEl = h('div', { class: 'cap', style: 'margin:5px 0 0' });
-      capEl.innerHTML = esc(bits.join(' \u00b7 ')) + ' \u00b7 about ' + across + ' km across.<br>'
-        + (region ? 'The ringed station is the one the contract settles on; the others are the reporting fields '
-                    + 'around it, each drawn as a station model: temperature upper-left, dewpoint lower-left, '
-                    + 'the circle filled by cloud cover, and a wind barb pointing where the wind comes from, a '
-                    + 'half barb five knots, a full barb ten and a pennant fifty. A city\u2019s temperature varies '
-                    + 'with land cover, distance from the center, shade and water, so where each thermometer sits '
-                    + 'matters.'
-                  : 'The contract settles on this one station, and a city\u2019s temperature varies with land cover, '
-                    + 'distance from the center, shade and water, so where it sits matters.')
+      capEl.innerHTML = esc(bits.join(' \u00b7 '))
         + esc(asof) + ' Imagery: '
         + '<a href="https://basemap.nationalmap.gov/" target="_blank" rel="noopener noreferrer">USGS The '
         + 'National Map</a>, a work of the United States government.';
@@ -747,9 +796,10 @@ window.WXCity = (() => {
       // strength in the sources' own colors and today drops back to a
       // reference behind it, which is the comparison the button is for
       if (yObs.length) ySeries.push({ nm: 'Yesterday observed', pts: yObs, col: COL.obs, w: 2.4, dash: null, op: 1 });
-      [['nws', 'Yesterday NWS as issued', COL.nws], ['nbm', 'Yesterday NBM as issued', COL.nbm],
-       ['lamp', 'Yesterday LAMP as issued', COL.lamp]].forEach(([k, nm, col]) => {
+      [['nws', 'Yesterday NWS', COL.nws], ['nbm', 'Yesterday NBM', COL.nbm],
+       ['lamp', 'Yesterday LAMP', COL.lamp]].forEach(([k, nm0, col]) => {
         const y = YD[k]; if (!y) return;
+        const nm = runName(nm0, y.cycle, tz, M);
         const pts = rows(y.rows).map(p => ({ t: p.t + DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1);
         if (pts.length) ySeries.push({ nm, pts, col, w: 2, dash: '6 3', op: 1 });
       });
@@ -823,7 +873,12 @@ window.WXCity = (() => {
       .concat(ySeries.flatMap(s => s.pts.map(p => p.v))).concat(levels.map(l => l.v)).concat(normals.map(n => n.v))
       .concat(lad ? lad.high.map(l => l.strike).concat(lad.low.map(l => l.strike)) : []);
     if (!temps.length) temps.push(unit === 'F' ? 70 : 20);
-    const lo = Math.floor(Math.min(...temps) / step) * step - step / 2, hi = Math.ceil(Math.max(...temps) / step) * step + step / 2;
+    /* The axis holds the data with a hair of air, not a rounded band around it.
+       Rounding out to the next whole step and then adding half a step again put
+       up to a step and a half of empty chart above and below the readings. */
+    const tmin = Math.min(...temps), tmax = Math.max(...temps);
+    const airT = Math.max((tmax - tmin) * 0.04, step / 4);
+    const lo = tmin - airT, hi = tmax + airT;
     const y = v => S.B - (v - lo) / (hi - lo) * (S.B - S.T);
     const lx = p => S.LX + (p / 100) * S.LW;
     const rightEdge = market ? S.LX + S.LW : S.R;
@@ -869,6 +924,15 @@ window.WXCity = (() => {
       marks.push(['tomorrow’s sunset', ss + DAYMS, '#e0a020', '3 3']);
     }
     if (market && M.listed) marks.unshift(['listed', P(M.listed), 'var(--muted)', null]);
+    /* The stretch to the left of midnight is the day before, when the board is
+       open and quoted but nothing the station reports counts. Saying so where
+       it sits is worth more than a line in a caption under the chart. */
+    if (d0 > w0) {
+      const midX = (x(w0) + x(d0)) / 2;
+      g.appendChild(txt('trading active, but observations do not count toward resolution',
+        { x: midX, y: S.T + 13, 'text-anchor': 'middle', class: 'ax', 'font-style': 'italic',
+          fill: 'var(--muted)', 'pointer-events': 'none' }));
+    }
     const MARK_NOTE = { midnight: 'the contract day begins (station local time)', sunrise: 'NOAA solar approximation for the station', sunset: 'NOAA solar approximation for the station',
       'tomorrow’s midnight': 'the day-ahead contract day begins (station local time)',
       'tomorrow’s sunrise': 'the same solar approximation carried forward one day',
@@ -1023,11 +1087,11 @@ window.WXCity = (() => {
     if (F.length) g.appendChild(line(F, { stroke: COL.nws, 'stroke-width': 2.4, opacity: od(.95) }));
     const obsMeta = {};
     ((ob && ob.rows) || []).forEach(r => { obsMeta[P(r.t)] = r; });
-    const obsTip = p => { const r = obsMeta[p.t] || {}; const inDay = p.t >= d0 && p.t < d1; return tip.rows((r.type || 'METAR') + ' observation' + (inDay ? '' : ' — before the contract day'), [
-      ['Time', WXC.clockFull(p.t, tz) + ' · ' + WXC.dateShort(p.t, tz)], ['Temperature', WXC.deg(p.v)],
-      ['Decoded from', SRC[r.src] || r.src || null],
-      ['Counts toward ' + isoDate(M.day).replace(/, \d{4}$/, '') + ' settlement', inDay ? (r.type === 'SPECI' ? 'yes (SPECI reports count)' : 'yes') : 'no (outside the contract day)'],
-    ], 'aviationweather.gov METAR · the crosshair lists every series at this time'); };
+    // the reading and when it was taken, to the tenth the report carries
+    const obsTip = p => { const r = obsMeta[p.t] || {}; return tip.rows((r.type || 'METAR'), [
+      ['Time', WXC.clockFull(p.t, tz) + ' · ' + WXC.dateShort(p.t, tz)],
+      ['Temperature', p.v.toFixed(1) + '°'],
+    ]); };
     if (O.length) {
       g.appendChild(line(O, { stroke: COL.obs, 'stroke-width': 2, opacity: od(1) }));
       O.forEach(p => { g.appendChild(el('circle', { cx: x(p.t), cy: y(p.v), r: 1.9, fill: COL.obs, opacity: od(1) })); g.appendChild(bind(el('circle', { cx: x(p.t), cy: y(p.v), r: 5, fill: 'transparent', 'pointer-events': 'all' }), () => obsTip(p), false)); });
@@ -1237,9 +1301,17 @@ window.WXCity = (() => {
     g.appendChild(txt('Temperature (°' + unit + '), local time' + (unit === 'C' ? ' — Celsius station' : ''), { x: S.W - 14, y: 16, 'text-anchor': 'end', class: 'axl' }));
 
     HV = { w0, d1, tz, S, market,
-      series: [{ nm: 'Observed', pts: O, col: COL.obs }, { nm: 'NWS now', pts: F, col: COL.nws }, { nm: 'NBM', pts: N, col: COL.nbm },
-               { nm: 'LAMP', pts: LA, col: COL.lamp }, { nm: 'NWS as issued', pts: A, col: COL.nws }, { nm: 'NBM as issued', pts: NA, col: COL.nbm },
-               { nm: 'LAMP as issued', pts: LAI, col: COL.lamp }]
+      /* Every run is named by when it was issued, the same "8p Y" the level
+         labels on the right carry. "Now" against "as issued" was a category the
+         reader had to learn; an issue time is the fact behind it and answers the
+         question that category was standing in for. */
+      series: [{ nm: 'Observed', pts: O, col: COL.obs },
+               { nm: runName('NWS', fc && fc.nws && fc.nws.cycle, tz, M), pts: F, col: COL.nws },
+               { nm: runName('NBM', fc && fc.nbm && fc.nbm.cycle, tz, M), pts: N, col: COL.nbm },
+               { nm: runName('LAMP', fc && fc.lamp && fc.lamp.cycle, tz, M), pts: LA, col: COL.lamp },
+               { nm: runName('NWS', AI.nws && AI.nws.cycle, tz, M), pts: A, col: COL.nws },
+               { nm: runName('NBM', AI.nbm && AI.nbm.cycle, tz, M), pts: NA, col: COL.nbm },
+               { nm: runName('LAMP', AI.lamp && AI.lamp.cycle, tz, M), pts: LAI, col: COL.lamp }]
         .concat(YU)
         .concat(ySeries.map(s => ({ nm: s.nm, pts: s.pts, col: s.col }))).filter(s => s.pts.length),
       prices: priceSer };

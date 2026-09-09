@@ -16,6 +16,7 @@
    real and stating them is the point. */
 window.WXCityScore = (() => {
   const { el, txt, h, $ } = WXC;
+  const SHOW_BAND = false;   // a dot answers for itself now
   const SERIES = [
     { k: 'nws', name: 'National Weather Service', col: 'var(--nws)' },
     { k: 'nbm', name: 'Blend of Models', col: 'var(--nbm)' },
@@ -62,7 +63,15 @@ window.WXCityScore = (() => {
     const days = st.days.slice(0, DAYS).slice().reverse();
 
     const W = 960, H = 380, L = 52, R = 830, T = 20, B = 316;
+    // NCEI's daily normal for this station, drawn on the panel and therefore
+    // part of what the axis has to hold
+    const nmz = await WXD.get('normals/' + station + '.json', 1440).catch(() => null);
+    // keyed by month-day; the panel's own last day is the one to read
+    const nmdays = nmz && nmz.data && nmz.data.days;
+    const lastDay = days.length ? days[days.length - 1].date : null;
+    const nmd = (nmdays && lastDay) ? nmdays[lastDay.slice(5)] : null;
     const vals = [];
+    if (nmd) { [nmd.tmax, nmd.tmin].forEach(v => { if (v != null) vals.push(v); }); }
     days.forEach(d => {
       if (d.obsHigh != null) vals.push(d.obsHigh);
       if (d.obsLow != null) vals.push(d.obsLow);
@@ -132,21 +141,69 @@ window.WXCityScore = (() => {
       cx, cy, r: rad, fill: filled ? col : 'var(--panel)', stroke: col,
       'stroke-width': filled ? 0.8 : 1.8, 'pointer-events': 'none' }));
 
+    /* The normal high and low, the same pair the chart above draws.
+
+       A week of dots says how the tools did against each other; the normals say
+       what the week itself was, which is the question a reader brings to a run
+       of hot days. NCEI's daily normal for the station, flat across the panel. */
+    if (nmd && (nmd.tmax != null || nmd.tmin != null)) {
+      [['normal high', nmd.tmax, 'var(--warm)'], ['normal low', nmd.tmin, 'var(--cool)']].forEach(([nm, v, col]) => {
+        if (v == null) return;
+        svg.appendChild(el('line', { x1: L, x2: R, y1: y(v), y2: y(v), stroke: col, 'stroke-width': 1,
+                                     'stroke-dasharray': '5 4', opacity: .8, 'pointer-events': 'none' }));
+        svg.appendChild(txt(nm + ' ' + v.toFixed(0) + '\u00b0', { x: R - 3, y: y(v) - 3, 'text-anchor': 'end',
+                                                                  class: 'axl', fill: col }));
+      });
+    }
+
+    /* Every mark answers for itself.
+
+       One box per day listed all five tools whichever dot the pointer was on,
+       so the reader had to find the row for the mark they were pointing at. A
+       dot now carries its own value, its error, and the moment its forecast was
+       issued, which for the market is the moment its quote was read. */
+    // the station's own clock, which is the one every cycle time is quoted in
+    const tz = st.tz || (window.WX_CITY && WX_CITY.tz) || undefined;
+    const stamp = t => { const ms = Date.parse(t || ''); return isFinite(ms) ? WXC.clockFull(ms, tz) + ' · ' + WXC.dateShort(ms, tz) : null; };
+    const hit = (cx, cy, html) => {
+      const h2 = el('circle', { cx, cy, r: 7, fill: 'transparent' });
+      h2.addEventListener('mousemove', e => tip.show(e, html()));
+      h2.addEventListener('mouseleave', () => tip.hide());
+      svg.appendChild(h2);
+    };
     days.forEach((d, i) => {
       SERIES.forEach((sr, j) => {
         const f = d[sr.k]; if (!f) return;
         const cx = x(i) + (j - (SERIES.length - 1) / 2) * spread;
-        if (f.high != null) dot(cx, y(f.high), sr.col, true, 3.4);
-        if (f.low != null) dot(cx, y(f.low), sr.col, false, 3.4);
+        [['high', f.high, f.errHigh, true], ['low', f.low, f.errLow, false]].forEach(([side, v, err, filled]) => {
+          if (v == null) return;
+          dot(cx, y(v), sr.col, filled, 3.4);
+          const when = sr.k === 'fx'
+            ? ['Quote read at', stamp(f.asof)]
+            : ['Cycle issued', stamp(side === 'high' ? (f.cycleHigh || f.cycle) : (f.cycleLow || f.cycle))];
+          hit(cx, y(v), () => tip.rows(
+            '<span class="sw" style="background:' + sr.col + '"></span>' + sr.name + ' · ' + side + ' · ' + dlab(d.date),
+            [[side === 'high' ? 'Forecast high' : 'Forecast low', v.toFixed(1) + '°'],
+             ['Observed', (side === 'high' ? d.obsHigh : d.obsLow) == null ? '—'
+               : (side === 'high' ? d.obsHigh : d.obsLow).toFixed(1) + '°'],
+             ['Error', err == null ? '—' : (err > 0 ? '+' : '') + err.toFixed(1) + '°'],
+             when,
+             sr.k === 'fx' ? null : ['Lead on the day', f.lead != null ? leadText(f.lead) : null]]));
+        });
       });
     });
     days.forEach((d, i) => {
-      if (d.obsHigh != null) dot(x(i), y(d.obsHigh), 'var(--ink)', true, 5);
-      if (d.obsLow != null) dot(x(i), y(d.obsLow), 'var(--ink)', false, 5);
+      [['high', d.obsHigh, true], ['low', d.obsLow, false]].forEach(([side, v, filled]) => {
+        if (v == null) return;
+        dot(x(i), y(v), 'var(--ink)', filled, 5);
+        hit(x(i), y(v), () => tip.rows('Observed ' + side + ' · ' + dlab(d.date),
+          [['Value', v.toFixed(1) + '°']], 'the METAR record the contract settles on'));
+      });
     });
 
-    // one hover band per day, carrying that day in full
+    // the shaded columns still mark which days the panel below opens out
     days.forEach((d, i) => {
+      if (!SHOW_BAND) return;
       const band = el('rect', { x: x(i) - wBand / 2, y: T, width: wBand, height: B - T, fill: 'transparent' });
       const rows = [['Observed high / low',
                      (d.obsHigh == null ? '—' : d.obsHigh.toFixed(1) + '°') + ' / '
@@ -168,18 +225,7 @@ window.WXCityScore = (() => {
       svg.appendChild(band);
     });
 
-    if (key) {
-      key.innerHTML = SERIES.map(s => '<span><i style="border-color:' + s.col + '"></i>' + s.name + '</span>').join('')
-        + '<span><i style="border-color:var(--ink);border-width:3px"></i><b>Observed</b></span>'
-        + '<span>a filled dot is the daily high, a hollow one the daily low</span>';
-    }
-    if (cap) {
-      cap.textContent = 'The last ' + days.length + ' scored day' + (days.length === 1 ? '' : 's')
-        + ' at this station. A missing dot is a day that tool was not archived for, which is why some tools start '
-        + 'later than others; the record grows by a day every day. Tools are nudged apart within each day so an '
-        + 'agreed forecast still shows every one of them. The ForecastEx line is the strike where the Yes '
-        + 'price crosses 50 cents, read from the last quote before local midnight.';
-    }
+    // the plot labels its own series, so a key under it says the same thing twice
   }
 
   /* The scored days for this station, as a table.
@@ -290,18 +336,33 @@ window.WXCityScore = (() => {
       });
       t.appendChild(tr);
     });
+
+    /* The mean of the column, under it.
+
+       A reader comparing tools down fourteen rows was doing the averaging by
+       eye. The error columns are the ones that settle it, so those carry the
+       mean error and the mean absolute error under it, and the temperature
+       columns carry the plain mean of what was forecast. Days a tool was not
+       archived for are left out of its own mean rather than counted as zero. */
+    const mean = v => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null);
+    const col = pick => mean(days.map(pick).filter(v => v != null && !isNaN(v)));
+    const mr = h('tr', { class: 'meanrow' }, [h('td', { text: 'Mean' })]);
+    [d => d.obsHigh, d => d.obsLow].forEach(pick => mr.appendChild(h('td', { class: 'num obs', text: f1(col(pick)) })));
+    SERIES.forEach(sr => {
+      [['high', 'errHigh'], ['low', 'errLow']].forEach(([vk, ek], i) => {
+        const td = h('td', { class: 'num' + (i === 0 ? ' gs' : ''), text: f1(col(d => (d[sr.k] || {})[vk])) });
+        if (i === 0) td.style.borderLeftColor = sr.col;
+        mr.appendChild(td);
+        const me = col(d => (d[sr.k] || {})[ek]);
+        const mae = col(d => { const e = (d[sr.k] || {})[ek]; return e == null ? null : Math.abs(e); });
+        mr.appendChild(h('td', { class: 'num err', text: me == null ? '\u2014' : sgn(me) + ' (' + mae.toFixed(1) + ')' }));
+      });
+    });
+    t.appendChild(mr);
     host.appendChild(h('div', { class: 'card', style: 'padding:0;overflow-x:auto' }, [t]));
     host.appendChild(h('p', { class: 'cap',
-      text: 'The last ' + days.length + ' scored day' + (days.length === 1 ? '' : 's') + ' at this station, in '
-            + (st.unit || '°F') + '. Every tool is read at one moment, six in the evening, this station\u2019s own '
-            + 'time, the day before. What differs is how stale each one\u2019s standing run was by then. Hourly guidance '
-            + 'is half an hour old, a four-times-daily model several hours, and the hours under each name are that '
-            + 'run\u2019s distance from midnight. The market column is the last quote before the same moment. '
-            + 'Every temperature is tinted on the same scale the national map uses, so the coldest reading in the '
-            + 'table is the palest and the warmest the deepest. err is the forecast minus what was observed, so a '
-            + 'positive number is a forecast that ran warm; those columns carry their own scale, red for warm and '
-            + 'blue for cold against a five-degree miss, so the sign of an error reads before the number does. '
-            + 'A dash is a day that tool was not archived for.' }));
+      text: 'The mean row carries each column\u2019s average, and under err the mean error with the mean absolute '
+            + 'error beside it in brackets.' }));
   }
 
   function init() { tip = WXC.tooltip(); }

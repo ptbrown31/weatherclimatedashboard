@@ -301,9 +301,14 @@ window.WXC = (() => {
      asset. The build writes a hash per file and the url carries it, so the
      address changes exactly when the content does. Without a stamp the plain
      path is used, which is what local mode and any older build serve. */
+  // the sixteen-point compass a wind is named by, from a bearing in degrees
+  const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                   'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  const compass = deg => (deg == null || isNaN(deg) ? '' : COMPASS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16]);
+
   const asset = name => 'assets/' + name
     + (window.WX && WX.assetV && WX.assetV[name] ? '?v=' + WX.assetV[name] : '');
 
   return {
-    asset, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref };
+    asset, compass, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref };
 })();

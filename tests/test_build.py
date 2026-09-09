@@ -213,22 +213,6 @@ class StationPage(unittest.TestCase):
         self.assertIn("°C", build.meta_of(out, "description"))
         self.assertNotIn("og:image", out)
 
-    def test_the_page_says_what_the_station_is_before_the_chart_is_drawn(self):
-        # everything else here is drawn from the snapshots by script, so this
-        # paragraph is all a crawler and a first-time reader have
-        out = build.strip_tags(self.page())
-        self.assertIn("San Francisco weather and the daily temperature contracts", out)
-        self.assertIn("KSFO) is the weather station the San Francisco daily temperature contracts settle on", out)
-        self.assertIn("whole degrees Fahrenheit", out)
-        self.assertIn("National Weather Service forecast", out)      # a US station has forecast tools drawn
-
-    def test_a_station_abroad_reads_in_celsius_and_claims_no_forecast_tools(self):
-        tpl = read("site", "city.html")
-        out = build.strip_tags(build.station_page(tpl, {"station": "YSSY", "city": "Sydney", "unit": "C"}, CFG))
-        self.assertIn("Sydney weather and the daily temperature contracts", out)
-        self.assertIn("whole degrees Celsius", out)
-        self.assertNotIn("National Blend of Models", out)
-
     def test_the_station_is_declared_before_the_chart_can_look_for_it(self):
         out = self.page()
         self.assertLess(out.index("window.WX_STATION"), out.index("js/chart-city.js"))
