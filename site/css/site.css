@@ -97,8 +97,10 @@ text{font-family:inherit}
 /* city page */
 .pickwrap{display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap;margin-bottom:6px}
 /* Each map takes the row it is on. Two fit only on a wide page, and there
-   they share the measure; below that they stack and each one fills it. */
-#pick,#pickW{flex:1 1 560px;width:auto;max-width:100%;display:block}
+   they share the measure; below that they stack and each one fills it. The
+   flex item is the wrapper the title sits in, not the svg inside it. */
+.pickwrap > div{flex:1 1 560px;min-width:0}
+#pick,#pickW{width:100%;max-width:100%;display:block}
 .pickttl{font-size:12px;color:var(--muted);margin:0 0 4px}
 #skRow{margin:12px 0 10px;font-size:12.5px}
 #skRow .lbl2{display:inline-block;width:88px;font-weight:620;color:var(--muted);font-size:12px}

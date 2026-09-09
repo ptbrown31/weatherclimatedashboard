@@ -302,7 +302,9 @@ window.WXCityScore = (() => {
       th.style.borderTopColor = sr.col;
       th.appendChild(h('span', { class: 'sw', style: 'background:' + sr.col }));
       th.appendChild(document.createTextNode(sr.name));
-      const lt = sr.k === 'fx' ? 'last quote before the day'
+      // the market is read at the same evening anchor as every model, so the
+      // column says the moment rather than a different rule
+      const lt = sr.k === 'fx' ? 'last quote before 6pm'
                                : leadText(leadOf(days, sr.k));
       if (lt) th.appendChild(h('span', { class: 'lead', text: lt }));
       hr1.appendChild(th);
