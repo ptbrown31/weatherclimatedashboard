@@ -240,6 +240,13 @@ window.WXCity = (() => {
     // read somewhere else, in a tab and in a search result, where the city's
     // weather is what the page is and the day is a detail of it
     document.title = (c.city || c.station) + ' weather' + (shown ? ', ' + shown : '') + ' (' + c.station + ')';
+    // the generated station pages carry this line already; the shared template
+    // route has no station until the script knows one, so it fills it here
+    const lede = $('#cityLede');
+    if (lede && !lede.textContent.trim()) {
+      lede.textContent = (c.city || c.station) + ' weather forecast, ' + c.station
+        + ' observations and daily high and low temperature prediction markets.';
+    }
   }
 
   /* A small map saying where this station is.
