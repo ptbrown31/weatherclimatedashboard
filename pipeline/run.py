@@ -29,6 +29,8 @@ Jobs:
     subhourly    the five minute stream between the hourly reports    (every 10 min)
     locator      a metro-scale map of each station, fetched once        (once a day)
     catquotes    prices for the catalogue's monthly and annual contracts   (every 30 min)
+    accuracy     the record builder's accuracy figures, copied from the
+                 archive prefix it writes to when its manifest changes  (every 30 min, after catquotes)
     daily        scorecard, normals, climate, season, catalogue, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
 """
@@ -44,7 +46,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report, severe
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report, severe, accuracy
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -65,6 +67,7 @@ def _register():
     JOBS["locator"] = locator.locator_pass
     JOBS["catquotes"] = catquotes.catquotes_pass
     JOBS["severe"] = severe.severe_pass
+    JOBS["accuracy"] = accuracy.accuracy_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -91,7 +94,10 @@ def _register():
     # headline reads snapshots the steps before it have just written, so it
     # goes last in both chains: after quotes for fresh prices, after the
     # scorecard for the day just scored
-    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes", "subhourly")
+    # accuracy sits after catquotes: it only copies files the builder has
+    # already pushed, so it needs no fresh input from the steps before it, and
+    # its one read of the manifest is cheap when nothing has changed
+    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes", "accuracy", "subhourly")
     # report last, so it reads the day traffic has just counted
     JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "severe", "catalogue", "series", "discussion", "locator", "headline", "traffic", "report")
     JOBS["market"] = chain("quotes", "reask", "headline")
@@ -101,7 +107,7 @@ def _register():
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.run", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | market | half-hourly | daily | all")
+    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | accuracy | market | half-hourly | daily | all")
     ap.add_argument("--config", help="path to site.json (default config/site.json)")
     ap.add_argument("--backend", choices=["local", "s3"], help="override storage backend")
     ap.add_argument("--root", help="local backend: data directory")

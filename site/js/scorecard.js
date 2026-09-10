@@ -584,7 +584,7 @@ window.WXScore = (() => {
       ], (S.sources || {})[src]);
     });
     host.appendChild(t);
-    host.appendChild(h('p', { class: 'cap', text: 'Forecasts are the cycle each source issued before local midnight; lead is hours from issuance to midnight. Error is forecast minus observed. Hover a cell for the cycle behind it.' }));
+    host.appendChild(h('p', { class: 'cap', text: 'Lead is the number of hours from the instant a forecast was available to the station-local midnight that ends the target day. Error is forecast minus observed. Hover a cell for the cycle behind it.' }));
   }
 
   async function init() {

@@ -54,6 +54,15 @@
       "Resource": ["arn:aws:iam::*:role/weather-tools-site-*"]
     },
     {
+      "Sid": "BuilderUser",
+      "Effect": "Allow",
+      "Action": ["iam:CreateUser", "iam:DeleteUser", "iam:GetUser", "iam:UpdateUser", "iam:TagUser",
+                 "iam:PutUserPolicy", "iam:DeleteUserPolicy", "iam:GetUserPolicy", "iam:ListUserPolicies",
+                 "iam:ListAttachedUserPolicies", "iam:CreateAccessKey", "iam:DeleteAccessKey", "iam:ListAccessKeys",
+                 "iam:UpdateAccessKey"],
+      "Resource": ["arn:aws:iam::*:user/weather-tools-site-*"]
+    },
+    {
       "Sid": "Schedules",
       "Effect": "Allow",
       "Action": ["scheduler:*"],

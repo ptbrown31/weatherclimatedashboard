@@ -3,59 +3,80 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Weather prediction market accuracy standings</title>
-<meta name="description" content="How accurate weather prediction markets have been against the National Weather Service and the other forecast tools, each read the evening before the day it forecasts.">
+<title>Weather prediction market accuracy</title>
+<meta name="description" content="How accurate ForecastEx daily temperature markets have been against eleven public forecast tools, scored on the same city-days at every lead, with calibration, a city map and a scorecard grid.">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
 </head>
 <body>
 <div class="wrap">
-<h1>Why prediction-market forecasts are accurate</h1>
-<p class="sub">The argument behind the daily standings, and the standings themselves. The day-by-day record they
-are drawn from is on the <a href="scorecard.html">scorecard</a>.</p>
-<div class="prose">
-<p>The standings published daily measure overall forecast accuracy across ForecastEx and eleven public forecast tools, averaged over a rolling 7-day window with a matched sample across every system.</p>
-<p>This constitutes <a href="https://www.interactivebrokers.com/campus/traders-insight/ibkr-climate-energy/prediction-markets-might-already-be-the-best-source-for-todays-weather-forecast/">ongoing evidence</a> that weather prediction markets like ForecastEx may be the most accurate short-range weather forecasts available, and the difference becomes greater as lead time decreases.</p>
-</div>
-
-<div class="secttl" style="margin-top:24px">MEASUREMENT</div>
-<p class="cap" style="margin-top:0">The exchange against LAMP, the National Weather Service&rsquo;s
-observation-updated aviation guidance, which is the one public product that reissues often enough to be compared
-at every lead. Each system&rsquo;s forecast of the daily high against the temperature the station recorded,
-pooled across every city and every hour of the day, plotted by how long before the end of the day it was made.
-Hover a point for the two errors and the number of city-days behind it. The other three systems this site tracks
-issue a few times a day and are compared on the <a href="scorecard.html">scorecard</a>.</p>
+<h1>Weather prediction market accuracy</h1>
+<p class="sub">ForecastEx daily high and low temperature markets scored against eleven public forecast tools, the National Weather Service point forecast, the National Blend of Models, the Aviation Forecast, the European, American, German, Canadian, UK, French and Japanese models and the German Statistical Model, on the same city-days at the same lead, against the temperature the station settled on.</p>
 <div class="bar"><span id="pageStatus"></span></div>
-<div class="card"><svg id="accChart" viewBox="0 0 960 430"></svg></div>
-<div class="key" id="accKey"></div>
-<p class="cap" id="accCap"></p>
 
-<div class="secttl" style="margin-top:26px">STANDINGS, LAST TWO SCORED WEEKS</div>
+<div class="secttl">LEAD CURVE</div>
+<p class="cap" style="margin-top:0">Mean absolute error of the market and of each tool against the settle, by hours before the end of the target day, on a matched sample with bootstrap bands.</p>
+<div class="bar acccontrols" id="accLeadBar"></div>
+<div class="card"><svg id="accLead" viewBox="0 0 960 430"></svg></div>
+<div class="key" id="accLeadKey"></div>
+<div id="accLeadMethod"></div>
+
+<div class="secttl">MARKET MOVEMENT BETWEEN FORECAST CYCLES</div>
+<p class="cap" style="margin-top:0">How far and how often the market's central value moves between the tools' forecast cycles, when it settles on the day's answer, how it responds to a tool update, and one city-day traced hour by hour.</p>
+<div class="bar acccontrols" id="accDynBar"></div>
+<div class="card"><div id="accDyn"></div></div>
+<div class="key" id="accDynKey"></div>
+<div id="accDynMethod"></div>
+
+<div class="secttl">CALIBRATION AND BRIER SCORE</div>
+<p class="cap" style="margin-top:0">Reliability of the Yes price against the share of contracts that paid, with the Brier score and its decomposition by lead, for the midpoint, the two-sided books and the Yes bid alone.</p>
+<div class="bar acccontrols" id="accCalBar"></div>
+<div class="card"><div id="accCal"></div></div>
+<div class="key" id="accCalKey"></div>
+<div id="accCalMethod"></div>
+
+<div class="secttl">CITY MAP</div>
+<p class="cap" style="margin-top:0">Market error against tool error at each of the 24 stations in the window a reader would use, the morning of the day, the evening before, or the newsletter's hours, with the paired difference and its interval.</p>
+<div class="bar acccontrols" id="accMapBar"></div>
+<div class="card"><svg id="accMap" viewBox="0 0 960 600"></svg></div>
+<div class="key" id="accMapKey"></div>
+<div id="accMapMethod"></div>
+
+<div class="secttl">SCORECARD GRID</div>
+<p class="cap" style="margin-top:0">Every system's error, bias and share within one degree at four leads, in the settle frame and in the climate-report frame, with the percent difference from the National Weather Service row and the newsletter's own window beside it.</p>
+<div class="bar acccontrols" id="accGridBar"></div>
+<div class="card"><div id="accGrid"></div></div>
+<div class="key" id="accGridKey"></div>
+<div id="accGridMethod"></div>
+
+<div class="secttl">HOW TO READ THIS PAGE</div>
+<ul class="conv">
+<li><b>Clock.</b> Lead is the number of hours before the station-local midnight that ends the target day, a tool is timed by the moment the capture held its value, and the market is timed by the ladder snapshot itself.</li>
+<li><b>Truth.</b> Every system is scored against the station's METAR settle, the day's extreme over hourly and special reports rounded half up to a whole degree Fahrenheit, and a toggle rescores the tools against the National Weather Service climate report for the same date, which is a different definition of the day's extreme and runs about a degree warmer on highs.</li>
+<li><b>Market value.</b> The Yes price at a strike is the midpoint of the Yes bid and one dollar less the No bid, the ladder is made monotone by pooling adjacent violators, and the market's temperature is where the ladder crosses one half, rounded up for highs and down for lows because settlement is strict.</li>
+<li><b>Tool value.</b> A tool's value at any instant is its last record at or before that instant for the target date, and the default view holds it at the running observed extreme, so a forecast high is never colder than a high already recorded and a forecast low is never warmer than a low already recorded.</li>
+<li><b>Sample.</b> The matched cohort at a lead holds the city-days where all eleven tools have a value and the market has a crossing, thin books, capture-short dates, backfilled rows and days with a gap in the report record are excluded and counted, and a bin needs 30 city-days to be drawn.</li>
+<li><b>Uncertainty.</b> Every interval is a 95 percent percentile bootstrap over target dates with 1,000 draws and a fixed seed, and a market minus tool difference is resampled under the same draws so the two sides of it move together.</li>
+</ul>
+
+<div class="secttl">STANDINGS, LAST TWO SCORED WEEKS</div>
 <p class="cap" style="margin-top:0">Over the last two weeks of scored days, how far was each tool from the temperature the station recorded? Ranked best first, on a matched
 sample so every tool is judged on the same station-days. Hover a bar for its bias, its share within two degrees,
 and the same figures on the daily low.</p>
 <span id="scoreStatus"></span>
 <div id="standings"></div>
-
-<div class="prose" style="margin-top:26px">
-<p>Both systems are scored the same way, on the same days, against the same recorded high. The gap is small a
-day and a half out, where neither system knows much the other does not, and widens as the day fills in, because the
-market can price an afternoon that is already half observed.</p>
-<p>Daily weather forecasting is one of the most mature, established, and scientifically principled fields of science and industry. It is not an exaggeration to describe conventional weather forecasting systems as the frontier of applied physics, statistics, and computer science, resting on decades, if not centuries, of scientific inquiry.</p>
-<p>As such, conventional weather forecasts should hardly represent a target ripe for a novel forecasting system to improve upon. Despite the formidable challenge, ForecastEx prediction markets seem to be doing just that, not just echoing public forecasts but aggregating dispersed information in a way that improves upon sophisticated established systems.</p>
-<p>This is possible because prediction markets are not substitutes for standard forecasts but rather sit downstream of them. They incorporate conventional forecast information as one input and convert it into refined probabilities through direct financial rewards for being accurate and direct financial penalties for being inaccurate. This creates a dual effect of attracting accurate individuals and systems into the market while deterring those who are inaccurate. People or systems that consistently make poor forecasts are heavily motivated to either improve or leave the market.</p>
-</div>
-<p class="cap">The argument here is about market prices as forecasts in general. The
-<a href="scorecard.html">scorecard</a> carries the measured record, including the days the market did worse than
-the forecast products, scored on a matched sample so every system is judged on the same days. Nothing here is
-investment advice.</p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
-<script src="js/accuracy.js"></script>
+<script src="js/acc-common.js"></script>
+<script src="js/acc-lead.js"></script>
+<script src="js/acc-dyn.js"></script>
+<script src="js/acc-cal.js"></script>
+<script src="js/acc-map.js"></script>
+<script src="js/acc-grid.js"></script>
 <script src="js/scorecard.js"></script>
-<script>WXC.chrome('accuracy.html'); WXAccuracy.init(); WXScore.init();</script>
+<script>WXC.chrome('accuracy.html'); WXAcc.init(); WXScore.init();</script>
 </body>
 </html>

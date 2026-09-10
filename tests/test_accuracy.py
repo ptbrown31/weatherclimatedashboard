@@ -1,94 +1,250 @@
-"""The two derivations behind the accuracy curve.
-
-Both change what the curve says, and both are easy to get wrong in a way that
-looks reasonable, so both are pinned here rather than trusted to a comment.
-"""
+"""The accuracy job on the local storage backend: a manifest publishes the
+files it names and then the manifest; the same build a second time writes
+nothing; a hash mismatch publishes nothing and is reported; a file without the
+contract's stamps is skipped and reported while the rest go through; traces
+the manifest no longer lists are pruned and nothing else is. The fixtures are
+the record builder's own output from a six-city development run, checked in
+under samples/snapshots/accuracy/, and every manifest here is built from those
+bytes rather than trusted from a file, so a test says exactly which entry it
+broke. No network."""
+import datetime as dt
+import hashlib
+import json
 import os
 import sys
+import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
-import export_accuracy as ea   # noqa: E402
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+from pipeline import accuracy, archive, storage   # noqa: E402
+
+FIXTURES = os.path.join(ROOT, "samples", "snapshots", "accuracy")
+NOW = dt.datetime(2026, 9, 10, 17, 5, tzinfo=dt.timezone.utc)
+BUILT = "2026-09-10T16:53:34Z"
 
 
-class SettlementDegree(unittest.TestCase):
-    """A contract pays when the recorded high is STRICTLY above the strike.
-
-    A market certain of 92 bids the 91 strike to a dollar and the 92 strike to
-    nothing, so the crossing sits at 91.5 — the midpoint of a step, not a
-    temperature. The degree above is the settle; the nearest degree is a coin
-    flip that measured 55% against 98% on real ladders.
-    """
-
-    def test_a_half_resolves_upward_not_to_the_nearest(self):
-        self.assertEqual(ea.settle_degree(91.5), 92.0)
-        self.assertEqual(ea.settle_degree(92.5), 93.0)
-
-    def test_a_crossing_inside_a_degree_names_the_degree_above(self):
-        self.assertEqual(ea.settle_degree(91.2), 92.0)
-        self.assertEqual(ea.settle_degree(91.9), 92.0)
-
-    def test_a_crossing_on_a_whole_degree_stays_there(self):
-        self.assertEqual(ea.settle_degree(91.0), 91.0)
-
-    def test_no_crossing_is_not_a_number(self):
-        self.assertIsNone(ea.settle_degree(None))
+def fixture(name: str) -> bytes:
+    with open(os.path.join(FIXTURES, name), "rb") as fh:
+        return fh.read()
 
 
-class CarriedForecast(unittest.TestCase):
-    """The bulletin's window expires; the forecast for the day does not.
-
-    Late in the day the remaining window holds only the night, so read literally
-    the Service forecast 70 for a day it had called 88. That is the window, not a
-    forecast anyone made, and scoring it that way grew the Service's error to
-    eighteen degrees an hour before midnight.
-    """
-
-    def test_a_dropped_window_keeps_the_day_it_forecast(self):
-        recs = [
-            {"city": "KATL", "day": "2026-08-20", "lead": 30, "nws": 88.0, "obs": 88.0},
-            {"city": "KATL", "day": "2026-08-20", "lead": 12, "nws": 88.0, "obs": 88.0},
-            {"city": "KATL", "day": "2026-08-20", "lead": 3, "nws": 70.0, "obs": 88.0},
-        ]
-        ea.carry_forward(recs)
-        self.assertEqual([r["nwsDay"] for r in sorted(recs, key=lambda r: -r["lead"])],
-                         [88.0, 88.0, 88.0])
-
-    def test_a_rising_forecast_still_rises(self):
-        """Carrying forward must not freeze a forecast that genuinely climbs."""
-        recs = [
-            {"city": "KDEN", "day": "2026-08-20", "lead": 30, "nws": 84.0, "obs": 90.0},
-            {"city": "KDEN", "day": "2026-08-20", "lead": 20, "nws": 89.0, "obs": 90.0},
-            {"city": "KDEN", "day": "2026-08-20", "lead": 6, "nws": 90.0, "obs": 90.0},
-        ]
-        ea.carry_forward(recs)
-        self.assertEqual([r["nwsDay"] for r in sorted(recs, key=lambda r: -r["lead"])],
-                         [84.0, 89.0, 90.0])
-
-    def test_cities_and_days_do_not_leak_into_each_other(self):
-        recs = [
-            {"city": "KATL", "day": "2026-08-20", "lead": 10, "nws": 99.0, "obs": 99.0},
-            {"city": "KATL", "day": "2026-08-21", "lead": 30, "nws": 70.0, "obs": 70.0},
-            {"city": "KDEN", "day": "2026-08-20", "lead": 30, "nws": 60.0, "obs": 60.0},
-        ]
-        ea.carry_forward(recs)
-        got = {(r["city"], r["day"]): r["nwsDay"] for r in recs}
-        self.assertEqual(got[("KATL", "2026-08-21")], 70.0)
-        self.assertEqual(got[("KDEN", "2026-08-20")], 60.0)
+def entry(name: str, raw: bytes, **override) -> dict:
+    e = {"name": name, "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    e.update(override)
+    return e
 
 
-class Curve(unittest.TestCase):
-    def test_a_thin_bin_is_dropped_rather_than_drawn(self):
-        recs = [{"city": "K%02d" % i, "day": "2026-08-20", "lead": 5,
-                 "nws": 80.0, "fx": 80.5, "obs": 81.0} for i in range(5)]
-        self.assertEqual(ea.curve(recs)["points"], [])
+def manifest(entries: list, built: str = BUILT) -> bytes:
+    return json.dumps({"schema": "accuracy-figures/1", "built": built, "asof": "2026-09-09",
+                       "files": entries}).encode()
 
-    def test_a_full_bin_reports_both_errors_and_its_count(self):
-        recs = [{"city": "K%02d" % i, "day": "2026-08-20", "lead": 5,
-                 "nws": 79.0, "fx": 80.5, "obs": 81.0} for i in range(40)]
-        p = ea.curve(recs)["points"][0]
-        self.assertEqual(p["cityDays"], 40)
-        self.assertAlmostEqual(p["nws"], 2.0)     # 79 vs 81
-        self.assertAlmostEqual(p["fx"], 0.0)      # 80.5 -> 81
-        self.assertAlmostEqual(p["improvement"], 100.0)
+
+class Recording(storage.LocalStorage):
+    """The local backend, counting writes and deletes so a test can say that a
+    pass changed nothing."""
+    def __init__(self, root):
+        super().__init__(root)
+        self.puts, self.deletes = [], []
+
+    def put(self, key, data, content_type="application/octet-stream", cache_control=None):
+        self.puts.append((key, content_type, cache_control))
+        super().put(key, data, content_type, cache_control)
+
+    def delete(self, key):
+        self.deletes.append(key)
+        super().delete(key)
+
+
+class Job(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.st = Recording(self.tmp.name)
+        self.cfg = {}
+
+    def ship(self, files: dict, built: str = BUILT, entries: list = None):
+        """Put the builder's files and a manifest describing them under the
+        archive prefix, the way push.sh leaves them."""
+        for name, raw in files.items():
+            self.st.put(accuracy.SRC_PREFIX + name, raw)
+        ents = entries if entries is not None else [entry(n, r) for n, r in files.items()]
+        self.st.put(accuracy.SRC_MANIFEST, manifest(ents, built))
+        self.st.puts.clear()
+
+    def run_pass(self) -> int:
+        return accuracy.accuracy_pass(self.cfg, self.st, NOW)
+
+    def published(self):
+        raw = self.st.get(accuracy.DST_MANIFEST)
+        return json.loads(raw) if raw else None
+
+    # ------------------------------------------------------------ publishing
+    def test_a_manifest_with_two_files_publishes_them_and_then_the_manifest(self):
+        files = {"availability.json": fixture("availability.json"),
+                 "calibration.json": fixture("calibration.json")}
+        self.ship(files)
+        self.assertEqual(self.run_pass(), 0)
+        for name, raw in files.items():
+            self.assertEqual(self.st.get(accuracy.DST_PREFIX + name), raw)   # the bytes, unchanged
+        pub = self.published()
+        self.assertEqual(pub["built"], BUILT)
+        self.assertEqual(pub["asof"], "2026-09-09")
+        self.assertEqual(sorted(pub["files"]), sorted(files))
+        self.assertEqual(pub["skipped"], [])
+        # the manifest is the last write, and every write carries the snapshot headers
+        self.assertEqual(self.st.puts[-1][0], accuracy.DST_MANIFEST)
+        for key, ctype, cache in self.st.puts:
+            self.assertEqual(ctype, "application/json", key)
+            self.assertEqual(cache, accuracy.SNAP_CACHE, key)
+        self.assertEqual(archive.LAST_STATUS["job"], "accuracy")
+        self.assertEqual(archive.LAST_STATUS["written"], 2)
+        self.assertEqual(archive.LAST_STATUS["errors"], 0)
+
+    def test_a_trace_file_is_published_on_its_own_stamps(self):
+        files = {"trace/2026-09-09.json": fixture("trace/2026-09-09.json")}
+        self.ship(files)
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "trace/2026-09-09.json"), files["trace/2026-09-09.json"])
+        self.assertEqual(self.published()["files"], ["trace/2026-09-09.json"])
+
+    def test_no_manifest_means_nothing_to_do(self):
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.st.puts, [])
+        self.assertIsNone(self.published())
+
+    # ---------------------------------------------------------- idempotence
+    def test_the_same_build_a_second_time_writes_nothing(self):
+        files = {"availability.json": fixture("availability.json"),
+                 "calibration.json": fixture("calibration.json")}
+        self.ship(files)
+        self.assertEqual(self.run_pass(), 0)
+        self.st.puts.clear()
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.st.puts, [])
+        self.assertEqual(self.st.deletes, [])
+
+    def test_a_new_built_stamp_publishes_again(self):
+        files = {"availability.json": fixture("availability.json")}
+        self.ship(files)
+        self.assertEqual(self.run_pass(), 0)
+        self.ship(files, built="2026-09-11T10:50:00Z")
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.published()["built"], "2026-09-11T10:50:00Z")
+        self.assertIn(accuracy.DST_PREFIX + "availability.json", [k for k, _c, _h in self.st.puts])
+
+    # ------------------------------------------------------------ transport
+    def test_a_hash_mismatch_publishes_nothing_and_reports_it(self):
+        avail, cal = fixture("availability.json"), fixture("calibration.json")
+        self.ship({"availability.json": avail, "calibration.json": cal},
+                  entries=[entry("availability.json", avail),
+                           entry("calibration.json", cal, sha256="0" * 64)])
+        self.assertEqual(self.run_pass(), 1)
+        self.assertEqual(self.st.puts, [])
+        self.assertIsNone(self.published())
+        failed = archive.LAST_STATUS["failed"]
+        self.assertEqual([f["name"] for f in failed], ["calibration.json"])
+        self.assertIn("sha256", failed[0]["reason"])
+
+    def test_a_size_mismatch_is_a_transport_fault_too(self):
+        avail = fixture("availability.json")
+        self.ship({"availability.json": avail}, entries=[entry("availability.json", avail, size=len(avail) - 1)])
+        self.assertEqual(self.run_pass(), 1)
+        self.assertEqual(self.st.puts, [])
+        self.assertIn("size", archive.LAST_STATUS["failed"][0]["reason"])
+
+    def test_a_listed_file_that_is_not_there_fails_the_build(self):
+        avail = fixture("availability.json")
+        self.ship({"availability.json": avail},
+                  entries=[entry("availability.json", avail), entry("grid.json", fixture("grid.json"))])
+        self.assertEqual(self.run_pass(), 1)
+        self.assertEqual(self.st.puts, [])
+        self.assertEqual(archive.LAST_STATUS["failed"][0], {"name": "grid.json", "reason": "missing"})
+
+    def test_a_name_that_leaves_the_prefix_is_refused(self):
+        avail = fixture("availability.json")
+        self.ship({"availability.json": avail},
+                  entries=[entry("availability.json", avail), entry("../summary.json", avail)])
+        self.assertEqual(self.run_pass(), 1)
+        self.assertEqual(self.st.puts, [])
+
+    # ------------------------------------------------------------- the meta
+    def test_a_file_failing_the_meta_check_is_skipped_and_reported(self):
+        good = fixture("availability.json")
+        body = json.loads(fixture("calibration.json"))
+        body["meta"]["conventions"] = "v2"          # built under conventions the page does not draw
+        bad = json.dumps(body).encode()
+        self.ship({"availability.json": good, "calibration.json": bad})
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "availability.json"), good)
+        self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "calibration.json"))
+        pub = self.published()
+        self.assertEqual(pub["files"], ["availability.json"])
+        self.assertEqual([s["name"] for s in pub["skipped"]], ["calibration.json"])
+        self.assertIn("conventions", pub["skipped"][0]["reason"])
+        self.assertEqual([s["name"] for s in archive.LAST_STATUS["skipped"]], ["calibration.json"])
+
+    def test_the_stamps_the_contract_names(self):
+        ok = {"meta": {"schema": "accuracy-figures/1", "asof": "2026-09-09", "conventions": "v1"}}
+        self.assertIsNone(accuracy.check_meta("grid.json", ok))
+        self.assertIn("schema", accuracy.check_meta("grid.json", {"meta": dict(ok["meta"], schema=1)}))
+        self.assertIn("asof", accuracy.check_meta("grid.json", {"meta": {"schema": "accuracy-figures/1", "conventions": "v1"}}))
+        self.assertIn("conventions", accuracy.check_meta("grid.json", {"meta": {"schema": "accuracy-figures/1", "asof": "2026-09-09"}}))
+        self.assertEqual(accuracy.check_meta("grid.json", {"metric": {}}), "no meta")
+        self.assertEqual(accuracy.check_meta("grid.json", [1, 2]), "not a JSON object")
+        # a trace carries its date and build time and none of the figure stamps
+        self.assertIsNone(accuracy.check_meta("trace/2026-09-09.json", {"meta": {"date": "2026-09-09", "built": BUILT}}))
+        self.assertIn("date", accuracy.check_meta("trace/2026-09-09.json", {"meta": {"built": BUILT}}))
+        self.assertIn("built", accuracy.check_meta("trace/2026-09-09.json", {"meta": {"date": "2026-09-09"}}))
+
+    def test_the_fixtures_carry_the_stamps(self):
+        for name in ("availability.json", "calibration.json", "dynamics.json", "grid.json", "lead-curve.json",
+                     "map.json", "trace/2026-09-08.json", "trace/2026-09-09.json"):
+            self.assertIsNone(accuracy.check_meta(name, json.loads(fixture(name))), name)
+
+    def test_a_file_that_is_not_json_is_skipped_not_fatal(self):
+        good, bad = fixture("availability.json"), b"{not json"
+        self.ship({"availability.json": good, "grid.json": bad})
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.published()["files"], ["availability.json"])
+        self.assertEqual(self.published()["skipped"][0]["reason"], "not valid JSON")
+
+    # -------------------------------------------------------------- pruning
+    def test_old_trace_files_are_pruned_and_nothing_else_is(self):
+        old_curve = b'{"schema":2,"points":[]}'      # the retired exporter's file, at its own key
+        self.st.put(accuracy.DST_PREFIX + "lead-curve.json", old_curve)
+        self.st.put(accuracy.DST_PREFIX + "trace/2026-07-01.json", b'{"meta":{"date":"2026-07-01"}}')
+        self.st.put(accuracy.DST_PREFIX + "trace/2026-07-02.json", b'{"meta":{"date":"2026-07-02"}}')
+        new = fixture("trace/2026-09-08.json")
+        self.ship({"trace/2026-09-08.json": new, "availability.json": fixture("availability.json")})
+        self.assertEqual(self.run_pass(), 0)
+        self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-07-01.json"))
+        self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-07-02.json"))
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "trace/2026-09-08.json"), new)
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "lead-curve.json"), old_curve)
+        self.assertEqual(sorted(self.st.deletes), [accuracy.DST_PREFIX + "trace/2026-07-01.json",
+                                                   accuracy.DST_PREFIX + "trace/2026-07-02.json"])
+        pub = self.published()
+        self.assertEqual((pub["traceKept"], pub["tracePruned"]), (1, 2))
+
+    def test_a_listed_trace_is_kept_even_when_this_build_skipped_it(self):
+        # an earlier build published the trace; this build lists it again but
+        # ships it without its stamps. Skipping the copy must not also delete
+        # the copy already published, since the manifest still names it.
+        self.st.put(accuracy.DST_PREFIX + "trace/2026-09-08.json", fixture("trace/2026-09-08.json"))
+        self.ship({"trace/2026-09-08.json": b'{"meta":{}}', "availability.json": fixture("availability.json")})
+        self.assertEqual(self.run_pass(), 0)
+        self.assertIsNotNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-09-08.json"))
+        self.assertEqual(self.st.deletes, [])
+
+    # ------------------------------------------------------------- deadline
+    def test_out_of_time_leaves_the_published_set_alone(self):
+        self.ship({"availability.json": fixture("availability.json")})
+        self.cfg["_deadline_end"] = 0.0             # the chain's budget is already spent
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.st.puts, [])
+        self.assertIsNone(self.published())
+
+
+if __name__ == "__main__":
+    unittest.main()

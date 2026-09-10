@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Push the lead-time accuracy curve to the site.
+"""Push the lead-time accuracy curve to the site. SUPERSEDED.
+
+The record builder described in docs/accuracy.md now produces every file the
+accuracy page reads, lead-curve.json among them, and pipeline/accuracy.py
+publishes them. This script is kept, unchanged, only so the old curve can be
+refreshed until the new page is live; once it is, the builder's lead curve
+replaces the old one at the same key and this script is not run again.
+DEPLOY.md carries the order of those steps.
 
 The comparison behind the accuracy page is between two forecasts of the same
 thing: the National Weather Service's LAMP bulletin high for a station's day,

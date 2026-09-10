@@ -10,6 +10,7 @@
   --night:#EEF1F6; --shade:#F4F7FB; --map-land:#EEF1F5; --map-sea:#F6F9FC; --map-line:#FFFFFF;
   --chip:#EEF2F7; --warn:#8A5A00; --warn-soft:#FFF4DC; --bad:#A6452B; --bad-soft:#F8E5DF; --ok:#2E6B3F; --ok-soft:#E3EFE6;
   --tip-bg:#12161C; --tip-ink:#FFFFFF;
+  --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t-extra:#9AA3AD;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
@@ -20,6 +21,7 @@
     --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
     --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
     --tip-bg:#E4E9F0; --tip-ink:#0F141A;
+    --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t-extra:#8C97A3;
   }
 }
 :root[data-theme="dark"]{
@@ -30,6 +32,7 @@
   --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
   --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
   --tip-bg:#E4E9F0; --tip-ink:#0F141A;
+  --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t-extra:#8C97A3;
 }
 *{box-sizing:border-box}
 html{color-scheme:light dark}
@@ -474,3 +477,72 @@ svg.emph-exchange .lcline,svg.emph-exchange .ldot,svg.emph-exchange .calcline,sv
 
 /* the mean under each column of the scored-days table, set off from the days */
 tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
+
+/* The accuracy page. The system colors are the tokens --t1 to --t11 above,
+   one per panel tool in the order of docs/accuracy.md, muted so the market's
+   accent line is the one a reader finds first; --t-extra is the single gray
+   the six own-span sources share. Everything else here is the furniture the
+   five figures have in common: a bar of tab groups, a legend, and the
+   method note with its equation set as written. */
+.bar.acccontrols{gap:6px 16px;min-height:10px;margin-bottom:8px}
+.tabgroup{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tabgroup .tl{font-size:11.5px;color:var(--muted);margin-right:2px}
+.tabgroup button.vbtn{padding:4px 10px}
+[id^="acc"].key span{white-space:nowrap}
+/* a key note is a sentence, so it takes its own line and wraps; on a narrow screen every entry wraps too, so the page never scrolls sideways */
+[id^="acc"].key .kn{white-space:normal;flex-basis:100%}
+@media (max-width:640px){[id^="acc"].key span{white-space:normal}}
+[id^="acc"].key .kn{color:var(--muted);font-style:italic}
+.accnote{background:var(--shade);border-left:3px solid var(--rule);padding:9px 13px 8px;margin:10px 0 4px;
+  font-size:12px;line-height:1.5;color:var(--muted);border-radius:0 6px 6px 0}
+.accnote .nt{font-weight:700;color:var(--navy);font-size:12px;margin-bottom:3px}
+.accnote .rule{margin:2px 0}
+.accnote .rule.n{margin-top:5px;color:var(--ink)}
+.eq{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:5px;padding:7px 10px;margin:4px 0 7px;overflow-x:auto;white-space:pre}
+.conv{margin:0 0 6px;padding-left:18px;max-width:78ch}
+.conv li{font-size:13px;line-height:1.55;margin:0 0 6px;color:var(--ink)}
+.conv li b{color:var(--navy)}
+.accsub{font-size:12px;font-weight:700;color:var(--navy);margin:8px 2px 4px}
+/* figure 2 of the accuracy page: the trace's date and city selects sit inside
+   the card above the trace, and the default rule reads as a caption under it */
+.acc-dyn-tracebar{margin:4px 4px 6px;gap:8px 14px}
+.acc-dyn-tracebar label{font-size:11.5px;color:var(--muted)}
+.acc-dyn-tracebar select{padding:4px 8px;font-size:12.5px}
+.acc-dyn-rule{margin:2px 6px 10px}
+/* accuracy city map: the round swatches in its key and the tool select in its bar */
+.key i.acc-map-sw{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px;border:1px solid var(--rule);box-sizing:border-box}
+.acc-map-ramp{display:inline-flex;gap:2px;vertical-align:middle;margin:0 6px}
+.key .acc-map-ramp i.acc-map-sw{margin-right:0}
+select.acc-map-sel{padding:4px 8px;font-size:12.5px}
+.acc-map-dot{cursor:default}
+/* Scorecard grid (accuracy figure 5). A sixteen-column table scrolls in its
+   own container; each cell stacks its value over its sample; the shading is
+   a token-colored layer behind the text so it reads in both themes. */
+.acc-grid-scroll{overflow-x:auto;margin:0 4px}
+table.acc-grid-table{width:auto;min-width:100%;font-size:12px;border:0}
+table.acc-grid-table th,table.acc-grid-table td{padding:4px 7px;white-space:nowrap;vertical-align:top}
+table.acc-grid-table th{font-size:10.5px}
+table.acc-grid-table th.acc-grid-g{text-align:center;border-left:1px solid var(--line);color:var(--ink);letter-spacing:.04em}
+table.acc-grid-table th.acc-grid-first,table.acc-grid-table td.acc-grid-first{border-left:1px solid var(--line)}
+table.acc-grid-table td.acc-grid-c{position:relative;text-align:right;font-variant-numeric:tabular-nums;min-width:56px}
+table.acc-grid-table td.acc-grid-c .acc-grid-fill{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none}
+table.acc-grid-table td.acc-grid-c .acc-grid-v,table.acc-grid-table td.acc-grid-c .acc-grid-n{position:relative;display:block}
+table.acc-grid-table .acc-grid-n{font-size:10px;color:var(--muted);line-height:1.2}
+table.acc-grid-table td.acc-grid-sys{color:var(--ink);font-weight:600;position:sticky;left:0;background:var(--panel);z-index:1}
+table.acc-grid-table td.acc-grid-sys .acc-grid-n{display:block;font-weight:400}
+table.acc-grid-table td.acc-grid-start{color:var(--muted);font-variant-numeric:tabular-nums}
+table.acc-grid-table tr.acc-grid-fx td{background:var(--shade)}
+table.acc-grid-table tr.acc-grid-fx td.acc-grid-sys{background:var(--shade)}
+table.acc-grid-table tr.acc-grid-fx td.acc-grid-c .acc-grid-v{font-weight:700}
+table.acc-grid-table tr.acc-grid-ref td.acc-grid-c .acc-grid-v{font-weight:600}
+table.acc-grid-table.acc-grid-nltable{min-width:0;width:auto}
+table.acc-grid-table.acc-grid-nltable td{white-space:normal}
+.acc-grid-sw{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-2px;border:1px solid var(--line)}
+.acc-grid-foot{font-size:11.5px;color:var(--muted);line-height:1.5;margin:6px 6px 2px}
+.acc-grid-foot.acc-grid-top{margin:0 6px 6px}
+.acc-grid-nl{margin:10px 4px 4px}
+a.acc-grid-dl{display:inline-block;font-size:12.5px;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);text-decoration:none}
+a.acc-grid-dl:hover{border-color:var(--rule)}
+.acc-grid-csv{font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin:6px 0 10px;max-height:280px;overflow:auto;white-space:pre}

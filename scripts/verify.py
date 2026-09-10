@@ -120,7 +120,7 @@ def run(no_build: bool) -> int:
                          ("weather.html", "#panels svg path", "weather series"),
                          ("fossil-fuels.html", "#panels svg path", "fossil fuel series"),
                          ("electricity-renewables.html", "#panels svg path", "electricity series"), ("about.html", "footer.site", "footer"),
-                         ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", ".prose p", "the accuracy argument"),
+                         ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", "#accLead path", "the lead curve"),
                          ("daily-temperature-markets.html", ".prose h2", "the article sections"),
                          ("allocator.html", "#allocSvg", "the allocation chart")]
                 for path, sel, what in pages:
@@ -157,26 +157,54 @@ def run(no_build: bool) -> int:
                                   "What are the four canonical forecast systems compared in the IBKR Campus Publication?",
                                   "What are all the forecast tools used in the IBKR Campus Publication?",
                                   "Further reading"], str(order)[:200])
-                page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(500)
-                acc_t = "\n".join(page.locator(".prose").all_inner_texts())
-                chk.add(f"{scheme} accuracy: the electricity section is not published",
-                        "electricity" not in acc_t.lower() and "wholesale" not in acc_t.lower(), acc_t[-90:])
-                chk.add(f"{scheme} accuracy: the mechanism argument is intact",
-                        "sit downstream of them" in acc_t and "deterring those who are inaccurate" in acc_t, f"chars={len(acc_t)}")
-                chk.add(f"{scheme} accuracy: the lead-time curve is drawn",
-                        page.locator("#accChart path").count() >= 2
-                        and page.locator("#accChart circle").count() >= 20,
-                        f"paths={page.locator('#accChart path').count()} pts={page.locator('#accChart circle').count()}")
-                acc_cap = page.locator("#accCap").inner_text()
-                acc_txt = page.locator("#accCap").inner_text()
-                chk.add(f"{scheme} accuracy: the page says where forecasting stops",
-                        "already been recorded" in acc_txt and "is not forecast skill" in acc_txt,
-                        acc_txt[-120:])
-                chk.add(f"{scheme} accuracy: that region is marked on the chart, not cut out",
-                        any("already happened" in t for t in page.eval_on_selector_all(
-                            "#accChart text", "e=>e.map(x=>x.textContent)")), "")
-                chk.add(f"{scheme} accuracy: the curve says what stands behind it",
-                        "city-days" in acc_cap and "scored on the same days" in acc_cap, acc_cap[:90])
+                # ---- the accuracy page: five figures from the record builder's files
+                #
+                # Every number on the page is the builder's (docs/accuracy.md); the
+                # gates prove the figures draw, each carries its estimator and its
+                # sample, the strip names the window and the build, and the copy
+                # keeps the exchange's language.
+                page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(2500)
+                n_lead = page.locator("#accLead path").count()
+                chk.add(f"{scheme} accuracy: the lead curve draws the market and the tools", n_lead >= 3, f"paths={n_lead}")
+                n_dyn, n_dynp = page.locator("#accDyn svg").count(), page.locator("#accDyn svg path").count()
+                chk.add(f"{scheme} accuracy: the movement figure draws its panels", n_dyn >= 3 and n_dynp >= 6,
+                        f"svgs={n_dyn} paths={n_dynp}")
+                n_calc, n_calr = page.locator("#accCal circle").count(), page.locator("#accCal rect").count()
+                chk.add(f"{scheme} accuracy: the calibration figure draws its bins and its bars",
+                        n_calc >= 10 and n_calr >= 8, f"circles={n_calc} rects={n_calr}")
+                n_mapc, n_mapp = page.locator("#accMap circle").count(), page.locator("#accMap path").count()
+                chk.add(f"{scheme} accuracy: the city map draws the states and the stations",
+                        n_mapc >= 3 and n_mapp >= 1, f"circles={n_mapc} paths={n_mapp}")
+                n_grid = page.locator("#accGrid tbody tr").count()
+                chk.add(f"{scheme} accuracy: the scorecard grid draws its rows", n_grid >= 6, f"rows={n_grid}")
+                notes = page.eval_on_selector_all(".accnote", """e => e.map(x => ({
+                    eq: (x.querySelector('.eq') || {textContent: ''}).textContent,
+                    n: (x.querySelector('.rule.n') || {textContent: ''}).textContent }))""")
+                bad_notes = [i for i, nt in enumerate(notes)
+                             if "=" not in nt["eq"] or not re.search(r"\b(?:Sample|n)\s*=?\s*[\d,]*\d", nt["n"])]
+                chk.add(f"{scheme} accuracy: every method note holds an estimator and a counted sample",
+                        len(notes) == 5 and not bad_notes, f"notes={len(notes)} bad={bad_notes}")
+                acc_st = page.locator("#pageStatus .status").inner_text() if page.locator("#pageStatus .status").count() else ""
+                chk.add(f"{scheme} accuracy: the status strip names the window and the build",
+                        "Data as of" in acc_st and re.search(r"window \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d", acc_st) is not None,
+                        acc_st[:90])
+                acc_body = page.locator("body").inner_text()
+                bad_words = sorted(set(m.group(0) for m in re.finditer(
+                    r"\b(?:ask|asks|asked|asking|offer|offers|offered|sell|sells|sellers|selling)\b", acc_body, re.I)))
+                if "DWM" in acc_body:
+                    bad_words.append("DWM")
+                if "fair value" in acc_body.lower():
+                    bad_words.append("fair value")
+                if "model probability" in acc_body.lower():
+                    bad_words.append("model probability")
+                chk.add(f"{scheme} accuracy: the page keeps the exchange's language and names no internal system",
+                        not bad_words, str(bad_words))
+                acc_served = strip_markup(urllib.request.urlopen(f"{srv.url}/accuracy.html").read().decode())
+                chk.add(f"{scheme} accuracy: the page serves its own text without running a script",
+                        len(acc_served.split()) >= 300, f"words={len(acc_served.split())}")
+                page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(400)
+                chk.add(f"{scheme} accuracy: the FAQ still reaches the page",
+                        page.locator(".prose a[href='accuracy.html']").count() >= 1, "")
                 page.goto(f"{srv.url}/daily-temperature-markets.html"); page.wait_for_timeout(500)
                 art_t = " ".join(" ".join(t.split()) for t in page.locator(".prose").all_inner_texts())
                 chk.add(f"{scheme} article: the settlement convention is stated exactly",
@@ -2697,17 +2725,41 @@ def run(no_build: bool) -> int:
                 # over whatever each archive lane happens to have collected
                 # scored days are measured against what happened; days still ahead
                 # have nothing to measure against and keep the consensus center
-                page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(1600)
-                chk.add(f"{scheme} standings: they are on the accuracy page, beside the argument",
+                page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(2500)
+                chk.add(f"{scheme} standings: they are on the accuracy page, under the five figures",
                         page.locator("#standChart rect[data-key]").count() >= 4,
                         str(page.locator("#standChart rect[data-key]").count()))
                 chk.add(f"{scheme} standings: the page says the sample is matched",
                         "sample is matched" in page.locator("#standings").inner_text(),
                         page.locator("#standings").inner_text()[:70])
-                accTexts = page.eval_on_selector_all("#accChart text", "e=>e.map(x=>x.textContent)")
-                chk.add(f"{scheme} accuracy: the measured system is named as LAMP",
-                        any("LAMP" in t for t in accTexts)
-                        and not any(t == "National Weather Service" for t in accTexts), str(accTexts[:4]))
+                # lows are a tab on every figure; the lead curve and the grid are the two proven
+                lead_before = page.locator("#accLead").inner_html()
+                page.locator("#accLeadBar button", has_text="Lows").first.click(); page.wait_for_timeout(500)
+                grid_before = page.locator("#accGrid").inner_html()
+                page.locator("#accGridBar button", has_text="Lows").first.click(); page.wait_for_timeout(500)
+                grid_heads = page.eval_on_selector_all("#accGrid thead th", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} accuracy: the lows tab redraws the lead curve and the grid",
+                        page.locator("#accLead").inner_html() != lead_before
+                        and page.locator("#accGrid").inner_html() != grid_before
+                        and "MAE low" in grid_heads and "MAE high" not in grid_heads, str(grid_heads[:6]))
+                # the map earns a color only where the paired interval clears zero
+                fills = page.eval_on_selector_all("#accMap circle", "e=>e.map(x=>x.getAttribute('fill')||'')")
+                colored = sum(1 for f in fills if f.startswith("color-mix("))
+                chk.add(f"{scheme} accuracy: the map colors at least three stations", colored >= 3, f"colored={colored}")
+                page.locator("#accMapBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(500)
+                fills = page.eval_on_selector_all("#accMap circle", "e=>e.map(x=>x.getAttribute('fill')||'')")
+                dashed = page.locator("#accMap circle[stroke-dasharray]").count()
+                grey = sum(1 for f in fills if f == "var(--line)")
+                chk.add(f"{scheme} accuracy: the map greys or hollows a station whose interval covers zero or that the frame excludes",
+                        grey + dashed >= 1, f"grey={grey} hollow={dashed}")
+                # a row per system in the matched cohort, the market first
+                grid_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/grid.json").read().decode())
+                matched = [r["id"] for r in grid_file.get("cohorts", {}).get("matched11", []) if r.get("id")]
+                page.locator("#accGridBar button", has_text="Highs").first.click(); page.wait_for_timeout(500)
+                grid_sys = page.eval_on_selector_all("#accGrid tbody td.acc-grid-sys", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} accuracy: the grid carries a row per system in the matched cohort, the market first",
+                        len(grid_sys) == len(matched) and len(matched) >= 6 and grid_sys[:1] == ["ForecastEx"],
+                        f"rows={len(grid_sys)} file={len(matched)} first={grid_sys[:1]}")
 
                 # ---- the scorecard grid: a row per station, a column per system
                 page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1400)
@@ -3012,7 +3064,9 @@ def run(no_build: bool) -> int:
                 for t in titles:
                     if re.match(r"^(the|a|an)\s", t, re.I):
                         bad_title.append(f"{path}: {t}")
-                body = page.eval_on_selector_all(".wrap p, .wrap li", "e=>e.map(x=>x.textContent)")
+                # the accuracy page's method notes are page copy too, so they take the same rules
+                body = page.eval_on_selector_all(".wrap p, .wrap li, .wrap .accnote .rule, .wrap .accnote .nt",
+                                                 "e=>e.map(x=>x.textContent)")
                 for t in body:
                     if re.search(r"[a-z)][:]\s+[a-z]", t):
                         bad_colon.append(f"{path}: {t[:70]}")

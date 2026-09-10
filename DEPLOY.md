@@ -223,39 +223,76 @@ Every mapping from a contract to a series was checked against the strikes the ex
 rather than inferred from the contract's name. `pipeline/energy.py` records which readings are
 easy to get wrong and why.
 
-## 11. The accuracy curve (run from the machine that can reach the capture)
+## 12. The accuracy record (the builder's key and the site job)
 
-The accuracy page draws forecast error against lead time for the National Weather Service's LAMP
-bulletin and the price-implied high. Both are captured by a separate system that is not on the
-network and is not named in this repository, which is public. The extractor that reads it therefore
-lives outside this tree, at `~/.weather-tools-site-accuracy/`; it opens that system's database
-read-only, touches only the three tables that record what happened — the bulletin, the exchange's
-own bids and asks, and the recorded daily extreme — and writes nothing back.
+The accuracy page draws the files described in `docs/accuracy.md`. The record builder that computes
+them runs on the machine that holds the capture, outside this repository, and pushes them to
+`data/archive/accuracy/latest/` in the site bucket together with a manifest. The stack gives the
+builder one identity, an IAM user with no console access whose policy reaches that prefix and
+nothing else. Its access key is created once from the owner's CLI and lands only in the credentials
+file on the capture machine, never in the stack, the repository or `deploy.env`.
 
-    ~/.weather-tools-site-accuracy/run.sh > ~/.weather-tools-site-accuracy/records.jsonl
-    WX_STORAGE_BACKEND=s3 WX_STORAGE_BUCKET=<bucket> WX_STORAGE_REGION=<region> \
-      WX_STORAGE_PREFIX=data \
-      python3 scripts/export_accuracy.py --records ~/.weather-tools-site-accuracy/records.jsonl
+Update the stack so the user exists, then read its generated name.
 
-`--dry-run` prints the curve and writes nothing.
+    ops/aws/deploy.sh stack
+    USER_NAME=$(aws cloudformation describe-stacks --stack-name weather-tools-site \
+      --query "Stacks[0].Outputs[?OutputKey=='AccuracyWriterName'].OutputValue" --output text)
 
-The two derivations that decide what the curve says are in `scripts/export_accuracy.py`, not in the
-extractor, so they can be read and are covered by `tests/test_accuracy.py`: the Service's figure is
-the highest its bulletin forecast for the day rather than the highest still to come, and the
-market's whole-degree high is the degree above the crossing rather than the nearest one. Both were
-measured before being adopted; the reasoning is in that file's docstring.
+Create the key and write it straight into the capture machine's credentials file under the profile
+`accuracy`. The secret crosses the network once, inside the ssh session, and is neither printed nor
+saved on this side.
 
-No model forecast, fitted probability or fair value is read or published.
+    aws iam create-access-key --user-name "$USER_NAME" \
+      --query "AccessKey.[AccessKeyId,SecretAccessKey]" --output text \
+      | awk 'BEGIN { print "User Name,Access key ID,Secret access key" } { print "accuracy," $1 "," $2 }' \
+      | ssh <capture machine> 'umask 077 && aws configure import --csv file:///dev/stdin && chmod 600 ~/.aws/credentials'
 
-Re-run it whenever the curve should catch up — the page states the window it covers, so a stale file
-is visible rather than silent, and it says the measurement has not been published yet if missing.
+`aws configure import` names the profile after the first column, which is why that column says
+`accuracy`. From the capture machine, `aws --profile accuracy sts get-caller-identity` should name
+the user, and `aws --profile accuracy s3 ls s3://<bucket>/` should be refused, because the policy
+lists only its own prefix. A user may hold two keys, so a rotation is create, install, then
+`aws iam delete-access-key --user-name "$USER_NAME" --access-key-id <old id>`.
+
+Install the builder with its own deploy script, which lives beside the old extractor outside this
+tree at `~/.weather-tools-site-accuracy/accuracy_store/`, copies the builder to the capture machine
+and installs its timer. Then run one build by hand so the prefix is populated.
+
+    ~/.weather-tools-site-accuracy/accuracy_store/deploy.sh
+    ~/.weather-tools-site-accuracy/accuracy_store/deploy.sh run
+
+Check the timer on the capture machine, which fires once a day after the settlement record for
+the previous day has landed, and check the bucket side, which should list the manifest and every
+file it names.
+
+    systemctl --user list-timers accuracy-store.timer
+    journalctl --user -u accuracy-store.service -n 50
+    aws s3 ls s3://<bucket>/data/archive/accuracy/latest/
+
+The site's part is the `accuracy` job in the half-hourly chain, after `catquotes`; it also runs alone
+as `{"job":"accuracy"}`. It reads the manifest, and when its `built` stamp differs from the one in
+`snapshots/accuracy/manifest.json` it checks each file's size and hash against the manifest, parses
+it, requires the contract's stamps (`meta.schema`, `meta.asof` and `meta.conventions`, or a trace
+file's `meta.date` and `meta.built`), copies it unchanged to `snapshots/accuracy/`, prunes trace files
+the manifest no longer lists, and writes the manifest last. A size or hash mismatch publishes nothing
+and reports the file. A file without the stamps is skipped and reported while the rest go through. A
+pass that finds the same `built` stamp reads one object and exits. The job computes nothing, and
+the pages read only `snapshots/accuracy/`.
+
+Retiring the old curve. `scripts/export_accuracy.py` still writes the old lead curve to
+`snapshots/accuracy/lead-curve.json`, the same key the builder's `lead-curve.json` takes, and the
+old page reads that key in the old shape, so the order matters. Deploy the function with the
+`accuracy` job (section 4) and the site with the new accuracy page (section 6) before any of the
+steps above. Nothing under `snapshots/accuracy/` changes until a manifest exists in the bucket, so
+the old curve stays published until then. After the first accuracy pass the builder's file has
+replaced it and `export_accuracy.py` is not run again. The job deletes nothing outside
+`snapshots/accuracy/trace/`.
 
 ## Cloudflare alternative
 
 `ops/cloudflare/README.md` describes serving the site and snapshots from Cloudflare (R2 + Pages)
 while the pipeline keeps running on Lambda. The application code does not change.
 
-## 8. Traffic counts
+## 13. Traffic counts
 
 The stack creates a second bucket, `<SiteName>-logs-<account>`, and turns on
 CloudFront standard access logging into it under `cf/`. That bucket exists only

@@ -365,6 +365,32 @@ Resources:
                 Action: [s3:ListBucket]
                 Resource: !GetAtt LogBucket.Arn
 
+  # The record builder behind the accuracy page runs on the machine that holds
+  # the capture, outside this stack, and pushes its files to one prefix under
+  # the archive (docs/accuracy.md section 4). This user is its only identity
+  # here: it can read, write and delete under that prefix and list nothing
+  # else, so a key that leaks cannot reach the site files, the snapshots or
+  # the rest of the archive. No login profile, so no console access. No access
+  # key is declared: the owner creates one with the CLI (DEPLOY.md) and it is
+  # never stored in the stack or its template.
+  AccuracyWriter:
+    Type: AWS::IAM::User
+    Properties:
+      Policies:
+        - PolicyName: accuracy-prefix
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource: !Sub "${Bucket.Arn}/data/archive/accuracy/*"
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: !GetAtt Bucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: ["data/archive/accuracy/*"]
+
   PipelineLogs:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -581,6 +607,9 @@ Outputs:
     Value: !Ref Distribution
   FunctionName:
     Value: !Ref Pipeline
+  AccuracyWriterName:
+    Description: IAM user the record builder pushes the accuracy files as; create its access key with the CLI
+    Value: !Ref AccuracyWriter
   ReportTopicArn:
     Description: SNS topic the daily traffic report is posted to
     Value: !Ref ReportTopic
