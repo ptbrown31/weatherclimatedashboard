@@ -393,7 +393,7 @@ window.WXAcc = (() => {
   // ------------------------------------------------------------- init
   // the bundle the figures draw from; kept so a tab change can redraw
   let D = null;
-  const MODULES = [['WXAccLead', 'lead'], ['WXAccDyn', 'dyn'], ['WXAccCal', 'cal'], ['WXAccMap', 'map'], ['WXAccGrid', 'grid']];
+  const MODULES = [['WXAccLead', 'lead'], ['WXAccMap', 'map'], ['WXAccGrid', 'grid'], ['WXAccCal', 'cal'], ['WXAccDyn', 'dyn']];
   // anything written as mathematics in the page's own markup, set once the
   // typesetter is loaded; the element's text is the source, so a page that
   // loses the typesetter still reads
