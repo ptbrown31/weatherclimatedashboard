@@ -313,6 +313,13 @@ Resources:
             CachedMethods: [GET, HEAD]
             Compress: true
             CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # managed CachingOptimized
+          - PathPattern: "vendor/*"
+            TargetOriginId: site
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # managed CachingOptimized
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 404

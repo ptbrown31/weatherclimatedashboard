@@ -193,13 +193,47 @@ window.WXAcc = (() => {
      {title, equation, rules, n}. The equation is typeset as it was written,
      in a monospace block; the rules are short lines, one thought each; n
      is the sample line, a number of city-days or a sentence of its own. */
+  /* Typeset an equation, or fall back to its source.
+
+     KaTeX is vendored beside the page rather than fetched, so it is there
+     whenever the page is; if it ever is not, the LaTeX source is still the
+     statement of the estimator and is shown as written rather than nothing. */
+  function tex(el, src, display) {
+    if (window.katex) {
+      try {
+        window.katex.render(src, el, { displayMode: !!display, throwOnError: false });
+        return el;
+      } catch (e) { /* an unparsable source falls through to itself */ }
+    }
+    el.textContent = src;
+    el.classList.add('texraw');
+    return el;
+  }
+  // prose carrying inline math between single dollars, as the notes are written
+  function mathText(el, s) {
+    String(s).split(/\$([^$]+)\$/).forEach((part, i) => {
+      if (!part) return;
+      if (i % 2 === 0) { el.appendChild(document.createTextNode(part)); return; }
+      tex(el.appendChild(h('span', { class: 'mi' })), part, false);
+    });
+    return el;
+  }
+
+  /* The method note under a figure: a title, then the body, then the sampling
+     rules, then the sample line. A body item is either a line of prose, which
+     may carry inline math, or {tex} for a display equation. The equations are
+     the page's statement of what it measured, so they are set as mathematics
+     rather than printed as code. */
   function methodNote(container, spec) {
     if (!container) return null;
     container.innerHTML = '';
     const box = h('div', { class: 'accnote' });
     if (spec.title) box.appendChild(h('div', { class: 'nt', text: spec.title }));
-    if (spec.equation) box.appendChild(h('pre', { class: 'eq', text: spec.equation }));
-    (spec.rules || []).forEach(r => box.appendChild(h('div', { class: 'rule', text: r })));
+    (spec.body || []).forEach(item => {
+      if (item && item.tex) { tex(box.appendChild(h('div', { class: 'eq' })), item.tex, true); return; }
+      mathText(box.appendChild(h('div', { class: 'rule' })), item);
+    });
+    (spec.rules || []).forEach(r => mathText(box.appendChild(h('div', { class: 'rule' })), r));
     if (spec.n != null) {
       box.appendChild(h('div', { class: 'rule n',
         text: typeof spec.n === 'number' ? 'Sample ' + int(spec.n) + ' city-days.' : String(spec.n) }));
@@ -360,8 +394,20 @@ window.WXAcc = (() => {
   // the bundle the figures draw from; kept so a tab change can redraw
   let D = null;
   const MODULES = [['WXAccLead', 'lead'], ['WXAccDyn', 'dyn'], ['WXAccCal', 'cal'], ['WXAccMap', 'map'], ['WXAccGrid', 'grid']];
+  // anything written as mathematics in the page's own markup, set once the
+  // typesetter is loaded; the element's text is the source, so a page that
+  // loses the typesetter still reads
+  function typeset(root) {
+    (root || document).querySelectorAll('[data-tex]').forEach(el => {
+      const src = el.getAttribute('data-tex');
+      el.removeAttribute('data-tex');
+      tex(el, src, true);
+    });
+  }
+
   async function init() {
     tooltip();
+    typeset(document);
     const keys = Object.keys(FILES);
     const got = await Promise.all(keys.map(k => load(FILES[k])));
     D = { results: {} };
@@ -382,7 +428,7 @@ window.WXAcc = (() => {
     NAME, SHORT, PANEL, CORE5, EXTRA, ORDER, COHORT, color, width, name, short, swatch,
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
-    tabs, metricTabs, key, methodNote, tooltip, hover,
+    tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,
     W, frame, clear, scale, leadScale, ticks, niceStep, xAxis, yAxis, leadAxis, lineSeries, dots, band, label,
     notYet, NOT_PUBLISHED,
   };

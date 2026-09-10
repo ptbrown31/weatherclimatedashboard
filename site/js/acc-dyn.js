@@ -573,19 +573,19 @@ window.WXAccDyn = (() => {
         + (meds.length ? ', the panel tools between ' + A.int(Math.min.apply(null, meds)) + ' and ' + A.int(Math.max.apply(null, meds)) + ' times.' : '.');
     }
     A.methodNote(note, {
-      title: 'Estimators, figure 2',
-      equation:
-        'S_s(h; d)     = share of matched city-days i with |v_s(h\'; i) − settle_i| ≤ d at every h\' ≤ h\n' +
-        '                median lead = the h where S_s(h; d) crosses 0.5, linear between grid hours; never = 1 − S_s(0; d)\n' +
-        'Rate_s(h)     = mean over own-span city-days of the number of changes of v_s in the hour ending at lead h\n' +
-        'Rate_s(hour)  = changes of v_s in that station-local hour / clock hours of it the system\'s span covers\n' +
-        'Delta_s(k)    = mean over events e of |v_s(t_e + k) − settle| − |v_s(t_e − 10 min) − settle|',
+      title: 'How convergence, movement, and reaction are measured',
+      body: [
+        'Convergence measures how early a system locks onto the right temperature and stays there. For a tolerance of $d$ degrees, a system has converged by lead $h$ if its value stayed within $d$ degrees of the settle from $h$ onward.',
+        { tex: 'S_s(h; d) = \\frac{1}{N}\\left|\\{\\, i : |v_{s,i}(h\') - o_i| \\le d \\text{ for every } h\' \\le h \\,\\}\\right|' },
+        'Median lead is the hour where $S_s(h; d)$ crosses one half.',
+        'Movement rate is how often a system\u2019s value changes, either per hour of lead or per station-local clock hour, counting only the hours a system was actually live.',
+        'Reaction traces the average change in a system\u2019s error in the minutes around a report that moved the observed extreme, comparing error just before the report to error afterward. A negative number means the system moved closer to the eventual settle.',
+      ],
       rules: [
-        'v_s is the standing raw value of system s, its last record at or before the instant, forward filled within the target date and never read backwards. For the market it is the whole-degree crossing of the ladder, rounded up for highs and down for lows because settlement is strict; the tolerance d is 1 or 2 °F by the tab.',
-        'Panel a counts a city-day in the matched cohort at h = 0 for the market and the eleven panel tools, and in the system\'s own pair for the six own-span sources. A line reaches one half where half of those city-days are within the tolerance from that lead to the end of the day; a system above one half at 36 h prints "before 36 h".',
-        'A market change is a change of the ladder crossing between two ten-minute snapshots; a tool change is a change of its value between two captures. By lead, the rate is the mean over the system\'s own-span rows. By station-local hour it divides the changes by the clock hours the system\'s span covers, the market from listing to the end of the day, a tool from its first to its last usable capture, so an hour with no capture counts as an hour with no change.',
-        'An event is a report that raised the bank by at least 1 °F for highs, or lowered it for lows, strictly before the first report that reached the day\'s extreme, on a city-day in the matched cohort at the grid hour at or before the report. The market value is the last ladder within an hour. Bands are the 95 percent percentile bootstrap over target dates, 1,000 draws, seed 20260910; a mean under 30 events is left blank.',
-        'The trace draws the reports as dots (specials hollow), the running bank as the grey step, the market\'s whole-degree value every ten minutes with its q10 to q90 band, and each panel tool\'s raw value stepped at its capture times and held dashed after its last update. The settle is the dashed rule and the listing time is marked.',
+        'The market\u2019s value is the whole-degree crossing of its price ladder, rounded the same way as in the lead-curve figure, the tolerance is 1 or 2 degrees, selectable by tab.',
+        'Convergence in the top panel uses the matched cohort of eleven tools plus the market at lead zero, or, for six additional sources shown on their own axis, whichever city-days each source covers.',
+        'A qualifying report raised the observed extreme by at least a degree on highs, or lowered it on lows, before the day\u2019s true extreme was reached. Bands are the same 1,000-draw bootstrap used elsewhere, seed 20260910, and a point under 30 qualifying events is left blank.',
+        'The traced city-day at the bottom shows every report as a dot, the running observed extreme as a grey step, the market\u2019s ten-minute price track with its 10th-to-90th-percentile band, and each tool\u2019s forecast held flat after its last update.',
       ],
       n: sample,
     });

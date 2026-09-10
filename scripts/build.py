@@ -41,6 +41,8 @@ STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorec
               "lessons.html", "js/lessons.js", "assets/lessons.json",
               "assets/basemap.json", "assets/world.json", "assets/hurricane-geo.json"]
 EMBED = ["embed/index.html", "js/chart-city.js"]
+# whole directories, copied as they are (see NOTICE for what each one is)
+VENDOR = ["vendor/katex"]
 
 
 def asset_versions() -> dict:
@@ -397,6 +399,14 @@ def build(target: str, cfg: dict, data_mode: str) -> dict:
     os.makedirs(out)
     files = SHARED + (STANDALONE if target == "standalone" else EMBED)
     missing = [f for f in files if not copy(f, out, flatten_embed=True)]
+    # vendored third-party code, copied whole because it carries its own font
+    # files and its stylesheet reaches them by relative path
+    for tree in (VENDOR if target == "standalone" else []):
+        src = os.path.join(SITE, tree)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(out, tree))
+        else:
+            missing.append(tree)
     data_base = cfg.get("data_base_url", "/data") if data_mode == "deploy" else "data"
     with open(os.path.join(out, "config.js"), "w") as fh:
         fh.write(config_js(cfg, target, data_base))

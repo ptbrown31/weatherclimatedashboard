@@ -103,6 +103,7 @@ parameters: `station`, `theme`, `market`.
     site/            the static frontend; js/market.js is the market seam; js/storm.js is a live storm's
                      wind contracts, delivery by delivery; embed/ is the iframe target
     site/assets/     small projected geometry the pages load (generated)
+    site/vendor/     third-party code shipped as it is (KaTeX; see NOTICE)
     geo/             vendored inputs, not served: public-domain TopoJSON and the exchange's wind reference-location list
     samples/         snapshots for offline local mode (checked in)
     scripts/         build.py, serve_local.py, verify.py, build_assets.py, scrub.py, traffic.py (read the counts),

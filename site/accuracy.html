@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Weather prediction market accuracy</title>
-<meta name="description" content="How accurate ForecastEx daily temperature markets have been against eleven public forecast tools, scored on the same city-days at every lead, with calibration, a city map and a scorecard grid.">
+<meta name="description" content="How ForecastEx’s daily temperature markets score against eleven public forecasts, on matched city-days at every lead, with calibration, a city-by-city map, and a full scorecard.">
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
 <script src="js/theme.js"></script>
@@ -12,39 +13,39 @@
 <body>
 <div class="wrap">
 <h1>Weather prediction market accuracy</h1>
-<p class="sub">ForecastEx daily high and low temperature markets scored against eleven public forecast tools, the National Weather Service point forecast, the National Blend of Models, the Aviation Forecast, the European, American, German, Canadian, UK, French and Japanese models and the German Statistical Model, on the same city-days at the same lead, against the temperature the station settled on.</p>
+<p class="sub">ForecastEx runs daily prediction markets on the high and low temperature in cities across the US. This page scores those markets against eleven public forecasts, the National Weather Service point forecast, the National Blend of Models, the Aviation Forecast, and models from the US, Europe, Germany, Canada, the UK, France, and Japan. Every comparison holds the city, the day, and the lead time fixed, and scores each system against the temperature the station recorded.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 
 <div class="secttl">LEAD CURVE</div>
-<p class="cap" style="margin-top:0">Mean absolute error of the market and of each tool against the settle, by hours before the end of the target day, on a matched sample with bootstrap bands.</p>
+<p class="cap" style="margin-top:0">Average error of the market and each forecast tool against the recorded temperature, plotted against hours remaining before the day ends. Bands show bootstrap uncertainty over the matched sample.</p>
 <div class="bar acccontrols" id="accLeadBar"></div>
 <div class="card"><svg id="accLead" viewBox="0 0 960 430"></svg></div>
 <div class="key" id="accLeadKey"></div>
 <div id="accLeadMethod"></div>
 
 <div class="secttl">MARKET MOVEMENT BETWEEN FORECAST CYCLES</div>
-<p class="cap" style="margin-top:0">How far and how often the market's central value moves between the tools' forecast cycles, when it settles on the day's answer, how it responds to a tool update, and one city-day traced hour by hour.</p>
+<p class="cap" style="margin-top:0">Tracks how much and how often the market’s price moves between other tools’ forecast updates, how quickly it settles on the final temperature, and how it reacts when a new report moves the observed extreme. One city-day is traced hour by hour as an example.</p>
 <div class="bar acccontrols" id="accDynBar"></div>
 <div class="card"><div id="accDyn"></div></div>
 <div class="key" id="accDynKey"></div>
 <div id="accDynMethod"></div>
 
 <div class="secttl">CALIBRATION AND BRIER SCORE</div>
-<p class="cap" style="margin-top:0">Reliability of the Yes price against the share of contracts that paid, with the Brier score and its decomposition by lead, for the midpoint, the two-sided books and the Yes bid alone.</p>
+<p class="cap" style="margin-top:0">Checks whether a Yes price of, say, 70 cents paid out about 70 percent of the time, and scores that reliability with the Brier score, split out by lead and by which side of the book is used.</p>
 <div class="bar acccontrols" id="accCalBar"></div>
 <div class="card"><div id="accCal"></div></div>
 <div class="key" id="accCalKey"></div>
 <div id="accCalMethod"></div>
 
 <div class="secttl">CITY MAP</div>
-<p class="cap" style="margin-top:0">Market error against tool error at each of the 24 stations in the window a reader would use, the morning of the day, the evening before, or the newsletter's hours, with the paired difference and its interval.</p>
+<p class="cap" style="margin-top:0">Compares market error to each tool’s error at each of the 24 cities, over the time window a reader would actually check, morning of, evening before, or newsletter hours, with the difference and its uncertainty interval.</p>
 <div class="bar acccontrols" id="accMapBar"></div>
 <div class="card"><svg id="accMap" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="accMapKey"></div>
 <div id="accMapMethod"></div>
 
 <div class="secttl">SCORECARD GRID</div>
-<p class="cap" style="margin-top:0">Every system's error, bias and share within one degree at four leads, in the settle frame and in the climate-report frame, with the percent difference from the National Weather Service row and the newsletter's own window beside it.</p>
+<p class="cap" style="margin-top:0">Summarizes each system’s error, bias, and share of forecasts within one degree at four leads, scored against both the official settlement and the National Weather Service’s climate report, with each system’s percent difference from the National Weather Service shown alongside.</p>
 <div class="bar acccontrols" id="accGridBar"></div>
 <div class="card"><div id="accGrid"></div></div>
 <div class="key" id="accGridKey"></div>
@@ -52,17 +53,20 @@
 
 <div class="secttl">HOW TO READ THIS PAGE</div>
 <ul class="conv">
-<li><b>Clock.</b> Lead is the number of hours before the station-local midnight that ends the target day, a tool is timed by the moment the capture held its value, and the market is timed by the ladder snapshot itself.</li>
-<li><b>Truth.</b> Every system is scored against the station's METAR settle, the day's extreme over hourly and special reports rounded half up to a whole degree Fahrenheit, and a toggle rescores the tools against the National Weather Service climate report for the same date, which is a different definition of the day's extreme and runs about a degree warmer on highs.</li>
-<li><b>Market value.</b> The Yes price at a strike is the midpoint of the Yes bid and one dollar less the No bid, the ladder is made monotone by pooling adjacent violators, and the market's temperature is where the ladder crosses one half, rounded up for highs and down for lows because settlement is strict.</li>
-<li><b>Tool value.</b> A tool's value at any instant is its last record at or before that instant for the target date, and the default view holds it at the running observed extreme, so a forecast high is never colder than a high already recorded and a forecast low is never warmer than a low already recorded.</li>
-<li><b>Sample.</b> The matched cohort at a lead holds the city-days where all eleven tools have a value and the market has a crossing, thin books, capture-short dates, backfilled rows and days with a gap in the report record are excluded and counted, and a bin needs 30 city-days to be drawn.</li>
-<li><b>Uncertainty.</b> Every interval is a 95 percent percentile bootstrap over target dates with 1,000 draws and a fixed seed, and a market minus tool difference is resampled under the same draws so the two sides of it move together.</li>
+<li><b>Clock.</b> Lead counts down to station-local midnight, the moment the target day ends. A tool&rsquo;s lead is timed to when its forecast was captured, the market&rsquo;s lead is timed to the ladder snapshot itself.</li>
+<li><b>Truth.</b> Every system is scored against the station&rsquo;s METAR settle, the day&rsquo;s highest or lowest hourly reading, rounded to the nearest whole degree. A toggle rescores tools against the National Weather Service&rsquo;s climate report instead, a different definition of the day&rsquo;s extreme that runs about a degree warmer on highs.</li>
+<li><b>Market value.</b> A contract&rsquo;s Yes price is the midpoint between the Yes bid and one dollar minus the No bid,
+<span class="eq" data-tex="p = \frac{\text{Yes bid} + (1 - \text{No bid})}{2}">p = (Yes bid + (1 - No bid)) / 2</span>
+when both sides are quoted. The ladder across strikes is forced monotone by pooling any violations, and the market&rsquo;s temperature is where it crosses fifty cents, rounded up for highs and down for lows to match whole-degree settlement.</li>
+<li><b>Tool value.</b> A tool&rsquo;s value at any moment is its most recent forecast at or before that moment for the target date. By default that value is held at the running observed extreme, so a forecast high is never shown below a high that already occurred, and a forecast low is never shown above a low that already occurred.</li>
+<li><b>Sample.</b> The matched cohort at a given lead includes only city-days where all eleven tools have a value and the market has a ladder crossing. Thin order books, short capture windows, backfilled rows, and days with gaps in the observation record are excluded and counted, a bin needs at least 30 city-days before it&rsquo;s drawn.</li>
+<li><b>Uncertainty.</b> Every interval on this page is a 95 percent bootstrap over target dates, 1,000 resamples, fixed seed. When a figure shows the market minus a tool, both sides are resampled from the same draws, so the difference reflects paired variation, not independent noise in each side.</li>
 </ul>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>
+<script src="vendor/katex/katex.min.js"></script>
 <script src="js/acc-common.js"></script>
 <script src="js/acc-lead.js"></script>
 <script src="js/acc-dyn.js"></script>

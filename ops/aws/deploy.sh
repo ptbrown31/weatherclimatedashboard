@@ -182,6 +182,11 @@ upload_target() {
   if [ -d "$src/assets" ]; then
     aws s3 cp "$src/assets/" "$dest/assets/" --recursive --only-show-errors --cache-control "$CC_ASSET"
   fi
+  # vendored code and its fonts: the pages reference the script and stylesheet
+  # by content hash, and the font files change only when the version does
+  if [ -d "$src/vendor" ]; then
+    aws s3 cp "$src/vendor/" "$dest/vendor/" --recursive --only-show-errors --cache-control "$CC_ASSET"
+  fi
   aws s3 cp "$src" "$dest" --recursive --only-show-errors --cache-control "$CC_ENTRY" \
       --exclude "*" --include "*.html" --include "config.js"
 }

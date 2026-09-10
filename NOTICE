@@ -10,6 +10,10 @@ or the National Weather Service. Where this site smooths, interpolates or
 otherwise computes from government data, the result is labelled as derived
 rather than presented as an official product.
 
+The estimators on the accuracy page are typeset with KaTeX, vendored under
+site/vendor/katex, Copyright (c) 2013-2020 Khan Academy and other
+contributors, used under the MIT license (site/vendor/katex/LICENSE).
+
 Country basemap outlines derive from Natural Earth (public domain). US state
 and county geometry derives from the US Census Bureau's cartographic boundary
 files (public domain).

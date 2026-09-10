@@ -239,7 +239,7 @@ window.WXAccLead = (() => {
         + 'The band is the market’s 95 percent bootstrap interval.';
       A.key(keyEl, ids.concat(extras), { note });
     }
-    methodNote(methEl, of);
+    methodNote(methEl);
   }
 
   function binTip(i, hh, ids, S, series, extras, own, n, b, note, viewText, raw) {
@@ -273,7 +273,7 @@ window.WXAccLead = (() => {
       + (foot ? '<div class="tf">' + foot + '</div>' : '');
   }
 
-  function methodNote(container, of) {
+  function methodNote(container) {
     if (!container) return;
     const meta = file.meta || {};
     const co = (meta.cohorts || {})[state.cohort] || {};
@@ -284,16 +284,18 @@ window.WXAccLead = (() => {
       + (co.from ? ' from ' + co.from : '') + '. ' + A.windowAndBuilt(meta) + '.';
     A.methodNote(container, {
       title: 'Mean absolute error by lead',
-      equation: 'MAE_s(h) = (1/N_h) sum_i |f_s,i(h) - o_i|\n'
-        + 'f_held(t) = max(raw, bank_high(t)) on highs, min(raw, bank_low(t)) on lows\n'
-        + 'f_raw(t)  = the last record at or before t, forward filled within the target date, undefined after the last live update\n'
-        + 'f_FX(t)   = ceil(x) on highs, floor(x) on lows, x the 0.5 crossing of the monotone Yes ladder, banked the same way\n'
-        + 'o_i       = the METAR settle of city-day i',
+      body: [
+        'Error is mean absolute error, the average gap in degrees between a system\u2019s call and what the station recorded, at a given lead.',
+        { tex: 'MAE_s(h) = \\frac{1}{N_h}\\sum_{i=1}^{N_h} \\left| f_{s,i}(h) - o_i \\right|' },
+        'where $f_{s,i}(h)$ is system $s$\u2019s value for city-day $i$ at lead $h$, and $o_i$ is the settle.',
+        'A system\u2019s value at a given lead is its most recent reading at or before that moment. Once a high or low has actually occurred, no forecast is shown as implying something more extreme, values are held at the running observed extreme. The market\u2019s value is where its price ladder crosses fifty cents, rounded up for highs and down for lows to match whole-degree settlement.',
+      ],
       rules: [
-        'Bins are one hour wide from 36 h to 0 h, a value at h is the last record available at or before that instant, and a bin under 30 city-days is left blank.',
-        'All eleven takes the city-days where every panel tool has a value at h and the market has a crossing, core five needs those five and the market, and the fixed cohort keeps only city-days matched at every hour from 30 to 0.',
-        'Bands are 95 percent percentile bootstrap intervals over target dates with 1,000 draws and seed 20260910, and beats counts the tools whose error the market comes in under at that hour, of the ' + of + ' in the cohort or, in the forecast-only view, of those still live.',
-        'Bins above ' + HATCH_ABOVE + ' h are hatched because the cohort there is partial and the hover names the dates and zones filling them; the six extra sources run on their own span with the held value and no band.',
+        'Bins run hourly from 36 hours before the day ends to zero, and a bin needs at least 30 matched city-days before it\u2019s drawn.',
+        'Three cohorts are available, all eleven tools plus the market, a core five (National Weather Service, Blend, Aviation Forecast, European and American models) plus the market, or a fixed set of city-days matched at every hour from 30 to 0.',
+        'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, seed 20260910.',
+        'Hours beyond the shaded threshold draw on a partial cohort, since not every tool has data that far out, hovering shows which dates and time zones fill those bins.',
+        'The six extra sources run on their own span, held at their last value, with no band.',
       ],
       n: sample,
     });

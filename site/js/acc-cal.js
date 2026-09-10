@@ -383,21 +383,22 @@ window.WXAccCal = (() => {
     const ncd = Math.max(0, ...rel.map(r => (fin(r.nCityDays) ? r.nCityDays : 0)));
     A.methodNote(meth, {
       title: 'Method',
-      equation: [
-        'BS = mean over contracts of (p − y)²,  y = 1 when the contract paid, else 0',
-        'BS_binned = REL − RES + UNC  (Murphy, on the ten price bins; the file carries BS_binned beside BS)',
-        'REL = Σ n_k (p̄_k − ȳ_k)² / n     RES = Σ n_k (ȳ_k − ȳ)² / n     UNC = ȳ (1 − ȳ)',
-        'BS_trunc = BS over the contracts with 0.02 < p < 0.98;  retained = their share of all contracts',
-        'width = median over ladders of strike(ladder crosses 0.9) − strike(ladder crosses 0.1), in °F',
-        'p = (Yes bid + (1 − No bid)) / 2 when both sides are quoted',
-      ].join('\n'),
+      body: [
+        'A contract\u2019s price should equal the probability it pays off. Reliability plots the average price in a bucket against the share of contracts in that bucket that actually paid, a perfectly calibrated market falls on the diagonal.',
+        { tex: 'p = \\frac{\\text{Yes bid} + (1 - \\text{No bid})}{2}' },
+        'used when both sides are quoted, the single quoted side otherwise.',
+        { tex: 'BS = \\frac{1}{N}\\sum_{j=1}^{N} (p_j - y_j)^2, \\qquad y_j \\in \\{0, 1\\}' },
+        '$y_j$ is 1 when the contract paid.',
+        { tex: 'BS = REL - RES + UNC' },
+        { tex: 'REL = \\frac{1}{N}\\sum_k n_k(\\bar p_k - \\bar y_k)^2 \\qquad RES = \\frac{1}{N}\\sum_k n_k(\\bar y_k - \\bar y)^2 \\qquad UNC = \\bar y(1-\\bar y)' },
+        'Reliability penalizes a price bucket whose average outcome differs from its average price. Resolution rewards separating outcomes across buckets rather than pricing everything near the base rate. Uncertainty is fixed by the base rate itself, it\u2019s the score a market gets for pricing every contract at that rate.',
+      ],
       rules: [
-        'The Yes price of a strike is the Yes bid plus one dollar less the No bid, halved, when both sides are quoted, and the single quoted side otherwise. Two-sided books only keeps the contracts where both sides are bid. Yes bid scores the Yes bid alone. A book bidding one cent against ninety-nine is unquoted.',
-        'A contract is one strike on the hourly-last ladder snapshot of an eligible city-day with a settle. It pays when the settle clears the strike strictly, above for highs and below for lows. The standing hour of a snapshot is its lead rounded up less one, and a lead bin holds the hours above its low bound up to and including its high bound.',
-        'Reliability bins are ten bins of width ten cents by price, the bin of a price p being the whole part of 10p. A bin under 50 contracts is pooled toward 50 cents and the receiving bin carries the pooled count while the histogram keeps the raw share. The horizontal position is the mean price in the bin, the vertical the share of contracts that paid, and the bar its 95 percent Wilson interval.',
-        'The Brier score by lead carries a 95 percent percentile bootstrap over target dates with 1,000 draws and a fixed seed. A lead with under 30 city-days is not drawn. The skill score is one less the Brier score over the uncertainty term, so it is measured against the base rate, the share of contracts that paid at that lead.',
-        'The truncated score keeps prices strictly between 2 and 98 cents, the range where a price says something the strike alone does not, and the share kept is printed over its marker. The Murphy terms are computed on the ten price bins, so their identity reproduces the binned score rather than the raw one; the difference is the within-bin variance, a few thousandths here. The rule at 0.25 is the score of pricing every contract at 50 cents, and the base rate rule is the score of pricing every contract at that lead\'s share paid, which is the uncertainty term.',
-        'Sharpness is the width of the ladder under the selected price rule after it is made monotone, the median over ladders that cross both 10 and 90 cents. The error of the median is the mean absolute difference between the whole-degree crossing of the ladder at 50 cents, rounded up for highs and down for lows, and the settle, over ladders that cross.',
+        'A contract is one strike on the last ladder snapshot of each hour, for a city-day with a settle, it pays when the settle clears the strike.',
+        'Reliability bins are ten cents wide, a bin under 50 contracts is pooled into the 50-cent bin.',
+        'The truncated Brier score keeps only prices strictly between 2 and 98 cents, the range where the price carries information beyond the strike itself, the share of contracts kept is printed above its marker.',
+        'Sharpness is the median width, in degrees, between where a ladder crosses 10 cents and where it crosses 90 cents, and the error of the median is the average miss of the ladder\u2019s 50-cent crossing.',
+        'All intervals are the same 1,000-draw, 95 percent bootstrap used elsewhere, and a lead with under 30 city-days is not drawn.',
       ],
       n: 'Sample ' + A.int(nc) + ' contracts across the four lead bins, up to ' + A.int(ncd) + ' city-days in a bin, ' + describe() + '.',
     });

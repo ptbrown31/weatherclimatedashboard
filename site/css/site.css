@@ -498,8 +498,17 @@ tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
 .accnote .nt{font-weight:700;color:var(--navy);font-size:12px;margin-bottom:3px}
 .accnote .rule{margin:2px 0}
 .accnote .rule.n{margin-top:5px;color:var(--ink)}
-.eq{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);background:var(--panel);
-  border:1px solid var(--line);border-radius:5px;padding:7px 10px;margin:4px 0 7px;overflow-x:auto;white-space:pre}
+/* an estimator, set as mathematics. KaTeX draws it; a display block gets room
+   above and below and scrolls on its own when a long one meets a narrow screen,
+   so the note never pushes the page sideways. .texraw is the fallback when
+   KaTeX has not loaded, where the LaTeX source stands in for the typesetting */
+.eq{color:var(--ink);margin:9px 0 10px;overflow-x:auto;overflow-y:hidden;text-align:center;padding:1px 0}
+.eq .katex-display{margin:0}
+.eq .katex{font-size:1.06em}
+.accnote .mi{color:var(--ink)}
+.accnote .mi .katex,.conv .mi .katex{font-size:1.02em}
+.texraw{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);
+  border:1px solid var(--line);border-radius:5px;padding:7px 10px;display:block;text-align:left;white-space:pre-wrap}
 .conv{margin:0 0 6px;padding-left:18px;max-width:78ch}
 .conv li{font-size:13px;line-height:1.55;margin:0 0 6px;color:var(--ink)}
 .conv li b{color:var(--navy)}

@@ -323,21 +323,24 @@ window.WXAccMap = (() => {
         key.appendChild(sw('background:var(--panel);border:2px solid ' + A.color(sel.tool), 'right dot ' + A.name(sel.tool)));
       }
       key.appendChild(sw('background:var(--panel);border:1.2px dashed var(--muted)', 'hollow, under 30 matched city-days or excluded from the frame'));
-      key.appendChild(h('span', { class: 'kn', text: 'Dot size follows the matched count. Colorado Springs was a test station the exchange never listed and Honolulu is outside the scope of this page, so neither is drawn.' }));
+      key.appendChild(h('span', { class: 'kn', text: 'Dot size follows the matched count. Colorado Springs and Honolulu are not drawn. Colorado Springs was a test listing the exchange never carried, and Honolulu falls outside this page\u2019s scope.' }));
     }
 
     let n = 0, k = 0;
     rows.forEach(({ c }) => { if (c && c.matched != null) { n += c.matched; k++; } });
     A.methodNote($('#accMapMethod'), {
-      title: 'Percent improvement by city, paired on the same city-days',
-      equation: 'MAE_s,c = mean over the matched city-days of city c, in the window, of |value_s − settle|\n'
-        + 'PI_c    = 100 × (MAE_tool,c − MAE_FX,c) / MAE_tool,c',
+      title: 'Percent improvement by city',
+      body: [
+        'Each city is scored on the city-days where both the tool and the market have a value in the chosen window, so the comparison is always paired on the same days.',
+        { tex: 'MAE_{s,c} = \\text{mean over matched city-days of city } c \\text{ of } |v_s - \\text{settle}|' },
+        { tex: 'PI_c = 100 \\times \\frac{MAE_{tool,c} - MAE_{FX,c}}{MAE_{tool,c}}' },
+        'A positive $PI_c$ means ForecastEx had the smaller error in that city. A dot is grey when the bootstrap interval on the paired difference covers zero.',
+      ],
       rules: [
-        'A city-day is matched when the tool has a value and the market has a crossing in the window, and a city with fewer than 30 matched city-days for the tool is hollow.',
-        'The windows are the morning of the target day, 06 to 12 in the station clock, the evening before at 18:00 station time, and the newsletter hours, 5 PM to 5 AM Eastern.',
-        'Positive PI_c means ForecastEx had the smaller error. The dot is grey when the bootstrap interval of the paired difference covers zero, and the printed number is PI_c, or each system’s MAE in the absolute-error view.',
-        'Intervals are 95 percent percentile bootstrap over target dates, 1,000 draws, seed 20260910, with the market minus tool differences resampled under the same draws.',
-        'The contracts pay on the METAR settle and the tools are scored against it by default. The climate-report frame scores the tool against the National Weather Service climate report for the same date, a different definition of the day’s extreme that runs about a degree warmer on highs, so the gap between the frames is a definition difference. Denver’s climate report stands in for Buckley Field, which is hollow in that frame.',
+        'Windows are the morning of the target day, 6 AM to noon station time, the evening before at 6 PM station time, and the newsletter\u2019s own hours, 5 PM to 5 AM Eastern.',
+        'A city with fewer than 30 matched city-days is hollow.',
+        'Intervals are the same bootstrap used throughout the page, with the market and tool differences resampled together so both sides move under the same draws.',
+        'The climate-report frame scores tools against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, so a gap between frames reflects that difference in definition rather than in forecast skill. Denver\u2019s climate-report figures stand in for Buckley Field, which has none of its own.',
       ],
       n: cells ? 'Sample ' + A.int(n) + ' matched city-days across ' + k + ' cities in this view.'
                : 'The file carries no values for this tool in this frame.',

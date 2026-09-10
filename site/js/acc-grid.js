@@ -361,14 +361,14 @@ window.WXAccGrid = (() => {
     }
     if (meta.window) n += ' ' + A().windowAndBuilt(meta) + '.';
     A().methodNote(methodEl, {
-      title: 'Scorecard grid, estimators and sampling',
-      equation: [
-        'MAE  = mean over city-days of |v - settle|                     degrees F',
-        'ME   = mean over city-days of (v - settle)                     positive when v ran warm',
-        'HR1  = share of city-days with |v - settle| <= 1',
-        'SS_s = 100 * (1 - MAE_s / MAE_NWS)                             on the same city-days, per lead',
-        'CRPS = sum over whole degrees k of (F(k) - 1[settle <= k])^2   F(k) = 1 - YesPrice(k) for highs, F(k - 1) = YesPrice(k) for lows',
-      ].join('\n'),
+      title: 'How the grid is scored',
+      body: [
+        'Mean absolute error and mean error are both in degrees Fahrenheit, mean error is signed, positive when a system runs warm. Hit rate is the share of city-days within one degree of the settle.',
+        { tex: 'SS_s = 100\\left(1 - \\frac{MAE_s}{MAE_{NWS}}\\right)' },
+        'A positive skill score means a system beat the National Weather Service on the same city-days. Its interval is a paired bootstrap, and a cell is greyed out when that interval covers zero or the sample is under ' + MIN_N + ' city-days.',
+        { tex: 'CRPS = \\sum_{k} \\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
+        'On highs, $F(k) = 1 - \\text{YesPrice}(k)$, on lows, $F(k-1) = \\text{YesPrice}(k)$. CRPS scores the whole distribution the market is pricing, not just its fifty-cent crossing.',
+      ],
       rules, n,
     });
   }
