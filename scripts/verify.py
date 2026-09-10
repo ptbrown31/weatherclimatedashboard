@@ -2721,17 +2721,12 @@ def run(no_build: bool) -> int:
                 # ---- scorecard hover: overall, station and day cells
                 page.goto(f"{srv.url}/scorecard.html")
                 page.wait_for_timeout(900)
-                # the standings must compare tools over the same station-days, not
-                # over whatever each archive lane happens to have collected
                 # scored days are measured against what happened; days still ahead
                 # have nothing to measure against and keep the consensus center
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(2500)
-                chk.add(f"{scheme} standings: they are on the accuracy page, under the five figures",
-                        page.locator("#standChart rect[data-key]").count() >= 4,
-                        str(page.locator("#standChart rect[data-key]").count()))
-                chk.add(f"{scheme} standings: the page says the sample is matched",
-                        "sample is matched" in page.locator("#standings").inner_text(),
-                        page.locator("#standings").inner_text()[:70])
+                chk.add(f"{scheme} accuracy: the standings are on the scorecard, not repeated here",
+                        page.locator("#standings").count() == 0
+                        and page.locator("#standChart").count() == 0, "")
                 # lows are a tab on every figure; the lead curve and the grid are the two proven
                 lead_before = page.locator("#accLead").inner_html()
                 page.locator("#accLeadBar button", has_text="Lows").first.click(); page.wait_for_timeout(500)

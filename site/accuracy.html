@@ -59,13 +59,6 @@
 <li><b>Sample.</b> The matched cohort at a lead holds the city-days where all eleven tools have a value and the market has a crossing, thin books, capture-short dates, backfilled rows and days with a gap in the report record are excluded and counted, and a bin needs 30 city-days to be drawn.</li>
 <li><b>Uncertainty.</b> Every interval is a 95 percent percentile bootstrap over target dates with 1,000 draws and a fixed seed, and a market minus tool difference is resampled under the same draws so the two sides of it move together.</li>
 </ul>
-
-<div class="secttl">STANDINGS, LAST TWO SCORED WEEKS</div>
-<p class="cap" style="margin-top:0">Over the last two weeks of scored days, how far was each tool from the temperature the station recorded? Ranked best first, on a matched
-sample so every tool is judged on the same station-days. Hover a bar for its bias, its share within two degrees,
-and the same figures on the daily low.</p>
-<span id="scoreStatus"></span>
-<div id="standings"></div>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
@@ -76,7 +69,6 @@ and the same figures on the daily low.</p>
 <script src="js/acc-cal.js"></script>
 <script src="js/acc-map.js"></script>
 <script src="js/acc-grid.js"></script>
-<script src="js/scorecard.js"></script>
-<script>WXC.chrome('accuracy.html'); WXAcc.init(); WXScore.init();</script>
+<script>WXC.chrome('accuracy.html'); WXAcc.init();</script>
 </body>
 </html>
