@@ -140,9 +140,20 @@ def run(no_build: bool) -> int:
                         f"chars={len(faq_t)}")
                 chk.add(f"{scheme} faq: the eleven tools survive with their links",
                         page.locator(".prose li a").count() >= 11, str(page.locator(".prose li a").count()))
-                chk.add(f"{scheme} faq: says plainly which sources this site itself draws",
-                        "This site draws a narrower set" in page.locator(".sub").inner_text(),
-                        page.locator(".sub").inner_text()[:70])
+                chk.add(f"{scheme} faq: the comparison questions name the publication they belong to",
+                        faq_t.count("IBKR Campus Publication") == 2 and "compared here" not in faq_t,
+                        faq_t[:70])
+                order = page.eval_on_selector_all(".prose h2", "e => e.map(x => x.textContent)")
+                chk.add(f"{scheme} faq: the questions run in the order the owner set",
+                        order == ["How do prediction markets work?",
+                                  "What is a weather prediction market?",
+                                  "Are weather prediction markets accurate?",
+                                  "How does a ForecastEx ladder become a single forecast temperature?",
+                                  "How the daily temperature displays are built",
+                                  "Data sources",
+                                  "What are the four canonical forecast systems compared in the IBKR Campus Publication?",
+                                  "What are all the forecast tools used in the IBKR Campus Publication?",
+                                  "Further reading"], str(order)[:200])
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(500)
                 acc_t = "\n".join(page.locator(".prose").all_inner_texts())
                 chk.add(f"{scheme} accuracy: the electricity section is not published",
@@ -650,8 +661,14 @@ def run(no_build: bool) -> int:
                         "How do prediction markets work?" in faq_t2
                         and page.locator("a[href='https://forecastex.com/faq']").count() == 1
                         and page.locator("a[href='https://www.interactivebrokers.com/predictionmarkets/en/home.php']").count() == 1, "")
-                chk.add(f"{scheme} faq: it says it is mostly about the daily temperature contracts",
-                        "Mostly about the daily temperature contracts" in faq_t2, faq_t2[:60])
+                chk.add(f"{scheme} faq: it opens on the first question, with nothing standing in front of it",
+                        page.locator(".wrap .sub").count() == 0
+                        and faq_t2.index("How do prediction markets work?")
+                            < faq_t2.index("What is a weather prediction market?"), faq_t2[:60])
+                chk.add(f"{scheme} faq: the accuracy question points at the standings and the day-by-day record",
+                        "Are weather prediction markets accurate?" in faq_t2
+                        and page.locator(".prose a[href='accuracy.html']").count() == 1
+                        and page.locator(".prose a[href='scorecard.html']").count() == 1, "")
                 chk.add(f"{scheme} faq: it carries the build detail that left About",
                         "archived as published" in faq_t2 and "Decode convention" in faq_t2, "")
                 page.goto(f"{srv.url}/about.html"); page.wait_for_timeout(500)
