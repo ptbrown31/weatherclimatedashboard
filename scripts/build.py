@@ -139,9 +139,16 @@ def title_of(html: str) -> str:
 
 
 def strip_tags(s: str) -> str:
-    """Readable text out of a fragment of the page's own markup."""
+    """Readable text out of a fragment of the page's own markup.
+
+    A tag becomes a space, because two blocks run together without one. That
+    leaves a gap wherever markup ended just before punctuation, which a link
+    at the end of a sentence or inside a heading does, so the gap in front of
+    the punctuation is closed again."""
     s = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", s, flags=re.S | re.I)
-    return " ".join(unescape(re.sub(r"<[^>]+>", " ", s)).split())
+    s = " ".join(unescape(re.sub(r"<[^>]+>", " ", s)).split())
+    s = re.sub(r"\s+([,.;:!?%)\u2019\u201d])", r"\1", s)
+    return re.sub(r"([(\u2018\u201c])\s+", r"\1", s)
 
 
 def jsonld(obj: dict) -> str:

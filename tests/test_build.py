@@ -160,6 +160,22 @@ class StructuredData(unittest.TestCase):
                          ["Question 1?", "Question 2?", "Question 3?"])
         self.assertEqual(faq["mainEntity"][0]["acceptedAnswer"]["text"], "Answer 1.")
 
+    def test_a_link_at_the_end_of_a_sentence_leaves_no_gap(self):
+        # a tag becomes a space, so markup that ends just before punctuation
+        # used to read "the ForecastEx FAQ ." in the structured data
+        self.assertEqual(build.strip_tags('in the <a href="x">IBKR Campus Publication</a>?'),
+                         "in the IBKR Campus Publication?")
+        self.assertEqual(build.strip_tags('the <a href="x">ForecastEx FAQ</a>.'), "the ForecastEx FAQ.")
+        self.assertEqual(build.strip_tags('Contracts (<a href="x">view here</a>).'), "Contracts (view here).")
+        self.assertEqual(build.strip_tags("<p>one</p><p>two</p>"), "one two")
+
+    def test_a_question_that_carries_a_link_keeps_its_question_mark(self):
+        body = ("<h2>Question 1?</h2><p>A.</p>"
+                '<h2>What does the <a href="x">publication</a> compare?</h2><p>B.</p>'
+                "<h2>Question 3?</h2><p>C.</p>")
+        self.assertEqual([q["name"] for q in build.faq_questions(body)],
+                         ["Question 1?", "What does the publication compare?", "Question 3?"])
+
     def test_headings_that_ask_nothing_are_not_questions(self):
         body = "<h2>Question 1?</h2><p>A.</p><h2>Data sources</h2><p>B.</p><h2>Question 2?</h2><p>C.</p>"
         self.assertEqual([q["name"] for q in build.faq_questions(body)], [])   # two questions is not a list

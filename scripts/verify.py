@@ -143,6 +143,9 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} faq: the comparison questions name the publication they belong to",
                         faq_t.count("IBKR Campus Publication") == 2 and "compared here" not in faq_t,
                         faq_t[:70])
+                chk.add(f"{scheme} faq: both publication headings reach the author's campus page",
+                        page.locator(".prose h2 a[href='https://www.interactivebrokers.com/campus/author/patrick1brown/']").count() == 2,
+                        str(page.locator(".prose h2 a").count()))
                 order = page.eval_on_selector_all(".prose h2", "e => e.map(x => x.textContent)")
                 chk.add(f"{scheme} faq: the questions run in the order the owner set",
                         order == ["How do prediction markets work?",
