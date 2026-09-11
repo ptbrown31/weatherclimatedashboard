@@ -101,6 +101,18 @@ the reconstruction is about half a degree worse in the middle of the day, and
 the American model's lows, where it is nine tenths worse at 18 hours. The
 measurement is rebuilt with the record by `om_measure.py` beside the builder.
 
+The four statistical guidance sources have a second archive, Iowa State's,
+which keeps every bulletin as it was issued with its cycle time and its
+forecast hours. That lane needs no allowance for staleness: the bulletin
+standing at an instant is the last one issued before it, exactly as in life.
+What the archive does not carry is the moment a bulletin reached a reader, so
+a reconstructed bulletin is timed to its cycle plus the median lag the capture
+itself measures for that source, 1.3 hours for the Aviation Forecast, 5.3 for
+GFS MOS, 3.3 for NAM MOS and 2.2 for Blend MOS. Measured the same way on the
+months both records cover, that lane's readings are identical to the capture's
+to a tenth of a degree at the median, and its worst mean absolute error
+difference at any lead is two tenths. `mos_measure.py` rebuilds it.
+
 **Observation sources.** The observation record is the desk's own METAR
 ingest, which begins 2026-03-09, plus Iowa State's ASOS archive before that,
 fetched once into a directory the builder reads beside the database. The ingest
