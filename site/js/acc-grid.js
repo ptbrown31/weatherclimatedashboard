@@ -155,6 +155,8 @@ window.WXAccGrid = (() => {
     }
     const rs = A().span(metaOf(), row.id, state.metric);
     if (rs) pairs.push(['Record', A().mdyY(rs.start) + ' to ' + A().mdyY(rs.end) + (fin(rs.days) ? ', ' + int(rs.days) + ' days' : '')]);
+    const lt = A().laneText(metaOf(), row.id);
+    if (lt) pairs.push(['Source', lt]);
     if (state.cohort === 'own') pairs.push(['Own span from', row.start || A().dash]);
     return A().tooltip().rows(nm + ', ' + L + ' h before the day ends', pairs);
   }

@@ -189,6 +189,9 @@ def run(no_build: bool) -> int:
                 # figures has to be told which days each one drew on.
                 n_bars = page.locator("svg.spanstrip rect").count()
                 strip_txt = page.locator("#accSpans").inner_text() if page.locator("#accSpans").count() else ""
+                open_bars = page.eval_on_selector_all("svg.spanstrip rect[stroke]", "e => e.length")
+                chk.add(f"{scheme} accuracy: the strip marks the reconstructed months apart from the capture",
+                        open_bars >= 4, f"open={open_bars}")
                 chk.add(f"{scheme} accuracy: the coverage strip draws a bar for every system",
                         n_bars >= 12 and re.search(r"[A-Z][a-z]{2} \d+ . [\d,]+ days", strip_txt) is not None,
                         f"bars={n_bars}")

@@ -207,6 +207,24 @@ window.WXAcc = (() => {
     if (s && s.start) return s;
     return sy.start ? { start: sy.start, end: null, days: null } : null;
   }
+  /* Where a system's record comes from. A source the capture reached only in
+     the summer is carried back over the earlier months by a reconstruction
+     from the archive, so its line has a seam: archive before, capture after.
+     Returns {archive, capture} spans, either one absent. */
+  function lanes(meta, id) {
+    const sy = meta && meta.systems && meta.systems[id];
+    const by = (sy && sy.bySrc) || {};
+    const out = {};
+    ['archive', 'capture', 'trade', 'quote'].forEach(k => { if (by[k] && by[k].start) out[k] = by[k]; });
+    return { archive: out.archive || out.trade || null, capture: out.capture || out.quote || null };
+  }
+  // 'archive to Jul 8, capture from Jul 9' where a record has a seam
+  function laneText(meta, id) {
+    const l = lanes(meta, id);
+    if (!l.archive || !l.capture) return '';
+    return 'Reconstructed from the archive through ' + mdyY(l.archive.end)
+      + ', from the capture itself from ' + mdyY(l.capture.start) + '.';
+  }
   // 'since Feb 11' for a legend entry or a column head
   function since(meta, id, metric) {
     const s = span(meta, id, metric);
@@ -275,8 +293,18 @@ window.WXAcc = (() => {
       const y = T + i * RH;
       svg.appendChild(txt(name(r.id), { x: L - 10, y: y + 4, 'text-anchor': 'end', class: 'ax' }));
       const x0 = x(t(r.s.start)), x1 = x(t(r.s.end || w.to));
+      const solid = r.id === 'FX' ? 0.95 : 0.6;
       svg.appendChild(el('rect', { x: x0, y: y - 5, width: Math.max(2, x1 - x0), height: 9, rx: 2,
-                                   fill: color(r.id), 'fill-opacity': r.id === 'FX' ? 0.95 : 0.6 }));
+                                   fill: color(r.id), 'fill-opacity': solid }));
+      // the part of the record that is a reconstruction is drawn open, so a
+      // reader can see at a glance where the source's own record begins
+      const l = lanes(meta, r.id);
+      if (l.archive && l.capture) {
+        const a0 = x(t(l.archive.start)), a1 = x(t(l.archive.end));
+        svg.appendChild(el('rect', { x: a0, y: y - 5, width: Math.max(2, a1 - a0), height: 9, rx: 2,
+                                     fill: 'var(--panel)', stroke: color(r.id), 'stroke-width': 1.2,
+                                     'fill-opacity': 0.9 }));
+      }
       svg.appendChild(txt(mdy(r.s.start) + (r.s.days ? ' · ' + int(r.s.days) + ' days' : ''),
                           { x: R + 8, y: y + 4, class: 'ax' }));
     });
@@ -539,6 +567,7 @@ window.WXAcc = (() => {
         text: 'Bars cover the days each system was scored on the '
           + (st.metric === 'high' ? 'daily high' : 'daily low')
           + '. The date and the day count are printed at the right of each bar. '
+          + 'An open bar is a reconstruction from the model archive, covering the months before that source\u2019s own capture began. '
           + spanLine(meta, ['FX'], st.metric, { lead: 'The market\u2019s own record runs from' }) }));
     };
     const bar = host.parentNode && host.parentNode.parentNode
@@ -573,7 +602,7 @@ window.WXAcc = (() => {
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
     tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,
-    mdy, mdyY, span, since, spanLine, cohortSpanLine, spanStrip,
+    mdy, mdyY, span, since, spanLine, cohortSpanLine, spanStrip, lanes, laneText,
     drawSpans,
     W, frame, clear, scale, leadScale, ticks, niceStep, xAxis, yAxis, leadAxis, lineSeries, dots, band, label,
     notYet, NOT_PUBLISHED,

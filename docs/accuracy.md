@@ -61,6 +61,46 @@ records which lane it came from in a `src` column, and the two lanes were
 compared over their full overlap: the crossings agree to a median of about a
 tenth of a degree.
 
+**Forecast sources.** Each source's own capture is its record wherever the
+capture reaches. For the eight sources Open-Meteo carries, the months before
+their capture began are reconstructed from Open-Meteo's archive, cut at the
+first target date the capture itself holds, so the archive never restates a
+day the capture already has. Every reading records which lane it came from.
+
+The archive is indexed by valid hour, not by run: for each hour it carries
+that hour's value in the run of one day earlier and of two days earlier. So
+the reconstruction reads, at an instant and for a target day, the extreme over
+the hours of that day still to come, each hour taken from the freshest
+archived run that existed at the instant, which is the one-day run for an hour
+within a day of it and the two-day run beyond. That makes the reconstruction a
+remaining-window source, scored the way the Aviation Forecast and the Blend
+already are, with the observation bank supplying what already happened. It
+also makes it stale against a live capture by up to a run cycle, because the
+archive has no finer step than a day.
+
+That handicap is measured rather than assumed. Over the months where both
+records exist, the same city-days and the same leads, the reconstruction's
+mean absolute error less the capture's, in degrees:
+
+| system | highs 30 h | 18 h | 12 h | 6 h | lows 30 h | 18 h | 12 h | 6 h |
+|---|---|---|---|---|---|---|---|---|
+| European AI Ensemble Mean | −0.21 | −0.16 | −0.13 | +0.06 | +0.05 | +0.02 | +0.02 | +0.02 |
+| European Model | +0.38 | +0.47 | +0.55 | +0.05 | +0.06 | +0.08 | +0.02 | +0.06 |
+| American Model | −0.06 | +0.02 | +0.24 | +0.04 | +0.49 | +0.91 | +0.26 | +0.33 |
+| German Model | −0.09 | −0.03 | +0.04 | +0.02 | +0.02 | +0.16 | +0.02 | +0.03 |
+| Canadian Model | −0.10 | +0.06 | +0.13 | +0.02 | +0.18 | +0.32 | +0.04 | +0.06 |
+| UK Model | +0.03 | +0.05 | +0.18 | +0.10 | −0.12 | +0.03 | −0.00 | +0.00 |
+| French Model | −0.08 | +0.08 | +0.24 | +0.06 | −0.08 | +0.09 | +0.01 | +0.01 |
+| Japanese Model | −0.49 | −0.18 | −0.06 | +0.01 | −0.11 | +0.04 | +0.01 | +0.02 |
+
+A positive number is a handicap against the reconstructed source. Most cells
+are a tenth of a degree or less against errors of about two degrees, and the
+median of the two values themselves is identical to a tenth. Two cells are
+large enough to matter and the page says so: the European model's highs, where
+the reconstruction is about half a degree worse in the middle of the day, and
+the American model's lows, where it is nine tenths worse at 18 hours. The
+measurement is rebuilt with the record by `om_measure.py` beside the builder.
+
 **Observation sources.** The observation record is the desk's own METAR
 ingest, which begins 2026-03-09, plus Iowa State's ASOS archive before that,
 fetched once into a directory the builder reads beside the database. The ingest
