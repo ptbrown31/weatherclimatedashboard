@@ -24,6 +24,13 @@ NOW = dt.datetime(2026, 9, 10, 17, 5, tzinfo=dt.timezone.utc)
 BUILT = "2026-09-10T16:53:34Z"
 
 
+# The two trace dates in the fixture set are whichever the last sample refresh
+# kept, so the tests name them from the directory rather than pinning dates that
+# move with every rebuild of the record.
+TRACES = sorted("trace/" + n for n in os.listdir(os.path.join(FIXTURES, "trace")) if n.endswith(".json"))
+TRACE_OLD, TRACE_NEW = TRACES[0], TRACES[-1]
+
+
 def fixture(name: str) -> bytes:
     with open(os.path.join(FIXTURES, name), "rb") as fh:
         return fh.read()
@@ -199,7 +206,7 @@ class Job(unittest.TestCase):
 
     def test_the_fixtures_carry_the_stamps(self):
         for name in ("availability.json", "calibration.json", "dynamics.json", "grid.json", "lead-curve.json",
-                     "map.json", "trace/2026-09-08.json", "trace/2026-09-09.json"):
+                     "map.json") + tuple(TRACES):
             self.assertIsNone(accuracy.check_meta(name, json.loads(fixture(name))), name)
 
     def test_a_file_that_is_not_json_is_skipped_not_fatal(self):
@@ -215,12 +222,12 @@ class Job(unittest.TestCase):
         self.st.put(accuracy.DST_PREFIX + "lead-curve.json", old_curve)
         self.st.put(accuracy.DST_PREFIX + "trace/2026-07-01.json", b'{"meta":{"date":"2026-07-01"}}')
         self.st.put(accuracy.DST_PREFIX + "trace/2026-07-02.json", b'{"meta":{"date":"2026-07-02"}}')
-        new = fixture("trace/2026-09-08.json")
-        self.ship({"trace/2026-09-08.json": new, "availability.json": fixture("availability.json")})
+        new = fixture(TRACE_OLD)
+        self.ship({TRACE_OLD: new, "availability.json": fixture("availability.json")})
         self.assertEqual(self.run_pass(), 0)
         self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-07-01.json"))
         self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-07-02.json"))
-        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "trace/2026-09-08.json"), new)
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + TRACE_OLD), new)
         self.assertEqual(self.st.get(accuracy.DST_PREFIX + "lead-curve.json"), old_curve)
         self.assertEqual(sorted(self.st.deletes), [accuracy.DST_PREFIX + "trace/2026-07-01.json",
                                                    accuracy.DST_PREFIX + "trace/2026-07-02.json"])
@@ -231,10 +238,10 @@ class Job(unittest.TestCase):
         # an earlier build published the trace; this build lists it again but
         # ships it without its stamps. Skipping the copy must not also delete
         # the copy already published, since the manifest still names it.
-        self.st.put(accuracy.DST_PREFIX + "trace/2026-09-08.json", fixture("trace/2026-09-08.json"))
-        self.ship({"trace/2026-09-08.json": b'{"meta":{}}', "availability.json": fixture("availability.json")})
+        self.st.put(accuracy.DST_PREFIX + TRACE_OLD, fixture(TRACE_OLD))
+        self.ship({TRACE_OLD: b'{"meta":{}}', "availability.json": fixture("availability.json")})
         self.assertEqual(self.run_pass(), 0)
-        self.assertIsNotNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-09-08.json"))
+        self.assertIsNotNone(self.st.get(accuracy.DST_PREFIX + TRACE_OLD))
         self.assertEqual(self.st.deletes, [])
 
     # ------------------------------------------------------------- deadline

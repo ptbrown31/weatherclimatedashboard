@@ -184,6 +184,21 @@ def run(no_build: bool) -> int:
                              if "=" not in nt["eq"] or not re.search(r"\b(?:Sample|n)\s*=?\s*[\d,]*\d", nt["n"])]
                 chk.add(f"{scheme} accuracy: every method note holds an estimator and a counted sample",
                         len(notes) == 5 and not bad_notes, f"notes={len(notes)} bad={bad_notes}")
+                # ---- how far back each record goes, stated everywhere it matters
+                # The systems do not share a span, so a reader comparing two
+                # figures has to be told which days each one drew on.
+                n_bars = page.locator("svg.spanstrip rect").count()
+                strip_txt = page.locator("#accSpans").inner_text() if page.locator("#accSpans").count() else ""
+                chk.add(f"{scheme} accuracy: the coverage strip draws a bar for every system",
+                        n_bars >= 12 and re.search(r"[A-Z][a-z]{2} \d+ . [\d,]+ days", strip_txt) is not None,
+                        f"bars={n_bars}")
+                spans = page.eval_on_selector_all(".accnote", "e => e.map(x => (x.querySelector('.rule.span') || {textContent: ''}).textContent)")
+                chk.add(f"{scheme} accuracy: every method note says which days its figure drew on",
+                        len(spans) == 5 and all(re.search(r"\b(?:19|20)\d\d\b", t or "") for t in spans),
+                        str([(t or "")[:40] for t in spans]))
+                lead_key = page.locator("#accLeadKey .ks").count()
+                chk.add(f"{scheme} accuracy: the lead curve's key dates every system's record",
+                        lead_key >= 6, f"entries={lead_key}")
                 acc_st = page.locator("#pageStatus .status").inner_text() if page.locator("#pageStatus .status").count() else ""
                 chk.add(f"{scheme} accuracy: the status strip names the window and the build",
                         "Data as of" in acc_st and re.search(r"window \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d", acc_st) is not None,
@@ -2752,6 +2767,12 @@ def run(no_build: bool) -> int:
                 matched = [r["id"] for r in grid_file.get("cohorts", {}).get("matched11", []) if r.get("id")]
                 page.locator("#accGridBar button", has_text="Highs").first.click(); page.wait_for_timeout(500)
                 grid_sys = page.eval_on_selector_all("#accGrid tbody td.acc-grid-sys", "e=>e.map(x=>x.textContent)")
+                head = page.locator("table.acc-grid-table thead th").all_inner_texts()
+                col = page.locator("table.acc-grid-table tbody td.acc-grid-start").all_inner_texts()
+                chk.add(f"{scheme} accuracy: the grid dates every row's own record in every cohort",
+                        any(t.strip().lower() == "record since" for t in head) and len(col) >= 6
+                        and all(re.match(r"^[A-Z][a-z]{2} \d+", t.strip()) for t in col),
+                        f"head={'Record since' in head} rows={len(col)}")
                 chk.add(f"{scheme} accuracy: the grid carries a row per system in the matched cohort, the market first",
                         len(grid_sys) == len(matched) and len(matched) >= 6 and grid_sys[:1] == ["ForecastEx"],
                         f"rows={len(grid_sys)} file={len(matched)} first={grid_sys[:1]}")

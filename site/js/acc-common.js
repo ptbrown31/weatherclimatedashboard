@@ -173,6 +173,117 @@ window.WXAcc = (() => {
   const metricTabs = (barEl, onChange, initial) =>
     tabs(barEl, [{ key: 'high', label: 'Highs' }, { key: 'low', label: 'Lows' }], onChange, { initial: initial || 'high' });
 
+  // ------------------------------------------------------------- record spans
+  /* How far back each record goes.
+
+     The systems on this page do not share a span. The market has priced
+     highs since the exchange opened its temperature board in February; the
+     forecast tools were captured later, most of them in July; and the
+     market's lows were too thinly quoted to score until May. So a figure
+     drawn over each system's own days is drawn over different days for each
+     system, and every figure says which days it used. The builder ships the
+     scored span of every system under meta.systems, whole and per metric,
+     and these read it.
+
+     The scored span is narrower than the raw one: it counts only the days a
+     system was actually scored on, after thin books, short captures and
+     gaps in the observation record were excluded. */
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // '2026-02-11' as 'Feb 11', and with the year where a caption needs it
+  function mdy(iso) {
+    if (!iso) return '';
+    const p = String(iso).split('-');
+    return p.length < 3 ? String(iso) : MON[+p[1] - 1] + ' ' + (+p[2]);
+  }
+  const mdyY = iso => (iso ? mdy(iso) + ' ' + String(iso).slice(0, 4) : '');
+  /* The span of one system: {start, end, days}. With a metric it is that
+     metric's own span, which is what a figure showing highs or lows alone
+     should print. Older files carry only a start, so that is the fallback. */
+  function span(meta, id, metric) {
+    const sy = meta && meta.systems && meta.systems[id];
+    if (!sy) return null;
+    const s = (metric && sy.byMetric && sy.byMetric[metric]) || sy.scored;
+    if (s && s.start) return s;
+    return sy.start ? { start: sy.start, end: null, days: null } : null;
+  }
+  // 'since Feb 11' for a legend entry or a column head
+  function since(meta, id, metric) {
+    const s = span(meta, id, metric);
+    return s ? 'since ' + mdy(s.start) : '';
+  }
+  /* One sentence naming the span of every system a figure drew, systems
+     that share a start date named together, earliest first. This is the
+     line that goes in a method note under a figure scored on each system's
+     own days. */
+  function spanLine(meta, ids, metric, opts) {
+    opts = opts || {};
+    const byStart = new Map();
+    (ids || []).forEach(id => {
+      const s = span(meta, id, metric);
+      if (!s) return;
+      if (!byStart.has(s.start)) byStart.set(s.start, []);
+      byStart.get(s.start).push(opts.short ? short(id) : name(id));
+    });
+    if (!byStart.size) return '';
+    const keys = Array.from(byStart.keys()).sort();
+    const parts = keys.map(k => {
+      const ns = byStart.get(k);
+      const who = ns.length > 3 ? ns.slice(0, 2).join(', ') + ' and ' + (ns.length - 2) + ' more' : ns.join(', ');
+      return mdyY(k) + ' for ' + who;
+    });
+    return (opts.lead || 'Records run from') + ' ' + parts.join('; ') + '.';
+  }
+  /* A sentence for a figure drawn on one matched cohort, where every system
+     shares the cohort's first day and the market's own record runs further
+     back than the figure shows. */
+  function cohortSpanLine(meta, cohort) {
+    const c = meta && meta.cohorts && meta.cohorts[cohort];
+    if (!c || !c.from) return '';
+    const fx = span(meta, 'FX');
+    const own = fx && fx.start && fx.start < c.from
+      ? ' The market’s own record begins ' + mdyY(fx.start) + '; this cohort starts where every tool in it has a value.'
+      : '';
+    return 'Scored from ' + mdyY(c.from) + ' to ' + mdyY(meta.asof) + '.' + own;
+  }
+  /* The coverage strip: one row per system, a bar over the days it was
+     scored on, drawn against the whole window so the reader sees at a
+     glance that the market's record is the long one. */
+  function spanStrip(host, meta, ids, metric) {
+    if (typeof host === 'string') host = $(host);
+    if (!host || !meta) return null;
+    const w = meta.window || {};
+    const rows = (ids || ORDER).map(id => ({ id, s: span(meta, id, metric) })).filter(r => r.s);
+    if (!rows.length || !w.from || !w.to) return null;
+    const t = iso => Date.parse(iso + 'T00:00:00Z');
+    const RH = 19, L = 188, R = 872, T = 26;
+    const H = T + rows.length * RH + 34;
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'spanstrip' });
+    const x = scale(t(w.from), t(w.to), L, R);
+    const months = [];
+    let d = new Date(t(w.from));
+    d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+    while (d.getTime() <= t(w.to)) {
+      months.push(d.getTime());
+      d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+    }
+    months.forEach(m => {
+      svg.appendChild(el('line', { x1: x(m), x2: x(m), y1: T - 8, y2: T + rows.length * RH - 6, class: 'grid' }));
+      svg.appendChild(txt(MON[new Date(m).getUTCMonth()], { x: x(m), y: T - 12, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    rows.forEach((r, i) => {
+      const y = T + i * RH;
+      svg.appendChild(txt(name(r.id), { x: L - 10, y: y + 4, 'text-anchor': 'end', class: 'ax' }));
+      const x0 = x(t(r.s.start)), x1 = x(t(r.s.end || w.to));
+      svg.appendChild(el('rect', { x: x0, y: y - 5, width: Math.max(2, x1 - x0), height: 9, rx: 2,
+                                   fill: color(r.id), 'fill-opacity': r.id === 'FX' ? 0.95 : 0.6 }));
+      svg.appendChild(txt(mdy(r.s.start) + (r.s.days ? ' · ' + int(r.s.days) + ' days' : ''),
+                          { x: R + 8, y: y + 4, class: 'ax' }));
+    });
+    host.innerHTML = '';
+    host.appendChild(svg);
+    return svg;
+  }
+
   // ------------------------------------------------------------- key
   // the legend under a figure: one entry per id, a colored rule and the name
   function key(container, ids, opts) {
@@ -182,6 +293,10 @@ window.WXAcc = (() => {
       const e = h('span', { 'data-id': id });
       e.appendChild(h('i', { style: 'border-color:' + color(id) + (id === 'FX' ? ';border-top-width:3px' : '') }));
       e.appendChild(document.createTextNode(opts.short ? short(id) : name(id)));
+      if (opts.meta) {
+        const sn = since(opts.meta, id, opts.metric);
+        if (sn) e.appendChild(h('span', { class: 'ks', text: sn }));
+      }
       container.appendChild(e);
     });
     if (opts.note) container.appendChild(h('span', { class: 'kn', text: opts.note }));
@@ -234,6 +349,7 @@ window.WXAcc = (() => {
       mathText(box.appendChild(h('div', { class: 'rule' })), item);
     });
     (spec.rules || []).forEach(r => mathText(box.appendChild(h('div', { class: 'rule' })), r));
+    if (spec.span) box.appendChild(h('div', { class: 'rule span', text: String(spec.span) }));
     if (spec.n != null) {
       box.appendChild(h('div', { class: 'rule n',
         text: typeof spec.n === 'number' ? 'Sample ' + int(spec.n) + ' city-days.' : String(spec.n) }));
@@ -405,6 +521,32 @@ window.WXAcc = (() => {
     });
   }
 
+  /* The coverage strip and its own controls: highs and lows are different
+     records for the market, so the strip carries the same metric tabs every
+     figure does. */
+  function drawSpans(D) {
+    const host = $('#accSpans'), keyEl = $('#accSpansKey');
+    if (!host) return;
+    const meta = D.meta;
+    if (!meta || !meta.systems) { notYet(host, NOT_PUBLISHED); return; }
+    const st = { metric: 'high' };
+    const paint = () => {
+      spanStrip(host, meta, ORDER, st.metric);
+      if (!keyEl) return;
+      keyEl.innerHTML = '';
+      keyEl.appendChild(h('span', { class: 'kn',
+        text: 'Bars cover the days each system was scored on the '
+          + (st.metric === 'high' ? 'daily high' : 'daily low')
+          + '. The date and the day count are printed at the right of each bar. '
+          + spanLine(meta, ['FX'], st.metric, { lead: 'The market\u2019s own record runs from' }) }));
+    };
+    const bar = host.parentNode && host.parentNode.parentNode
+      ? host.parentNode.insertAdjacentElement('beforebegin', h('div', { class: 'bar acccontrols' }))
+      : null;
+    if (bar) metricTabs(bar, k => { st.metric = k; paint(); }, st.metric);
+    paint();
+  }
+
   async function init() {
     tooltip();
     typeset(document);
@@ -415,6 +557,7 @@ window.WXAcc = (() => {
     D.meta = newestMeta(D);
     const st = $('#pageStatus');
     if (st) { st.innerHTML = ''; st.appendChild(statusEl(D)); }
+    drawSpans(D);
     MODULES.forEach(([g, k]) => {
       const mod = window[g];
       if (!mod || typeof mod.draw !== 'function') return;
@@ -429,6 +572,8 @@ window.WXAcc = (() => {
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
     tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,
+    mdy, mdyY, span, since, spanLine, cohortSpanLine, spanStrip,
+    drawSpans,
     W, frame, clear, scale, leadScale, ticks, niceStep, xAxis, yAxis, leadAxis, lineSeries, dots, band, label,
     notYet, NOT_PUBLISHED,
   };

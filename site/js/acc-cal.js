@@ -377,6 +377,26 @@ window.WXAccCal = (() => {
     keyEl.appendChild(h('span', { class: 'kn', text: 'bar is the 95 percent Wilson interval' }));
   }
 
+  /* This figure scores the market alone, so its span is the market's own
+     record on the metric shown. Highs reach back to the day the exchange
+     opened its temperature board; lows were too thinly quoted to score
+     until months later, and the line says so rather than leaving the
+     reader to assume both ran the same length. */
+  function fxSpan() {
+    const meta = (cal && cal.meta) || {};
+    const sp = A.span(meta, 'FX', st.metric);
+    if (!sp || !sp.start) return '';
+    const word = st.metric === 'high' ? 'highs' : 'lows';
+    let t = 'Scored on the market\u2019s ' + word + ' from ' + A.mdyY(sp.start) + ' to ' + A.mdyY(sp.end || meta.asof)
+          + (sp.days ? ', ' + A.int(sp.days) + ' days' : '') + '.';
+    const other = A.span(meta, 'FX', st.metric === 'high' ? 'low' : 'high');
+    if (other && other.start && other.start !== sp.start) {
+      t += ' The ' + (st.metric === 'high' ? 'lows' : 'highs') + ' record starts ' + A.mdyY(other.start)
+         + ', so the two tabs do not cover the same period.';
+    }
+    return t;
+  }
+
   function method(meth, block) {
     const rel = block.reliability || [];
     const nc = rel.reduce((s, r) => s + (fin(r.n) ? r.n : 0), 0);
@@ -400,6 +420,7 @@ window.WXAccCal = (() => {
         'Sharpness is the median width, in degrees, between where a ladder crosses 10 cents and where it crosses 90 cents, and the error of the median is the average miss of the ladder\u2019s 50-cent crossing.',
         'All intervals are the same 1,000-draw, 95 percent bootstrap used elsewhere, and a lead with under 30 city-days is not drawn.',
       ],
+      span: fxSpan(),
       n: 'Sample ' + A.int(nc) + ' contracts across the four lead bins, up to ' + A.int(ncd) + ' city-days in a bin, ' + describe() + '.',
     });
   }

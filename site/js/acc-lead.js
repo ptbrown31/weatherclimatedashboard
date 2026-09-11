@@ -237,7 +237,7 @@ window.WXAccLead = (() => {
       const note = (raw ? 'A dot marks each tool’s last live update for the day. ' : '')
         + (extras.length ? 'The six extra sources are drawn on their own span with the held value and no band. ' : '')
         + 'The band is the market’s 95 percent bootstrap interval.';
-      A.key(keyEl, ids.concat(extras), { note });
+      A.key(keyEl, ids.concat(extras), { note, meta: file.meta, metric: state.metric });
     }
     methodNote(methEl);
   }
@@ -273,6 +273,21 @@ window.WXAccLead = (() => {
       + (foot ? '<div class="tf">' + foot + '</div>' : '');
   }
 
+  /* Which days this view drew on. A matched cohort starts where every
+     member has a value, so the line also says how far the market's own
+     record runs back behind it; the extra sources are on their own span
+     and are named with theirs. */
+  function spanText(meta) {
+    const parts = [];
+    const co = A.cohortSpanLine(meta, state.cohort);
+    if (co) parts.push(co);
+    if (state.more === 'on') {
+      const ex = A.spanLine(meta, A.EXTRA, state.metric, { lead: 'Extra sources run from', short: true });
+      if (ex) parts.push(ex);
+    }
+    return parts.join(' ');
+  }
+
   function methodNote(container) {
     if (!container) return;
     const meta = file.meta || {};
@@ -297,6 +312,7 @@ window.WXAccLead = (() => {
         'Hours beyond the shaded threshold draw on a partial cohort, since not every tool has data that far out, hovering shows which dates and time zones fill those bins.',
         'The six extra sources run on their own span, held at their last value, with no band.',
       ],
+      span: spanText(meta),
       n: sample,
     });
   }

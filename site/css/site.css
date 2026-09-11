@@ -498,6 +498,16 @@ tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
 .accnote .nt{font-weight:700;color:var(--navy);font-size:12px;margin-bottom:3px}
 .accnote .rule{margin:2px 0}
 .accnote .rule.n{margin-top:5px;color:var(--ink)}
+/* the span line under a figure: which days it drew on, set apart from the
+   sampling rules above it because it is the one the reader checks before
+   comparing two figures to each other */
+.accnote .rule.span{margin-top:5px;color:var(--ink);font-weight:600}
+/* the record a key entry covers, printed after the name it belongs to */
+[id^="acc"].key .ks{color:var(--muted);opacity:.85;margin-left:5px;font-style:italic}
+/* the coverage strip: one bar per system over the window */
+svg.spanstrip{display:block;width:100%;height:auto}
+svg.spanstrip text.ax{font-size:11px;fill:var(--muted)}
+svg.spanstrip line.grid{stroke:var(--line);stroke-width:1}
 /* an estimator, set as mathematics. KaTeX draws it; a display block gets room
    above and below and scrolls on its own when a long one meets a narrow screen,
    so the note never pushes the page sideways. .texraw is the fallback when
@@ -540,7 +550,8 @@ table.acc-grid-table td.acc-grid-c .acc-grid-v,table.acc-grid-table td.acc-grid-
 table.acc-grid-table .acc-grid-n{font-size:10px;color:var(--muted);line-height:1.2}
 table.acc-grid-table td.acc-grid-sys{color:var(--ink);font-weight:600;position:sticky;left:0;background:var(--panel);z-index:1}
 table.acc-grid-table td.acc-grid-sys .acc-grid-n{display:block;font-weight:400}
-table.acc-grid-table td.acc-grid-start{color:var(--muted);font-variant-numeric:tabular-nums}
+table.acc-grid-table td.acc-grid-start{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+table.acc-grid-table th.acc-grid-start{white-space:nowrap}
 table.acc-grid-table tr.acc-grid-fx td{background:var(--shade)}
 table.acc-grid-table tr.acc-grid-fx td.acc-grid-sys{background:var(--shade)}
 table.acc-grid-table tr.acc-grid-fx td.acc-grid-c .acc-grid-v{font-weight:700}

@@ -161,7 +161,7 @@ window.WXAccDyn = (() => {
     sub('Change in error after a report moved the bank');
     N.e = svg('accDynE', 240);
     const keyEl = $('#accDynKey');
-    if (keyEl) A.key(keyEl, LINES, { short: true,
+    if (keyEl) A.key(keyEl, LINES, { short: true, meta: dyn && dyn.meta,
       note: 'the six own-span sources are the gray rows of the strip in panel a and are not drawn as lines' });
   }
   /* The city list for the chosen date, with the builder's default rule
@@ -587,6 +587,8 @@ window.WXAccDyn = (() => {
         'A qualifying report raised the observed extreme by at least a degree on highs, or lowered it on lows, before the day\u2019s true extreme was reached. Bands are the same 1,000-draw bootstrap used elsewhere, seed 20260910, and a point under 30 qualifying events is left blank.',
         'The traced city-day at the bottom shows every report as a dot, the running observed extreme as a grey step, the market\u2019s ten-minute price track with its 10th-to-90th-percentile band, and each tool\u2019s forecast held flat after its last update.',
       ],
+      span: A.cohortSpanLine(dyn && dyn.meta, 'matched11')
+            + ' ' + A.spanLine(dyn && dyn.meta, ['FX'].concat(A.PANEL), S.metric, { lead: 'Each system\u2019s own record runs from', short: true }),
       n: sample,
     });
   }

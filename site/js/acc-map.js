@@ -320,7 +320,8 @@ window.WXAccMap = (() => {
         const steps = [0, 0.25, 0.5, 0.75, 1].map(s => maeFill(s * scale.maeCap));
         key.appendChild(ramp(steps, 'Mean absolute error 0°', A.deg1(scale.maeCap) + ', one scale for both'));
         key.appendChild(sw('background:var(--panel);border:2px solid var(--accent)', 'left dot ForecastEx'));
-        key.appendChild(sw('background:var(--panel);border:2px solid ' + A.color(sel.tool), 'right dot ' + A.name(sel.tool)));
+        const ts = A.since(D.map && D.map.meta, sel.tool, sel.metric);
+        key.appendChild(sw('background:var(--panel);border:2px solid ' + A.color(sel.tool), 'right dot ' + A.name(sel.tool) + (ts ? ', ' + ts : '')));
       }
       key.appendChild(sw('background:var(--panel);border:1.2px dashed var(--muted)', 'hollow, under 30 matched city-days or excluded from the frame'));
       key.appendChild(h('span', { class: 'kn', text: 'Dot size follows the matched count. Colorado Springs and Honolulu are not drawn. Colorado Springs was a test listing the exchange never carried, and Honolulu falls outside this page\u2019s scope.' }));
@@ -342,6 +343,8 @@ window.WXAccMap = (() => {
         'Intervals are the same bootstrap used throughout the page, with the market and tool differences resampled together so both sides move under the same draws.',
         'The climate-report frame scores tools against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, so a gap between frames reflects that difference in definition rather than in forecast skill. Denver\u2019s climate-report figures stand in for Buckley Field, which has none of its own.',
       ],
+      span: A.spanLine(D.map && D.map.meta, ['FX', sel.tool], sel.metric,
+                       { lead: 'Records run from' }) + ' The pair is scored only where both hold a value.',
       n: cells ? 'Sample ' + A.int(n) + ' matched city-days across ' + k + ' cities in this view.'
                : 'The file carries no values for this tool in this frame.',
     });

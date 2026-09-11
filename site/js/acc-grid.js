@@ -153,8 +153,21 @@ window.WXAccGrid = (() => {
         ? ssText(cell.ssLo) + ' to ' + ssText(cell.ssHi)
         : (cell.n >= MIN_N ? 'covers zero, not colored' : 'under ' + MIN_N + ' city-days')]);
     }
+    const rs = A().span(metaOf(), row.id, state.metric);
+    if (rs) pairs.push(['Record', A().mdyY(rs.start) + ' to ' + A().mdyY(rs.end) + (fin(rs.days) ? ', ' + int(rs.days) + ' days' : '')]);
     if (state.cohort === 'own') pairs.push(['Own span from', row.start || A().dash]);
     return A().tooltip().rows(nm + ', ' + L + ' h before the day ends', pairs);
+  }
+
+  // ------------------------------------------------------------- record span
+  const metaOf = () => (grid && grid.meta) || {};
+  /* The first day a system was scored on, on the metric shown. Every row
+     carries it, in every cohort, because the depth of a system's own record
+     is not the same thing as the days a matched cohort could use. */
+  function recordSince(row) {
+    const sp = A().span(metaOf(), row.id, state.metric);
+    if (!sp) return row.start || A().dash;
+    return A().mdy(sp.start) + (fin(sp.days) ? ' · ' + int(sp.days) + 'd' : '');
   }
 
   // ------------------------------------------------------------- table
@@ -171,7 +184,8 @@ window.WXAccGrid = (() => {
     const thead = h('thead');
     const r1 = h('tr');
     r1.appendChild(h('th', { rowspan: 2, text: 'System' }));
-    if (own) r1.appendChild(h('th', { rowspan: 2, text: 'Own span from' }));
+    r1.appendChild(h('th', { rowspan: 2, class: 'acc-grid-start', text: 'Record since',
+                             title: 'The first day this system was scored on, on the metric shown. Systems started at different times, so a matched cohort begins at the latest of them.' }));
     L.forEach(x => r1.appendChild(h('th', { class: 'acc-grid-g', colspan: sub.length, text: x + ' h' + (x === SORT_H ? ' (sort)' : ''),
                                             title: x + ' hours before the station-local midnight that ends the target day' })));
     thead.appendChild(r1);
@@ -188,7 +202,7 @@ window.WXAccGrid = (() => {
       nameTd.appendChild(document.createTextNode(A().name(row.id)));
       if (row.id === 'NDFD' && !own) nameTd.appendChild(h('span', { class: 'acc-grid-n', text: 'reference row' }));
       tr.appendChild(nameTd);
-      if (own) tr.appendChild(h('td', { class: 'acc-grid-start', text: row.start || A().dash }));
+      tr.appendChild(h('td', { class: 'acc-grid-start', text: recordSince(row) }));
       L.forEach(x => {
         const cell = cellOf(row, state.frame, x);
         const tds = [];
@@ -258,7 +272,7 @@ window.WXAccGrid = (() => {
     const L = leads();
     const highs = state.metric === 'high';
     const own = state.cohort === 'own';
-    const head = ['system', 'id'];
+    const head = ['system', 'id', 'record_since'];
     if (own) head.push('own_span_from');
     L.forEach(x => {
       if (highs) head.push('mae_high_' + x + 'h', 'n_high_' + x + 'h', 'mae_low_' + x + 'h', 'n_low_' + x + 'h',
@@ -270,6 +284,8 @@ window.WXAccGrid = (() => {
                    + (grid.meta && grid.meta.built ? ' built=' + grid.meta.built : ''), head.join(',')];
     rows.forEach(row => {
       const out = [q(A().name(row.id)), row.id];
+      const sp = A().span(metaOf(), row.id, state.metric);
+      out.push(sp ? sp.start : (row.start || ''));
       if (own) out.push(row.start || '');
       L.forEach(x => {
         const c = cellOf(row, state.frame, x) || {};
@@ -315,6 +331,23 @@ window.WXAccGrid = (() => {
     if (csvPre) { csvPre.textContent = csv; csvPre.hidden = !state.csv; }
     renderKey();
     renderMethod();
+  }
+
+  /* The sentence under the table saying how far back the record goes: each
+     row's own first scored day is in its Record column, and a matched
+     cohort is pinned to the latest of them. */
+  function spanFoot() {
+    const meta = metaOf();
+    const fx = A().span(meta, 'FX', state.metric);
+    const coh = (meta.cohorts || {})[state.cohort];
+    const base = 'Record since is each system’s own first scored day on the ' + (state.metric === 'high' ? 'high' : 'low') + '. ';
+    if (state.cohort === 'own') {
+      return base + 'Every row here is scored on its own days, so the rows do not cover the same period.';
+    }
+    return base + (coh && coh.from
+      ? 'This cohort is scored only from ' + A().mdyY(coh.from) + ', where the last of its members starts'
+        + (fx && fx.start && fx.start < coh.from ? ', though the market’s own record runs back to ' + A().mdyY(fx.start) : '') + '.'
+      : '');
   }
 
   function renderKey() {
@@ -369,7 +402,7 @@ window.WXAccGrid = (() => {
         { tex: 'CRPS = \\sum_{k} \\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
         'On highs, $F(k) = 1 - \\text{YesPrice}(k)$, on lows, $F(k-1) = \\text{YesPrice}(k)$. CRPS scores the whole distribution the market is pricing, not just its fifty-cent crossing.',
       ],
-      rules, n,
+      rules, n, span: spanFoot(),
     });
   }
 

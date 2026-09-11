@@ -46,6 +46,21 @@ bracketing strikes; a ladder that never crosses has no central value at that
 snapshot and is counted as missing. The whole-degree value is `ceil(x)` for
 highs and `floor(x)` for lows, because settlement is strict.
 
+**Market sources.** The ladder is reconstructed from two records. The first is
+the desk's own quote capture, which holds both sides of the book at every
+snapshot and begins in mid-May. The second is the exchange's published archive,
+a tape of every trade and a daily closing file, which begins the day the
+temperature board opened and carries the record back more than three months
+further. A traded price is taken as both sides of that strike at that instant;
+each strike's last traded price is then carried forward to every hour of the
+day, so a ladder is assembled across strikes that traded at different times.
+The closing file is used only for the strike set that was listed and for
+settlement, never for a price, because its untraded strikes carry a stale mark
+whose crossing sits close to a degree away from the quoted one. Every row
+records which lane it came from in a `src` column, and the two lanes were
+compared over their full overlap: the crossings agree to a median of about a
+tenth of a degree.
+
 **Standing value.** At any instant `t` a system's raw value is its last record
 available at or before `t` for that target date, forward filled within the
 target date and seeded by the earliest record for that date; nothing later is
@@ -113,8 +128,19 @@ All files sit under `snapshots/accuracy/`. Every file carries
 ```
 meta: { schema, asof, built, window: {from, to}, roster: [ids], conventions: "v1",
         cohorts: {matched11: {from, cities, n_high, n_low}, core5: {...}},
-        exclusions: [{reason, dates, count}], systems: {id: {name, start, lag_p50_h, kind}} }
+        exclusions: [{reason, dates, count}],
+        systems: {id: {name, start, lag_p50_h, kind,
+                       scored: {start, end, days},
+                       byMetric: {high: {start, end, days}, low: {...}}}} }
 ```
+
+`start` is the first target date on which at least twenty stations hold a raw
+value at any grid hour, so it is when the source entered the capture. `scored`
+is narrower: the first and last target date the system was actually scored on
+and how many such dates there are, after exclusions. `byMetric` splits that by
+high and low, which the market needs, since its highs were priced from the day
+the temperature board opened and its lows were too thinly quoted to score for
+some months after. The page prints the scored span, not the raw one.
 
 `schema` is the string `accuracy-figures/1`. `asof` is the newest resolved
 target date; `built` the build time. Numbers are rounded to three decimals;
@@ -236,7 +262,17 @@ each file to `snapshots/accuracy/` after checking that it parses and carries
 
 Five figures, each with a method note carrying the estimator and the sampling
 rule, and a status strip naming the window and the build time. In order: the
-lead curve; how the market moves between forecast cycles; calibration and
-Brier; the city map; the scorecard grid. Highs default, lows a tab on every
-figure. No commentary. The old lead curve stays published until this page is
-live.
+lead curve; the city map; the scorecard grid; calibration and Brier; how the
+market moves between forecast cycles. Then the coverage strip, then the
+conventions. Highs default, lows a tab on every figure. No commentary. The old
+lead curve stays published until this page is live.
+
+**Spans are printed everywhere.** The systems do not share a record. The
+coverage strip draws one bar per system over the days it was scored on, with
+its own metric tabs. Every figure's method note carries a span line saying
+which days that view used, every legend entry carries the date its system's
+record starts, and the scorecard grid carries a `Record since` column in every
+cohort, beside the cohort's own first day. A matched cohort begins where the
+last of its members begins, and where the market's own record runs back behind
+that, the note says so rather than letting the cohort's start stand in for the
+market's.
