@@ -61,6 +61,18 @@ records which lane it came from in a `src` column, and the two lanes were
 compared over their full overlap: the crossings agree to a median of about a
 tenth of a degree.
 
+**Observation sources.** The observation record is the desk's own METAR
+ingest, which begins 2026-03-09, plus Iowa State's ASOS archive before that,
+fetched once into a directory the builder reads beside the database. The ingest
+wins wherever both hold a report, so the archive only fills gaps and never
+restates a day the desk already holds. Temperatures are converted from the
+report's Celsius field, never from the archive's whole-degree Fahrenheit
+column, which would round away the half degree the settlement rule turns on,
+and routine and special reports are fetched separately because the archive
+distinguishes them by request rather than by column. Over the 600 United States
+city-days from 2026-02-11 to 2026-03-07 the archive alone reproduces the
+published settle exactly, on highs and on lows.
+
 **Standing value.** At any instant `t` a system's raw value is its last record
 available at or before `t` for that target date, forward filled within the
 target date and seeded by the earliest record for that date; nothing later is
