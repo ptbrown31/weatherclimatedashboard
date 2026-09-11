@@ -16,7 +16,7 @@ window.WXAcc = (() => {
 
   // ------------------------------------------------------------- naming
   // docs/accuracy.md section 2. Every export uses these ids; the reader sees
-  // the names. The eleven panel tools are NDFD through JMA, in this order.
+  // the names. The alternative forecast systems are NDFD through JMA, in this order.
   const NAME = {
     FX: 'ForecastEx',
     NDFD: 'National Weather Service', NBM: 'National Blend of Models', LAMP: 'Aviation Forecast',
@@ -33,27 +33,26 @@ window.WXAcc = (() => {
     AIFS: 'Euro. AI', ECMWF_IFS: 'Euro. Ens.', GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
     HRRR: 'HRRR', HRRR_OM: 'HRRR (OM)',
   };
-  const PANEL = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS', 'MOSMIX', 'ICON', 'GEM', 'UKMO', 'MF', 'JMA'];
-  const CORE5 = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS'];
-  const EXTRA = ['AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR', 'HRRR_OM'];
-  const ORDER = ['FX'].concat(PANEL, EXTRA);
-  // which cohort each id belongs to, for a figure that filters by cohort
-  const COHORT = { matched11: ['FX'].concat(PANEL), core5: ['FX'].concat(CORE5), own: ORDER };
+  /* One list, no sub-groups. Every system beside the exchange's own market is
+     an alternative forecast system, presented the same way as the others: on
+     its own record, against the same truth, with its span printed beside it.
+     The order is the reader's, official forecasts first and then the models. */
+  const TOOLS = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS', 'MOSMIX', 'ICON', 'GEM', 'UKMO', 'MF', 'JMA',
+                 'AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR', 'HRRR_OM'];
+  const ORDER = ['FX'].concat(TOOLS);
 
   // ------------------------------------------------------------- palette
   // The exchange keeps the site accent so it is the line a reader finds
-  // first. The eleven panel tools take a muted ramp (--t1 to --t11 in
-  // site.css), one hue each in panel order, so they read as a family behind
-  // the market rather than as eleven competing colors. The extra sources
-  // share one gray: they are drawn on their own span and never against each
-  // other, so telling them apart by color is not something the page asks.
+  // first. Every alternative forecast system takes one hue of a muted ramp
+  // (--t1 to --t18 in site.css), in the reader's order, so they read as a
+  // family behind the ForecastEx prediction market rather than as eighteen
+  // competing colors.
   function color(id) {
     if (id === 'FX') return 'var(--accent)';
-    const i = PANEL.indexOf(id);
-    if (i >= 0) return 'var(--t' + (i + 1) + ')';
-    return 'var(--t-extra)';
+    const i = TOOLS.indexOf(id);
+    return i >= 0 ? 'var(--t' + (i + 1) + ')' : 'var(--t-extra)';
   }
-  // the market line is heavier than a tool line, for the same reason
+  // the ForecastEx prediction market line is heavier than an alternative forecast system line, for the same reason
   const width = id => (id === 'FX' ? 2.6 : 1.5);
   const name = id => NAME[id] || id;
   const short = id => SHORT[id] || id;
@@ -71,7 +70,7 @@ window.WXAcc = (() => {
   const pct1 = v => (v == null || isNaN(v) ? dash : (Math.round(v * 1000) / 10).toFixed(1) + '%');
   const int = n => (n == null || isNaN(n) ? dash : Math.round(n).toLocaleString('en-US'));
   const hours = v => (v == null || isNaN(v) ? dash : Math.round(v) + ' h');
-  // an interval as text, for a tooltip row
+  // an interval as text, for an alternative forecast systemtip row
   const iv = (lo, hi, f) => (lo == null || hi == null ? dash : (f || f1)(lo) + ' to ' + (f || f1)(hi));
 
   // ------------------------------------------------------------- files
@@ -148,7 +147,7 @@ window.WXAcc = (() => {
      click that changes the selection, never on the initial state. opts:
      {initial, label}; the label is set in front of the group in muted type.
      Returns {get, set(key, silent)}; several groups can share one bar, each
-     in its own span, so a figure can carry highs/lows beside a cohort. */
+     in its own span, so a figure can carry highs/lows beside another group. */
   function tabs(barEl, options, onChange, opts) {
     opts = opts || {};
     const items = options.map(o => (typeof o === 'string' ? { key: o, label: o } : o));
@@ -177,9 +176,9 @@ window.WXAcc = (() => {
   // ------------------------------------------------------------- record spans
   /* How far back each record goes.
 
-     The systems on this page do not share a span. The market has priced
+     The systems on this page do not share a span. The ForecastEx prediction market has priced
      highs since the exchange opened its temperature board in February; the
-     forecast tools were captured later, most of them in July; and the
+     alternative forecast systems start later, most of them in July; and the
      market's lows were too thinly quoted to score until May. So a figure
      drawn over each system's own days is drawn over different days for each
      system, and every figure says which days it used. The builder ships the
@@ -206,24 +205,6 @@ window.WXAcc = (() => {
     const s = (metric && sy.byMetric && sy.byMetric[metric]) || sy.scored;
     if (s && s.start) return s;
     return sy.start ? { start: sy.start, end: null, days: null } : null;
-  }
-  /* Where a system's record comes from. A source the capture reached only in
-     the summer is carried back over the earlier months by a reconstruction
-     from the archive, so its line has a seam: archive before, capture after.
-     Returns {archive, capture} spans, either one absent. */
-  function lanes(meta, id) {
-    const sy = meta && meta.systems && meta.systems[id];
-    const by = (sy && sy.bySrc) || {};
-    const out = {};
-    ['archive', 'capture', 'trade', 'quote'].forEach(k => { if (by[k] && by[k].start) out[k] = by[k]; });
-    return { archive: out.archive || out.trade || null, capture: out.capture || out.quote || null };
-  }
-  // 'archive to Jul 8, capture from Jul 9' where a record has a seam
-  function laneText(meta, id) {
-    const l = lanes(meta, id);
-    if (!l.archive || !l.capture) return '';
-    return 'Reconstructed from the archive through ' + mdyY(l.archive.end)
-      + ', from the capture itself from ' + mdyY(l.capture.start) + '.';
   }
   // 'since Feb 11' for a legend entry or a column head
   function since(meta, id, metric) {
@@ -252,21 +233,23 @@ window.WXAcc = (() => {
     });
     return (opts.lead || 'Records run from') + ' ' + parts.join('; ') + '.';
   }
-  /* A sentence for a figure drawn on one matched cohort, where every system
-     shares the cohort's first day and the market's own record runs further
-     back than the figure shows. */
+  /* A sentence for a figure drawn on one set of days rather than on each
+     system's own record. */
   function cohortSpanLine(meta, cohort) {
+    if (cohort === 'own') {
+      const fx = span(meta, 'FX');
+      return 'Every system is scored on the days its own record covers'
+        + (fx && fx.start ? ', and the ForecastEx prediction market\u2019s runs from ' + mdyY(fx.start) : '')
+        + '. Each comparison between two systems is made on the days they share.';
+    }
     const c = meta && meta.cohorts && meta.cohorts[cohort];
     if (!c || !c.from) return '';
-    const fx = span(meta, 'FX');
-    const own = fx && fx.start && fx.start < c.from
-      ? ' The market’s own record begins ' + mdyY(fx.start) + '; this cohort starts where every tool in it has a value.'
-      : '';
-    return 'Scored from ' + mdyY(c.from) + ' to ' + mdyY(meta.asof) + '.' + own;
+    return 'Scored from ' + mdyY(c.from) + ' to ' + mdyY(meta.asof)
+      + ' on the days the ForecastEx prediction market priced at every hour from 30 to 0.';
   }
   /* The coverage strip: one row per system, a bar over the days it was
      scored on, drawn against the whole window so the reader sees at a
-     glance that the market's record is the long one. */
+     glance that the ForecastEx prediction market's record is the long one. */
   function spanStrip(host, meta, ids, metric) {
     if (typeof host === 'string') host = $(host);
     if (!host || !meta) return null;
@@ -293,18 +276,8 @@ window.WXAcc = (() => {
       const y = T + i * RH;
       svg.appendChild(txt(name(r.id), { x: L - 10, y: y + 4, 'text-anchor': 'end', class: 'ax' }));
       const x0 = x(t(r.s.start)), x1 = x(t(r.s.end || w.to));
-      const solid = r.id === 'FX' ? 0.95 : 0.6;
       svg.appendChild(el('rect', { x: x0, y: y - 5, width: Math.max(2, x1 - x0), height: 9, rx: 2,
-                                   fill: color(r.id), 'fill-opacity': solid }));
-      // the part of the record that is a reconstruction is drawn open, so a
-      // reader can see at a glance where the source's own record begins
-      const l = lanes(meta, r.id);
-      if (l.archive && l.capture) {
-        const a0 = x(t(l.archive.start)), a1 = x(t(l.archive.end));
-        svg.appendChild(el('rect', { x: a0, y: y - 5, width: Math.max(2, a1 - a0), height: 9, rx: 2,
-                                     fill: 'var(--panel)', stroke: color(r.id), 'stroke-width': 1.2,
-                                     'fill-opacity': 0.9 }));
-      }
+                                   fill: color(r.id), 'fill-opacity': r.id === 'FX' ? 0.95 : 0.6 }));
       svg.appendChild(txt(mdy(r.s.start) + (r.s.days ? ' · ' + int(r.s.days) + ' days' : ''),
                           { x: R + 8, y: y + 4, class: 'ax' }));
     });
@@ -551,7 +524,7 @@ window.WXAcc = (() => {
   }
 
   /* The coverage strip and its own controls: highs and lows are different
-     records for the market, so the strip carries the same metric tabs every
+     records for the ForecastEx prediction market, so the strip carries the same metric tabs every
      figure does. */
   function drawSpans(D) {
     const host = $('#accSpans'), keyEl = $('#accSpansKey');
@@ -567,8 +540,8 @@ window.WXAcc = (() => {
         text: 'Bars cover the days each system was scored on the '
           + (st.metric === 'high' ? 'daily high' : 'daily low')
           + '. The date and the day count are printed at the right of each bar. '
-          + 'An open bar is a reconstruction from the model archive, covering the months before that source\u2019s own capture began. '
-          + spanLine(meta, ['FX'], st.metric, { lead: 'The market\u2019s own record runs from' }) }));
+
+          + spanLine(meta, ['FX'], st.metric, { lead: 'The ForecastEx prediction market\u2019s own record runs from' }) }));
     };
     const bar = host.parentNode && host.parentNode.parentNode
       ? host.parentNode.insertAdjacentElement('beforebegin', h('div', { class: 'bar acccontrols' }))
@@ -598,11 +571,11 @@ window.WXAcc = (() => {
 
   return {
     init, load, trace, valid, data: () => D, FILES, CADENCE,
-    NAME, SHORT, PANEL, CORE5, EXTRA, ORDER, COHORT, color, width, name, short, swatch,
+    NAME, SHORT, TOOLS, ORDER, color, width, name, short, swatch,
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
     tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,
-    mdy, mdyY, span, since, spanLine, cohortSpanLine, spanStrip, lanes, laneText,
+    mdy, mdyY, span, since, spanLine, cohortSpanLine, spanStrip,
     drawSpans,
     W, frame, clear, scale, leadScale, ticks, niceStep, xAxis, yAxis, leadAxis, lineSeries, dots, band, label,
     notYet, NOT_PUBLISHED,

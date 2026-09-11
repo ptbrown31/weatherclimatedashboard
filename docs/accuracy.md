@@ -19,17 +19,17 @@ the international stations are outside this page's scope.
 
 **Clock.** One clock everywhere. For a city-day `i` with station-local date `D`,
 `T_i` is the station-local midnight that ends `D`, in UTC through the zone.
-Lead `h = (T_i - t) / 3600` in hours. A tool's timestamp `t` is the moment its
+Lead `h = (T_i - t) / 3600` in hours. An alternative forecast system's timestamp `t` is the moment its
 value was in the capture panel's hands (the capture time), which is an upper
-bound on its availability; the market's timestamp is the ladder snapshot's own
+bound on its availability; the ForecastEx prediction market's timestamp is the ladder snapshot's own
 time. Issuance times are recorded only for nine of the seventeen sources and
 appear only as a sensitivity in the method note.
 
-**Truth.** The market pays on the station's METAR settle: the day's extreme
+**Truth.** The ForecastEx prediction market pays on the station's METAR settle: the day's extreme
 over hourly and special reports, rounded half up to a whole degree Fahrenheit,
 over the station-local clock day. Highs pay when `settle > strike` strictly;
-lows when `settle < strike` strictly. The market is always scored against the
-settle. Tools are scored against the settle by default and, through a toggle,
+lows when `settle < strike` strictly. The ForecastEx prediction market is always scored against the
+settle. Alternative forecast systems are scored against the settle by default and, through a toggle,
 against the National Weather Service climate report for the same date, which is
 a different definition of the day's extreme (a rounded five-minute mean over
 the standard-time day) and runs about a degree warmer on highs. Denver's
@@ -131,19 +131,22 @@ target date and seeded by the earliest record for that date; nothing later is
 ever read. The default value is what a reader held at that minute: for highs
 `max(raw, bank_high(t))`, for lows `min(raw, bank_low(t))`, where the bank is
 the running settle-rounded extreme of the station's reports up to that exact
-instant. The bank is applied to the market's central value as well. The
-forecast-only value is the raw value, undefined after the tool's last live
+instant. The bank is applied to the ForecastEx prediction market's central value as well. The
+forecast-only value is the raw value, undefined after the system's last live
 update for the target day. Carry-forward of earlier bulletins is not a page
 rule.
 
-**Cohorts.** `matched11` at a lead `h` holds the city-days where all eleven
-panel tools have a value at `h` and the market has a crossing at `h`. `core5`
-holds the National Weather Service, the Blend, the Aviation Forecast, the
-European model and the American model with the market. `fixed30` holds the
-city-days present in `matched11` at every hour from 30 to 0. Own-span figures
-use each source's own start and are never colored against another source.
+**Which days.** Two bases, both about days and neither a grouping of systems.
+`own` scores each system on the city-days its own record covers and the
+ForecastEx prediction market priced, which is the default everywhere. `fixed30`
+restricts those days to the ones the ForecastEx prediction market priced at
+every hour from 30 down to 0, so a curve drawn across those hours is drawn on
+one set of days and its slope cannot be an artefact of the sample changing
+underneath it. Every comparison between two systems, the skill score and the
+percent improvement alike, is computed on the days the pair share, so a
+system's own span never has to match another's.
 
-**Exclusions**, counted and printed, never silent: backfilled tool rows;
+**Exclusions**, counted and printed, never silent: backfilled forecast rows;
 European-ensemble rows captured under five hours after their nominal run;
 thin-book city-days (the ladder standing at the 30 h anchor and the one
 standing at the 18 h anchor both have under half their listed strikes carrying
@@ -155,7 +158,7 @@ other than 24 hours.
 
 **Uncertainty.** Bootstrap over target dates, 1,000 draws, seed 20260910, 95
 percent percentile intervals. A drawn bin needs 30 city-days. Paired
-differences (market minus tool) are resampled under the same draws.
+differences (ForecastEx prediction market minus a system) are resampled under the same draws.
 
 **Language.** Yes bid, No bid, Yes price. Never ask, offer, sell, fair value,
 or a model probability of the site's own.
@@ -176,15 +179,15 @@ or a model probability of the site's own.
 | UKMO | UK Model | four captures a day |
 | MF | French Model | four captures a day |
 | JMA | Japanese Model | four captures a day |
-| AIFS | European AI Ensemble Mean | extra, own span |
-| ECMWF_IFS | European Ensemble Mean | extra, own span |
-| GFS_MOS | GFS MOS | extra, own span |
-| NAM_MOS | NAM MOS | extra, own span |
-| NBS_MOS | Blend MOS | extra, own span |
-| HRRR | HRRR | extra, own span, no value above 18 h |
-| HRRR_OM | HRRR (Open-Meteo) | extra, own span |
+| AIFS | European AI Ensemble Mean | alternative forecast system |
+| ECMWF_IFS | European Ensemble Mean | alternative forecast system |
+| GFS_MOS | GFS MOS | alternative forecast system |
+| NAM_MOS | NAM MOS | alternative forecast system |
+| NBS_MOS | Blend MOS | alternative forecast system |
+| HRRR | HRRR | alternative forecast system, no value above 18 h |
+| HRRR_OM | HRRR (Open-Meteo) | alternative forecast system |
 
-The eleven panel tools are NDFD through JMA. Every export uses these ids.
+Every export uses these ids. There are no sub-groups: every system beside the exchange's own market is an alternative forecast system and is presented the same way as the others.
 
 AIFS is ECMWF's AI forecasting system, captured directly as the hourly
 ensemble mean at eight runs a day rather than through the panel, so its daily
@@ -197,7 +200,7 @@ All files sit under `snapshots/accuracy/`. Every file carries
 
 ```
 meta: { schema, asof, built, window: {from, to}, roster: [ids], conventions: "v1",
-        cohorts: {matched11: {from, cities, n_high, n_low}, core5: {...}},
+        cohorts: {fixed30: {from, cities, n_high, n_low}},
         exclusions: [{reason, dates, count}],
         systems: {id: {name, start, lag_p50_h, kind,
                        scored: {start, end, days},
@@ -208,7 +211,7 @@ meta: { schema, asof, built, window: {from, to}, roster: [ids], conventions: "v1
 value at any grid hour, so it is when the source entered the capture. `scored`
 is narrower: the first and last target date the system was actually scored on
 and how many such dates there are, after exclusions. `byMetric` splits that by
-high and low, which the market needs, since its highs were priced from the day
+high and low, which the ForecastEx prediction market needs, since its highs were priced from the day
 the temperature board opened and its lows were too thinly quoted to score for
 some months after. The page prints the scored span, not the raw one.
 
@@ -221,7 +224,7 @@ counts are integers; a missing value is `null`.
 ```
 { meta, metric: {high: BLOCK, low: BLOCK} }
 BLOCK = { h: [36..0],
-          cohorts: { matched11: SERIES, core5: SERIES, fixed30: SERIES },
+          cohorts: { own: SERIES, fixed30: SERIES },
           own: { id: {h: [...], mae: [...], n: [...]} }  // per-horizon own span, no interval
         }
 SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
@@ -294,14 +297,14 @@ city id; `meta.cohorts` includes `fixed30`.
 CELLS = { frame: { metar: { toolId: { cityId: { fx: {mae, n}, tool: {mae, n}, pi, lo, hi, matched: n, fxChanges, toolChanges } | null } },
                    cli:   { ... } }, median: { frame: { toolId: {pi, lo, hi, colored: int} } } }
 ```
-A city with fewer than 30 matched city-days for a tool carries `null` values.
+A city with fewer than 30 matched city-days for an alternative forecast system carries `null` values.
 
 ### grid.json
 
 ```
 { meta,
   h: [30, 18, 12, 6],
-  cohorts: { matched11: ROWS, core5: ROWS, own: ROWS },
+  cohorts: { own: ROWS, fixed30: ROWS },
   frames: ["metar", "cli"],
   newsletter: { window: {days, from, to}, rows: [ {id, mae, n, rank} ] } }
 ROWS = [ { id, start, frame: { metar: CELLS, cli: CELLS } } ]
@@ -342,7 +345,7 @@ coverage strip draws one bar per system over the days it was scored on, with
 its own metric tabs. Every figure's method note carries a span line saying
 which days that view used, every legend entry carries the date its system's
 record starts, and the scorecard grid carries a `Record since` column in every
-cohort, beside the cohort's own first day. A matched cohort begins where the
-last of its members begins, and where the market's own record runs back behind
+cohort, beside the cohort's own first day. A sample begins where the
+last of its members begins, and where the ForecastEx prediction market's own record runs back behind
 that, the note says so rather than letting the cohort's start stand in for the
 market's.

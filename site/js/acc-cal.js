@@ -9,12 +9,12 @@
 
    Everything drawn here comes from calibration.json as the builder ships it
    under docs/accuracy.md; the module bins nothing and scores nothing. The
-   eleven forecast tools publish no probabilities, so there is no tool line,
+   alternative forecast systems publish no probabilities, so there is no line for them,
    and the site computes no probability of its own.
 
    Three stacked SVGs in the card: a row of four reliability panels (one per
    lead bin), the decomposition bars by lead, and the sharpness line with
-   the error of the market's median on a second axis. draw(D) takes the
+   the error of the ForecastEx prediction market's median on a second axis. draw(D) takes the
    bundle WXAcc.init assembles and reads D.cal. */
 window.WXAccCal = (() => {
   const { el, txt, h, $ } = WXC;
@@ -37,7 +37,7 @@ window.WXAccCal = (() => {
     { key: 'all', label: 'All', title: 'every priced contract' },
     { key: 'trunc', label: TRUNC_LABEL, title: 'prices strictly between 2 and 98 cents, the truncated score' },
   ];
-  // series colors: the market keeps the accent; the Murphy terms take the
+  // series colors: the ForecastEx prediction market keeps the accent; the Murphy terms take the
   // site's penalty, credit and neutral tokens; the median's error the navy
   const C_BS = 'var(--accent)', C_TRUNC = 'var(--navy)', C_REL = 'var(--bad)', C_RES = 'var(--ok)',
         C_UNC = 'var(--muted)', C_WIDTH = 'var(--accent)', C_MAE = 'var(--navy)';
@@ -79,7 +79,7 @@ window.WXAccCal = (() => {
     host.appendChild(h('div', { class: 'accsub', text: 'Sharpness of the ladder and the error of its median' }));
     host.appendChild(sharpness(block));
     host.appendChild(h('p', { class: 'cap acc-cal-note',
-      text: 'The eleven forecast tools publish no probabilities, so this figure has no tool line, and the site computes none of its own.' }));
+      text: 'The alternative forecast systems publish no probabilities, so this figure has no line for them, and the site computes none of its own.' }));
     if (keyEl) legend(keyEl);
     if (meth) method(meth, block);
   }
@@ -306,7 +306,7 @@ window.WXAccCal = (() => {
      of the strike where the monotone ladder crosses 90 c less the strike
      where it crosses 10 c. A ladder can be sharp and wrong, so the error of
      its median (the whole-degree crossing against the settle) rides on a
-     second axis; a market that narrows before its error falls is
+     second axis; a prediction market that narrows before its error falls is
      overconfident, one that narrows after is slow. */
   function sharpness(block) {
     const sh = block.sharpness || {};
@@ -377,7 +377,7 @@ window.WXAccCal = (() => {
     keyEl.appendChild(h('span', { class: 'kn', text: 'bar is the 95 percent Wilson interval' }));
   }
 
-  /* This figure scores the market alone, so its span is the market's own
+  /* This figure scores the ForecastEx prediction market alone, so its span is the ForecastEx prediction market's own
      record on the metric shown. Highs reach back to the day the exchange
      opened its temperature board; lows were too thinly quoted to score
      until months later, and the line says so rather than leaving the
@@ -387,7 +387,7 @@ window.WXAccCal = (() => {
     const sp = A.span(meta, 'FX', st.metric);
     if (!sp || !sp.start) return '';
     const word = st.metric === 'high' ? 'highs' : 'lows';
-    let t = 'Scored on the market\u2019s ' + word + ' from ' + A.mdyY(sp.start) + ' to ' + A.mdyY(sp.end || meta.asof)
+    let t = 'Scored on the ForecastEx prediction market\u2019s ' + word + ' from ' + A.mdyY(sp.start) + ' to ' + A.mdyY(sp.end || meta.asof)
           + (sp.days ? ', ' + A.int(sp.days) + ' days' : '') + '.';
     const other = A.span(meta, 'FX', st.metric === 'high' ? 'low' : 'high');
     if (other && other.start && other.start !== sp.start) {
@@ -411,7 +411,7 @@ window.WXAccCal = (() => {
         '$y_j$ is 1 when the contract paid.',
         { tex: 'BS = REL - RES + UNC' },
         { tex: 'REL = \\frac{1}{N}\\sum_k n_k(\\bar p_k - \\bar y_k)^2 \\qquad RES = \\frac{1}{N}\\sum_k n_k(\\bar y_k - \\bar y)^2 \\qquad UNC = \\bar y(1-\\bar y)' },
-        'Reliability penalizes a price bucket whose average outcome differs from its average price. Resolution rewards separating outcomes across buckets rather than pricing everything near the base rate. Uncertainty is fixed by the base rate itself, it\u2019s the score a market gets for pricing every contract at that rate.',
+        'Reliability penalizes a price bucket whose average outcome differs from its average price. Resolution rewards separating outcomes across buckets rather than pricing everything near the base rate. Uncertainty is fixed by the base rate itself, it\u2019s the score a prediction market gets for pricing every contract at that rate.',
       ],
       rules: [
         'A contract is one strike on the last ladder snapshot of each hour, for a city-day with a settle, it pays when the settle clears the strike.',

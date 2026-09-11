@@ -1,7 +1,7 @@
-/* Figure 2, how the market moves between forecast cycles.
+/* Figure 2, how the ForecastEx prediction market moves between forecast cycles.
 
-   A forecast tool changes its value when a new cycle lands, a few times a
-   day; the market can change every ten minutes as reports come in and as
+   An alternative forecast system changes its value when a new cycle lands, a few times a
+   day; the ForecastEx prediction market can change every ten minutes as reports come in and as
    the ladder is requoted. This figure reads that difference three ways from
    dynamics.json, under the conventions of docs/accuracy.md.
 
@@ -9,18 +9,18 @@
         whose value is within a tolerance of the settle from a lead onward,
         so the curve reads as "by this many hours out, this share had the
         answer and kept it". Under it, a strip of changes per hour by lead,
-        one row per system, shaded on a log scale because the market's rate
-        is an order of magnitude above a tool's.
-     b. Changes per hour by station-local hour, the market with its
-        bootstrap band against the panel tools, which peak at cycle hours.
+        one row per system, shaded on a log scale because the ForecastEx prediction market's rate
+        is an order of magnitude above an alternative forecast system's.
+     b. Changes per hour by station-local hour, the ForecastEx prediction market with its
+        bootstrap band against the forecasts, which peak at cycle hours.
      c. One city-day traced hour by hour from trace/<date>.json, then the
         event strip, the change in absolute error in the two hours after a
         report that moved the bank, one line per system.
 
    Every value drawn is the builder's; nothing here is computed beyond
-   pixel placement. The systems drawn as lines are the market and the
-   eleven panel tools. The own-span sources are gray rows in the strip
-   of panel a and are not drawn as lines against another source, per the
+   pixel placement. The systems drawn as lines are the ForecastEx prediction market and the
+   alternative forecast systems. Every system is a line and a row in the strip
+   of panel a, per the
    contract's own-span rule. */
 window.WXAccDyn = (() => {
   const A = WXAcc;
@@ -29,8 +29,8 @@ window.WXAccDyn = (() => {
   const P = WXC.P;
   const HOUR = 36e5;
 
-  // the systems drawn as lines, the market first so the key reads that way
-  const LINES = ['FX'].concat(A.PANEL);
+  // the systems drawn as lines, the ForecastEx prediction market first so the key reads that way
+  const LINES = ['FX'].concat(A.TOOLS);
   const TOLS = [{ key: 'tol1', label: '1 F', deg: 1 }, { key: 'tol2', label: '2 F', deg: 2 }];
 
   // the state a tab change redraws from
@@ -162,7 +162,7 @@ window.WXAccDyn = (() => {
     N.e = svg('accDynE', 240);
     const keyEl = $('#accDynKey');
     if (keyEl) A.key(keyEl, LINES, { short: true, meta: dyn && dyn.meta,
-      note: 'the own-span sources are the gray rows of the strip in panel a and are not drawn as lines' });
+      note: 'every system is a line above and a row of the strip below' });
   }
   /* The city list for the chosen date, with the builder's default rule
      applied when the current city is not traced on that date: the city
@@ -337,7 +337,7 @@ window.WXAccDyn = (() => {
     A.clear(svg, H);
     const g = A.frame(H, { L: 90, R: 850 });
     const x = A.scale(-0.5, 23.5, g.L, g.R);
-    const tools = A.PANEL.filter(id => b.tools && Array.isArray(b.tools[id]));
+    const tools = A.TOOLS.filter(id => b.tools && Array.isArray(b.tools[id]));
     let top = 0;
     const bump = v => { if (fin(v) && v > top) top = v; };
     (b.fx || []).forEach(bump); (b.fxHi || []).forEach(bump);
@@ -355,9 +355,9 @@ window.WXAccDyn = (() => {
                  { stroke: A.color('FX'), 'stroke-width': A.width('FX') });
     if (pc && pc.fx) {
       const meds = tools.map(id => pc.tools && pc.tools[id]).filter(fin);
-      const t = 'Changes per city-day, ' + metricWord() + ', market median ' + A.int(pc.fx.median)
+      const t = 'Changes per city-day, ' + metricWord() + ', ForecastEx median ' + A.int(pc.fx.median)
         + ' (quartiles ' + A.int(pc.fx.q1) + ' to ' + A.int(pc.fx.q3) + ')'
-        + (meds.length ? ', panel tools ' + A.int(Math.min.apply(null, meds)) + ' to ' + A.int(Math.max.apply(null, meds)) : '');
+        + (meds.length ? ', the other systems ' + A.int(Math.min.apply(null, meds)) + ' to ' + A.int(Math.max.apply(null, meds)) : '');
       svg.appendChild(txt(t, { x: g.L, y: g.T - 8, class: 'axl' }));
     }
     overlay(svg, g, p => {
@@ -405,7 +405,7 @@ window.WXAccDyn = (() => {
     A.clear(svg, H);
     const g = A.frame(H, { L: 90, R: 850 });
     const listing = P(c.listing), dayStart = P(c.dayStart), dayEnd = P(c.dayEnd);
-    // the window opens three hours before listing so the tools' standing values are seen before the market opens
+    // the window opens three hours before listing so the alternative forecast systems' standing values are seen before the ForecastEx prediction market opens
     const t0 = Math.floor((fin(listing) ? listing : dayStart - 12 * HOUR) / HOUR) * HOUR - 3 * HOUR;
     const t1 = fin(dayEnd) ? dayEnd : t0 + 40 * HOUR;
     const x = A.scale(t0, t1, g.L, g.R);
@@ -413,7 +413,7 @@ window.WXAccDyn = (() => {
     const mk = (c.market && c.market[m]) || [];
     const bank = (c.bank && c.bank[m]) || [];
     const settle = m === 'high' ? c.settleHigh : c.settleLow;
-    const tools = A.PANEL.filter(id => c.tools && c.tools[id] && Array.isArray(c.tools[id][m]));
+    const tools = A.TOOLS.filter(id => c.tools && c.tools[id] && Array.isArray(c.tools[id][m]));
 
     // the vertical range: every temperature drawn, with a degree of air above and below
     let lo = Infinity, hi = -Infinity;
@@ -452,7 +452,7 @@ window.WXAccDyn = (() => {
                                    'stroke-dasharray': '6 4' }));
       A.label(svg, g.R - 4, y(settle) - 5, 'settle ' + settle + '°', 'var(--ink)', { 'text-anchor': 'end' });
     }
-    // the market's q10 to q90 band, then the tools, the bank, the market line
+    // the ForecastEx prediction market's q10 to q90 band, then the alternative forecast systems, the bank, the ForecastEx prediction market line
     const mxs = mk.map(r => x(P(r[0])));
     A.band(svg, mxs, mk.map(r => (fin(r[3]) ? y(r[3]) : null)), mk.map(r => (fin(r[4]) ? y(r[4]) : null)), 'var(--accent)');
     tools.forEach(id => {
@@ -489,7 +489,7 @@ window.WXAccDyn = (() => {
       svg.appendChild(o[3] ? el('circle', { cx: x(t), cy: y(o[1]), r: 2.2, fill: 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': 1 })
                            : el('circle', { cx: x(t), cy: y(o[1]), r: 2.6, fill: 'var(--ink)', 'fill-opacity': 0.75 }));
     });
-    svg.appendChild(txt('Reports as dots, the bank as the grey step, the market whole-degree value as the accent line with its q10 to q90 band, each tool stepped at its capture times',
+    svg.appendChild(txt('Reports as dots, the bank as the grey step, the ForecastEx whole-degree value as the accent line with its q10 to q90 band, each forecast stepped at its own updates',
                         { x: g.L, y: g.T - 8, class: 'axl' }));
 
     overlay(svg, g, p => {
@@ -561,16 +561,16 @@ window.WXAccDyn = (() => {
     const note = $('#accDynMethod');
     if (!note) return;
     const meta = dyn.meta || {};
-    const coh = (meta.cohorts && meta.cohorts.matched11) || {};
+    const coh = (meta.cohorts && meta.cohorts.own) || {};
     const n = S.metric === 'high' ? coh.n_high : coh.n_low;
     const ev = dyn.event && dyn.event.metric && dyn.event.metric[S.metric];
     const pc = dyn.rate && dyn.rate.perCityDay && dyn.rate.perCityDay.metric && dyn.rate.perCityDay.metric[S.metric];
-    let sample = 'Sample ' + A.int(n) + ' matched city-days for ' + metricWord() + (ev ? ', ' + A.int(ev.events) + ' bank-moving reports' : '') + '.';
+    let sample = 'Sample ' + A.int(n) + ' city-days for ' + metricWord() + (ev ? ', ' + A.int(ev.events) + ' bank-moving reports' : '') + '.';
     if (pc && pc.fx && fin(pc.fx.median)) {
-      const meds = A.PANEL.map(id => pc.tools && pc.tools[id]).filter(fin);
-      sample += ' The market changed its crossing a median ' + A.int(pc.fx.median) + ' times per city-day (quartiles '
+      const meds = A.TOOLS.map(id => pc.tools && pc.tools[id]).filter(fin);
+      sample += ' The ForecastEx prediction market changed its crossing a median ' + A.int(pc.fx.median) + ' times per city-day (quartiles '
         + A.int(pc.fx.q1) + ' to ' + A.int(pc.fx.q3) + ')'
-        + (meds.length ? ', the panel tools between ' + A.int(Math.min.apply(null, meds)) + ' and ' + A.int(Math.max.apply(null, meds)) + ' times.' : '.');
+        + (meds.length ? ', the other systems between ' + A.int(Math.min.apply(null, meds)) + ' and ' + A.int(Math.max.apply(null, meds)) + ' times.' : '.');
     }
     A.methodNote(note, {
       title: 'How convergence, movement, and reaction are measured',
@@ -582,13 +582,13 @@ window.WXAccDyn = (() => {
         'Reaction traces the average change in a system\u2019s error in the minutes around a report that moved the observed extreme, comparing error just before the report to error afterward. A negative number means the system moved closer to the eventual settle.',
       ],
       rules: [
-        'The market\u2019s value is the whole-degree crossing of its price ladder, rounded the same way as in the lead-curve figure, the tolerance is 1 or 2 degrees, selectable by tab.',
-        'Convergence in the top panel uses the matched cohort of eleven tools plus the market at lead zero, or, for the additional sources shown on their own axis, whichever city-days each source covers.',
+        'The ForecastEx prediction market\u2019s value is the whole-degree crossing of its price ladder, rounded the same way as in the lead-curve figure, the tolerance is 1 or 2 degrees, selectable by tab.',
+        'Convergence in the top panel uses, for each system, the city-days its own record covers and the ForecastEx prediction market priced at lead zero.',
         'A qualifying report raised the observed extreme by at least a degree on highs, or lowered it on lows, before the day\u2019s true extreme was reached. Bands are the same 1,000-draw bootstrap used elsewhere, seed 20260910, and a point under 30 qualifying events is left blank.',
-        'The traced city-day at the bottom shows every report as a dot, the running observed extreme as a grey step, the market\u2019s ten-minute price track with its 10th-to-90th-percentile band, and each tool\u2019s forecast held flat after its last update.',
+        'The traced city-day at the bottom shows every report as a dot, the running observed extreme as a grey step, the ForecastEx prediction market\u2019s ten-minute price track with its 10th-to-90th-percentile band, and each alternative forecast system\u2019s forecast held flat after its last update.',
       ],
       span: A.cohortSpanLine(dyn && dyn.meta, 'matched11')
-            + ' ' + A.spanLine(dyn && dyn.meta, ['FX'].concat(A.PANEL), S.metric, { lead: 'Each system\u2019s own record runs from', short: true }),
+            + ' ' + A.spanLine(dyn && dyn.meta, ['FX'].concat(A.TOOLS), S.metric, { lead: 'Each system\u2019s own record runs from', short: true }),
       n: sample,
     });
   }

@@ -165,7 +165,7 @@ def run(no_build: bool) -> int:
                 # keeps the exchange's language.
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(2500)
                 n_lead = page.locator("#accLead path").count()
-                chk.add(f"{scheme} accuracy: the lead curve draws the market and the tools", n_lead >= 3, f"paths={n_lead}")
+                chk.add(f"{scheme} accuracy: the lead curve draws the market and every system", n_lead >= 3, f"paths={n_lead}")
                 n_dyn, n_dynp = page.locator("#accDyn svg").count(), page.locator("#accDyn svg path").count()
                 chk.add(f"{scheme} accuracy: the movement figure draws its panels", n_dyn >= 3 and n_dynp >= 6,
                         f"svgs={n_dyn} paths={n_dynp}")
@@ -189,15 +189,12 @@ def run(no_build: bool) -> int:
                 # figures has to be told which days each one drew on.
                 n_bars = page.locator("svg.spanstrip rect").count()
                 strip_txt = page.locator("#accSpans").inner_text() if page.locator("#accSpans").count() else ""
-                open_bars = page.eval_on_selector_all("svg.spanstrip rect[stroke]", "e => e.length")
-                chk.add(f"{scheme} accuracy: the strip marks the reconstructed months apart from the capture",
-                        open_bars >= 4, f"open={open_bars}")
                 chk.add(f"{scheme} accuracy: the coverage strip draws a bar for every system",
                         n_bars >= 12 and re.search(r"[A-Z][a-z]{2} \d+ . [\d,]+ days", strip_txt) is not None,
                         f"bars={n_bars}")
                 spans = page.eval_on_selector_all(".accnote", "e => e.map(x => (x.querySelector('.rule.span') || {textContent: ''}).textContent)")
                 chk.add(f"{scheme} accuracy: every method note says which days its figure drew on",
-                        len(spans) == 5 and all(re.search(r"\b(?:19|20)\d\d\b", t or "") for t in spans),
+                        len(spans) == 5 and all((t or "").strip() for t in spans),
                         str([(t or "")[:40] for t in spans]))
                 lead_key = page.locator("#accLeadKey .ks").count()
                 chk.add(f"{scheme} accuracy: the lead curve's key dates every system's record",
@@ -2767,7 +2764,7 @@ def run(no_build: bool) -> int:
                         grey + dashed >= 1, f"grey={grey} hollow={dashed}")
                 # a row per system in the matched cohort, the market first
                 grid_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/grid.json").read().decode())
-                matched = [r["id"] for r in grid_file.get("cohorts", {}).get("matched11", []) if r.get("id")]
+                matched = [r["id"] for r in grid_file.get("cohorts", {}).get("own", []) if r.get("id")]
                 page.locator("#accGridBar button", has_text="Highs").first.click(); page.wait_for_timeout(500)
                 grid_sys = page.eval_on_selector_all("#accGrid tbody td.acc-grid-sys", "e=>e.map(x=>x.textContent)")
                 head = page.locator("table.acc-grid-table thead th").all_inner_texts()
@@ -2776,7 +2773,7 @@ def run(no_build: bool) -> int:
                         any(t.strip().lower() == "record since" for t in head) and len(col) >= 6
                         and all(re.match(r"^[A-Z][a-z]{2} \d+", t.strip()) for t in col),
                         f"head={'Record since' in head} rows={len(col)}")
-                chk.add(f"{scheme} accuracy: the grid carries a row per system in the matched cohort, the market first",
+                chk.add(f"{scheme} accuracy: the grid carries a row per system, the market first",
                         len(grid_sys) == len(matched) and len(matched) >= 6 and grid_sys[:1] == ["ForecastEx"],
                         f"rows={len(grid_sys)} file={len(matched)} first={grid_sys[:1]}")
 

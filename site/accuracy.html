@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Weather prediction market accuracy</title>
-<meta name="description" content="How ForecastEx’s daily temperature markets score against eleven public forecasts, on matched city-days at every lead, with calibration, a city-by-city map, and a full scorecard.">
+<meta name="description" content="How the ForecastEx prediction market scores against eighteen alternative forecast systems, city-day by city-day at every lead, with calibration, a city map and a full scorecard.">
 <link rel="stylesheet" href="vendor/katex/katex.min.css">
 <link rel="stylesheet" href="css/site.css">
 <script src="config.js"></script>
@@ -13,61 +13,53 @@
 <body>
 <div class="wrap">
 <h1>Weather prediction market accuracy</h1>
-<p class="sub">ForecastEx runs daily prediction markets on the high and low temperature in cities across the US. This page scores those markets against eleven public forecasts, the National Weather Service point forecast, the National Blend of Models, the Aviation Forecast, and models from the US, Europe, Germany, Canada, the UK, France, and Japan. Every comparison holds the city, the day, and the lead time fixed, and scores each system against the temperature the station recorded.</p>
+<p class="sub">ForecastEx runs daily prediction markets on the high and low temperature in cities across the US. This page scores the ForecastEx prediction market against eighteen alternative forecast systems, among them the National Weather Service point forecast, the National Blend of Models, the Aviation Forecast, statistical guidance from four model families, and models from the US, Europe, Germany, Canada, the UK, France, and Japan, including ECMWF&rsquo;s AI forecasting system. Every comparison holds the city, the day, and the lead time fixed, and scores each system against the temperature the station recorded.</p>
 <div class="bar"><span id="pageStatus"></span></div>
-
 <div class="secttl">LEAD CURVE</div>
-<p class="cap" style="margin-top:0">Average error of the market and each forecast tool against the recorded temperature, plotted against hours remaining before the day ends. Bands show bootstrap uncertainty over the matched sample.</p>
+<p class="cap" style="margin-top:0">Average error of the ForecastEx prediction market and each alternative forecast system against the recorded temperature, plotted against hours remaining before the day ends. Bands show bootstrap uncertainty over the sample drawn.</p>
 <div class="bar acccontrols" id="accLeadBar"></div>
 <div class="card"><svg id="accLead" viewBox="0 0 960 430"></svg></div>
 <div class="key" id="accLeadKey"></div>
 <div id="accLeadMethod"></div>
-
 <div class="secttl">CITY MAP</div>
-<p class="cap" style="margin-top:0">Compares market error to each tool’s error at each of the 24 cities, over the time window a reader would actually check, morning of, evening before, or newsletter hours, with the difference and its uncertainty interval.</p>
+<p class="cap" style="margin-top:0">Compares ForecastEx prediction market error to each alternative forecast system’s error at each of the 24 cities, over the time window a reader would actually check, morning of, evening before, or newsletter hours, with the difference and its uncertainty interval.</p>
 <div class="bar acccontrols" id="accMapBar"></div>
 <div class="card"><svg id="accMap" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="accMapKey"></div>
 <div id="accMapMethod"></div>
-
 <div class="secttl">SCORECARD GRID</div>
 <p class="cap" style="margin-top:0">Summarizes each system’s error, bias, and share of forecasts within one degree at four leads, scored against both the official settlement and the National Weather Service’s climate report, with each system’s percent difference from the National Weather Service shown alongside.</p>
 <div class="bar acccontrols" id="accGridBar"></div>
 <div class="card"><div id="accGrid"></div></div>
 <div class="key" id="accGridKey"></div>
 <div id="accGridMethod"></div>
-
 <div class="secttl">CALIBRATION AND BRIER SCORE</div>
 <p class="cap" style="margin-top:0">Checks whether a Yes price of, say, 70 cents paid out about 70 percent of the time, and scores that reliability with the Brier score, split out by lead and by which side of the book is used.</p>
 <div class="bar acccontrols" id="accCalBar"></div>
 <div class="card"><div id="accCal"></div></div>
 <div class="key" id="accCalKey"></div>
 <div id="accCalMethod"></div>
-
 <div class="secttl">MARKET MOVEMENT BETWEEN FORECAST CYCLES</div>
-<p class="cap" style="margin-top:0">Tracks how much and how often the market’s price moves between other tools’ forecast updates, how quickly it settles on the final temperature, and how it reacts when a new report moves the observed extreme. One city-day is traced hour by hour as an example.</p>
+<p class="cap" style="margin-top:0">Tracks how much and how often the ForecastEx prediction market’s price moves between forecast updates elsewhere, how quickly it settles on the final temperature, and how it reacts when a new report moves the observed extreme. One city-day is traced hour by hour as an example.</p>
 <div class="bar acccontrols" id="accDynBar"></div>
 <div class="card"><div id="accDyn"></div></div>
 <div class="key" id="accDynKey"></div>
 <div id="accDynMethod"></div>
-
 <div class="secttl">HOW FAR BACK EACH RECORD GOES</div>
-<p class="cap" style="margin-top:0">The systems on this page did not all start on the same day. Each bar covers the days that system was actually scored on, after thin order books, short capture windows and gaps in the observation record were excluded. A figure that matches systems to each other can only use the days they share, so it starts where the last of them starts. The market&rsquo;s early months are reconstructed from the exchange&rsquo;s published trade tape, one ladder an hour, rather than from the ten-minute quote capture that begins in June. Over the months both records cover, the two agree on the market&rsquo;s temperature to about a tenth of a degree.</p>
+<p class="cap" style="margin-top:0">The systems on this page did not all start on the same day. Each bar covers the days that system was actually scored on, after thin order books, short capture windows and gaps in the observation record were excluded. A figure that matches systems to each other can only use the days they share, so it starts where the last of them starts. </p>
 <div class="card"><div id="accSpans"></div></div>
 <div class="key" id="accSpansKey"></div>
-
 <div class="secttl">HOW TO READ THIS PAGE</div>
 <ul class="conv">
-<li><b>Span.</b> Every figure names the days it drew on. The market&rsquo;s record before June comes from the exchange&rsquo;s published trade tape, read as a ladder on each hour; from June it comes from a capture of both sides of the book every ten minutes. The market has priced daily highs since the exchange opened its temperature board; its lows were too thinly quoted to score for some months after that; and the forecast tools entered the capture later still. Twelve of them reach back the same way, eight reconstructed from Open-Meteo&rsquo;s archive of the models and four from Iowa State&rsquo;s archive of the statistical guidance, for the months before their own capture began. Where a figure scores systems against each other it uses only the days they share, and where it scores each on its own days it says so.</li>
-<li><b>Reconstruction.</b> A reconstructed forecast is the extreme over the hours of the day still to come, each hour taken from the freshest archived model run available at that moment. The archive steps a day at a time, so a reconstruction runs up to one run cycle staler than the capture it stands in for. Measured on the months both records cover, on the same city-days and the same leads, a reconstruction scores within about a tenth of a degree of the capture for most sources and leads. Two cases are larger and both run against the reconstructed source, the European model&rsquo;s highs by about half a degree in the middle of the day and the American model&rsquo;s lows by nine tenths at eighteen hours. The statistical guidance has a second archive that keeps every bulletin as it was issued, so those four sources carry no staleness at all and match the capture to a tenth of a degree.</li>
-<li><b>Clock.</b> Lead counts down to station-local midnight, the moment the target day ends. A tool&rsquo;s lead is timed to when its forecast was captured, the market&rsquo;s lead is timed to the ladder snapshot itself.</li>
-<li><b>Truth.</b> Every system is scored against the station&rsquo;s METAR settle, the day&rsquo;s highest or lowest hourly reading, rounded to the nearest whole degree. A toggle rescores tools against the National Weather Service&rsquo;s climate report instead, a different definition of the day&rsquo;s extreme that runs about a degree warmer on highs.</li>
-<li><b>Market value.</b> A contract&rsquo;s Yes price is the midpoint between the Yes bid and one dollar minus the No bid,
+<li><b>Span.</b> Every figure names the days it drew on. The ForecastEx prediction market has priced daily highs since the exchange opened its temperature board; its lows were too thinly quoted to score for some months after that; and the alternative forecast systems start at different dates. Each system&rsquo;s span is printed beside it, and every comparison between two systems is made on the days the pair share.</li>
+<li><b>Clock.</b> Lead counts down to station-local midnight, the moment the target day ends. An alternative forecast system&rsquo;s lead is timed to when its forecast was captured, the ForecastEx prediction market&rsquo;s lead is timed to the ladder snapshot itself.</li>
+<li><b>Truth.</b> Every system is scored against the station&rsquo;s METAR settle, the day&rsquo;s highest or lowest hourly reading, rounded to the nearest whole degree. A toggle rescores alternative forecast systems against the National Weather Service&rsquo;s climate report instead, a different definition of the day&rsquo;s extreme that runs about a degree warmer on highs.</li>
+<li><b>Prediction market value.</b> A contract&rsquo;s Yes price is the midpoint between the Yes bid and one dollar minus the No bid,
 <span class="eq" data-tex="p = \frac{\text{Yes bid} + (1 - \text{No bid})}{2}">p = (Yes bid + (1 - No bid)) / 2</span>
-when both sides are quoted. The ladder across strikes is forced monotone by pooling any violations, and the market&rsquo;s temperature is where it crosses fifty cents, rounded up for highs and down for lows to match whole-degree settlement.</li>
-<li><b>Tool value.</b> A tool&rsquo;s value at any moment is its most recent forecast at or before that moment for the target date. By default that value is held at the running observed extreme, so a forecast high is never shown below a high that already occurred, and a forecast low is never shown above a low that already occurred.</li>
-<li><b>Sample.</b> The matched cohort at a given lead includes only city-days where all eleven tools have a value and the market has a ladder crossing. Thin order books, short capture windows, backfilled rows, and days with gaps in the observation record are excluded and counted, a bin needs at least 30 city-days before it&rsquo;s drawn.</li>
-<li><b>Uncertainty.</b> Every interval on this page is a 95 percent bootstrap over target dates, 1,000 resamples, fixed seed. When a figure shows the market minus a tool, both sides are resampled from the same draws, so the difference reflects paired variation, not independent noise in each side.</li>
+when both sides are quoted. The ladder across strikes is forced monotone by pooling any violations, and the ForecastEx prediction market&rsquo;s temperature is where it crosses fifty cents, rounded up for highs and down for lows to match whole-degree settlement.</li>
+<li><b>Forecast value.</b> An alternative forecast system&rsquo;s value at any moment is its most recent forecast at or before that moment for the target date. By default that value is held at the running observed extreme, so a forecast high is never shown below a high that already occurred, and a forecast low is never shown above a low that already occurred.</li>
+<li><b>Sample.</b> Every system is scored on the city-days its own record covers and the ForecastEx prediction market priced, and every comparison between two systems is made on the days the pair share. A fixed sample is available that restricts the days to those the ForecastEx prediction market priced at every hour from 30 to 0, so a curve&rsquo;s slope cannot come from the sample changing underneath it. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted, and a bin needs at least 30 city-days before it&rsquo;s drawn.</li>
+<li><b>Uncertainty.</b> Every interval on this page is a 95 percent bootstrap over target dates, 1,000 resamples, fixed seed. When a figure shows the ForecastEx prediction market minus a system, both sides are resampled from the same draws, so the difference reflects paired variation, not independent noise in each side.</li>
 </ul>
 </div>
 <script src="js/common.js"></script>

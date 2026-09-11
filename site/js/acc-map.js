@@ -1,16 +1,16 @@
-/* Figure 4, the city map: where ForecastEx beats or trails a chosen tool.
+/* Figure 4, the city map: where ForecastEx beats or trails a chosen alternative forecast system.
 
    The lead curve and the grid pool every station; a reader who trades one
-   city wants to know whether the market beat the tool there. Each station
+   city wants to know whether the ForecastEx prediction market beat the system there. Each station
    is a dot on the CONUS whose color is the percent improvement of the
-   market over the tool in one reading window, on the paired city-days the
+   market over the system in one reading window, on the paired city-days the
    two share, with the bootstrap interval deciding whether the dot earns a
    color at all. A second view shows the two mean absolute errors side by
-   side on one shared scale, so a large improvement over a poor tool is not
-   read as a small error of the market's own.
+   side on one shared scale, so a large improvement over a poor system is not
+   read as a small error of the ForecastEx prediction market's own.
 
    Every number comes from map.json (docs/accuracy.md section 3). The
-   module chooses a metric, a tool, a window, a frame and a view, draws
+   module chooses a metric, an alternative forecast system, a window, a frame and a view, draws
    what the file holds for that choice, and computes nothing beyond the
    color and the radius that carry the file's own values. */
 window.WXAccMap = (() => {
@@ -26,11 +26,11 @@ window.WXAccMap = (() => {
     { key: 'newsletter', label: 'Newsletter 5 PM to 5 AM ET', title: 'The hours the daily letter is written and read, 5 PM to 5 AM Eastern' },
   ];
   const FRAMES = [
-    { key: 'metar', label: 'METAR settle', title: 'The tool scored against the settle the contracts pay on' },
-    { key: 'cli', label: 'NWS climate report', title: 'The tool scored against the National Weather Service climate report for the same date' },
+    { key: 'metar', label: 'METAR settle', title: 'The system scored against the settle the contracts pay on' },
+    { key: 'cli', label: 'NWS climate report', title: 'The system scored against the National Weather Service climate report for the same date' },
   ];
   const MODES = [
-    { key: 'pi', label: 'Improvement', title: 'Percent improvement of ForecastEx over the tool, paired' },
+    { key: 'pi', label: 'Improvement', title: 'Percent improvement of the ForecastEx prediction market over the system, paired' },
     { key: 'mae', label: 'Absolute error', title: 'Both mean absolute errors on one shared scale' },
   ];
   // "the National Weather Service" but "GFS MOS": a name that opens with an
@@ -57,7 +57,7 @@ window.WXAccMap = (() => {
   const straddles = c => c.lo != null && c.hi != null && c.lo <= 0 && c.hi >= 0;
 
   /* The scales are fixed over the whole file, every metric, window, frame
-     and tool, so a change of control changes the dots and never the key. The
+     and system, so a change of control changes the dots and never the key. The
      percent cap is the largest improvement seen, rounded up to a ten; the
      radius runs on the largest matched count; the error scale on the largest
      MAE either system posted anywhere. */
@@ -106,15 +106,11 @@ window.WXAccMap = (() => {
   function controls(bar) {
     bar.innerHTML = '';
     A.metricTabs(bar, k => { sel.metric = k; render(); }, sel.metric);
-    // the tool is a select: seventeen names are too many for a row of tabs
+    // the system is a select: eighteen names are too many for a row of tabs
     const group = h('span', { class: 'tabgroup' });
-    group.appendChild(h('span', { class: 'tl', text: 'Tool' }));
-    const s = h('select', { class: 'acc-map-sel', 'aria-label': 'Tool' });
-    const og1 = h('optgroup', { label: 'Panel tools' });
-    A.PANEL.forEach(id => og1.appendChild(h('option', { value: id, text: A.name(id) })));
-    const og2 = h('optgroup', { label: 'Extra sources, own span' });
-    A.EXTRA.forEach(id => og2.appendChild(h('option', { value: id, text: A.name(id) })));
-    s.appendChild(og1); s.appendChild(og2);
+    group.appendChild(h('span', { class: 'tl', text: 'Compare with' }));
+    const s = h('select', { class: 'acc-map-sel', 'aria-label': 'Alternative forecast system' });
+    A.TOOLS.forEach(id => s.appendChild(h('option', { value: id, text: A.name(id) })));
     s.value = sel.tool;
     s.onchange = () => { sel.tool = s.value; render(); };
     group.appendChild(s);
@@ -154,12 +150,12 @@ window.WXAccMap = (() => {
       + WNAME[sel.win] + ', ' + FNAME[sel.frame],
       { x: 16, y: 15, 'font-size': 13, 'font-weight': 700, fill: 'var(--navy)' }));
     let summary;
-    if (!cells) summary = 'The file carries no values for this tool in this frame.';
+    if (!cells) summary = 'The file carries no values for this system in this frame.';
     else if (med && med.pi != null) {
       summary = 'Median improvement across cities ' + signedPct(med.pi)
         + (med.lo != null && med.hi != null ? ', interval ' + pctIv(med.lo, med.hi) : '')
         + ', ' + A.int(med.colored) + ' of ' + cities.length + ' cities colored';
-      if (sel.mode === 'mae') summary += '. Left dot ForecastEx, right dot the tool, darker is the larger error';
+      if (sel.mode === 'mae') summary += '. Left dot ForecastEx, right dot the system, darker is the larger error';
     } else summary = 'No median published for this selection';
     svg.appendChild(txt(summary, { x: 16, y: 31, class: 'axl', fill: 'var(--muted)' }));
 
@@ -190,12 +186,12 @@ window.WXAccMap = (() => {
         dot.appendChild(el('line', { x1: city.px, y1: city.py, x2: X, y2: Y, stroke: 'var(--muted)', 'stroke-width': 1 }));
         dot.appendChild(el('circle', { cx: city.px, cy: city.py, r: 1.8, fill: 'var(--muted)', stroke: 'none' }));
       }
-      const hollowWhy = !cells ? 'The tool carries no values in this frame'
+      const hollowWhy = !cells ? 'The system carries no values in this frame'
         : excluded(city.id) ? 'Denver’s climate report stands in for Buckley Field, which the climate frame excludes'
-        : 'Under 30 matched city-days for this tool';
+        : 'Under 30 matched city-days for this system';
       const ink = { 'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl', 'text-anchor': 'middle' };
       if (!c) {
-        // hollow: the station is on the exchange, the tool has nothing to score here
+        // hollow: the station is on the exchange, the system has nothing to score here
         dot.appendChild(el('circle', { cx: X, cy: Y, r, fill: 'var(--panel)', stroke: 'var(--muted)',
                                        'stroke-width': 1.2, 'stroke-dasharray': '2.5 2' }));
         placed.push([X - r, Y - r, X + r, Y + r]);
@@ -207,7 +203,7 @@ window.WXAccMap = (() => {
         dot.appendChild(txt(wholePct(c.pi), Object.assign({ x: X, y: Y + 3.4 }, ink)));
         placed.push([X - r - 2, Y - r - 2, X + r + 2, Y + r + 2]);
       } else {
-        // the pair: ForecastEx on the left in the accent ring, the tool on the
+        // the pair: ForecastEx on the left in the accent ring, the system on the
         // right in its own color, both filled on the one error scale
         const fxMae = c.fx && c.fx.mae, tMae = c.tool && c.tool.mae;
         const xl = X - r - 1, xr = X + r + 1;
@@ -314,7 +310,7 @@ window.WXAccMap = (() => {
       };
       if (sel.mode === 'pi') {
         const steps = [-1, -0.66, -0.33, 0.33, 0.66, 1].map(s => piFill(s * scale.piCap));
-        key.appendChild(ramp(steps, 'Tool more accurate, −' + scale.piCap + '%', '+' + scale.piCap + '%, ForecastEx more accurate'));
+        key.appendChild(ramp(steps, 'System more accurate, −' + scale.piCap + '%', '+' + scale.piCap + '%, ForecastEx more accurate'));
         key.appendChild(sw('background:var(--line);border-color:var(--rule)', 'grey, the interval covers zero'));
       } else {
         const steps = [0, 0.25, 0.5, 0.75, 1].map(s => maeFill(s * scale.maeCap));
@@ -332,21 +328,21 @@ window.WXAccMap = (() => {
     A.methodNote($('#accMapMethod'), {
       title: 'Percent improvement by city',
       body: [
-        'Each city is scored on the city-days where both the tool and the market have a value in the chosen window, so the comparison is always paired on the same days.',
+        'Each city is scored on the city-days where both the system and the ForecastEx prediction market have a value in the chosen window, so the comparison is always paired on the same days.',
         { tex: 'MAE_{s,c} = \\text{mean over matched city-days of city } c \\text{ of } |v_s - \\text{settle}|' },
-        { tex: 'PI_c = 100 \\times \\frac{MAE_{tool,c} - MAE_{FX,c}}{MAE_{tool,c}}' },
+        { tex: 'PI_c = 100 \\times \\frac{MAE_{sys,c} - MAE_{FX,c}}{MAE_{sys,c}}' },
         'A positive $PI_c$ means ForecastEx had the smaller error in that city. A dot is grey when the bootstrap interval on the paired difference covers zero.',
       ],
       rules: [
         'Windows are the morning of the target day, 6 AM to noon station time, the evening before at 6 PM station time, and the newsletter\u2019s own hours, 5 PM to 5 AM Eastern.',
         'A city with fewer than 30 matched city-days is hollow.',
-        'Intervals are the same bootstrap used throughout the page, with the market and tool differences resampled together so both sides move under the same draws.',
-        'The climate-report frame scores tools against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, so a gap between frames reflects that difference in definition rather than in forecast skill. Denver\u2019s climate-report figures stand in for Buckley Field, which has none of its own.',
+        'Intervals are the same bootstrap used throughout the page, with the ForecastEx prediction market and system differences resampled together so both sides move under the same draws.',
+        'The climate-report frame scores alternative forecast systems against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, so a gap between frames reflects that difference in definition rather than in forecast skill. Denver\u2019s climate-report figures stand in for Buckley Field, which has none of its own.',
       ],
       span: A.spanLine(D.map && D.map.meta, ['FX', sel.tool], sel.metric,
                        { lead: 'Records run from' }) + ' The pair is scored only where both hold a value.',
       n: cells ? 'Sample ' + A.int(n) + ' matched city-days across ' + k + ' cities in this view.'
-               : 'The file carries no values for this tool in this frame.',
+               : 'The file carries no values for this system in this frame.',
     });
   }
 
@@ -357,8 +353,8 @@ window.WXAccMap = (() => {
     if (!host) return;
     if (!D || !D.map || !D.map.metric) { A.notYet(host, A.NOT_PUBLISHED); return; }
     fitScales();
-    // the first tool in the file that the select can name, when the default is absent
-    const first = toolCells() ? sel.tool : A.PANEL.concat(A.EXTRA).find(id => {
+    // the first system in the file that the select can name, when the default is absent
+    const first = toolCells() ? sel.tool : A.TOOLS.find(id => {
       const w = cellsOf(); return w && w.frame && w.frame[sel.frame] && w.frame[sel.frame][id];
     });
     if (first) sel.tool = first;
