@@ -235,7 +235,7 @@ window.WXAccLead = (() => {
     // ---- the key and the method note follow the view
     if (keyEl) {
       const note = (raw ? 'A dot marks each tool’s last live update for the day. ' : '')
-        + (extras.length ? 'The six extra sources are drawn on their own span with the held value and no band. ' : '')
+        + (extras.length ? 'The extra sources are drawn on their own span with the held value and no band. ' : '')
         + 'The band is the market’s 95 percent bootstrap interval.';
       A.key(keyEl, ids.concat(extras), { note, meta: file.meta, metric: state.metric });
     }
@@ -310,7 +310,7 @@ window.WXAccLead = (() => {
         'Three cohorts are available, all eleven tools plus the market, a core five (National Weather Service, Blend, Aviation Forecast, European and American models) plus the market, or a fixed set of city-days matched at every hour from 30 to 0.',
         'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, seed 20260910.',
         'Hours beyond the shaded threshold draw on a partial cohort, since not every tool has data that far out, hovering shows which dates and time zones fill those bins.',
-        'The six extra sources run on their own span, held at their last value, with no band.',
+        'The extra sources run on their own span, held at their last value, with no band.',
       ],
       span: spanText(meta),
       n: sample,

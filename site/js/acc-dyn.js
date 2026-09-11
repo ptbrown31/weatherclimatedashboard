@@ -19,7 +19,7 @@
 
    Every value drawn is the builder's; nothing here is computed beyond
    pixel placement. The systems drawn as lines are the market and the
-   eleven panel tools. The six own-span sources are gray rows in the strip
+   eleven panel tools. The own-span sources are gray rows in the strip
    of panel a and are not drawn as lines against another source, per the
    contract's own-span rule. */
 window.WXAccDyn = (() => {
@@ -162,7 +162,7 @@ window.WXAccDyn = (() => {
     N.e = svg('accDynE', 240);
     const keyEl = $('#accDynKey');
     if (keyEl) A.key(keyEl, LINES, { short: true, meta: dyn && dyn.meta,
-      note: 'the six own-span sources are the gray rows of the strip in panel a and are not drawn as lines' });
+      note: 'the own-span sources are the gray rows of the strip in panel a and are not drawn as lines' });
   }
   /* The city list for the chosen date, with the builder's default rule
      applied when the current city is not traced on that date: the city
@@ -583,7 +583,7 @@ window.WXAccDyn = (() => {
       ],
       rules: [
         'The market\u2019s value is the whole-degree crossing of its price ladder, rounded the same way as in the lead-curve figure, the tolerance is 1 or 2 degrees, selectable by tab.',
-        'Convergence in the top panel uses the matched cohort of eleven tools plus the market at lead zero, or, for six additional sources shown on their own axis, whichever city-days each source covers.',
+        'Convergence in the top panel uses the matched cohort of eleven tools plus the market at lead zero, or, for the additional sources shown on their own axis, whichever city-days each source covers.',
         'A qualifying report raised the observed extreme by at least a degree on highs, or lowered it on lows, before the day\u2019s true extreme was reached. Bands are the same 1,000-draw bootstrap used elsewhere, seed 20260910, and a point under 30 qualifying events is left blank.',
         'The traced city-day at the bottom shows every report as a dot, the running observed extreme as a grey step, the market\u2019s ten-minute price track with its 10th-to-90th-percentile band, and each tool\u2019s forecast held flat after its last update.',
       ],

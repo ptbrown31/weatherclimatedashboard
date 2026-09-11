@@ -22,19 +22,20 @@ window.WXAcc = (() => {
     NDFD: 'National Weather Service', NBM: 'National Blend of Models', LAMP: 'Aviation Forecast',
     ECMWF: 'European Model', GFS: 'American Model', MOSMIX: 'German Statistical Model',
     ICON: 'German Model', GEM: 'Canadian Model', UKMO: 'UK Model', MF: 'French Model', JMA: 'Japanese Model',
-    ECMWF_IFS: 'European Ensemble Mean', GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
+    AIFS: 'European AI Ensemble Mean', ECMWF_IFS: 'European Ensemble Mean',
+    GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
     HRRR: 'HRRR', HRRR_OM: 'HRRR (Open-Meteo)',
   };
   // a shorter name for a legend or a column head, where the full one wraps
   const SHORT = {
     FX: 'ForecastEx', NDFD: 'NWS', NBM: 'Blend', LAMP: 'Aviation', ECMWF: 'European', GFS: 'American',
     MOSMIX: 'German Stat.', ICON: 'German', GEM: 'Canadian', UKMO: 'UK', MF: 'French', JMA: 'Japanese',
-    ECMWF_IFS: 'Euro. Ens.', GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
+    AIFS: 'Euro. AI', ECMWF_IFS: 'Euro. Ens.', GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
     HRRR: 'HRRR', HRRR_OM: 'HRRR (OM)',
   };
   const PANEL = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS', 'MOSMIX', 'ICON', 'GEM', 'UKMO', 'MF', 'JMA'];
   const CORE5 = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS'];
-  const EXTRA = ['ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR', 'HRRR_OM'];
+  const EXTRA = ['AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR', 'HRRR_OM'];
   const ORDER = ['FX'].concat(PANEL, EXTRA);
   // which cohort each id belongs to, for a figure that filters by cohort
   const COHORT = { matched11: ['FX'].concat(PANEL), core5: ['FX'].concat(CORE5), own: ORDER };

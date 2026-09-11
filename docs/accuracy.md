@@ -124,6 +124,7 @@ or a model probability of the site's own.
 | UKMO | UK Model | four captures a day |
 | MF | French Model | four captures a day |
 | JMA | Japanese Model | four captures a day |
+| AIFS | European AI Ensemble Mean | extra, own span |
 | ECMWF_IFS | European Ensemble Mean | extra, own span |
 | GFS_MOS | GFS MOS | extra, own span |
 | NAM_MOS | NAM MOS | extra, own span |
@@ -132,6 +133,11 @@ or a model probability of the site's own.
 | HRRR_OM | HRRR (Open-Meteo) | extra, own span |
 
 The eleven panel tools are NDFD through JMA. Every export uses these ids.
+
+AIFS is ECMWF's AI forecasting system, captured directly as the hourly
+ensemble mean at eight runs a day rather than through the panel, so its daily
+extreme is taken here as the maximum and minimum of the captured hours over
+the station-local day, from each capture that covers the whole of it.
 
 ## 3. Files
 
