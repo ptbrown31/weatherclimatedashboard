@@ -253,8 +253,10 @@ cohort has members.
 
 ```
 { meta,
-  converge: { metric: { tol1: { h: [36..0], systems: { id: { share: [...], median: number|null, never: number } } },
-                        tol2: { ... } } },
+  converge: { metric: { tol1: { metar: CONV, cli: CONV }, tol2: { ... } } },
+    // CONV = { h: [36..0], systems: { id: { share: [...], median: number|null, never: number } } }
+    // cli holds each alternative forecast system to the climate report instead;
+    // the market keeps the settle its contracts pay on in either frame
   rate: { byLead: { metric: { h: [36..0], systems: { id: [changes per hour] } } },
           byLocalHour: { metric: { hour: [0..23], fx: [...], fxLo, fxHi, tools: { id: [...] } } },
           perCityDay: { metric: { fx: {median, q1, q3}, tools: { id: median } } } },
@@ -305,9 +307,15 @@ members as well as a centre, so `metric.<m>.ensembles` carries them scored on
 the same contracts:
 
 ```
-ensembles: { id: { name, leadBins: [...], reliability: [ ... as above ... ],
-                   byLead: { h, brier, n, crps, dispersion, bias, spread } } }
+ensembles: { id: { name, frame: { metar: BLK, cli: BLK } } }
+BLK = { leadBins: [...], reliability: [ ... as above ... ],
+        byLead: { h, brier, n, crps, dispersion, bias, spread } }
 ```
+
+The climate-report frame recomputes the contract's own outcome against the
+National Weather Service report for the same date, so a station whose report
+stands in for another drops out of it. The market keeps the settle its
+contracts pay on in either frame, since that is what they pay on.
 
 The reading is a normal curve centred on that system's own forecast of the
 day's extreme, which is the extreme of its hourly ensemble means over the

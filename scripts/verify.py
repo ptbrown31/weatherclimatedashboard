@@ -173,8 +173,24 @@ def run(no_build: bool) -> int:
                 cal_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/calibration.json").read().decode())
                 ensb = (cal_file.get("metric", {}).get("high", {}) or {}).get("ensembles", {})
                 cal_txt = page.locator("#accCal").inner_text()
+                # the frame tab reaches the reliability panels and the convergence figure too
+                cal_metar = page.locator("#accCal").inner_html()
+                page.locator("#accCalBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(700)
+                chk.add(f"{scheme} accuracy: the reliability panels redraw in the climate-report frame",
+                        page.locator("#accCal").inner_html() != cal_metar, "")
+                page.locator("#accCalBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
+                dyn_metar = page.locator("#accDyn").inner_html()
+                page.locator("#accDynBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(700)
+                chk.add(f"{scheme} accuracy: the convergence figure redraws in the climate-report frame",
+                        page.locator("#accDyn").inner_html() != dyn_metar, "")
+                page.locator("#accDynBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
+                cal_bar = page.locator("#accCalBar").inner_text()
+                chk.add(f"{scheme} accuracy: the calibration figure drops the price-side and range toggles",
+                        "Yes bid" not in cal_bar and "2 to 98" not in cal_bar, cal_bar.replace("\n", " | ")[:120])
                 chk.add(f"{scheme} accuracy: the ensembles are scored on the same contracts as the market",
-                        len(ensb) >= 2 and all(e.get("byLead", {}).get("brier") for e in ensb.values())
+                        len(ensb) >= 2
+                        and all((e.get("frame", {}).get(f, {}).get("byLead", {}) or {}).get("brier")
+                                for e in ensb.values() for f in ("metar", "cli"))
                         and "Ensemble" in cal_txt, f"systems={sorted(ensb)}")
                 n_calc, n_calr = page.locator("#accCal circle").count(), page.locator("#accCal rect").count()
                 chk.add(f"{scheme} accuracy: the calibration figure draws its bins and its bars",

@@ -24,7 +24,6 @@ window.WXAccCal = (() => {
   const PRICE = [
     { key: 'mid', label: 'Yes price midpoint', title: 'the midpoint of the Yes bid and one dollar less the No bid; the single quoted side when only one side is bid' },
     { key: 'twoSided', label: 'Two-sided books only', title: 'the midpoint on books with a bid on both sides; a one-sided book is unquoted' },
-    { key: 'yesBid', label: 'Yes bid', title: 'the Yes bid alone' },
   ];
   /* The truncated score. The builder's truncated Brier keeps prices strictly
      between 2 and 98 cents, the band the calibration working paper uses, and
@@ -33,10 +32,6 @@ window.WXAccCal = (() => {
      test of the prices that carry information. */
   const TRUNC = [0.02, 0.98];
   const TRUNC_LABEL = '2 to 98 c';
-  const RANGE = [
-    { key: 'all', label: 'All', title: 'every priced contract' },
-    { key: 'trunc', label: TRUNC_LABEL, title: 'prices strictly between 2 and 98 cents, the truncated score' },
-  ];
   // series colors: the ForecastEx prediction market keeps the accent; the Murphy terms take the
   // site's penalty, credit and neutral tokens; the median's error the navy
   const C_BS = 'var(--accent)', C_TRUNC = 'var(--navy)', C_REL = 'var(--bad)', C_RES = 'var(--ok)',
@@ -44,7 +39,15 @@ window.WXAccCal = (() => {
   const fin = v => v != null && isFinite(v);
   const cents = v => (fin(v) ? Math.round(v * 100) + ' c' : A.dash);
 
-  const st = { metric: 'high', price: 'mid', range: 'all' };
+  /* The truth an alternative forecast system is held to, as on the lead curve
+     and the map. The market keeps the settle its contracts pay on, whatever
+     the frame; only the systems with a spread are rescored. */
+  const FRAMES = [
+    { key: 'metar', label: 'METAR settle', title: 'Every system scored against the settle the contracts pay on' },
+    { key: 'cli', label: 'NWS climate report', title: 'The systems with a spread scored against the National Weather Service climate report for the same date; the ForecastEx prediction market keeps the settle it pays on' },
+  ];
+
+  const st = { metric: 'high', price: 'mid', range: 'all', frame: 'metar' };
   let cal = null;
 
   function draw(D) {
@@ -58,7 +61,7 @@ window.WXAccCal = (() => {
     if (bar) {
       A.metricTabs(bar, k => { st.metric = k; render(host, keyEl, meth); }, st.metric);
       A.tabs(bar, PRICE, k => { st.price = k; render(host, keyEl, meth); }, { initial: st.price, label: 'Price' });
-      A.tabs(bar, RANGE, k => { st.range = k; render(host, keyEl, meth); }, { initial: st.range, label: 'Range' });
+      A.tabs(bar, FRAMES, k => { st.frame = k; render(host, keyEl, meth); }, { initial: st.frame, label: 'Frame' });
     }
     render(host, keyEl, meth);
   }
@@ -88,7 +91,8 @@ window.WXAccCal = (() => {
   }
 
   // "highs, Yes price midpoint": the rule's label keeps its capital Yes
-  const describe = () => (st.metric === 'high' ? 'highs' : 'lows') + ', ' + PRICE.find(p => p.key === st.price).label;
+  const describe = () => (st.metric === 'high' ? 'highs' : 'lows') + ', ' + PRICE.find(p => p.key === st.price).label
+    + (st.frame === 'cli' ? ', climate-report frame' : '');
 
   /* The systems with a spread of their own, in draw order. Their colour is
      the one they carry everywhere else on the page, so a reader who knows the
@@ -101,8 +105,10 @@ window.WXAccCal = (() => {
        The dashes separate them where two hues run close together. */
     const OWN = { GEFS: 'var(--t13)' };
     const DASH = [null, '5 3', '2 2', '7 3 2 3'];
-    return Object.keys(e).map((id, i) => ({ id, block: e[id], name: e[id].name || A.name(id),
-                                            color: OWN[id] || A.color(id), dash: DASH[i % DASH.length] }));
+    return Object.keys(e).map((id, i) => ({ id, name: e[id].name || A.name(id),
+                                            block: ((e[id].frame || {})[st.frame]) || {},
+                                            color: OWN[id] || A.color(id), dash: DASH[i % DASH.length] }))
+                         .filter(o => o.block && o.block.byLead);
   }
 
   // ------------------------------------------------------- reliability row
@@ -491,6 +497,7 @@ window.WXAccCal = (() => {
         'Sharpness is the median width, in degrees, between where a ladder crosses 10 cents and where it crosses 90 cents, and the error of the median is the average miss of the ladder\u2019s 50-cent crossing.',
         'CRPS scores the whole ladder rather than the point it crosses, in the same degrees, so it is the one number that answers whether the spread is right as well as the centre. A ladder that is well centred but too confident is penalised here and nowhere else on the page.',
         'Four of the alternative forecast systems publish the spread of their ensemble members as well as a centre, so a probability can be read off them and scored on these same contracts. The reading is a normal curve on the model\u2019s own forecast of the day\u2019s extreme with the model\u2019s own spread at the hour that extreme falls on, and the contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed, so what is scored is what the raw product gives a reader who wants a probability from it. Their values are banked at the running observed extreme exactly as every other value on the page is, since a reader watching the reports knows a strike already cleared.',
+        'The frame tab changes the truth those systems are held to, as it does on the lead curve and the map. In the climate-report frame the contract\u2019s outcome is recomputed against the National Weather Service report for the same date, which is a different definition of the day\u2019s extreme, and Buckley Field drops out because Denver\u2019s report stands in for it. The market keeps the settle its own contracts pay on in either frame, since that is what they pay on.',
         'Two caveats belong with those lines. A model publishes a spread for each hour, not for the day\u2019s extreme, so reading the peak hour\u2019s spread as the extreme\u2019s is an approximation this page makes rather than one the model makes. And the level bias each model carries in the error figures passes straight into its probability here, which is most of why the curves sit off the diagonal.',
         { tex: 'CRPS = \\sum_{k}\\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
         'where $F(k)$ is the ladder read as a distribution over whole degrees. Against the error of the median on the same axis, the gap between the two lines is what the spread costs or saves over the midpoint alone.',

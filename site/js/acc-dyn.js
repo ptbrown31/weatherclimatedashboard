@@ -34,7 +34,13 @@ window.WXAccDyn = (() => {
   const TOLS = [{ key: 'tol1', label: '1 F', deg: 1 }, { key: 'tol2', label: '2 F', deg: 2 }];
 
   // the state a tab change redraws from
-  const S = { metric: 'high', tol: 'tol1', date: null, city: null };
+  const S = { metric: 'high', tol: 'tol1', frame: 'metar', date: null, city: null };
+  /* The truth an alternative forecast system is held to, as on the lead curve
+     and the map. The market keeps the settle its contracts pay on. */
+  const FRAMES = [
+    { key: 'metar', label: 'METAR settle', title: 'Every system scored against the settle the contracts pay on' },
+    { key: 'cli', label: 'NWS climate report', title: 'Alternative forecast systems scored against the National Weather Service climate report for the same date; the ForecastEx prediction market keeps the settle it pays on' },
+  ];
   let dyn = null, bundle = null, N = null;
   const traces = {};   // trace files by date, false when the fetch failed
   let traceReq = 0;    // guards a slow fetch against a newer selection
@@ -132,6 +138,7 @@ window.WXAccDyn = (() => {
       A.metricTabs(bar, m => { S.metric = m; redraw(); }, S.metric);
       A.tabs(bar, TOLS.map(t => ({ key: t.key, label: t.label, title: 'Within ' + t.deg + ' °F of the settle' })),
              t => { S.tol = t; drawA(); drawNote(); }, { initial: S.tol, label: 'Tolerance' });
+      A.tabs(bar, FRAMES, k => { S.frame = k; drawA(); drawNote(); }, { initial: S.frame, label: 'Frame' });
     }
     host.innerHTML = '';
     N = {};
@@ -190,7 +197,10 @@ window.WXAccDyn = (() => {
   // ------------------------------------------------------------- panel a
   function drawA() {
     const svg = N.a;
-    const cv = dyn.converge && dyn.converge.metric && dyn.converge.metric[S.metric] && dyn.converge.metric[S.metric][S.tol];
+    const cvAll = dyn.converge && dyn.converge.metric && dyn.converge.metric[S.metric]
+                  && dyn.converge.metric[S.metric][S.tol];
+    // the file carries both frames; an older one carried the metar frame alone
+    const cv = cvAll && (cvAll.systems ? cvAll : cvAll[S.frame] || cvAll.metar);
     const bl = dyn.rate && dyn.rate.byLead && dyn.rate.byLead.metric && dyn.rate.byLead.metric[S.metric];
     if (!cv || !cv.h || !cv.systems) { A.notYet(svg, 'The convergence block is not in the published file.'); return; }
     const stripRows = [];   // the changes-per-hour strip was removed with panel b
@@ -494,6 +504,7 @@ window.WXAccDyn = (() => {
       rules: [
         'The ForecastEx prediction market\u2019s value is the whole-degree crossing of its price ladder, rounded the same way as in the lead-curve figure, the tolerance is 1 or 2 degrees, selectable by tab.',
         'Convergence in the top panel uses, for each system, the city-days its own record covers and the ForecastEx prediction market priced at lead zero.',
+        'The frame tab changes the truth an alternative forecast system is held to, as it does on the lead curve and the map. In the climate-report frame each is measured against the National Weather Service report for the same date, a different definition of the day\u2019s extreme, and Buckley Field drops out because Denver\u2019s report stands in for it. The ForecastEx prediction market keeps the settle its contracts pay on in either frame.',
         'The traced city-day at the bottom shows every report as a dot, the running observed extreme as a grey step, the ForecastEx prediction market\u2019s ten-minute price track with its 10th-to-90th-percentile band, and each alternative forecast system\u2019s forecast held flat after its last update.',
       ],
       span: A.cohortSpanLine(dyn && dyn.meta, 'matched11')
