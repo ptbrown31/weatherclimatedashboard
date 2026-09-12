@@ -174,7 +174,7 @@ def run(no_build: bool) -> int:
                 ensb = (cal_file.get("metric", {}).get("high", {}) or {}).get("ensembles", {})
                 cal_txt = page.locator("#accCal").inner_text()
                 chk.add(f"{scheme} accuracy: the ensembles are scored on the same contracts as the market",
-                        len(ensb) == 2 and all(e.get("byLead", {}).get("brier") for e in ensb.values())
+                        len(ensb) >= 2 and all(e.get("byLead", {}).get("brier") for e in ensb.values())
                         and "Ensemble" in cal_txt, f"systems={sorted(ensb)}")
                 n_calc, n_calr = page.locator("#accCal circle").count(), page.locator("#accCal rect").count()
                 chk.add(f"{scheme} accuracy: the calibration figure draws its bins and its bars",

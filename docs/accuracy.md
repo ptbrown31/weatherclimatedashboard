@@ -300,7 +300,7 @@ are `[t, tempF, tempRounded, isSpeci]`; grid cells carry `nLow` beside `n`;
 availability exclusion rows carry `metric`; map cells are nested tool id then
 city id; `meta.cohorts` includes `fixed30`.
 
-Two of the alternative forecast systems publish the spread of their ensemble
+Four of the alternative forecast systems publish the spread of their ensemble
 members as well as a centre, so `metric.<m>.ensembles` carries them scored on
 the same contracts:
 

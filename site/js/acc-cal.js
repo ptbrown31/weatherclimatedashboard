@@ -81,7 +81,7 @@ window.WXAccCal = (() => {
     host.appendChild(sharpness(block, ens));
     host.appendChild(h('p', { class: 'cap acc-cal-note',
       text: ens.length
-        ? 'Two of the alternative forecast systems publish the spread of their members as well as a centre, so a probability can be read off them without anything being fitted, and they are scored here on the same contracts. The rest publish a single temperature and appear in the error figures only.'
+        ? 'Four of the alternative forecast systems publish the spread of their ensemble members as well as a centre, so a probability can be read off them without anything being fitted, and they are scored here on the same contracts. The rest publish a single temperature and appear in the error figures only.'
         : 'The alternative forecast systems publish no probabilities, so this figure has no line for them, and the site computes none of its own.' }));
     if (keyEl) legend(keyEl);
     if (meth) method(meth, block);
@@ -95,11 +95,14 @@ window.WXAccCal = (() => {
      European AI line from the lead curve finds it here too. */
   function ensembleSeries() {
     const e = (cal && cal.metric && cal.metric[st.metric] && cal.metric[st.metric].ensembles) || {};
-    // AIFS keeps the hue it carries in the error figures; GEFS appears only
-    // here, so it takes a hue of its own rather than the fallback grey
+    /* Each keeps the hue its family carries in the error figures, so a reader
+       who knows the Canadian line there finds it here. GEFS appears only in
+       this figure, so it takes a hue of its own rather than the fallback grey.
+       The dashes separate them where two hues run close together. */
     const OWN = { GEFS: 'var(--t13)' };
+    const DASH = [null, '5 3', '2 2', '7 3 2 3'];
     return Object.keys(e).map((id, i) => ({ id, block: e[id], name: e[id].name || A.name(id),
-                                            color: OWN[id] || A.color(id), dash: i ? '5 3' : null }));
+                                            color: OWN[id] || A.color(id), dash: DASH[i % DASH.length] }));
   }
 
   // ------------------------------------------------------- reliability row
@@ -255,8 +258,9 @@ window.WXAccCal = (() => {
       const ys = eb.map(v => (fin(v) ? y(v) : null));
       A.lineSeries(svg, xs, ys, { stroke: e.color, 'stroke-width': 1.8, 'stroke-dasharray': e.dash });
       A.dots(svg, xs, ys, { fill: e.color, r: 2.6 });
-      const f = ys.findIndex(fin);
-      if (f >= 0) A.label(svg, xs[f] + 6, ys[f] + (i ? 14 : -8), e.name, e.color);
+      let f = ys.findIndex(fin);
+      if (f >= 0) { f = Math.min(f + i, ys.length - 1); while (f > 0 && !fin(ys[f])) f--; }
+      if (f >= 0 && fin(ys[f])) A.label(svg, xs[f] + 6, ys[f] + (i % 2 ? 14 : -8), e.name, e.color);
     });
     // the day boundary, between the last lead of the day before and the first of the day
     const k24 = hs.findIndex(v => v <= 24);
@@ -403,10 +407,10 @@ window.WXAccCal = (() => {
       const ey = hs.map((_, i) => (fin(ec[i]) ? ym(ec[i]) : null));
       A.lineSeries(svg, xs, ey, { stroke: e.color, 'stroke-width': 1.5, 'stroke-dasharray': e.dash });
       A.dots(svg, xs, ey, { fill: e.color, r: 2.4 });
-      // each name at a different lead so two long labels never share a line
+      // each name at its own lead so several long labels never stack
       let f = ey.findIndex(fin);
-      if (f >= 0) { f = Math.min(f + i * 2, ey.length - 1); while (f > 0 && !fin(ey[f])) f--; }
-      if (f >= 0 && fin(ey[f])) A.label(svg, xs[f] + 6, ey[f] + (i ? 15 : -8), e.name + ' CRPS', e.color);
+      if (f >= 0) { f = Math.min(f + i, ey.length - 1); while (f > 0 && !fin(ey[f])) f--; }
+      if (f >= 0 && fin(ey[f])) A.label(svg, xs[f] + 6, ey[f] + (i % 2 ? 15 : -8), e.name, e.color);
     });
     if (fw < 0 && fm < 0) svg.appendChild(txt('under 30 ladders at every lead', { x: (g.L + g.R) / 2, y: (g.T + g.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
     hs.forEach((hh, i) => {
@@ -486,7 +490,7 @@ window.WXAccCal = (() => {
         'The truncated Brier score keeps only prices strictly between 2 and 98 cents, the range where the price carries information beyond the strike itself, the share of contracts kept is printed above its marker.',
         'Sharpness is the median width, in degrees, between where a ladder crosses 10 cents and where it crosses 90 cents, and the error of the median is the average miss of the ladder\u2019s 50-cent crossing.',
         'CRPS scores the whole ladder rather than the point it crosses, in the same degrees, so it is the one number that answers whether the spread is right as well as the centre. A ladder that is well centred but too confident is penalised here and nowhere else on the page.',
-        'Two of the alternative forecast systems publish the spread of their ensemble members as well as a centre, so a probability can be read off them and scored on these same contracts. The reading is a normal curve on the model\u2019s own forecast of the day\u2019s extreme with the model\u2019s own spread at the hour that extreme falls on, and the contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed, so what is scored is what the raw product gives a reader who wants a probability from it. Their values are banked at the running observed extreme exactly as every other value on the page is, since a reader watching the reports knows a strike already cleared.',
+        'Four of the alternative forecast systems publish the spread of their ensemble members as well as a centre, so a probability can be read off them and scored on these same contracts. The reading is a normal curve on the model\u2019s own forecast of the day\u2019s extreme with the model\u2019s own spread at the hour that extreme falls on, and the contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed, so what is scored is what the raw product gives a reader who wants a probability from it. Their values are banked at the running observed extreme exactly as every other value on the page is, since a reader watching the reports knows a strike already cleared.',
         'Two caveats belong with those lines. A model publishes a spread for each hour, not for the day\u2019s extreme, so reading the peak hour\u2019s spread as the extreme\u2019s is an approximation this page makes rather than one the model makes. And the level bias each model carries in the error figures passes straight into its probability here, which is most of why the curves sit off the diagonal.',
         { tex: 'CRPS = \\sum_{k}\\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
         'where $F(k)$ is the ladder read as a distribution over whole degrees. Against the error of the median on the same axis, the gap between the two lines is what the spread costs or saves over the midpoint alone.',
