@@ -73,13 +73,16 @@ window.WXAccCal = (() => {
     }
     const edges = (cal.bins && cal.bins.edges) || [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
     host.appendChild(h('div', { class: 'accsub', text: 'Reliability by lead bin, ' + describe() }));
-    host.appendChild(reliability(block, edges));
+    const ens = ensembleSeries();
+    host.appendChild(reliability(block, edges, ens));
     host.appendChild(h('div', { class: 'accsub', text: 'Brier score and its decomposition by lead' }));
-    host.appendChild(decomposition(block));
+    host.appendChild(decomposition(block, ens));
     host.appendChild(h('div', { class: 'accsub', text: 'Dispersion: ladder width, error of the median, and CRPS' }));
-    host.appendChild(sharpness(block));
+    host.appendChild(sharpness(block, ens));
     host.appendChild(h('p', { class: 'cap acc-cal-note',
-      text: 'The alternative forecast systems publish no probabilities, so this figure has no line for them, and the site computes none of its own.' }));
+      text: ens.length
+        ? 'Two of the alternative forecast systems publish the spread of their members as well as a centre, so a probability can be read off them without anything being fitted, and they are scored here on the same contracts. The rest publish a single temperature and appear in the error figures only.'
+        : 'The alternative forecast systems publish no probabilities, so this figure has no line for them, and the site computes none of its own.' }));
     if (keyEl) legend(keyEl);
     if (meth) method(meth, block);
   }
@@ -87,13 +90,25 @@ window.WXAccCal = (() => {
   // "highs, Yes price midpoint": the rule's label keeps its capital Yes
   const describe = () => (st.metric === 'high' ? 'highs' : 'lows') + ', ' + PRICE.find(p => p.key === st.price).label;
 
+  /* The systems with a spread of their own, in draw order. Their colour is
+     the one they carry everywhere else on the page, so a reader who knows the
+     European AI line from the lead curve finds it here too. */
+  function ensembleSeries() {
+    const e = (cal && cal.metric && cal.metric[st.metric] && cal.metric[st.metric].ensembles) || {};
+    // AIFS keeps the hue it carries in the error figures; GEFS appears only
+    // here, so it takes a hue of its own rather than the fallback grey
+    const OWN = { GEFS: 'var(--t13)' };
+    return Object.keys(e).map((id, i) => ({ id, block: e[id], name: e[id].name || A.name(id),
+                                            color: OWN[id] || A.color(id), dash: i ? '5 3' : null }));
+  }
+
   // ------------------------------------------------------- reliability row
   /* Four panels, one per lead bin, share paid against price. The marker
      area is the contract count, so a bin of 10,000 tail contracts and a
      bin of 500 central ones are seen for what they are; the bar is the
      Wilson interval on the share paid; the inset is the price histogram,
      the raw share of contracts in each decile before any pooling. */
-  function reliability(block, edges) {
+  function reliability(block, edges, ens) {
     const bins = block.leadBins || [];
     const rel = block.reliability || [];
     const n = Math.min(bins.length, rel.length) || 1;
@@ -146,6 +161,20 @@ window.WXAccCal = (() => {
         svg.appendChild(el('circle', { cx: x(px), cy: y(py), r: rad, fill: C_BS, 'fill-opacity': 0.45 * op, stroke: C_BS,
                                        'stroke-width': 1.2, 'stroke-opacity': op, 'pointer-events': 'none' }));
         pts.push({ k, px, py, rad });
+      });
+      /* The two systems that publish a spread, on the same contracts and the
+         same axes. Drawn as a plain line rather than sized markers: what
+         matters is where the curve sits against the diagonal, and the market
+         keeps the weight of the panel. */
+      (ens || []).forEach(e => {
+        const er = (e.block.reliability || [])[i] || {};
+        const ex = [], ey = [];
+        (er.x || []).forEach((px, k) => {
+          const py = er.y && er.y[k];
+          if (fin(px) && fin(py)) { ex.push(x(px)); ey.push(y(py)); }
+        });
+        if (ex.length > 1) A.lineSeries(svg, ex, ey, { stroke: e.color, 'stroke-width': 1.6, 'stroke-dasharray': e.dash });
+        A.dots(svg, ex, ey, { fill: e.color, r: 2 });
       });
       // hit targets last so they sit over the drawing
       pts.forEach(p => {
@@ -200,14 +229,15 @@ window.WXAccCal = (() => {
      share printed over it. The 0.25 rule is the score of pricing every
      contract at 50 c; the base rate rule is the score of pricing every
      contract at that lead's share paid, which is the uncertainty term. */
-  function decomposition(block) {
+  function decomposition(block, ens) {
     const by = block.byLead || {};
     const hs = by.h || [];
     const H = 300, g = A.frame(H, { T: 26, B: H - 56 });
     const svg = el('svg', { viewBox: '0 0 960 ' + H, class: 'acc-cal-bars' });
     const nG = hs.length || 1, gw = (g.R - g.L) / nG;
     const cx = i => g.L + (i + 0.5) * gw;
-    const vals = [0.25].concat(['rel', 'res', 'unc', 'hi', 'brierTrunc'].flatMap(k => (by[k] || []).filter(fin)));
+    const vals = [0.25].concat(['rel', 'res', 'unc', 'hi', 'brierTrunc'].flatMap(k => (by[k] || []).filter(fin)),
+                               (ens || []).flatMap(e => ((e.block.byLead || {}).brier || []).filter(fin)));
     const ymax = Math.max(...vals) * 1.12;
     const step = A.niceStep(ymax, 5);
     const y = A.scale(0, Math.ceil(ymax / step) * step, g.B, g.T);
@@ -215,6 +245,19 @@ window.WXAccCal = (() => {
     hs.forEach((hh, i) => svg.appendChild(txt(hh + ' h', { x: cx(i), y: g.B + 17, 'text-anchor': 'middle', class: 'ax' })));
     svg.appendChild(txt('Hours before the end of the target day', { x: (g.L + g.R) / 2, y: g.B + 38, 'text-anchor': 'middle', class: 'ax' }));
     svg.appendChild(el('line', { x1: g.L, x2: g.R, y1: g.B, y2: g.B, stroke: 'var(--rule)', 'stroke-width': 1 }));
+    /* The systems with a spread, on the same axis: their Brier on the same
+       contracts at the same hour. Their score barely falls as the day
+       approaches, because a raw ensemble spread does not collapse the way a
+       book does once the outcome is nearly known. */
+    (ens || []).forEach((e, i) => {
+      const eb = (e.block.byLead || {}).brier || [];
+      const xs = hs.map((_, i) => cx(i));
+      const ys = eb.map(v => (fin(v) ? y(v) : null));
+      A.lineSeries(svg, xs, ys, { stroke: e.color, 'stroke-width': 1.8, 'stroke-dasharray': e.dash });
+      A.dots(svg, xs, ys, { fill: e.color, r: 2.6 });
+      const f = ys.findIndex(fin);
+      if (f >= 0) A.label(svg, xs[f] + 6, ys[f] + (i ? 14 : -8), e.name, e.color);
+    });
     // the day boundary, between the last lead of the day before and the first of the day
     const k24 = hs.findIndex(v => v <= 24);
     if (k24 > 0) {
@@ -308,7 +351,7 @@ window.WXAccCal = (() => {
      its median (the whole-degree crossing against the settle) rides on a
      second axis; a prediction market that narrows before its error falls is
      overconfident, one that narrows after is slow. */
-  function sharpness(block) {
+  function sharpness(block, ens) {
     const sh = block.sharpness || {};
     const hs = sh.h || [];
     const H = 236, g = A.frame(H, { T: 24, B: H - 56, R: 898 });
@@ -316,7 +359,8 @@ window.WXAccCal = (() => {
     const nG = hs.length || 1, gw = (g.R - g.L) / nG;
     const cx = i => g.L + (i + 0.5) * gw;
     const wmax = Math.max(1, ...(sh.width || []).filter(fin)) * 1.15;
-    const mmax = Math.max(0.5, ...(sh.maeMedian || []).filter(fin), ...(sh.crps || []).filter(fin)) * 1.15;
+    const mmax = Math.max(0.5, ...(sh.maeMedian || []).filter(fin), ...(sh.crps || []).filter(fin),
+                          ...(ens || []).flatMap(e => ((e.block.byLead || {}).crps || []).filter(fin))) * 1.15;
     const ws = A.niceStep(wmax, 4), ms = A.niceStep(mmax, 3);
     const yw = A.scale(0, Math.ceil(wmax / ws) * ws, g.B, g.T);
     const ym = A.scale(0, Math.ceil(mmax / ms) * ms, g.B, g.T);
@@ -353,6 +397,17 @@ window.WXAccCal = (() => {
     if (fm >= 0) A.label(svg, xs[fm] + 6, my[fm] + (fw === fm && Math.abs(my[fm] - wy[fm]) < 18 ? 16 : -8), 'error of the median', C_MAE);
     const fc = first(cy);
     if (fc >= 0) A.label(svg, xs[fc] + 6, cy[fc] + 16, 'CRPS', C_CRPS);
+    // the same CRPS, on the same ladder, for the systems that publish a spread
+    (ens || []).forEach((e, i) => {
+      const ec = (e.block.byLead || {}).crps || [];
+      const ey = hs.map((_, i) => (fin(ec[i]) ? ym(ec[i]) : null));
+      A.lineSeries(svg, xs, ey, { stroke: e.color, 'stroke-width': 1.5, 'stroke-dasharray': e.dash });
+      A.dots(svg, xs, ey, { fill: e.color, r: 2.4 });
+      // each name at a different lead so two long labels never share a line
+      let f = ey.findIndex(fin);
+      if (f >= 0) { f = Math.min(f + i * 2, ey.length - 1); while (f > 0 && !fin(ey[f])) f--; }
+      if (f >= 0 && fin(ey[f])) A.label(svg, xs[f] + 6, ey[f] + (i ? 15 : -8), e.name + ' CRPS', e.color);
+    });
     if (fw < 0 && fm < 0) svg.appendChild(txt('under 30 ladders at every lead', { x: (g.L + g.R) / 2, y: (g.T + g.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
     hs.forEach((hh, i) => {
       const hit = el('rect', { x: g.L + i * gw, y: g.T, width: gw, height: g.B - g.T, fill: 'none', 'pointer-events': 'all' });
@@ -383,6 +438,8 @@ window.WXAccCal = (() => {
     item('Error of the median', 'border-color:' + C_MAE + ';border-top-style:dashed;border-top-width:2px');
     item('CRPS', 'border-color:' + C_CRPS + ';border-top-width:2px');
     // two short notes rather than one, since a key entry never wraps
+    ensembleSeries().forEach(e => item(e.name, 'border-color:' + e.color + ';border-top-width:2px'
+      + (e.dash ? ';border-top-style:dashed' : '')));
     keyEl.appendChild(h('span', { class: 'kn', text: 'marker area is the contract count' }));
     keyEl.appendChild(h('span', { class: 'kn', text: 'bar is the 95 percent Wilson interval' }));
   }
@@ -429,6 +486,8 @@ window.WXAccCal = (() => {
         'The truncated Brier score keeps only prices strictly between 2 and 98 cents, the range where the price carries information beyond the strike itself, the share of contracts kept is printed above its marker.',
         'Sharpness is the median width, in degrees, between where a ladder crosses 10 cents and where it crosses 90 cents, and the error of the median is the average miss of the ladder\u2019s 50-cent crossing.',
         'CRPS scores the whole ladder rather than the point it crosses, in the same degrees, so it is the one number that answers whether the spread is right as well as the centre. A ladder that is well centred but too confident is penalised here and nowhere else on the page.',
+        'Two of the alternative forecast systems publish the spread of their ensemble members as well as a centre, so a probability can be read off them and scored on these same contracts. The reading is a normal curve on the model\u2019s own forecast of the day\u2019s extreme with the model\u2019s own spread at the hour that extreme falls on, and the contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed, so what is scored is what the raw product gives a reader who wants a probability from it. Their values are banked at the running observed extreme exactly as every other value on the page is, since a reader watching the reports knows a strike already cleared.',
+        'Two caveats belong with those lines. A model publishes a spread for each hour, not for the day\u2019s extreme, so reading the peak hour\u2019s spread as the extreme\u2019s is an approximation this page makes rather than one the model makes. And the level bias each model carries in the error figures passes straight into its probability here, which is most of why the curves sit off the diagonal.',
         { tex: 'CRPS = \\sum_{k}\\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
         'where $F(k)$ is the ladder read as a distribution over whole degrees. Against the error of the median on the same axis, the gap between the two lines is what the spread costs or saves over the midpoint alone.',
         'All intervals are the same 1,000-draw, 95 percent bootstrap used elsewhere, and a lead with under 30 city-days is not drawn.',

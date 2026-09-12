@@ -169,6 +169,13 @@ def run(no_build: bool) -> int:
                 n_dyn, n_dynp = page.locator("#accDyn svg").count(), page.locator("#accDyn svg path").count()
                 chk.add(f"{scheme} accuracy: the convergence figure draws both panels", n_dyn == 2 and n_dynp >= 6,
                         f"svgs={n_dyn} paths={n_dynp}")
+                # the systems that publish a spread are scored on the same contracts
+                cal_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/calibration.json").read().decode())
+                ensb = (cal_file.get("metric", {}).get("high", {}) or {}).get("ensembles", {})
+                cal_txt = page.locator("#accCal").inner_text()
+                chk.add(f"{scheme} accuracy: the ensembles are scored on the same contracts as the market",
+                        len(ensb) == 2 and all(e.get("byLead", {}).get("brier") for e in ensb.values())
+                        and "Ensemble" in cal_txt, f"systems={sorted(ensb)}")
                 n_calc, n_calr = page.locator("#accCal circle").count(), page.locator("#accCal rect").count()
                 chk.add(f"{scheme} accuracy: the calibration figure draws its bins and its bars",
                         n_calc >= 10 and n_calr >= 8, f"circles={n_calc} rects={n_calr}")

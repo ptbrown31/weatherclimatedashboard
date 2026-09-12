@@ -323,7 +323,7 @@ window.WXAccLead = (() => {
       rules: [
         'Bins run hourly from 36 hours before the day ends to zero, and a bin needs at least 30 matched city-days before it\u2019s drawn.',
         'Three cohorts are available, every alternative forecast system plus the ForecastEx prediction market, a core five (National Weather Service, Blend, Aviation Forecast, European and American models) plus the ForecastEx prediction market, or a fixed set of city-days matched at every hour from 30 to 0.',
-        'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, seed 20260910.',
+        'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates.',
         'Hours beyond the shaded threshold draw on a partial sample, since not every alternative forecast system has data that far out, hovering shows which dates and time zones fill those bins.',
         'The extra sources run on their own span, held at their last value, with no band.',
       ],

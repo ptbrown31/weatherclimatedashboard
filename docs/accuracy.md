@@ -300,6 +300,34 @@ are `[t, tempF, tempRounded, isSpeci]`; grid cells carry `nLow` beside `n`;
 availability exclusion rows carry `metric`; map cells are nested tool id then
 city id; `meta.cohorts` includes `fixed30`.
 
+Two of the alternative forecast systems publish the spread of their ensemble
+members as well as a centre, so `metric.<m>.ensembles` carries them scored on
+the same contracts:
+
+```
+ensembles: { id: { name, leadBins: [...], reliability: [ ... as above ... ],
+                   byLead: { h, brier, n, crps, dispersion, bias, spread } } }
+```
+
+The reading is a normal curve centred on that system's own forecast of the
+day's extreme, which is the extreme of its hourly ensemble means over the
+station-local day, with its own member spread at the hour that extreme falls
+on. A high pays when the unrounded extreme reaches half a degree past the
+strike and a low when it falls half a degree under, which is how settlement
+rounds. The values are banked at the running observed extreme exactly as every
+other value on this page is. Nothing is fitted and no bias is removed.
+
+`dispersion` is the diagnostic that separates the two ways a probability can
+be wrong: the standard deviation of the standardised error with the level bias
+taken out, so one means the spread is the right size for the errors the system
+actually makes and two means it is half the size it should be. `bias` and
+`spread` are the level error and the mean spread in degrees. Two limits belong
+with these lines and are stated on the page: a system publishes a spread for
+each hour rather than for the day's extreme, so reading the peak hour's spread
+as the extreme's is this page's approximation and not the system's; and the
+level bias each carries in the error figures passes straight into its
+probability here.
+
 ### map.json
 
 ```

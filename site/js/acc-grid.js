@@ -374,7 +374,7 @@ window.WXAccGrid = (() => {
       : null;
     const rules = [
       'v is the standing value at lead h, the last record at or before that instant held at the running observed extreme, and settle is the station’s METAR settle. The ForecastEx prediction market is always scored against the settle. In the climate-report frame an alternative forecast system’s settle is replaced by the National Weather Service climate report for the same date.',
-      'SS_s is positive when a system’s error is below the National Weather Service row’s on the same city-days. Its interval is a paired bootstrap over target dates, 1,000 draws, seed 20260910, 95 percent percentile. A cell whose interval covers zero, or whose sample is under ' + MIN_N + ' city-days, is grey, and the own-span cohort is never colored.',
+      'SS_s is positive when a system’s error is below the National Weather Service row’s on the same city-days. Its interval is a paired bootstrap over target dates, 1,000 draws, 95 percent percentile. A cell whose interval covers zero, or whose sample is under ' + MIN_N + ' city-days, is grey, and the own-span cohort is never colored.',
       'CRPS is computed on the ForecastEx prediction market’s monotone ladder at the same snapshot, its Yes prices read as a distribution over whole degrees, closed at the end strikes.',
       'Rows after ForecastEx are ordered by the ' + SORT_H + ' h mean absolute error in the selected view. Every day on record scores each system on the city-days its own record covers, and the fixed sample restricts those days to the ones the ForecastEx prediction market priced at every hour from 30 to 0.',
     ];
