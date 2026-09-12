@@ -109,11 +109,11 @@ class Job(unittest.TestCase):
         self.assertEqual(archive.LAST_STATUS["errors"], 0)
 
     def test_a_trace_file_is_published_on_its_own_stamps(self):
-        files = {"trace/2026-09-09.json": fixture("trace/2026-09-09.json")}
+        files = {TRACE_NEW: fixture(TRACE_NEW)}
         self.ship(files)
         self.assertEqual(self.run_pass(), 0)
-        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "trace/2026-09-09.json"), files["trace/2026-09-09.json"])
-        self.assertEqual(self.published()["files"], ["trace/2026-09-09.json"])
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + TRACE_NEW), files[TRACE_NEW])
+        self.assertEqual(self.published()["files"], [TRACE_NEW])
 
     def test_no_manifest_means_nothing_to_do(self):
         self.assertEqual(self.run_pass(), 0)

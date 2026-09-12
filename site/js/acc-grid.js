@@ -388,7 +388,7 @@ window.WXAccGrid = (() => {
     }
     if (meta.window) n += ' ' + A().windowAndBuilt(meta) + '.';
     A().methodNote(methodEl, {
-      title: 'How the grid is scored',
+      title: 'Scoring',
       body: [
         'Mean absolute error and mean error are both in degrees Fahrenheit, mean error is signed, positive when a system runs warm. Hit rate is the share of city-days within one degree of the settle.',
         { tex: 'SS_s = 100\\left(1 - \\frac{MAE_s}{MAE_{NWS}}\\right)' },
@@ -405,7 +405,6 @@ window.WXAccGrid = (() => {
     if (controlsBuilt || !bar) return;
     controlsBuilt = true;
     bar.innerHTML = '';
-    A().metricTabs(bar, k => { state.metric = k; render(); }, state.metric);
     A().tabs(bar, COHORTS, k => { state.cohort = k; render(); }, { initial: state.cohort, label: 'Days' });
     A().tabs(bar, FRAMES, k => { state.frame = k; render(); }, { initial: state.frame, label: 'Frame' });
     A().tabs(bar, [{ key: 'off', label: 'Hide' }, { key: 'on', label: 'Show' }], k => { state.nl = k; render(); },

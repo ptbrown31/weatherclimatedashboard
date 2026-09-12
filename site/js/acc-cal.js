@@ -40,7 +40,7 @@ window.WXAccCal = (() => {
   // series colors: the ForecastEx prediction market keeps the accent; the Murphy terms take the
   // site's penalty, credit and neutral tokens; the median's error the navy
   const C_BS = 'var(--accent)', C_TRUNC = 'var(--navy)', C_REL = 'var(--bad)', C_RES = 'var(--ok)',
-        C_UNC = 'var(--muted)', C_WIDTH = 'var(--accent)', C_MAE = 'var(--navy)';
+        C_UNC = 'var(--muted)', C_WIDTH = 'var(--accent)', C_MAE = 'var(--navy)', C_CRPS = 'var(--t6)';
   const fin = v => v != null && isFinite(v);
   const cents = v => (fin(v) ? Math.round(v * 100) + ' c' : A.dash);
 
@@ -76,7 +76,7 @@ window.WXAccCal = (() => {
     host.appendChild(reliability(block, edges));
     host.appendChild(h('div', { class: 'accsub', text: 'Brier score and its decomposition by lead' }));
     host.appendChild(decomposition(block));
-    host.appendChild(h('div', { class: 'accsub', text: 'Sharpness of the ladder and the error of its median' }));
+    host.appendChild(h('div', { class: 'accsub', text: 'Dispersion: ladder width, error of the median, and CRPS' }));
     host.appendChild(sharpness(block));
     host.appendChild(h('p', { class: 'cap acc-cal-note',
       text: 'The alternative forecast systems publish no probabilities, so this figure has no line for them, and the site computes none of its own.' }));
@@ -316,7 +316,7 @@ window.WXAccCal = (() => {
     const nG = hs.length || 1, gw = (g.R - g.L) / nG;
     const cx = i => g.L + (i + 0.5) * gw;
     const wmax = Math.max(1, ...(sh.width || []).filter(fin)) * 1.15;
-    const mmax = Math.max(0.5, ...(sh.maeMedian || []).filter(fin)) * 1.15;
+    const mmax = Math.max(0.5, ...(sh.maeMedian || []).filter(fin), ...(sh.crps || []).filter(fin)) * 1.15;
     const ws = A.niceStep(wmax, 4), ms = A.niceStep(mmax, 3);
     const yw = A.scale(0, Math.ceil(wmax / ws) * ws, g.B, g.T);
     const ym = A.scale(0, Math.ceil(mmax / ms) * ms, g.B, g.T);
@@ -336,6 +336,12 @@ window.WXAccCal = (() => {
     const xs = hs.map((_, i) => cx(i));
     const wy = (sh.width || []).map(v => (fin(v) ? yw(v) : null));
     const my = (sh.maeMedian || []).map(v => (fin(v) ? ym(v) : null));
+    /* CRPS on the same axis as the error of the median, which is what it can
+       be read against: both are in degrees, and the gap between them is what
+       the ladder's spread costs or saves over its midpoint alone. */
+    const cy = (sh.crps || []).map(v => (fin(v) ? ym(v) : null));
+    A.lineSeries(svg, xs, cy, { stroke: C_CRPS, 'stroke-width': 1.8 });
+    A.dots(svg, xs, cy, { fill: C_CRPS, stroke: 'var(--panel)', 'stroke-width': 1, r: 3 });
     A.lineSeries(svg, xs, wy, { stroke: C_WIDTH, 'stroke-width': 2.4 });
     A.dots(svg, xs, wy, { fill: C_WIDTH, stroke: 'var(--panel)', 'stroke-width': 1, r: 3.4 });
     A.lineSeries(svg, xs, my, { stroke: C_MAE, 'stroke-width': 1.8, 'stroke-dasharray': '5 4' });
@@ -345,6 +351,8 @@ window.WXAccCal = (() => {
     const fw = first(wy), fm = first(my);
     if (fw >= 0) A.label(svg, xs[fw] + 6, wy[fw] - 8, 'ladder width', C_WIDTH);
     if (fm >= 0) A.label(svg, xs[fm] + 6, my[fm] + (fw === fm && Math.abs(my[fm] - wy[fm]) < 18 ? 16 : -8), 'error of the median', C_MAE);
+    const fc = first(cy);
+    if (fc >= 0) A.label(svg, xs[fc] + 6, cy[fc] + 16, 'CRPS', C_CRPS);
     if (fw < 0 && fm < 0) svg.appendChild(txt('under 30 ladders at every lead', { x: (g.L + g.R) / 2, y: (g.T + g.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
     hs.forEach((hh, i) => {
       const hit = el('rect', { x: g.L + i * gw, y: g.T, width: gw, height: g.B - g.T, fill: 'none', 'pointer-events': 'all' });
@@ -353,6 +361,7 @@ window.WXAccCal = (() => {
         return T.rows(hh + ' h before the day ends, ' + describe(), [
           ['Ladder width, 10 c to 90 c', A.deg1(sh.width && sh.width[i])],
           ['Error of the median', A.deg1(sh.maeMedian && sh.maeMedian[i])],
+          ['CRPS of the whole ladder', A.deg1(sh.crps && sh.crps[i])],
           ['Ladders with both crossings', A.int(sh.n && sh.n[i])],
         ], fin(sh.width && sh.width[i]) ? '' : 'Under 30 ladders at this lead, so the width is not drawn.');
       });
@@ -372,6 +381,7 @@ window.WXAccCal = (() => {
     item('Uncertainty', 'border-color:' + C_UNC + ';border-top-width:8px');
     item('Ladder width', 'border-color:' + C_WIDTH + ';border-top-width:3px');
     item('Error of the median', 'border-color:' + C_MAE + ';border-top-style:dashed;border-top-width:2px');
+    item('CRPS', 'border-color:' + C_CRPS + ';border-top-width:2px');
     // two short notes rather than one, since a key entry never wraps
     keyEl.appendChild(h('span', { class: 'kn', text: 'marker area is the contract count' }));
     keyEl.appendChild(h('span', { class: 'kn', text: 'bar is the 95 percent Wilson interval' }));
@@ -418,6 +428,9 @@ window.WXAccCal = (() => {
         'Reliability bins are ten cents wide, a bin under 50 contracts is pooled into the 50-cent bin.',
         'The truncated Brier score keeps only prices strictly between 2 and 98 cents, the range where the price carries information beyond the strike itself, the share of contracts kept is printed above its marker.',
         'Sharpness is the median width, in degrees, between where a ladder crosses 10 cents and where it crosses 90 cents, and the error of the median is the average miss of the ladder\u2019s 50-cent crossing.',
+        'CRPS scores the whole ladder rather than the point it crosses, in the same degrees, so it is the one number that answers whether the spread is right as well as the centre. A ladder that is well centred but too confident is penalised here and nowhere else on the page.',
+        { tex: 'CRPS = \\sum_{k}\\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
+        'where $F(k)$ is the ladder read as a distribution over whole degrees. Against the error of the median on the same axis, the gap between the two lines is what the spread costs or saves over the midpoint alone.',
         'All intervals are the same 1,000-draw, 95 percent bootstrap used elsewhere, and a lead with under 30 city-days is not drawn.',
       ],
       span: fxSpan(),

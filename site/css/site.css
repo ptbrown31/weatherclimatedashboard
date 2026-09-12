@@ -502,6 +502,9 @@ tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
    sampling rules above it because it is the one the reader checks before
    comparing two figures to each other */
 .accnote .rule.span{margin-top:5px;color:var(--ink);font-weight:600}
+/* the market's own row in the lead-curve standings, so the eye finds it
+   wherever the ranking has put it at that hour */
+.tip table.l3 tr.tfx td{font-weight:700;color:var(--ink)}
 /* the record a key entry covers, printed after the name it belongs to */
 [id^="acc"].key .ks{color:var(--muted);opacity:.85;margin-left:5px;font-style:italic}
 /* the coverage strip: one bar per system over the window */

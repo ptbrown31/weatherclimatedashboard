@@ -137,11 +137,9 @@ window.WXAccDyn = (() => {
     N = {};
     const sub = t => host.appendChild(h('div', { class: 'accsub', text: t }));
     const svg = (id, H) => host.appendChild(el('svg', { id, viewBox: '0 0 ' + A.W + ' ' + H }));
-    sub('a. Time to converge, and changes per hour by lead');
-    N.a = svg('accDynA', 540);
-    sub('b. Changes per hour by station-local hour');
-    N.b = svg('accDynB', 300);
-    sub('c. One city-day traced');
+    sub('a. Time to converge');
+    N.a = svg('accDynA', 400);
+    sub('b. One city-day traced');
     const tb = host.appendChild(h('div', { class: 'bar acc-dyn-tracebar' }));
     const ti = dyn.traceIndex || {};
     const dates = (ti.dates || []).slice().reverse();
@@ -158,11 +156,8 @@ window.WXAccDyn = (() => {
     N.city.onchange = () => { S.city = N.city.value; drawC(); };
     N.c = svg('accDynC', 380);
     N.rule = host.appendChild(h('p', { class: 'cap acc-dyn-rule' }));
-    sub('Change in error after a report moved the bank');
-    N.e = svg('accDynE', 240);
     const keyEl = $('#accDynKey');
-    if (keyEl) A.key(keyEl, LINES, { short: true, meta: dyn && dyn.meta,
-      note: 'every system is a line above and a row of the strip below' });
+    if (keyEl) A.key(keyEl, LINES, { short: true, meta: dyn && dyn.meta });
   }
   /* The city list for the chosen date, with the builder's default rule
      applied when the current city is not traced on that date: the city
@@ -189,7 +184,7 @@ window.WXAccDyn = (() => {
   }
 
   function redraw() {
-    drawA(); drawB(); drawC(); drawE(); drawNote();
+    drawA(); drawC(); drawNote();
   }
 
   // ------------------------------------------------------------- panel a
@@ -198,7 +193,7 @@ window.WXAccDyn = (() => {
     const cv = dyn.converge && dyn.converge.metric && dyn.converge.metric[S.metric] && dyn.converge.metric[S.metric][S.tol];
     const bl = dyn.rate && dyn.rate.byLead && dyn.rate.byLead.metric && dyn.rate.byLead.metric[S.metric];
     if (!cv || !cv.h || !cv.systems) { A.notYet(svg, 'The convergence block is not in the published file.'); return; }
-    const stripRows = bl && bl.systems ? A.ORDER.filter(id => Array.isArray(bl.systems[id])) : [];
+    const stripRows = [];   // the changes-per-hour strip was removed with panel b
     const RH = 11;
     const gA = { L: 90, R: 850, T: 24, B: 252 };
     const stripT = gA.B + 48, stripB = stripT + stripRows.length * RH;
@@ -327,49 +322,6 @@ window.WXAccDyn = (() => {
     ov.addEventListener('mouseleave', () => hi.setAttribute('visibility', 'hidden'));
   }
 
-  // ------------------------------------------------------------- panel b
-  function drawB() {
-    const svg = N.b;
-    const b = dyn.rate && dyn.rate.byLocalHour && dyn.rate.byLocalHour.metric && dyn.rate.byLocalHour.metric[S.metric];
-    const pc = dyn.rate && dyn.rate.perCityDay && dyn.rate.perCityDay.metric && dyn.rate.perCityDay.metric[S.metric];
-    if (!b || !b.hour) { A.notYet(svg, 'The by-hour block is not in the published file.'); return; }
-    const H = 300;
-    A.clear(svg, H);
-    const g = A.frame(H, { L: 90, R: 850 });
-    const x = A.scale(-0.5, 23.5, g.L, g.R);
-    const tools = A.TOOLS.filter(id => b.tools && Array.isArray(b.tools[id]));
-    let top = 0;
-    const bump = v => { if (fin(v) && v > top) top = v; };
-    (b.fx || []).forEach(bump); (b.fxHi || []).forEach(bump);
-    tools.forEach(id => b.tools[id].forEach(bump));
-    const step = A.niceStep(top || 1, 5);
-    const ymax = Math.ceil((top || 1) / step) * step;
-    const y = A.scale(0, ymax, g.B, g.T);
-    A.yAxis(svg, g, y, A.ticks(0, ymax, step), v => A.f1(v), 'Changes per hour');
-    A.xAxis(svg, g, x, A.ticks(0, 23, 3), hourFmt, 'Station-local hour');
-    A.band(svg, b.hour.map(x), (b.fxLo || []).map(v => (fin(v) ? y(v) : null)), (b.fxHi || []).map(v => (fin(v) ? y(v) : null)),
-           'var(--accent)');
-    tools.forEach(id => A.lineSeries(svg, b.hour.map(x), b.tools[id].map(v => (fin(v) ? y(v) : null)),
-                                     { stroke: A.color(id), 'stroke-width': A.width(id) }));
-    A.lineSeries(svg, b.hour.map(x), (b.fx || []).map(v => (fin(v) ? y(v) : null)),
-                 { stroke: A.color('FX'), 'stroke-width': A.width('FX') });
-    if (pc && pc.fx) {
-      const meds = tools.map(id => pc.tools && pc.tools[id]).filter(fin);
-      const t = 'Changes per city-day, ' + metricWord() + ', ForecastEx median ' + A.int(pc.fx.median)
-        + ' (quartiles ' + A.int(pc.fx.q1) + ' to ' + A.int(pc.fx.q3) + ')'
-        + (meds.length ? ', the other systems ' + A.int(Math.min.apply(null, meds)) + ' to ' + A.int(Math.max.apply(null, meds)) : '');
-      svg.appendChild(txt(t, { x: g.L, y: g.T - 8, class: 'axl' }));
-    }
-    overlay(svg, g, p => {
-      const i = nearestIndex(b.hour, x.invert(p.x));
-      const hr = b.hour[i];
-      const pairs = [[A.swatch('FX'), A.f2(b.fx[i]) + (fin(b.fxLo[i]) ? ' (' + A.iv(b.fxLo[i], b.fxHi[i], A.f2) + ')' : '')]];
-      tools.map(id => [id, b.tools[id][i]]).filter(o => fin(o[1])).sort((a, c) => c[1] - a[1])
-        .forEach(o => pairs.push([A.swatch(o[0]), A.f2(o[1])]));
-      return { x: x(hr), html: rows('Changes per hour in the local hour beginning ' + hourFmt(hr), pairs,
-                                    'market band is the 95 percent bootstrap over dates') };
-    });
-  }
 
   // ------------------------------------------------------------- panel c
   function drawC() {
@@ -515,46 +467,6 @@ window.WXAccDyn = (() => {
     });
   }
 
-  // ------------------------------------------------------------- the event strip
-  function drawE() {
-    const svg = N.e;
-    const ev = dyn.event && dyn.event.metric && dyn.event.metric[S.metric];
-    if (!ev || !ev.k || !ev.systems) { A.notYet(svg, 'The event block is not in the published file.'); return; }
-    const H = 240;
-    A.clear(svg, H);
-    const g = A.frame(H, { L: 90, R: 850 });
-    const kmax = Math.max.apply(null, ev.k);
-    const x = A.scale(0, kmax, g.L, g.R);
-    const drawn = LINES.filter(id => ev.systems[id] && Array.isArray(ev.systems[id].delta));
-    let lo = 0, hi = 0;
-    drawn.forEach(id => {
-      const s = ev.systems[id];
-      ['delta', 'lo', 'hi'].forEach(k => (s[k] || []).forEach(v => { if (fin(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } }));
-    });
-    const step = A.niceStep((hi - lo) || 0.1, 4);
-    lo = Math.floor(lo / step - 1e-9) * step; hi = Math.ceil(hi / step + 1e-9) * step;
-    if (hi === lo) hi = lo + step;
-    const y = A.scale(lo, hi, g.B, g.T);
-    const sgn = v => (v > 1e-9 ? '+' : v < -1e-9 ? '−' : '') + (step < 0.1 ? A.f2(Math.abs(v)) : A.f1(Math.abs(v)));
-    A.yAxis(svg, g, y, A.ticks(lo, hi, step), sgn, 'Change in absolute error (°F)');
-    A.xAxis(svg, g, x, A.ticks(0, kmax, 20), v => v + ' min', 'Minutes after a report that moved the bank');
-    svg.appendChild(el('line', { x1: g.L, x2: g.R, y1: y(0), y2: y(0), stroke: 'var(--rule)', 'stroke-width': 1.2 }));
-    const fx = ev.systems.FX;
-    if (fx) A.band(svg, ev.k.map(x), (fx.lo || []).map(v => (fin(v) ? y(v) : null)), (fx.hi || []).map(v => (fin(v) ? y(v) : null)), 'var(--accent)');
-    drawn.filter(id => id !== 'FX').forEach(id =>
-      A.lineSeries(svg, ev.k.map(x), ev.systems[id].delta.map(v => (fin(v) ? y(v) : null)), { stroke: A.color(id), 'stroke-width': A.width(id) }));
-    if (fx) A.lineSeries(svg, ev.k.map(x), fx.delta.map(v => (fin(v) ? y(v) : null)), { stroke: A.color('FX'), 'stroke-width': A.width('FX') });
-    svg.appendChild(txt(A.int(ev.events) + ' reports moved the bank toward the day\'s extreme, ' + metricWord()
-                        + '. Below zero means the system moved closer to the settle', { x: g.L, y: g.T - 8, class: 'axl' }));
-    overlay(svg, g, p => {
-      const i = nearestIndex(ev.k, x.invert(p.x));
-      const k = ev.k[i];
-      const pairs = drawn.map(id => [id, ev.systems[id].delta[i]]).filter(o => fin(o[1])).sort((a, b) => a[1] - b[1])
-        .map(o => [A.swatch(o[0]), A.signed1(o[1]) + (o[0] === 'FX' && fin(ev.systems.FX.lo[i]) ? ' (' + A.iv(ev.systems.FX.lo[i], ev.systems.FX.hi[i], A.signed1) + ')' : '')]);
-      return { x: x(k), html: rows(k + ' minutes after the report, change in absolute error', pairs,
-                                   'relative to ten minutes before the report; market band is the 95 percent bootstrap over dates') };
-    });
-  }
 
   // ------------------------------------------------------------- method note
   function drawNote() {
@@ -565,7 +477,7 @@ window.WXAccDyn = (() => {
     const n = S.metric === 'high' ? coh.n_high : coh.n_low;
     const ev = dyn.event && dyn.event.metric && dyn.event.metric[S.metric];
     const pc = dyn.rate && dyn.rate.perCityDay && dyn.rate.perCityDay.metric && dyn.rate.perCityDay.metric[S.metric];
-    let sample = 'Sample ' + A.int(n) + ' city-days for ' + metricWord() + (ev ? ', ' + A.int(ev.events) + ' bank-moving reports' : '') + '.';
+    let sample = 'Sample ' + A.int(n) + ' city-days for ' + metricWord() + '.';
     if (pc && pc.fx && fin(pc.fx.median)) {
       const meds = A.TOOLS.map(id => pc.tools && pc.tools[id]).filter(fin);
       sample += ' The ForecastEx prediction market changed its crossing a median ' + A.int(pc.fx.median) + ' times per city-day (quartiles '
@@ -573,18 +485,15 @@ window.WXAccDyn = (() => {
         + (meds.length ? ', the other systems between ' + A.int(Math.min.apply(null, meds)) + ' and ' + A.int(Math.max.apply(null, meds)) + ' times.' : '.');
     }
     A.methodNote(note, {
-      title: 'How convergence, movement, and reaction are measured',
+      title: 'Convergence',
       body: [
         'Convergence measures how early a system locks onto the right temperature and stays there. For a tolerance of $d$ degrees, a system has converged by lead $h$ if its value stayed within $d$ degrees of the settle from $h$ onward.',
         { tex: 'S_s(h; d) = \\frac{1}{N}\\left|\\{\\, i : |v_{s,i}(h\') - o_i| \\le d \\text{ for every } h\' \\le h \\,\\}\\right|' },
         'Median lead is the hour where $S_s(h; d)$ crosses one half.',
-        'Movement rate is how often a system\u2019s value changes, either per hour of lead or per station-local clock hour, counting only the hours a system was actually live.',
-        'Reaction traces the average change in a system\u2019s error in the minutes around a report that moved the observed extreme, comparing error just before the report to error afterward. A negative number means the system moved closer to the eventual settle.',
       ],
       rules: [
         'The ForecastEx prediction market\u2019s value is the whole-degree crossing of its price ladder, rounded the same way as in the lead-curve figure, the tolerance is 1 or 2 degrees, selectable by tab.',
         'Convergence in the top panel uses, for each system, the city-days its own record covers and the ForecastEx prediction market priced at lead zero.',
-        'A qualifying report raised the observed extreme by at least a degree on highs, or lowered it on lows, before the day\u2019s true extreme was reached. Bands are the same 1,000-draw bootstrap used elsewhere, seed 20260910, and a point under 30 qualifying events is left blank.',
         'The traced city-day at the bottom shows every report as a dot, the running observed extreme as a grey step, the ForecastEx prediction market\u2019s ten-minute price track with its 10th-to-90th-percentile band, and each alternative forecast system\u2019s forecast held flat after its last update.',
       ],
       span: A.cohortSpanLine(dyn && dyn.meta, 'matched11')

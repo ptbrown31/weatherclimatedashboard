@@ -167,7 +167,7 @@ def run(no_build: bool) -> int:
                 n_lead = page.locator("#accLead path").count()
                 chk.add(f"{scheme} accuracy: the lead curve draws the market and every system", n_lead >= 3, f"paths={n_lead}")
                 n_dyn, n_dynp = page.locator("#accDyn svg").count(), page.locator("#accDyn svg path").count()
-                chk.add(f"{scheme} accuracy: the movement figure draws its panels", n_dyn >= 3 and n_dynp >= 6,
+                chk.add(f"{scheme} accuracy: the convergence figure draws both panels", n_dyn == 2 and n_dynp >= 6,
                         f"svgs={n_dyn} paths={n_dynp}")
                 n_calc, n_calr = page.locator("#accCal circle").count(), page.locator("#accCal rect").count()
                 chk.add(f"{scheme} accuracy: the calibration figure draws its bins and its bars",
@@ -2745,13 +2745,19 @@ def run(no_build: bool) -> int:
                 # lows are a tab on every figure; the lead curve and the grid are the two proven
                 lead_before = page.locator("#accLead").inner_html()
                 page.locator("#accLeadBar button", has_text="Lows").first.click(); page.wait_for_timeout(500)
-                grid_before = page.locator("#accGrid").inner_html()
-                page.locator("#accGridBar button", has_text="Lows").first.click(); page.wait_for_timeout(500)
                 grid_heads = page.eval_on_selector_all("#accGrid thead th", "e=>e.map(x=>x.textContent)")
-                chk.add(f"{scheme} accuracy: the lows tab redraws the lead curve and the grid",
-                        page.locator("#accLead").inner_html() != lead_before
-                        and page.locator("#accGrid").inner_html() != grid_before
-                        and "MAE low" in grid_heads and "MAE high" not in grid_heads, str(grid_heads[:6]))
+                chk.add(f"{scheme} accuracy: the lows tab redraws the lead curve",
+                        page.locator("#accLead").inner_html() != lead_before, "")
+                # the scorecard needs no lows tab: it prints both metrics at once
+                chk.add(f"{scheme} accuracy: the scorecard prints highs and lows together, with no lows tab",
+                        "MAE low" in grid_heads and "MAE high" in grid_heads
+                        and page.locator("#accGridBar button", has_text="Lows").count() == 0, str(grid_heads[:6]))
+                # the climate-report frame is offered on the lead curve as it is on the map
+                lead_metar = page.locator("#accLead").inner_html()
+                page.locator("#accLeadBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(600)
+                chk.add(f"{scheme} accuracy: the lead curve redraws in the climate-report frame",
+                        page.locator("#accLead").inner_html() != lead_metar, "")
+                page.locator("#accLeadBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
                 # the map earns a color only where the paired interval clears zero
                 fills = page.eval_on_selector_all("#accMap circle", "e=>e.map(x=>x.getAttribute('fill')||'')")
                 colored = sum(1 for f in fills if f.startswith("color-mix("))
@@ -2765,7 +2771,6 @@ def run(no_build: bool) -> int:
                 # a row per system in the matched cohort, the market first
                 grid_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/grid.json").read().decode())
                 matched = [r["id"] for r in grid_file.get("cohorts", {}).get("own", []) if r.get("id")]
-                page.locator("#accGridBar button", has_text="Highs").first.click(); page.wait_for_timeout(500)
                 grid_sys = page.eval_on_selector_all("#accGrid tbody td.acc-grid-sys", "e=>e.map(x=>x.textContent)")
                 head = page.locator("table.acc-grid-table thead th").all_inner_texts()
                 col = page.locator("table.acc-grid-table tbody td.acc-grid-start").all_inner_texts()

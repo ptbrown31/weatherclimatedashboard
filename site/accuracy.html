@@ -33,23 +33,23 @@
 <div class="card"><div id="accGrid"></div></div>
 <div class="key" id="accGridKey"></div>
 <div id="accGridMethod"></div>
-<div class="secttl">CALIBRATION AND BRIER SCORE</div>
+<div class="secttl">CALIBRATION</div>
 <p class="cap" style="margin-top:0">Checks whether a Yes price of, say, 70 cents paid out about 70 percent of the time, and scores that reliability with the Brier score, split out by lead and by which side of the book is used.</p>
 <div class="bar acccontrols" id="accCalBar"></div>
 <div class="card"><div id="accCal"></div></div>
 <div class="key" id="accCalKey"></div>
 <div id="accCalMethod"></div>
-<div class="secttl">MARKET MOVEMENT BETWEEN FORECAST CYCLES</div>
-<p class="cap" style="margin-top:0">Tracks how much and how often the ForecastEx prediction market’s price moves between forecast updates elsewhere, how quickly it settles on the final temperature, and how it reacts when a new report moves the observed extreme. One city-day is traced hour by hour as an example.</p>
+<div class="secttl">CONVERGENCE</div>
+<p class="cap" style="margin-top:0">How early each system locks onto the temperature the day ends on and stays there. One city-day is traced hour by hour beneath it as an example.</p>
 <div class="bar acccontrols" id="accDynBar"></div>
 <div class="card"><div id="accDyn"></div></div>
 <div class="key" id="accDynKey"></div>
 <div id="accDynMethod"></div>
-<div class="secttl">HOW FAR BACK EACH RECORD GOES</div>
+<div class="secttl">RECORD LENGTH</div>
 <p class="cap" style="margin-top:0">The systems on this page did not all start on the same day. Each bar covers the days that system was actually scored on, after thin order books, short capture windows and gaps in the observation record were excluded. A figure that matches systems to each other can only use the days they share, so it starts where the last of them starts. </p>
 <div class="card"><div id="accSpans"></div></div>
 <div class="key" id="accSpansKey"></div>
-<div class="secttl">HOW TO READ THIS PAGE</div>
+<div class="secttl">CONVENTIONS</div>
 <ul class="conv">
 <li><b>Span.</b> Every figure names the days it drew on. The ForecastEx prediction market has priced daily highs since the exchange opened its temperature board; its lows were too thinly quoted to score for some months after that; and the alternative forecast systems start at different dates. Each system&rsquo;s span is printed beside it, and every comparison between two systems is made on the days the pair share.</li>
 <li><b>Clock.</b> Lead counts down to station-local midnight, the moment the target day ends. An alternative forecast system&rsquo;s lead is timed to when its forecast was captured, the ForecastEx prediction market&rsquo;s lead is timed to the ladder snapshot itself.</li>

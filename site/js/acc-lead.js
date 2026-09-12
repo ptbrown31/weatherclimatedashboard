@@ -32,6 +32,10 @@ window.WXAccLead = (() => {
     { key: 'own', label: 'Every day on record', title: 'Each system scored on the city-days its own record covers' },
     { key: 'fixed30', label: 'Fixed sample', title: 'City-days the ForecastEx prediction market priced at every hour from 30 to 0, so every bin holds the same days' },
   ];
+  const FRAMES = [
+    { key: 'metar', label: 'METAR settle', title: 'Every system scored against the settle the contracts pay on' },
+    { key: 'cli', label: 'NWS climate report', title: 'Alternative forecast systems scored against the National Weather Service climate report for the same date; the ForecastEx prediction market keeps the settle it pays on' },
+  ];
   const VALUES = [
     { key: 'held', label: 'What a reader held', title: 'The raw value floored at the running observed extreme, the number a reader with the observations was holding' },
     { key: 'raw', label: 'Forecast only', title: 'The raw record, undefined after each alternative forecast system’s last live update for the day' },
@@ -39,7 +43,7 @@ window.WXAccLead = (() => {
   const HATCH_ID = 'accLeadHatch';
   const HATCH_ABOVE = 30;
 
-  const state = { metric: 'high', cohort: 'own', value: 'held' };
+  const state = { metric: 'high', cohort: 'own', value: 'held', frame: 'metar' };
   let file = null, built = false;
 
   // ------------------------------------------------------------- data
@@ -53,10 +57,11 @@ window.WXAccLead = (() => {
      file already leaves later bins null, and the cut here keeps the line
      honest against a builder that fills them. The own block has no raw
      value and no interval. */
-  function seriesFor(block, sys, raw, hs) {
-    const mae = (raw ? sys.maeRaw : sys.mae) || [];
-    const lo = (raw ? sys.loRaw : sys.lo) || [];
-    const hi = (raw ? sys.hiRaw : sys.hi) || [];
+  function seriesFor(block, sys, raw, hs, frame) {
+    const cli = frame === 'cli';
+    const mae = (raw ? sys.maeRaw : cli ? sys.maeCli : sys.mae) || [];
+    const lo = (raw ? sys.loRaw : cli ? sys.loCli : sys.lo) || [];
+    const hi = (raw ? sys.hiRaw : cli ? sys.hiCli : sys.hi) || [];
     const cut = raw && fin(sys.lastLiveH) ? sys.lastLiveH : null;
     const keep = i => (cut == null || hs[i] >= cut);
     return {
@@ -106,10 +111,10 @@ window.WXAccLead = (() => {
     const hmax = Math.max.apply(null, hs);
     const ids = cohortIds().filter(id => series.systems[id]);
     const S = {};
-    ids.forEach(id => { S[id] = seriesFor(block, series.systems[id], raw, hs); });
+    ids.forEach(id => { S[id] = seriesFor(block, series.systems[id], raw, hs, state.frame); });
     const own = block.own || {};
     const extras = [];
-    const beats = (raw ? series.beatsRaw : series.beats) || [];
+    const beats = (raw ? series.beatsRaw : state.frame === 'cli' ? series.beatsCli : series.beats) || [];
     const nPer = series.n || [];
     const notes = series.binNote || [];
 
@@ -217,7 +222,8 @@ window.WXAccLead = (() => {
                                stroke: 'none', 'pointer-events': 'none', visibility: 'hidden' });
     svg.appendChild(guide);
     const viewText = (state.metric === 'high' ? 'Highs' : 'Lows') + ', ' + cohortName(state.cohort).toLowerCase() + ', '
-      + (raw ? 'forecast only' : 'what a reader held');
+      + (raw ? 'forecast only' : 'what a reader held')
+      + (state.frame === 'cli' ? ', climate-report frame' : '');
     hs.forEach((hh, i) => {
       const x0 = x(hh + 0.5), w = x(hh - 0.5) - x0;
       const r = el('rect', { x: x0, y: g.T, width: w, height: s2 + sh - g.T, fill: 'transparent', stroke: 'none' });
@@ -237,21 +243,38 @@ window.WXAccLead = (() => {
     methodNote(methEl);
   }
 
+  /* The tooltip is a standings table for the hour under the cursor: every
+     system ordered by its error there, and how much worse than ForecastEx it
+     is as a percentage. The order is recomputed for each bin, so moving along
+     the curve shows the ranking change with lead rather than holding one
+     fixed order the reader has to decode. */
   function binTip(i, hh, ids, S, series, extras, own, n, b, note, viewText, raw) {
     const title = hh === 0 ? 'The hour the day ends' : hh + ' hour' + (hh === 1 ? '' : 's') + ' before the day ends';
     let sub = viewText + '. ' + (fin(n) ? A.int(n) + ' city-days' : 'no sample') + (fin(n) && n < 30 ? ', under the 30 the bins need' : '') + '.';
     if (b && fin(b.k)) sub += ' ForecastEx beats ' + b.k + ' of ' + b.of + ' systems.';
-    let rows = '';
-    const row = (id, mae, nn, age, cph) => '<tr><td>' + A.swatch(id).replace(A.name(id), A.short(id)) + '</td><td>' + A.f2(mae)
-      + '</td><td>' + A.int(nn) + '</td><td>' + A.f1(age) + '</td><td>' + A.f2(cph) + '</td></tr>';
+    const fx = S.FX ? S.FX.mae[i] : null;
+    // worse than ForecastEx by this share of its error; a system with the
+    // smaller error shows a negative number, which is the market being beaten
+    const rel = v => (fin(v) && fin(fx) && fx > 0 ? 100 * (v - fx) / fx : null);
+    const relTxt = v => (v == null ? A.dash : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(0) + '%');
+    const entries = [];
     ids.forEach(id => {
       const sys = series.systems[id] || {};
-      rows += row(id, S[id].mae[i], n, (sys.ageMedianH || [])[i], (sys.changesPerHour || [])[i]);
+      entries.push({ id, mae: S[id].mae[i], n,
+                     age: (sys.ageMedianH || [])[i], cph: (sys.changesPerHour || [])[i] });
     });
     extras.forEach(id => {
       const o = own[id], j = o.h.indexOf(hh);
-      if (j < 0) return;
-      rows += row(id, o.mae[j], o.n[j], null, null);
+      if (j >= 0) entries.push({ id, mae: o.mae[j], n: o.n[j], age: null, cph: null });
+    });
+    entries.sort((p, q) => (fin(p.mae) ? p.mae : Infinity) - (fin(q.mae) ? q.mae : Infinity));
+    let rows = '';
+    entries.forEach((e, k) => {
+      rows += '<tr' + (e.id === 'FX' ? ' class="tfx"' : '') + '><td>' + (k + 1)
+        + '</td><td>' + A.swatch(e.id).replace(A.name(e.id), A.short(e.id))
+        + '</td><td>' + A.f2(e.mae)
+        + '</td><td>' + (e.id === 'FX' ? '—' : relTxt(rel(e.mae)))
+        + '</td><td>' + A.int(e.n) + '</td></tr>';
     });
     let foot = '';
     if (S.FX && fin(S.FX.lo[i]) && fin(S.FX.hi[i])) foot += 'ForecastEx band ' + A.iv(S.FX.lo[i], S.FX.hi[i], A.f2) + '. ';
@@ -264,8 +287,8 @@ window.WXAccLead = (() => {
     }
     if (extras.length) foot += (foot ? ' ' : '') + 'Extra sources are on their own span' + (raw ? ' with the held value' : '') + '.';
     return '<b>' + title + '</b><div class="tsub">' + sub + '</div>'
-      + '<table class="l3"><tr><th>System</th><th>MAE °F</th><th>n</th><th>age h</th><th>changes/h</th></tr>' + rows + '</table>'
-      + (foot ? '<div class="tf">' + foot + '</div>' : '');
+      + '<table class="l3"><tr><th>#</th><th>System</th><th>MAE °F</th><th>vs ForecastEx</th><th>n</th></tr>'
+      + rows + '</table>' + (foot ? '<div class="tf">' + foot + '</div>' : '');
   }
 
   /* Which days this view drew on. A sample starts where every
@@ -304,7 +327,9 @@ window.WXAccLead = (() => {
         'Hours beyond the shaded threshold draw on a partial sample, since not every alternative forecast system has data that far out, hovering shows which dates and time zones fill those bins.',
         'The extra sources run on their own span, held at their last value, with no band.',
       ],
-      span: spanText(meta),
+      span: spanText(meta) + (state.frame === 'cli'
+        ? ' In the climate-report frame each alternative forecast system is scored against the National Weather Service report for the same date, the ForecastEx prediction market keeps the settle it pays on, and Buckley Field drops out because Denver\u2019s report stands in for it.'
+        : ''),
       n: sample,
     });
   }
@@ -315,6 +340,7 @@ window.WXAccLead = (() => {
     A.metricTabs(bar, k => { state.metric = k; render(); }, state.metric);
     A.tabs(bar, COHORTS, k => { state.cohort = k; render(); }, { initial: state.cohort, label: 'Days' });
     A.tabs(bar, VALUES, k => { state.value = k; render(); }, { initial: state.value, label: 'Value' });
+    A.tabs(bar, FRAMES, k => { state.frame = k; render(); }, { initial: state.frame, label: 'Frame' });
     built = true;
   }
 

@@ -24,21 +24,21 @@ window.WXAcc = (() => {
     ICON: 'German Model', GEM: 'Canadian Model', UKMO: 'UK Model', MF: 'French Model', JMA: 'Japanese Model',
     AIFS: 'European AI Ensemble Mean', ECMWF_IFS: 'European Ensemble Mean',
     GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
-    HRRR: 'HRRR', HRRR_OM: 'HRRR (Open-Meteo)',
+    HRRR: 'HRRR',
   };
   // a shorter name for a legend or a column head, where the full one wraps
   const SHORT = {
     FX: 'ForecastEx', NDFD: 'NWS', NBM: 'Blend', LAMP: 'Aviation', ECMWF: 'European', GFS: 'American',
     MOSMIX: 'German Stat.', ICON: 'German', GEM: 'Canadian', UKMO: 'UK', MF: 'French', JMA: 'Japanese',
     AIFS: 'Euro. AI', ECMWF_IFS: 'Euro. Ens.', GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
-    HRRR: 'HRRR', HRRR_OM: 'HRRR (OM)',
+    HRRR: 'HRRR',
   };
   /* One list, no sub-groups. Every system beside the exchange's own market is
      an alternative forecast system, presented the same way as the others: on
      its own record, against the same truth, with its span printed beside it.
      The order is the reader's, official forecasts first and then the models. */
   const TOOLS = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS', 'MOSMIX', 'ICON', 'GEM', 'UKMO', 'MF', 'JMA',
-                 'AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR', 'HRRR_OM'];
+                 'AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR'];
   const ORDER = ['FX'].concat(TOOLS);
 
   // ------------------------------------------------------------- palette

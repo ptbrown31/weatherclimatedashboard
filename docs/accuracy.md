@@ -184,8 +184,12 @@ or a model probability of the site's own.
 | GFS_MOS | GFS MOS | alternative forecast system |
 | NAM_MOS | NAM MOS | alternative forecast system |
 | NBS_MOS | Blend MOS | alternative forecast system |
-| HRRR | HRRR | alternative forecast system, no value above 18 h |
-| HRRR_OM | HRRR (Open-Meteo) | alternative forecast system |
+| HRRR | HRRR | alternative forecast system |
+
+One HRRR is carried. The desk captures it directly with a real model cycle
+but only out to 18 hours, which cannot be drawn across this page's whole lead
+range, so the Open-Meteo rendering of the same model is the one kept and is
+named simply HRRR.
 
 Every export uses these ids. There are no sub-groups: every system beside the exchange's own market is an alternative forecast system and is presented the same way as the others.
 
@@ -229,12 +233,19 @@ BLOCK = { h: [36..0],
         }
 SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
                                        maeRaw: [per h], loRaw, hiRaw,          // forecast-only view
+                                       maeCli: [per h], loCli, hiCli,          // climate-report frame
                                        lastLiveH: int|null,                    // where the raw line ends
                                        ageMedianH: [per h], changesPerHour: [per h] } },
            beats: [per h: {k: int, of: int, ids: [ids beaten]}],
            beatsRaw: [per h: ...],
+           beatsCli: [per h: ...],
            binNote: [per h: {dates: [from, to], zones: {tz: count}} | null] }
 ```
+In the climate-report frame each alternative forecast system is scored against
+the National Weather Service report for the same date while the market keeps
+the settle it pays on, so the market's `maeCli` equals its `mae` and Buckley
+Field drops out of the frame.
+
 Bins with `n < 30` carry `null` values. `h` above 30 is present only where the
 cohort has members.
 
@@ -279,7 +290,8 @@ PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6],[6,0]],
                byLead: { h: [36,30,24,18,12,6,3,1], brier, lo, hi, brierBinned, rel, res, unc, brierTrunc, retained, bss, base, n },
                // brier is the raw score; brierBinned = rel - res + unc on the ten price bins;
                // brierTrunc keeps prices strictly inside (0.02, 0.98), retained is their share
-               sharpness: { h: [...], width: [...], maeMedian: [...], n: [...] },
+               sharpness: { h: [...], width: [...], maeMedian: [...], crps: [...], n: [...] },
+               // crps scores the whole ladder in degrees, against the median's error on the same axis
                movedPerHour: { h: [...], contracts: [...] } }
 ```
 
