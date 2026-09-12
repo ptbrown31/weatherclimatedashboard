@@ -49,6 +49,11 @@ from .storage import Storage
 SCHEMA = 1                                  # the published manifest's own shape
 SRC_PREFIX = "archive/accuracy/latest/"
 SRC_MANIFEST = SRC_PREFIX + "manifest.json"
+# The builder runs daily on the machine that holds the capture, and this job
+# only copies what it finds. So the failure that matters here is silence: the
+# builder stops and every pass reports success while the page quietly freezes.
+# Past this many days without a new build, say so on the health channel.
+STALE_DAYS = 3
 DST_PREFIX = "snapshots/accuracy/"
 DST_MANIFEST = DST_PREFIX + "manifest.json"
 TRACE_DIR = "trace/"
@@ -189,12 +194,31 @@ def prune_traces(store: Storage, keep: set) -> int:
     return removed
 
 
+def stale_alarm(built: Optional[str], now: dt.datetime) -> Optional[str]:
+    """The health line when the builder has gone quiet, or None while it has
+    not. Nothing here is a failure of this job, so it never counts as an
+    error; it is the one thing about this lane that nobody would otherwise
+    notice, since a stale archive and a healthy pass look the same."""
+    if not built:
+        return "accuracy: no build has ever been published to the archive"
+    try:
+        t = dt.datetime.fromisoformat(str(built).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return "accuracy: the archive's build stamp is unreadable (%s)" % built
+    days = (now - t).total_seconds() / 86400.0
+    if days < STALE_DAYS:
+        return None
+    return "accuracy: no new build in %.1f days, last %s" % (days, built)
+
+
 def _run(store: Storage, now: dt.datetime, deadline: arch.Deadline, status: dict) -> int:
     src = _read_json(store, SRC_MANIFEST)
     if src is None:
         status["note"] = "no manifest at " + SRC_MANIFEST
+        status["stale"] = stale_alarm(None, now)
         return 0
     built = src.get("built")
+    status["stale"] = stale_alarm(built if isinstance(built, str) else None, now)
     if not isinstance(built, str) or not built:
         status["failed"].append({"name": "manifest.json", "reason": "no built stamp"})
         return 1
@@ -250,7 +274,9 @@ def accuracy_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
         status["error"] = f"{type(e).__name__}: {e}"
     status["errors"] = errors
     status["seconds"] = round(time.time() - t0, 1)
-    arch.LAST_STATUS = {"job": "accuracy", "errors": errors, "alarms": [], "seconds": status["seconds"],
+    arch.LAST_STATUS = {"job": "accuracy", "errors": errors,
+                        "alarms": [status["stale"]] if status.get("stale") else [],
+                        "seconds": status["seconds"],
                         "written": status["written"], "built": status.get("built"),
                         "failed": status["failed"], "skipped": status["skipped"]}
     print(json.dumps(status))

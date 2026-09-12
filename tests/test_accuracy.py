@@ -255,3 +255,34 @@ class Job(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Staleness(Job):
+    """The builder going quiet is the failure this job cannot see any other
+    way: a stale archive and a healthy pass look identical from here."""
+
+    def test_a_fresh_build_raises_nothing(self):
+        now = dt.datetime(2026, 9, 12, tzinfo=dt.timezone.utc)
+        self.assertIsNone(accuracy.stale_alarm("2026-09-11T10:45:00Z", now))
+
+    def test_silence_past_the_threshold_is_named_with_its_age(self):
+        now = dt.datetime(2026, 9, 12, tzinfo=dt.timezone.utc)
+        msg = accuracy.stale_alarm("2026-09-05T10:45:00Z", now)
+        self.assertIsNotNone(msg)
+        self.assertIn("6.6 days", msg)
+        self.assertIn("2026-09-05", msg)
+
+    def test_a_missing_or_unreadable_stamp_is_reported_too(self):
+        now = dt.datetime(2026, 9, 12, tzinfo=dt.timezone.utc)
+        self.assertIn("ever been published", accuracy.stale_alarm(None, now))
+        self.assertIn("unreadable", accuracy.stale_alarm("not a date", now))
+
+    def test_the_alarm_travels_on_the_health_channel_without_being_an_error(self):
+        from pipeline import archive as arch
+        self.ship({"availability.json": fixture("availability.json")})
+        # a manifest whose build is old: the pass still succeeds
+        old = manifest([entry("availability.json", fixture("availability.json"))],
+                       built="2026-01-01T00:00:00Z")
+        self.st.put(accuracy.SRC_MANIFEST, old)
+        self.assertEqual(self.run_pass(), 0)
+        self.assertTrue(any("no new build" in a for a in arch.LAST_STATUS["alarms"]))

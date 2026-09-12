@@ -371,6 +371,15 @@ each file to `snapshots/accuracy/` after checking that it parses and carries
 `meta.schema`, `meta.asof` and `meta.conventions`. The pages read only
 `snapshots/accuracy/`.
 
+**Keeping it running.** The daily service on the machine that holds the
+capture does four things in order: fetch the exchange's published archive,
+build the record, push the figure files here, and back up everything
+irreplaceable to `data/archive/accuracy/backup/` on the same bucket, which is
+not served. Nothing in that chain involves a laptop. The site's own account
+copies the files into place every half hour and, past three days without a new
+build, mails a health alarm: a stale archive and a healthy pass look identical
+from this side, so nothing else would notice.
+
 ## 5. The page
 
 Five figures, each with a method note carrying the estimator and the sampling
