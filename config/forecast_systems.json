@@ -1,0 +1,293 @@
+{
+ "_about": "The one list of forecast systems and how they are grouped. scripts/build.py renders the forecast systems table on the accuracy page from it and ships it in config.js, where the scorecard grid takes its row groups and row order from the same list. Change the grouping or the order here and both follow. `id` is the system's id in the accuracy files; `ens` is its entry in calibration.json's ensembles; a row may carry either or both.",
+ "groups": [
+  {
+   "key": "market",
+   "title": "Prediction market",
+   "note": "The system every other row is compared against, included for completeness.",
+   "systems": [
+    {
+     "key": "FX",
+     "name": "ForecastEx",
+     "url": "https://forecastex.com/",
+     "what": "Daily contracts on each city’s high and low temperature. The ladder of Yes prices across strikes is a probability distribution for the settle.",
+     "kind": "Probabilistic",
+     "where": "every figure",
+     "grid": "The settlement station",
+     "step": "The station-local day",
+     "updates": "Continuously, as orders arrive",
+     "id": "FX"
+    }
+   ]
+  },
+  {
+   "key": "nwp",
+   "title": "Raw numerical weather prediction models",
+   "note": "Physics models that step the atmosphere forward in time. Their output applies to a grid box rather than the exact point where a station sits.",
+   "systems": [
+    {
+     "key": "ECMWF",
+     "name": "European Model",
+     "url": "https://www.ecmwf.int/en/forecasts/documentation-and-support/medium-range-forecasts",
+     "what": "ECMWF’s global model, its single deterministic run.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "9 km",
+     "step": "Hourly, 3-hourly after 90 h",
+     "updates": "Every 6 hours",
+     "id": "ECMWF"
+    },
+    {
+     "key": "ECMWF_IFS",
+     "name": "European Ensemble Mean",
+     "url": "https://www.ecmwf.int/en/forecasts/documentation-and-support/medium-range-forecasts",
+     "what": "The average of ECMWF’s 51-member ensemble. Only its mean is used here.",
+     "kind": "Ensemble mean",
+     "where": "error figures",
+     "grid": "0.25°, about 25 km",
+     "step": "3-hourly",
+     "updates": "Every 6 hours",
+     "id": "ECMWF_IFS"
+    },
+    {
+     "key": "GFS",
+     "name": "American Model",
+     "url": "https://www.emc.ncep.noaa.gov/emc/pages/numerical_forecast_systems/gfs.php",
+     "what": "NOAA’s Global Forecast System.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "0.11°, about 13 km",
+     "step": "Hourly, 3-hourly after 120 h",
+     "updates": "Every 6 hours",
+     "id": "GFS"
+    },
+    {
+     "key": "GEFS",
+     "name": "American Ensemble",
+     "url": "https://www.emc.ncep.noaa.gov/emc/pages/numerical_forecast_systems/gefs.php",
+     "what": "NOAA’s Global Ensemble Forecast System, 31 members.",
+     "kind": "Probabilistic",
+     "where": "calibration",
+     "grid": "0.25°, about 25 km",
+     "step": "3-hourly",
+     "updates": "Every 6 hours",
+     "ens": "GEFS"
+    },
+    {
+     "key": "ICON",
+     "name": "German Model",
+     "url": "https://www.dwd.de/EN/research/weatherforecasting/num_modelling/01_num_weather_prediction_modells/icon_description.html",
+     "what": "ICON, the global model of Germany’s weather service.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "0.1°, about 11 km",
+     "step": "Hourly, 3-hourly after 78 h",
+     "updates": "Every 6 hours",
+     "id": "ICON"
+    },
+    {
+     "key": "ICON_ENS",
+     "name": "German Ensemble",
+     "url": "https://www.dwd.de/EN/research/weatherforecasting/num_modelling/01_num_weather_prediction_modells/icon_description.html",
+     "what": "ICON’s global ensemble, 40 members.",
+     "kind": "Probabilistic",
+     "where": "calibration",
+     "grid": "26 km",
+     "step": "Hourly",
+     "updates": "Every 12 hours",
+     "ens": "ICON"
+    },
+    {
+     "key": "GEM",
+     "name": "Canadian Model",
+     "url": "https://weather.gc.ca/model_forecast/model_e.html",
+     "what": "GEM, the global model of Environment and Climate Change Canada.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "0.15°, about 15 km",
+     "step": "3-hourly",
+     "updates": "Every 12 hours",
+     "id": "GEM"
+    },
+    {
+     "key": "GEM_ENS",
+     "name": "Canadian Ensemble",
+     "url": "https://weather.gc.ca/ensemble/index_e.html",
+     "what": "Canada’s global ensemble, 21 members.",
+     "kind": "Probabilistic",
+     "where": "calibration",
+     "grid": "0.25°, about 25 km",
+     "step": "3-hourly",
+     "updates": "Every 12 hours",
+     "ens": "GEM"
+    },
+    {
+     "key": "UKMO",
+     "name": "UK Model",
+     "url": "https://www.metoffice.gov.uk/research/approach/modelling-systems/unified-model",
+     "what": "The Met Office Unified Model, run globally.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "0.09°, about 10 km",
+     "step": "Hourly, 3-hourly after 54 h",
+     "updates": "Every 6 hours",
+     "id": "UKMO"
+    },
+    {
+     "key": "MF",
+     "name": "French Model",
+     "url": "https://open-meteo.com/en/docs/meteofrance-api",
+     "what": "ARPEGE, the global model of Météo-France.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "0.25°, about 25 km",
+     "step": "Hourly, 3-hourly after 2 days",
+     "updates": "Every 6 hours",
+     "id": "MF"
+    },
+    {
+     "key": "JMA",
+     "name": "Japanese Model",
+     "url": "https://www.jma.go.jp/jma/en/Activities/nwp.html",
+     "what": "The Global Spectral Model of the Japan Meteorological Agency.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "0.5°, about 55 km",
+     "step": "6-hourly",
+     "updates": "Every 6 hours",
+     "id": "JMA"
+    },
+    {
+     "key": "HRRR",
+     "name": "HRRR",
+     "url": "https://rapidrefresh.noaa.gov/hrrr/",
+     "what": "NOAA’s High-Resolution Rapid Refresh, covering the contiguous United States.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "3 km",
+     "step": "Hourly",
+     "updates": "Every hour",
+     "id": "HRRR"
+    }
+   ]
+  },
+  {
+   "key": "mos",
+   "title": "Numerical weather prediction with model output statistics",
+   "note": "Physics model output corrected station by station against what the models got wrong in the past.",
+   "systems": [
+    {
+     "key": "NBM",
+     "name": "National Blend of Models",
+     "url": "https://vlab.noaa.gov/web/mdl/nbm",
+     "what": "NOAA’s calibrated blend of many models, the starting point for the Weather Service’s own forecast.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "2.5 km",
+     "step": "Hourly, 3-hourly after 36 h",
+     "updates": "Every hour",
+     "id": "NBM"
+    },
+    {
+     "key": "NBS_MOS",
+     "name": "Blend MOS",
+     "url": "https://vlab.noaa.gov/web/mdl/nbm",
+     "what": "The station text bulletin of the National Blend of Models.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "Station points",
+     "step": "3-hourly, to 72 h",
+     "updates": "Four times a day",
+     "id": "NBS_MOS"
+    },
+    {
+     "key": "LAMP",
+     "name": "Aviation Forecast",
+     "url": "https://vlab.noaa.gov/web/mdl/lamp",
+     "what": "LAMP, statistical guidance refreshed with the latest observations.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "Station points",
+     "step": "Hourly, to about 38 h",
+     "updates": "Every hour",
+     "id": "LAMP"
+    },
+    {
+     "key": "GFS_MOS",
+     "name": "GFS MOS",
+     "url": "https://vlab.noaa.gov/web/mdl/gfs-mos",
+     "what": "Statistical guidance built on the American Model alone, with no forecaster editing.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "Station points",
+     "step": "3-hourly, to 72 h",
+     "updates": "Four times a day",
+     "id": "GFS_MOS"
+    },
+    {
+     "key": "NAM_MOS",
+     "name": "NAM MOS",
+     "url": "https://vlab.noaa.gov/web/mdl/nam-mos",
+     "what": "Statistical guidance built on NOAA’s North American Mesoscale model.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "Station points",
+     "step": "3-hourly, to 72 h",
+     "updates": "Twice a day",
+     "id": "NAM_MOS"
+    },
+    {
+     "key": "MOSMIX",
+     "name": "German Statistical Model",
+     "url": "https://www.dwd.de/EN/ourservices/met_application_mosmix/met_application_mosmix.html",
+     "what": "MOSMIX, which combines and corrects the German and European models.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "About 5,400 station points",
+     "step": "Hourly, to 240 h",
+     "updates": "Hourly for the first day, four times a day beyond",
+     "id": "MOSMIX"
+    }
+   ]
+  },
+  {
+   "key": "human",
+   "title": "Human forecasting systems",
+   "note": "Forecasters editing model guidance with their own judgment.",
+   "systems": [
+    {
+     "key": "NDFD",
+     "name": "National Weather Service",
+     "url": "https://vlab.noaa.gov/web/mdl/ndfd",
+     "what": "The official public forecast from the National Digital Forecast Database, which forecasters edit starting from the National Blend of Models.",
+     "kind": "Deterministic",
+     "where": "error figures",
+     "grid": "2.5 km",
+     "step": "Hourly for the first 36 h",
+     "updates": "About every 30 minutes through day 3",
+     "id": "NDFD"
+    }
+   ]
+  },
+  {
+   "key": "ai",
+   "title": "AI systems",
+   "note": "Models trained on decades of past weather rather than stepping physical equations forward.",
+   "systems": [
+    {
+     "key": "AIFS",
+     "name": "European AI Ensemble Mean",
+     "url": "https://www.ecmwf.int/en/forecasts/dataset/aifs-machine-learning-data",
+     "what": "AIFS, ECMWF’s machine-learning forecasting system, run as a 51-member ensemble. Its mean appears in the error figures and the spread of its members in calibration.",
+     "kind": "Probabilistic",
+     "where": "error figures and calibration",
+     "grid": "0.25°, about 25 km",
+     "step": "6-hourly",
+     "updates": "Every 6 hours",
+     "id": "AIFS",
+     "ens": "AIFS"
+    }
+   ]
+  }
+ ]
+}

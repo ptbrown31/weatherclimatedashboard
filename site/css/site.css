@@ -559,16 +559,15 @@ table.acc-grid-table tr.acc-grid-fx td{background:var(--shade)}
 table.acc-grid-table tr.acc-grid-fx td.acc-grid-sys{background:var(--shade)}
 table.acc-grid-table tr.acc-grid-fx td.acc-grid-c .acc-grid-v{font-weight:700}
 table.acc-grid-table tr.acc-grid-ref td.acc-grid-c .acc-grid-v{font-weight:600}
-table.acc-grid-table.acc-grid-nltable{min-width:0;width:auto}
-table.acc-grid-table.acc-grid-nltable td{white-space:normal}
+/* the metric over its two sides, a faint divider between MAE and mean error
+   inside a lead, and the group rows that follow the forecast systems table */
+table.acc-grid-table th.acc-grid-m{text-align:center;color:var(--ink);font-size:10.5px}
+table.acc-grid-table th.acc-grid-mid,table.acc-grid-table td.acc-grid-mid{border-left:1px dashed var(--line)}
+table.acc-grid-table tr.acc-grid-grp th{text-align:left;background:var(--shade);color:var(--navy);font-size:11px;
+  letter-spacing:.06em;padding:7px 10px 5px;border-top:1px solid var(--line);position:sticky;left:0}
 .acc-grid-sw{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-2px;border:1px solid var(--line)}
 .acc-grid-foot{font-size:11.5px;color:var(--muted);line-height:1.5;margin:6px 6px 2px}
 .acc-grid-foot.acc-grid-top{margin:0 6px 6px}
-.acc-grid-nl{margin:10px 4px 4px}
-a.acc-grid-dl{display:inline-block;font-size:12.5px;padding:4px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);text-decoration:none}
-a.acc-grid-dl:hover{border-color:var(--rule)}
-.acc-grid-csv{font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);background:var(--panel);
-  border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin:6px 0 10px;max-height:280px;overflow:auto;white-space:pre}
 
 /* The source tables at the foot of the accuracy page. A group row names the
    family and says in a line what sets it apart; the kind is a small chip so a

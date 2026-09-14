@@ -1,23 +1,21 @@
-/* Figure 5, the scorecard grid.
+/* Figure 3, the scorecard grid.
 
-   One HTML table: ForecastEx first, then every source in the selected
-   view ordered by its 12 h mean absolute error, against four leads
-   (30, 18, 12 and 6 hours before the end of the target day). Each lead
-   carries the mean absolute error on highs and on lows, the mean error on
-   highs and the share of city-days within one degree on highs, every one
-   with its sample printed small. The ForecastEx prediction market's error cell also carries the
+   One HTML table with a row per system, grouped and ordered as the forecast
+   systems table at the foot of the page is. Both take that grouping from the
+   one registry, config/forecast_systems.json, so a change there moves both.
+
+   Three leads, 30, 18 and 12 hours before the end of the target day. Under
+   each, the mean absolute error on the high and on the low, then the mean
+   error on the high and on the low, every value with its sample printed
+   small. The ForecastEx prediction market's high-error cell also carries the
    CRPS of its ladder, footnoted, because a ladder is a distribution and a
    central value alone says less than the ladder does.
 
-   The shading is the paired difference from the National Weather Service
-   row on the same city-days, per lead, so a column is read on its own
-   scale. A cell whose paired interval covered zero, or whose sample is
-   under 30 city-days, is left grey. Each pair is compared on the days the
-   two share, so a row's own span never has to match another's.
-
-   Highs are the default and lows a tab. The builder ships the bias, the
-   one-degree share, the paired difference and the CRPS for highs only, so
-   the lows view carries the mean absolute error alone, uncolored.
+   The shading on the high-error cell is the paired difference from the
+   National Weather Service row on the same city-days, per lead, so a column
+   is read on its own scale. A cell whose paired interval covered zero, or
+   whose sample is under 30 city-days, is left grey. Each pair is compared on
+   the days the two share, so a row's own span never has to match another's.
 
    draw(D) receives the bundle WXAcc.init assembles and reads D.grid; a
    caller passing the grid file itself as the first argument is accepted. */
@@ -25,12 +23,16 @@ window.WXAccGrid = (() => {
   const { h, $ } = WXC;
   const A = () => window.WXAcc;
 
-  // the four leads the builder scores, in the order they are read
-  const LEADS_DEFAULT = [30, 18, 12, 6];
-  // the lead the rows are ordered by: the last lead where most of the
-  // day is still ahead and every system has issued a fresh value
-  const SORT_H = 12;
+  // the leads the builder scores, in the order they are read
+  const LEADS_DEFAULT = [30, 18, 12];
   const MIN_N = 30;
+  // the four columns under each lead: the metric, the side, and the cell field
+  const COLS = [
+    { group: 'MAE', side: 'High', key: 'maeHigh', n: 'n', fmt: 'f2', title: 'Mean absolute error on the daily high, °F' },
+    { group: 'MAE', side: 'Low', key: 'maeLow', n: 'nLow', fmt: 'f2', title: 'Mean absolute error on the daily low, °F' },
+    { group: 'Mean error', side: 'High', key: 'meHigh', n: 'n', fmt: 'signed2', title: 'Mean error on the daily high, °F, positive when the system ran warm' },
+    { group: 'Mean error', side: 'Low', key: 'meLow', n: 'nLow', fmt: 'signed2', title: 'Mean error on the daily low, °F, positive when the system ran warm' },
+  ];
 
   const COHORTS = [
     { key: 'own', label: 'Every day on record', title: 'Each system scored on the city-days its own record covers' },
@@ -53,7 +55,7 @@ window.WXAccGrid = (() => {
   const f2 = v => A().f2(v);
   // a bias that rounds to zero prints as zero, never as a signed nothing
   const signed2 = v => (!fin(v) ? A().dash : Math.abs(v) < 0.005 ? '0.00' : (v > 0 ? '+' : '−') + f2(Math.abs(v)));
-  const pct = v => A().pct(v);
+  const FMT = { f2, signed2 };
   const int = v => A().int(v);
   // a percent difference with its sign, one decimal, for the tooltip
   const ssText = v => (!fin(v) ? A().dash : (v > 0 ? '+' : v < 0 ? '−' : '') + A().f1(Math.abs(v)) + '%');
@@ -61,7 +63,7 @@ window.WXAccGrid = (() => {
   // ------------------------------------------------------------- state
   let host = null, bar = null, keyEl = null, methodEl = null;
   let grid = null;
-  const state = { metric: 'high', cohort: 'own', frame: 'metar', nl: 'off', csv: false };
+  const state = { cohort: 'own', frame: 'metar' };
   let controlsBuilt = false;
 
   // ------------------------------------------------------------- data access
@@ -71,37 +73,23 @@ window.WXAccGrid = (() => {
     return (fr && fr.h && fr.h[String(lead)]) || null;
   };
   const leads = () => (grid && Array.isArray(grid.h) && grid.h.length ? grid.h.map(Number) : LEADS_DEFAULT);
-  // the row's headline error in the view: highs by maeHigh, lows by maeLow
-  const headline = (cell, metric) => (cell ? (metric === 'high' ? cell.maeHigh : cell.maeLow) : null);
+  const metaOf = () => (grid && grid.meta) || {};
 
-  /* Row order. ForecastEx stays first so the ForecastEx prediction market is always the row a
-     reader compares against; the sources follow by their 12 h error in
-     the selected frame, a missing value sorting last, ties broken by the
-     contract's naming order so two equal rows never swap between builds. */
-  function orderedRows() {
+  /* The rows in groups, in the registry's order: the same grouping and the
+     same order as the forecast systems table, from the same file. */
+  function groupedRows() {
     const rows = rowsOf(state.cohort);
-    const order = A().ORDER;
-    const fx = rows.filter(r => r.id === 'FX');
-    const rest = rows.filter(r => r.id !== 'FX');
-    const keyOf = r => {
-      const v = headline(cellOf(r, state.frame, SORT_H), state.metric);
-      return fin(v) ? v : Infinity;
-    };
-    rest.sort((a, b) => {
-      const d = keyOf(a) - keyOf(b);
-      if (d !== 0 && isFinite(d)) return d;
-      if (keyOf(a) !== keyOf(b)) return keyOf(a) === Infinity ? 1 : -1;
-      return order.indexOf(a.id) - order.indexOf(b.id);
-    });
-    return fx.concat(rest);
+    const byId = {};
+    rows.forEach(r => { byId[r.id] = r; });
+    return A().systemGroups(rows.map(r => r.id)).map(g => ({ title: g.title, rows: g.ids.map(id => byId[id]) }));
   }
 
   /* Shading. Per lead, the strongest colored cell in the column sets the
-     scale, so a column with one 99 percent cell (the ForecastEx prediction market at 6 h, when the
-     day's high has usually been recorded) does not wash out the rest of the
-     table. Positive is better than the National Weather Service row and
+     scale, so one very large difference does not wash out the rest of the
+     column. Positive is better than the National Weather Service row and
      takes the site's ok token, negative its bad token; the interval rule and
-     the sample rule leave a cell grey. */
+     the sample rule leave a cell grey. The builder ships the paired
+     difference for highs, so the shading sits on the high-error cell. */
   function colorable(cell) {
     return !!cell && fin(cell.ssHigh) && fin(cell.ssLo) && fin(cell.ssHi) && fin(cell.n) && cell.n >= MIN_N;
   }
@@ -115,7 +103,6 @@ window.WXAccGrid = (() => {
     return out;
   }
   function fillFor(cell, colMax) {
-    if (state.metric !== 'high') return null;
     if (!colorable(cell)) return { token: 'var(--rule)', opacity: 0.28 };
     const share = colMax > 0 ? Math.abs(cell.ssHigh) / colMax : 0;
     return { token: cell.ssHigh >= 0 ? 'var(--ok)' : 'var(--bad)', opacity: 0.12 + 0.5 * share };
@@ -139,190 +126,101 @@ window.WXAccGrid = (() => {
       ['Days', COHORTS.find(c => c.key === state.cohort).label],
       ['Truth', frameName],
       ['MAE high', cell ? f2(cell.maeHigh) + '°F' : A().dash],
-      ['City-days, highs', cell ? int(cell.n) : A().dash],
       ['MAE low', cell ? f2(cell.maeLow) + '°F' : A().dash],
-      ['City-days, lows', cell ? int(cell.nLow) : A().dash],
       ['Mean error high', cell ? signed2(cell.meHigh) + '°F' : A().dash],
-      ['Within 1°F, highs', cell ? pct(cell.hr1High) : A().dash],
+      ['Mean error low', cell ? signed2(cell.meLow) + '°F' : A().dash],
+      ['City-days, highs', cell ? int(cell.n) : A().dash],
+      ['City-days, lows', cell ? int(cell.nLow) : A().dash],
     ];
     if (row.id === 'FX') pairs.push(['CRPS of the ladder', cell ? f2(cell.crps) : A().dash]);
     if (row.id !== 'NDFD' && cell) {
-      pairs.push(['Against the NWS row', ssText(cell.ssHigh)]);
+      pairs.push(['High error against the NWS row', ssText(cell.ssHigh)]);
       pairs.push(['95% interval', fin(cell.ssLo) && fin(cell.ssHi)
         ? ssText(cell.ssLo) + ' to ' + ssText(cell.ssHi)
         : (cell.n >= MIN_N ? 'covers zero, not colored' : 'under ' + MIN_N + ' city-days')]);
     }
-    const rs = A().span(metaOf(), row.id, state.metric);
+    const rs = A().span(metaOf(), row.id, 'high');
     if (rs) pairs.push(['Record', A().mdyY(rs.start) + ' to ' + A().mdyY(rs.end) + (fin(rs.days) ? ', ' + int(rs.days) + ' days' : '')]);
-
     return A().tooltip().rows(nm + ', ' + L + ' h before the day ends', pairs);
   }
 
-  // ------------------------------------------------------------- record span
-  const metaOf = () => (grid && grid.meta) || {};
-  /* The first day a system was scored on, on the metric shown. Every row
-     carries it, in every view, because the depth of a system's own record
-     is not the same thing as the days a sample could use. */
+  /* The first day a system was scored on. Every row carries it, in every
+     view, because the depth of a system's own record is not the same thing
+     as the days a sample could use. */
   function recordSince(row) {
-    const sp = A().span(metaOf(), row.id, state.metric);
+    const sp = A().span(metaOf(), row.id, 'high');
     if (!sp) return row.start || A().dash;
     return A().mdy(sp.start) + (fin(sp.days) ? ' · ' + int(sp.days) + 'd' : '');
   }
 
   // ------------------------------------------------------------- table
-  function buildTable(rows) {
+  function buildTable(groups) {
     const L = leads();
-    const highs = state.metric === 'high';
-    const scale = columnScale(rows);
-    const sub = highs
-      ? [['MAE high', 'mean absolute error on the daily high, °F'], ['MAE low', 'mean absolute error on the daily low, °F'],
-         ['ME high', 'mean error on the daily high, positive when the value ran warm'], ['Within 1°', 'share of city-days within one degree on the high']]
-      : [['MAE low', 'mean absolute error on the daily low, °F']];
+    const allRows = groups.flatMap(g => g.rows);
+    const scale = columnScale(allRows);
+    const width = 2 + L.length * COLS.length;
     const table = h('table', { class: 'acc-grid-table' });
     const thead = h('thead');
-    const r1 = h('tr');
-    r1.appendChild(h('th', { rowspan: 2, text: 'System' }));
-    r1.appendChild(h('th', { rowspan: 2, class: 'acc-grid-start', text: 'Record since',
-                             title: 'The first day this system was scored on, on the metric shown. Systems started at different times, so the rows do not cover the same period.' }));
-    L.forEach(x => r1.appendChild(h('th', { class: 'acc-grid-g', colspan: sub.length, text: x + ' h' + (x === SORT_H ? ' (sort)' : ''),
-                                            title: x + ' hours before the station-local midnight that ends the target day' })));
-    thead.appendChild(r1);
-    const r2 = h('tr');
-    L.forEach(() => sub.forEach((s, i) => r2.appendChild(h('th', { class: 'num' + (i === 0 ? ' acc-grid-first' : ''), text: s[0], title: s[1] }))));
-    thead.appendChild(r2);
+    // three header rows: the lead, the metric over its two sides, the side
+    const r1 = h('tr'), r2 = h('tr'), r3 = h('tr');
+    r1.appendChild(h('th', { rowspan: 3, text: 'System' }));
+    r1.appendChild(h('th', { rowspan: 3, class: 'acc-grid-start', text: 'Record since',
+                             title: 'The first day this system was scored on. Systems started at different times, so the rows do not cover the same period.' }));
+    L.forEach(x => {
+      r1.appendChild(h('th', { class: 'acc-grid-g', colspan: COLS.length, text: x + ' h',
+                               title: x + ' hours before the station-local midnight that ends the target day' }));
+      const metrics = [];
+      COLS.forEach(c => { if (!metrics.includes(c.group)) metrics.push(c.group); });
+      metrics.forEach((m, k) => r2.appendChild(h('th', { class: 'acc-grid-m' + (k === 0 ? ' acc-grid-first' : ''),
+                                                       colspan: COLS.filter(c => c.group === m).length, text: m })));
+      COLS.forEach((c, i) => r3.appendChild(h('th', { class: 'num' + (i === 0 ? ' acc-grid-first' : '') + (c.side === 'High' && i > 0 ? ' acc-grid-mid' : ''),
+                                                    text: c.side, title: c.title })));
+    });
+    thead.appendChild(r1); thead.appendChild(r2); thead.appendChild(r3);
     table.appendChild(thead);
 
     const tbody = h('tbody');
-    rows.forEach(row => {
-      const tr = h('tr', { class: row.id === 'FX' ? 'acc-grid-fx' : (row.id === 'NDFD' ? 'acc-grid-ref' : '') });
-      const nameTd = h('td', { class: 'acc-grid-sys' });
-      nameTd.appendChild(h('span', { class: 'acc-grid-sw', style: 'background:' + A().color(row.id) }));
-      nameTd.appendChild(document.createTextNode(A().name(row.id)));
-      if (row.id === 'NDFD') nameTd.appendChild(h('span', { class: 'acc-grid-n', text: 'reference row' }));
-      tr.appendChild(nameTd);
-      tr.appendChild(h('td', { class: 'acc-grid-start', text: recordSince(row) }));
-      L.forEach(x => {
-        const cell = cellOf(row, state.frame, x);
-        const tds = [];
-        if (highs) {
-          const isFx = row.id === 'FX';
-          tds.push(numCell(cell && cell.maeHigh, cell && cell.n, f2, fillFor(cell, scale[x]),
-            { cls: 'acc-grid-first', mark: isFx ? '†' : '', sub: isFx ? 'CRPS ' + f2(cell && cell.crps) : null }));
-          tds.push(numCell(cell && cell.maeLow, cell && cell.nLow, f2, null));
-          tds.push(numCell(cell && cell.meHigh, cell && cell.n, signed2, null));
-          tds.push(numCell(cell && cell.hr1High, cell && cell.n, pct, null));
-        } else {
-          tds.push(numCell(cell && cell.maeLow, cell && cell.nLow, f2, null, { cls: 'acc-grid-first' }));
-        }
-        tds.forEach(td => { A().hover(td, () => tipFor(row, x, cell)); tr.appendChild(td); });
+    groups.forEach(g => {
+      tbody.appendChild(h('tr', { class: 'acc-grid-grp' }, [h('th', { colspan: width, text: g.title })]));
+      g.rows.forEach(row => {
+        const tr = h('tr', { class: row.id === 'FX' ? 'acc-grid-fx' : (row.id === 'NDFD' ? 'acc-grid-ref' : '') });
+        const nameTd = h('td', { class: 'acc-grid-sys' });
+        nameTd.appendChild(h('span', { class: 'acc-grid-sw', style: 'background:' + A().color(row.id) }));
+        nameTd.appendChild(document.createTextNode(A().name(row.id)));
+        if (row.id === 'NDFD') nameTd.appendChild(h('span', { class: 'acc-grid-n', text: 'reference row' }));
+        tr.appendChild(nameTd);
+        tr.appendChild(h('td', { class: 'acc-grid-start', text: recordSince(row) }));
+        L.forEach(x => {
+          const cell = cellOf(row, state.frame, x);
+          COLS.forEach((c, i) => {
+            const isFx = row.id === 'FX' && c.key === 'maeHigh';
+            const td = numCell(cell && cell[c.key], cell && cell[c.n], FMT[c.fmt],
+              c.key === 'maeHigh' && row.id !== 'NDFD' ? fillFor(cell, scale[x]) : null,
+              { cls: i === 0 ? 'acc-grid-first' : (c.side === 'High' ? 'acc-grid-mid' : ''),
+                mark: isFx ? '†' : '', sub: isFx ? 'CRPS ' + f2(cell && cell.crps) : null });
+            A().hover(td, () => tipFor(row, x, cell));
+            tr.appendChild(td);
+          });
+        });
+        tbody.appendChild(tr);
       });
-      tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     return table;
   }
 
-  // ------------------------------------------------------------- newsletter
-  /* The newsletter block as the builder ranks it: the last seven resolved
-     days, highs, every system scored on the same city-days, ties named
-     where two systems agree to two decimals, which is the builder's rule. */
-  function buildNewsletter() {
-    const nl = grid.newsletter || {};
-    const rows = Array.isArray(nl.rows) ? nl.rows.filter(r => r && r.id) : [];
-    const w = nl.window || {};
-    const box = h('div', { class: 'acc-grid-nl' });
-    box.appendChild(h('div', { class: 'accsub', text: 'Newsletter window, highs, last ' + (fin(w.days) ? int(w.days) : A().dash) + ' resolved days'
-      + (w.from && w.to ? ', ' + w.from + ' to ' + w.to : '') }));
-    if (!rows.length) {
-      box.appendChild(h('div', { class: 'acc-grid-foot', text: 'No system reached the newsletter window’s eligibility in these days.' }));
-      return box;
-    }
-    const byRank = {};
-    rows.forEach(r => { byRank[r.rank] = (byRank[r.rank] || 0) + 1; });
-    const t = h('table', { class: 'acc-grid-table acc-grid-nltable' });
-    const th = h('tr');
-    [['Rank', ''], ['System', ''], ['MAE high', 'num'], ['City-days', 'num']].forEach(([s, c]) => th.appendChild(h('th', { class: c, text: s })));
-    t.appendChild(h('thead', {}, [th]));
-    const tb = h('tbody');
-    rows.forEach(r => {
-      const tr = h('tr', { class: r.id === 'FX' ? 'acc-grid-fx' : '' });
-      tr.appendChild(h('td', { class: 'num', text: int(r.rank) + (byRank[r.rank] > 1 ? ' tie' : '') }));
-      const nameTd = h('td', { class: 'acc-grid-sys' });
-      nameTd.appendChild(h('span', { class: 'acc-grid-sw', style: 'background:' + A().color(r.id) }));
-      nameTd.appendChild(document.createTextNode(A().name(r.id)));
-      tr.appendChild(nameTd);
-      tr.appendChild(h('td', { class: 'num', text: f2(r.mae) }));
-      tr.appendChild(h('td', { class: 'num', text: int(r.n) }));
-      tb.appendChild(tr);
-    });
-    t.appendChild(tb);
-    box.appendChild(h('div', { class: 'acc-grid-scroll' }, [t]));
-    box.appendChild(h('div', { class: 'acc-grid-foot', text: 'Mean absolute error of each system’s standing high over the newsletter’s hours, 5 PM to 5 AM ET, against the METAR settle, on the city-days every ranked system has a value for. A tie is two systems equal to two decimals.' }));
-    return box;
-  }
-
-  // ------------------------------------------------------------- csv
-  /* The visible table as text. Built from the same rows and cells the
-     table was drawn from, so the file and the screen never disagree. */
-  const q = s => (/[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s);
-  const num = v => (fin(v) ? String(v) : '');
-  function buildCsv(rows) {
-    const L = leads();
-    const highs = state.metric === 'high';
-    const head = ['system', 'id', 'record_since'];
-    L.forEach(x => {
-      if (highs) head.push('mae_high_' + x + 'h', 'n_high_' + x + 'h', 'mae_low_' + x + 'h', 'n_low_' + x + 'h',
-                           'me_high_' + x + 'h', 'within_1F_high_' + x + 'h', 'vs_nws_pct_' + x + 'h', 'vs_nws_lo_' + x + 'h', 'vs_nws_hi_' + x + 'h', 'crps_' + x + 'h');
-      else head.push('mae_low_' + x + 'h', 'n_low_' + x + 'h');
-    });
-    const lines = ['# cohort=' + state.cohort + ' frame=' + state.frame + ' metric=' + state.metric
-                   + (grid.meta && grid.meta.window ? ' window=' + grid.meta.window.from + '..' + grid.meta.window.to : '')
-                   + (grid.meta && grid.meta.built ? ' built=' + grid.meta.built : ''), head.join(',')];
-    rows.forEach(row => {
-      const out = [q(A().name(row.id)), row.id];
-      const sp = A().span(metaOf(), row.id, state.metric);
-      out.push(sp ? sp.start : (row.start || ''));
-      L.forEach(x => {
-        const c = cellOf(row, state.frame, x) || {};
-        if (highs) out.push(num(c.maeHigh), num(c.n), num(c.maeLow), num(c.nLow), num(c.meHigh), num(c.hr1High),
-                            num(c.ssHigh), num(c.ssLo), num(c.ssHi), row.id === 'FX' ? num(c.crps) : '');
-        else out.push(num(c.maeLow), num(c.nLow));
-      });
-      lines.push(out.join(','));
-    });
-    if (state.nl === 'on' && grid.newsletter && Array.isArray(grid.newsletter.rows)) {
-      const w = grid.newsletter.window || {};
-      lines.push('', '# newsletter window highs days=' + num(w.days) + ' from=' + (w.from || '') + ' to=' + (w.to || ''),
-                 'rank,system,id,mae_high,n');
-      grid.newsletter.rows.forEach(r => lines.push([num(r.rank), q(A().name(r.id)), r.id, num(r.mae), num(r.n)].join(',')));
-    }
-    return lines.join('\n') + '\n';
-  }
-
   // ------------------------------------------------------------- render
-  let csvLink = null, csvPre = null, csvBtn = null;
   function render() {
     if (!host) return;
     host.innerHTML = '';
     if (!grid) { A().notYet(host, A().NOT_PUBLISHED); return; }
-    const rows = orderedRows();
-    if (!rows.length) { A().notYet(host, 'The builder shipped no rows for this view.'); renderKey(); renderMethod(); return; }
-    host.appendChild(h('div', { class: 'acc-grid-foot acc-grid-top', text: 'Lead in hours before the station-local midnight that ends the target day. Each cell prints its value and its sample of city-days. Rows after ForecastEx are ordered by their ' + SORT_H + ' h ' + (state.metric === 'high' ? 'MAE high' : 'MAE low') + '.' }));
-    host.appendChild(h('div', { class: 'acc-grid-scroll' }, [buildTable(rows)]));
-    const foot = [];
-    if (state.metric === 'high') foot.push('† CRPS of the ForecastEx prediction market’s ladder against the settle, in degrees, on the same city-days as its MAE.');
-    if (state.metric === 'low') foot.push('The builder ships the bias, the one-degree share, the paired difference and the CRPS for highs only, so the lows view carries the mean absolute error alone, uncolored.');
+    const groups = groupedRows();
+    if (!groups.length) { A().notYet(host, 'The builder shipped no rows for this view.'); renderKey(); renderMethod(); return; }
+    host.appendChild(h('div', { class: 'acc-grid-foot acc-grid-top', text: 'Lead in hours before the station-local midnight that ends the target day. Each cell prints its value and its sample of city-days. Rows are grouped and ordered as in the forecast systems table at the foot of the page.' }));
+    host.appendChild(h('div', { class: 'acc-grid-scroll' }, [buildTable(groups)]));
+    const foot = ['† CRPS of the ForecastEx prediction market’s ladder against the settle, in degrees, on the same city-days as its MAE.'];
     if (state.frame === 'cli') foot.push('In the climate-report frame every alternative forecast system is scored against the National Weather Service climate report for the same date, the ForecastEx prediction market stays scored against the settle, and Buckley Field is excluded because Denver’s report stands in for it.');
     foot.forEach(t => host.appendChild(h('div', { class: 'acc-grid-foot', text: t })));
-    if (state.nl === 'on') host.appendChild(buildNewsletter());
-    // the CSV, as a link and as text on the page
-    const csv = buildCsv(rows);
-    const fname = 'accuracy-grid-' + state.cohort + '-' + state.frame + '-' + state.metric + '.csv';
-    if (csvLink) {
-      csvLink.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
-      csvLink.download = fname;
-    }
-    if (csvPre) { csvPre.textContent = csv; csvPre.hidden = !state.csv; }
     renderKey();
     renderMethod();
   }
@@ -331,9 +229,8 @@ window.WXAccGrid = (() => {
      row's own first scored day is in its Record column. */
   function spanFoot() {
     const meta = metaOf();
-    const fx = A().span(meta, 'FX', state.metric);
     const coh = (meta.cohorts || {})[state.cohort];
-    const base = 'Record since is each system’s own first scored day on the ' + (state.metric === 'high' ? 'high' : 'low') + '. ';
+    const base = 'Record since is each system’s own first scored day. ';
     if (state.cohort === 'own') {
       return base + 'Every row is scored on the days its own record covers, so the rows do not cover the same period. '
         + 'Each comparison against another row is made on the days the pair share.';
@@ -353,19 +250,15 @@ window.WXAccGrid = (() => {
       s.appendChild(document.createTextNode(text));
       return s;
     };
-    if (state.metric !== 'high') {
-      keyEl.appendChild(h('span', { class: 'kn', text: 'Lows carry no paired difference, so no cell is colored.' }));
-      return;
-    }
-    keyEl.appendChild(item('var(--ok)', 0.55, 'lower error than the National Weather Service row'));
-    keyEl.appendChild(item('var(--bad)', 0.55, 'higher error than the National Weather Service row'));
+    keyEl.appendChild(item('var(--ok)', 0.55, 'lower high error than the National Weather Service row'));
+    keyEl.appendChild(item('var(--bad)', 0.55, 'higher high error than the National Weather Service row'));
     keyEl.appendChild(item('var(--rule)', 0.28, 'interval covers zero, or under ' + MIN_N + ' city-days'));
-    keyEl.appendChild(h('span', { class: 'kn', text: 'shade scaled per lead column' }));
+    keyEl.appendChild(h('span', { class: 'kn', text: 'shading on the MAE high cell, scaled per lead column' }));
   }
 
   function renderMethod() {
     if (!methodEl) return;
-    const meta = (grid && grid.meta) || {};
+    const meta = metaOf();
     const coh = (meta.cohorts || {})[state.cohort];
     const excl = Array.isArray(meta.exclusions) ? meta.exclusions : [];
     const exclText = excl.length
@@ -374,14 +267,14 @@ window.WXAccGrid = (() => {
       : null;
     const rules = [
       'v is the standing value at lead h, the last record at or before that instant held at the running observed extreme, and settle is the station’s METAR settle. The ForecastEx prediction market is always scored against the settle. In the climate-report frame an alternative forecast system’s settle is replaced by the National Weather Service climate report for the same date.',
-      'SS_s is positive when a system’s error is below the National Weather Service row’s on the same city-days. Its interval is a paired bootstrap over target dates, 1,000 draws, 95 percent percentile. A cell whose interval covers zero, or whose sample is under ' + MIN_N + ' city-days, is grey, and the own-span cohort is never colored.',
+      'SS_s is positive when a system’s high error is below the National Weather Service row’s on the same city-days. Its interval is a paired bootstrap over target dates, 1,000 draws, 95 percent percentile. A cell whose interval covers zero, or whose sample is under ' + MIN_N + ' city-days, is grey.',
       'CRPS is computed on the ForecastEx prediction market’s monotone ladder at the same snapshot, its Yes prices read as a distribution over whole degrees, closed at the end strikes.',
-      'Rows after ForecastEx are ordered by the ' + SORT_H + ' h mean absolute error in the selected view. Every day on record scores each system on the city-days its own record covers, and the fixed sample restricts those days to the ones the ForecastEx prediction market priced at every hour from 30 to 0.',
+      'Rows are grouped and ordered as in the forecast systems table at the foot of the page. Every day on record scores each system on the city-days its own record covers, and the fixed sample restricts those days to the ones the ForecastEx prediction market priced at every hour from 30 to 0.',
     ];
     if (exclText) rules.push(exclText);
     let n;
     if (coh && (fin(coh.n_high) || fin(coh.n_low))) {
-      n = 'Sample ' + int(state.metric === 'high' ? coh.n_high : coh.n_low) + ' city-days on ' + (state.metric === 'high' ? 'highs' : 'lows')
+      n = 'Sample ' + int(coh.n_high) + ' city-days on highs and ' + int(coh.n_low) + ' on lows'
         + (fin(coh.cities) ? ' over ' + int(coh.cities) + ' cities' : '') + (coh.from ? ' from ' + coh.from : '') + ', the sample at each lead printed in its cell.';
     } else {
       n = 'Sample varies by system and is printed in every cell.';
@@ -390,7 +283,7 @@ window.WXAccGrid = (() => {
     A().methodNote(methodEl, {
       title: 'Scoring',
       body: [
-        'Mean absolute error and mean error are both in degrees Fahrenheit, mean error is signed, positive when a system runs warm. Hit rate is the share of city-days within one degree of the settle.',
+        'Mean absolute error and mean error are both in degrees Fahrenheit, on the daily high and the daily low. Mean error is signed, positive when a system runs warm.',
         { tex: 'SS_s = 100\\left(1 - \\frac{MAE_s}{MAE_{NWS}}\\right)' },
         'A positive skill score means a system beat the National Weather Service on the same city-days. Its interval is a paired bootstrap, and a cell is greyed out when that interval covers zero or the sample is under ' + MIN_N + ' city-days.',
         { tex: 'CRPS = \\sum_{k} \\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
@@ -407,27 +300,6 @@ window.WXAccGrid = (() => {
     bar.innerHTML = '';
     A().tabs(bar, COHORTS, k => { state.cohort = k; render(); }, { initial: state.cohort, label: 'Days' });
     A().tabs(bar, FRAMES, k => { state.frame = k; render(); }, { initial: state.frame, label: 'Frame' });
-    A().tabs(bar, [{ key: 'off', label: 'Hide' }, { key: 'on', label: 'Show' }], k => { state.nl = k; render(); },
-             { initial: state.nl, label: 'Newsletter window' });
-    const g = h('span', { class: 'tabgroup acc-grid-csv-ctl' });
-    csvLink = h('a', { class: 'vbtn acc-grid-dl', text: 'Download CSV', href: '#',
-                       title: 'The visible table as CSV. Some embedded viewers block downloads; the text is also shown on the page.' });
-    csvBtn = h('button', { class: 'vbtn', text: 'Show CSV' });
-    csvBtn.onclick = () => {
-      state.csv = !state.csv;
-      csvBtn.classList.toggle('on', state.csv);
-      csvBtn.textContent = state.csv ? 'Hide CSV' : 'Show CSV';
-      if (csvPre) csvPre.hidden = !state.csv;
-    };
-    g.appendChild(csvLink); g.appendChild(csvBtn);
-    bar.appendChild(g);
-    // the CSV text sits under the method note, out of the card, so the
-    // table keeps its height when it is shown
-    if (methodEl && !csvPre) {
-      csvPre = h('pre', { class: 'acc-grid-csv', hidden: '' });
-      csvPre.hidden = true;
-      methodEl.parentNode.insertBefore(csvPre, methodEl.nextSibling);
-    }
   }
 
   // ------------------------------------------------------------- entry

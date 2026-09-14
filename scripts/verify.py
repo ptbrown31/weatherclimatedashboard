@@ -2790,9 +2790,15 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: the lows tab redraws the lead curve",
                         page.locator("#accLead").inner_html() != lead_before, "")
                 # the scorecard needs no lows tab: it prints both metrics at once
-                chk.add(f"{scheme} accuracy: the scorecard prints highs and lows together, with no lows tab",
-                        "MAE low" in grid_heads and "MAE high" in grid_heads
-                        and page.locator("#accGridBar button", has_text="Lows").count() == 0, str(grid_heads[:6]))
+                heads_t = [t.strip() for t in grid_heads]
+                grid_bar = page.locator("#accGridBar").inner_text()
+                chk.add(f"{scheme} accuracy: the scorecard puts MAE and mean error, high and low, under each of three leads",
+                        heads_t[:1] == ["System"] and [t for t in heads_t if t.endswith(" h")] == ["30 h", "18 h", "12 h"]
+                        and heads_t.count("MAE") == 3 and heads_t.count("Mean error") == 3
+                        and heads_t.count("High") == 6 and heads_t.count("Low") == 6
+                        and page.locator("#accGridBar button", has_text="Lows").count() == 0, str(heads_t[:12]))
+                chk.add(f"{scheme} accuracy: the scorecard has no CSV or newsletter controls",
+                        "CSV" not in grid_bar and "Newsletter" not in grid_bar, grid_bar.replace("\n", " | ")[:100])
                 # the climate-report frame is offered on the lead curve as it is on the map
                 lead_metar = page.locator("#accLead").inner_html()
                 page.locator("#accLeadBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(600)
@@ -2822,6 +2828,15 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: the grid carries a row per system, the market first",
                         len(grid_sys) == len(matched) and len(matched) >= 6 and grid_sys[:1] == ["ForecastEx"],
                         f"rows={len(grid_sys)} file={len(matched)} first={grid_sys[:1]}")
+                # the grid and the systems table share one grouping and one order
+                grid_groups = page.eval_on_selector_all("#accGrid tr.acc-grid-grp th", "e=>e.map(x=>x.textContent.trim())")
+                table_groups = page.eval_on_selector_all("table.acc-sources tr.grp th", "e => e.map(x => x.firstChild.textContent.trim())")
+                table_names = page.eval_on_selector_all("table.acc-sources td.sys a", "e => e.map(x => x.textContent.trim())")
+                grid_names = [re.sub(r"reference row$", "", n).strip() for n in grid_sys]
+                chk.add(f"{scheme} accuracy: the scorecard groups and orders its rows as the systems table does",
+                        grid_groups == [g for g in table_groups if g in grid_groups]
+                        and grid_names == [n for n in table_names if n in grid_names],
+                        f"grid={grid_groups} names={grid_names[:4]}")
 
                 # ---- the scorecard grid: a row per station, a column per system
                 page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1400)

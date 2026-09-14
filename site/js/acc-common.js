@@ -41,6 +41,29 @@ window.WXAcc = (() => {
                  'AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR'];
   const ORDER = ['FX'].concat(TOOLS);
 
+  /* The grouping and order of the forecast systems. One registry,
+     config/forecast_systems.json, carried in config.js: the build renders the
+     forecast systems table at the foot of the page from it, and a figure that
+     lists systems row by row takes its groups and order from here, so a
+     change to either the grouping or the order in that file moves both.
+     Returns [{key, title, note, ids}] holding only the ids asked for, in
+     registry order, with any id the registry does not name gathered in a last
+     group so nothing a file carries is ever dropped from view. */
+  function systemGroups(ids) {
+    const want = new Set(ids || []);
+    const reg = (window.WX && window.WX.forecastSystems && window.WX.forecastSystems.groups) || [];
+    const seen = new Set();
+    const out = [];
+    reg.forEach(g => {
+      const got = (g.systems || []).map(r => r.id).filter(id => id && want.has(id) && !seen.has(id));
+      got.forEach(id => seen.add(id));
+      if (got.length) out.push({ key: g.key, title: g.title, note: g.note || '', ids: got });
+    });
+    const rest = (ids || []).filter(id => !seen.has(id));
+    if (rest.length) out.push({ key: 'other', title: 'Other systems', note: '', ids: rest });
+    return out;
+  }
+
   // ------------------------------------------------------------- palette
   // The exchange keeps the site accent so it is the line a reader finds
   // first. Every alternative forecast system takes one hue of a muted ramp
@@ -591,7 +614,7 @@ window.WXAcc = (() => {
 
   return {
     init, load, trace, valid, data: () => D, FILES, CADENCE,
-    NAME, SHORT, TOOLS, ORDER, color, width, name, short, swatch,
+    NAME, SHORT, TOOLS, ORDER, systemGroups, color, width, name, short, swatch,
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
     tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,

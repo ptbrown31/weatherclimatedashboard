@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+from html import escape as html_escape
 import os
 import re
 import shutil
@@ -60,6 +61,39 @@ def asset_versions() -> dict:
     return out
 
 
+SYSTEMS_REGISTRY = os.path.join(ROOT, "config", "forecast_systems.json")
+SYSTEMS_MARKER = "<!-- forecast-systems -->"
+
+
+def forecast_systems() -> dict:
+    """The one list of forecast systems and their grouping, or an empty one."""
+    if not os.path.exists(SYSTEMS_REGISTRY):
+        return {"groups": []}
+    with open(SYSTEMS_REGISTRY) as fh:
+        reg = json.load(fh)
+    return {"groups": reg.get("groups") or []}
+
+
+def systems_rows(reg: dict) -> str:
+    """The body of the accuracy page's forecast systems table, rendered from
+    the registry so the page carries it without running a script. The record
+    cell is filled at load from the published record."""
+    esc = lambda t: html_escape(str(t), quote=True)
+    out = []
+    for g in reg.get("groups") or []:
+        out.append('<tr class="grp"><th colspan="7">%s<span>%s</span></th></tr>' % (esc(g["title"]), esc(g.get("note", ""))))
+        for r in g.get("systems") or []:
+            kind = r.get("kind", "")
+            attrs = "".join(' data-%s="%s"' % (k, esc(r[k])) for k in ("id", "ens") if r.get(k))
+            out.append('<tr><td class="sys"><a href="%s">%s</a></td><td>%s</td>'
+                       '<td class="kind k-%s">%s<span>%s</span></td><td>%s</td><td>%s</td><td>%s</td>'
+                       '<td class="rec"%s>&mdash;</td></tr>'
+                       % (esc(r["url"]), esc(r["name"]), esc(r["what"]), esc(kind.split()[0].lower() if kind else ""),
+                          esc(kind), esc(r.get("where", "")), esc(r.get("grid", "")), esc(r.get("step", "")),
+                          esc(r.get("updates", "")), attrs))
+    return "\n".join(out)
+
+
 def config_js(cfg: dict, target: str, data_base: str) -> str:
     market = (cfg.get("market_overlay") or {}).get(target, "off")
     wx = {
@@ -85,6 +119,9 @@ def config_js(cfg: dict, target: str, data_base: str) -> str:
         # Atlantic board. A page asks for an asset by this stamp, so the URL
         # changes when the content does and never otherwise.
         "assetV": asset_versions(),
+        # the grouping and order of the forecast systems, which the accuracy
+        # page's table and its scorecard grid both follow
+        "forecastSystems": forecast_systems(),
     }
     # the category hierarchy travels in config.js so the header can be drawn on
     # the first paint rather than after a fetch: it is small, it changes only
@@ -410,6 +447,13 @@ def build(target: str, cfg: dict, data_mode: str) -> dict:
     data_base = cfg.get("data_base_url", "/data") if data_mode == "deploy" else "data"
     with open(os.path.join(out, "config.js"), "w") as fh:
         fh.write(config_js(cfg, target, data_base))
+    acc = os.path.join(out, "accuracy.html")
+    if os.path.exists(acc):
+        with open(acc) as fh:
+            page = fh.read()
+        if SYSTEMS_MARKER in page:
+            with open(acc, "w") as fh:
+                fh.write(page.replace(SYSTEMS_MARKER, systems_rows(forecast_systems()), 1))
     pages = stations = 0
     if target == "standalone":
         pages, stations = identity(out, cfg)

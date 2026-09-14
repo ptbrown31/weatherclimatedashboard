@@ -351,15 +351,21 @@ A city with fewer than 30 matched city-days for an alternative forecast system c
 
 ```
 { meta,
-  h: [30, 18, 12, 6],
+  h: [30, 18, 12],
   cohorts: { own: ROWS, fixed30: ROWS },
-  frames: ["metar", "cli"],
-  newsletter: { window: {days, from, to}, rows: [ {id, mae, n, rank} ] } }
+  frames: ["metar", "cli"] }
 ROWS = [ { id, start, frame: { metar: CELLS, cli: CELLS } } ]
-CELLS = { h: { "30": { maeHigh, maeLow, meHigh, hr1High, crps (FX only), n, ssHigh, ssLo, ssHi } ... } }
+CELLS = { h: { "30": { maeHigh, maeLow, meHigh, meLow, hr1High, crps (FX only), n, nLow, ssHigh, ssLo, ssHi } ... } }
 ```
 `ss` is the percent difference from the National Weather Service row on the
-same cells; a `null` interval means the paired interval covered zero.
+same cells; a `null` interval means the paired interval covered zero. The 6 h
+column and the newsletter ranking were removed on 2026-09-14.
+
+The page draws the grid with the mean absolute error and then the mean error
+under each lead, each on the high and the low. It does not order the rows by
+score: it groups and orders them from `config/forecast_systems.json`, the same
+registry the forecast systems table at the foot of the page is rendered from
+at build time, so a change to the grouping or the order there moves both.
 
 ### availability.json
 

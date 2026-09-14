@@ -285,3 +285,37 @@ class AssetStamps(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForecastSystemsRegistry(unittest.TestCase):
+    """One registry drives both the accuracy page's systems table and the
+    scorecard's grouping, so the table the build renders and the list it ships
+    to the page must be the same list."""
+
+    def test_every_registry_row_is_rendered_under_its_group(self):
+        reg = build.forecast_systems()
+        html = build.systems_rows(reg)
+        n_rows = sum(len(g["systems"]) for g in reg["groups"])
+        self.assertGreaterEqual(n_rows, 21)
+        self.assertEqual(html.count('<td class="sys">'), n_rows)
+        self.assertEqual(html.count('<tr class="grp">'), len(reg["groups"]))
+        # group headers appear in registry order
+        pos = [html.index(">" + g["title"].replace("&", "&amp;") + "<") for g in reg["groups"]]
+        self.assertEqual(pos, sorted(pos))
+
+    def test_the_page_config_carries_the_same_registry(self):
+        js = build.config_js({}, "standalone", "data")
+        payload = json.loads(js.split("window.WX = ", 1)[1].rstrip().rstrip(";"))
+        self.assertEqual(payload["forecastSystems"], build.forecast_systems())
+
+    def test_each_row_names_a_system_or_an_ensemble_and_every_id_is_unique(self):
+        reg = build.forecast_systems()
+        keys, ids = [], []
+        for g in reg["groups"]:
+            for r in g["systems"]:
+                self.assertTrue(r.get("id") or r.get("ens"), r.get("name"))
+                keys.append(r["key"])
+                if r.get("id"):
+                    ids.append(r["id"])
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertEqual(len(ids), len(set(ids)))
