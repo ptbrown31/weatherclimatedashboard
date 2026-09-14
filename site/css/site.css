@@ -486,6 +486,7 @@ tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
    method note with its equation set as written. */
 .bar.acccontrols{gap:6px 16px;min-height:10px;margin-bottom:8px}
 .tabgroup{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tabgroup[hidden]{display:none}
 .tabgroup .tl{font-size:11.5px;color:var(--muted);margin-right:2px}
 .tabgroup button.vbtn{padding:4px 10px}
 [id^="acc"].key span{white-space:nowrap}

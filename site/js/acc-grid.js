@@ -7,9 +7,11 @@
    Three leads, 30, 18 and 12 hours before the end of the target day. Under
    each, the mean absolute error on the high and on the low, then the mean
    error on the high and on the low, every value with its sample printed
-   small. The ForecastEx prediction market's high-error cell also carries the
-   CRPS of its ladder, footnoted, because a ladder is a distribution and a
-   central value alone says less than the ladder does.
+   small. Every system that publishes a distribution (the ForecastEx
+   prediction market's ladder and the four ensembles) carries its CRPS under
+   each error cell, footnoted, because a distribution says more than its
+   centre does. The three ensembles with no single-run row of their own are
+   rows here, scored on their ensemble mean.
 
    The shading on the high-error cell is the paired difference from the
    National Weather Service row on the same city-days, per lead, so a column
@@ -108,6 +110,10 @@ window.WXAccGrid = (() => {
     return { token: cell.ssHigh >= 0 ? 'var(--ok)' : 'var(--bad)', opacity: 0.12 + 0.5 * share };
   }
 
+  // a cell carries a CRPS only for a system with a distribution; the key is absent otherwise
+  const hasCrps = cell => !!cell && ('crps' in cell || 'crpsLow' in cell);
+  const CRPS_KEY = { maeHigh: 'crps', maeLow: 'crpsLow' };
+
   // ------------------------------------------------------------- cells
   function numCell(value, n, fmt, fill, extra) {
     const td = h('td', { class: 'acc-grid-c' + (extra && extra.cls ? ' ' + extra.cls : '') });
@@ -132,7 +138,10 @@ window.WXAccGrid = (() => {
       ['City-days, highs', cell ? int(cell.n) : A().dash],
       ['City-days, lows', cell ? int(cell.nLow) : A().dash],
     ];
-    if (row.id === 'FX') pairs.push(['CRPS of the ladder', cell ? f2(cell.crps) : A().dash]);
+    if (hasCrps(cell)) {
+      pairs.push(['CRPS high', f2(cell.crps) + (fin(cell.crps) ? '°F' : '')]);
+      pairs.push(['CRPS low', f2(cell.crpsLow) + (fin(cell.crpsLow) ? '°F' : '')]);
+    }
     if (row.id !== 'NDFD' && cell) {
       pairs.push(['High error against the NWS row', ssText(cell.ssHigh)]);
       pairs.push(['95% interval', fin(cell.ssLo) && fin(cell.ssHi)
@@ -193,11 +202,11 @@ window.WXAccGrid = (() => {
         L.forEach(x => {
           const cell = cellOf(row, state.frame, x);
           COLS.forEach((c, i) => {
-            const isFx = row.id === 'FX' && c.key === 'maeHigh';
+            const ck = hasCrps(cell) ? CRPS_KEY[c.key] : null;
             const td = numCell(cell && cell[c.key], cell && cell[c.n], FMT[c.fmt],
               c.key === 'maeHigh' && row.id !== 'NDFD' ? fillFor(cell, scale[x]) : null,
               { cls: i === 0 ? 'acc-grid-first' : (c.side === 'High' ? 'acc-grid-mid' : ''),
-                mark: isFx ? '†' : '', sub: isFx ? 'CRPS ' + f2(cell && cell.crps) : null });
+                mark: ck ? '†' : '', sub: ck ? 'CRPS ' + f2(cell[ck]) : null });
             A().hover(td, () => tipFor(row, x, cell));
             tr.appendChild(td);
           });
@@ -218,7 +227,8 @@ window.WXAccGrid = (() => {
     if (!groups.length) { A().notYet(host, 'The builder shipped no rows for this view.'); renderKey(); renderMethod(); return; }
     host.appendChild(h('div', { class: 'acc-grid-foot acc-grid-top', text: 'Lead in hours before the station-local midnight that ends the target day. Each cell prints its value and its sample of city-days. Rows are grouped and ordered as in the forecast systems table at the foot of the page.' }));
     host.appendChild(h('div', { class: 'acc-grid-scroll' }, [buildTable(groups)]));
-    const foot = ['† CRPS of the ForecastEx prediction market’s ladder against the settle, in degrees, on the same city-days as its MAE.'];
+    const foot = ['† CRPS in degrees for every system that publishes a distribution, the ForecastEx prediction market’s ladder and each ensemble’s normal curve read at the same strikes at the same hour. It is scored against the same truth as the cell, on the cell’s city-days that the distribution covers.',
+                  'The American, Canadian and German ensemble rows score the ensemble mean, held at the running observed extreme like every other value, on the city-days the ForecastEx prediction market priced.'];
     if (state.frame === 'cli') foot.push('In the climate-report frame every alternative forecast system is scored against the National Weather Service climate report for the same date, the ForecastEx prediction market stays scored against the settle, and Buckley Field is excluded because Denver’s report stands in for it.');
     foot.forEach(t => host.appendChild(h('div', { class: 'acc-grid-foot', text: t })));
     renderKey();
@@ -268,7 +278,7 @@ window.WXAccGrid = (() => {
     const rules = [
       'v is the standing value at lead h, the last record at or before that instant held at the running observed extreme, and settle is the station’s METAR settle. The ForecastEx prediction market is always scored against the settle. In the climate-report frame an alternative forecast system’s settle is replaced by the National Weather Service climate report for the same date.',
       'SS_s is positive when a system’s high error is below the National Weather Service row’s on the same city-days. Its interval is a paired bootstrap over target dates, 1,000 draws, 95 percent percentile. A cell whose interval covers zero, or whose sample is under ' + MIN_N + ' city-days, is grey.',
-      'CRPS is computed on the ForecastEx prediction market’s monotone ladder at the same snapshot, its Yes prices read as a distribution over whole degrees, closed at the end strikes.',
+      'CRPS is computed over the ForecastEx prediction market’s strikes at the same snapshot, closed at the end strikes. The market’s distribution is its monotone ladder, its Yes prices read as probabilities. An ensemble’s is a normal curve on its own mean and spread at the hour the day’s extreme falls, with nothing fitted, banked at the running observed extreme as every value on the page is.',
       'Rows are grouped and ordered as in the forecast systems table at the foot of the page. Every day on record scores each system on the city-days its own record covers, and the fixed sample restricts those days to the ones the ForecastEx prediction market priced at every hour from 30 to 0.',
     ];
     if (exclText) rules.push(exclText);
@@ -287,7 +297,7 @@ window.WXAccGrid = (() => {
         { tex: 'SS_s = 100\\left(1 - \\frac{MAE_s}{MAE_{NWS}}\\right)' },
         'A positive skill score means a system beat the National Weather Service on the same city-days. Its interval is a paired bootstrap, and a cell is greyed out when that interval covers zero or the sample is under ' + MIN_N + ' city-days.',
         { tex: 'CRPS = \\sum_{k} \\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
-        'On highs, $F(k) = 1 - \\text{YesPrice}(k)$, on lows, $F(k-1) = \\text{YesPrice}(k)$. CRPS scores the whole distribution the ForecastEx prediction market is pricing, not just its fifty-cent crossing.',
+        'On highs, $F(k) = 1 - P(k)$, on lows, $F(k-1) = P(k)$, where $P(k)$ is the probability the contract at strike $k$ pays, the Yes price for the ForecastEx prediction market and the normal curve for an ensemble. CRPS scores the whole distribution, not just its centre.',
       ],
       rules, n, span: spanFoot(),
     });

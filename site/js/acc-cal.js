@@ -94,20 +94,15 @@ window.WXAccCal = (() => {
   const describe = () => (st.metric === 'high' ? 'highs' : 'lows') + ', ' + PRICE.find(p => p.key === st.price).label
     + (st.frame === 'cli' ? ', climate-report frame' : '');
 
-  /* The systems with a spread of their own, in draw order. Their colour is
-     the one they carry everywhere else on the page, so a reader who knows the
-     European AI line from the lead curve finds it here too. */
+  /* The systems with a spread of their own, in draw order. Each keeps the
+     hue and dash it carries everywhere else on the page (WXAcc.color and
+     WXAcc.ensDash), so a reader who knows the Canadian ensemble from the lead
+     curve's CRPS view or the scorecard finds it here too. */
   function ensembleSeries() {
     const e = (cal && cal.metric && cal.metric[st.metric] && cal.metric[st.metric].ensembles) || {};
-    /* Each keeps the hue its family carries in the error figures, so a reader
-       who knows the Canadian line there finds it here. GEFS appears only in
-       this figure, so it takes a hue of its own rather than the fallback grey.
-       The dashes separate them where two hues run close together. */
-    const OWN = { GEFS: 'var(--t13)' };
-    const DASH = [null, '5 3', '2 2', '7 3 2 3'];
-    return Object.keys(e).map((id, i) => ({ id, name: e[id].name || A.name(id),
-                                            block: ((e[id].frame || {})[st.frame]) || {},
-                                            color: OWN[id] || A.color(id), dash: DASH[i % DASH.length] }))
+    return Object.keys(e).map(id => ({ id, name: e[id].name || A.name(A.ensId(id)),
+                                       block: ((e[id].frame || {})[st.frame]) || {},
+                                       color: A.color(A.ensId(id)), dash: A.ensDash(A.ensId(id)) }))
                          .filter(o => o.block && o.block.byLead);
   }
 

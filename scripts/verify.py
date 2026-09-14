@@ -2805,6 +2805,25 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: the lead curve redraws in the climate-report frame",
                         page.locator("#accLead").inner_html() != lead_metar, "")
                 page.locator("#accLeadBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
+                # the CRPS view: the market's ladder against every ensemble, on the held value only
+                page.locator("#accLeadBar button", has_text="CRPS").first.click(); page.wait_for_timeout(600)
+                crps_key = page.eval_on_selector_all("#accLeadKey > span[data-id]", "e => e.map(x => x.getAttribute('data-id'))")
+                crps_axis = page.eval_on_selector_all("#accLead text", "e => e.map(x => x.textContent)")
+                value_hidden = page.eval_on_selector_all("#accLeadBar .tabgroup", "e => e.filter(g => g.hidden).map(g => g.textContent)")
+                crps_note = page.locator("#accLeadMethod").inner_text()
+                chk.add(f"{scheme} accuracy: the lead curve's CRPS view draws the market against the four ensembles",
+                        crps_key[:1] == ["FX"] and set(crps_key[1:]) == {"AIFS", "GEFS", "GEM_ENS", "ICON_ENS"}
+                        and any("CRPS" in t for t in crps_axis) and "CRPS by lead" in crps_note
+                        and page.locator("#accLead path[stroke-dasharray]").count() >= 3
+                        and len(value_hidden) == 1 and "What a reader held" in value_hidden[0],
+                        f"key={crps_key} hidden={value_hidden}")
+                page.locator("#accLead rect[fill='transparent']").nth(12).hover(); page.wait_for_timeout(300)
+                crps_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: the CRPS hover ranks the distributions against ForecastEx",
+                        # the header is set in capitals by the stylesheet, and innerText follows it
+                        "crps" in crps_tip.lower() and "vs forecastex" in crps_tip.lower() and "Amer. Ens." in crps_tip,
+                        crps_tip.replace("\n", " | ")[-160:])
+                page.locator("#accLeadBar button", has_text="MAE").first.click(); page.wait_for_timeout(400)
                 # the map earns a color only where the paired interval clears zero
                 fills = page.eval_on_selector_all("#accMap circle", "e=>e.map(x=>x.getAttribute('fill')||'')")
                 colored = sum(1 for f in fills if f.startswith("color-mix("))
@@ -2828,6 +2847,14 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: the grid carries a row per system, the market first",
                         len(grid_sys) == len(matched) and len(matched) >= 6 and grid_sys[:1] == ["ForecastEx"],
                         f"rows={len(grid_sys)} file={len(matched)} first={grid_sys[:1]}")
+                # every system with a distribution carries a CRPS under both error cells at every lead
+                crps_rows = page.eval_on_selector_all("#accGrid tbody tr:not(.acc-grid-grp)", """e => e.map(tr => [
+                    tr.querySelector('td.acc-grid-sys').firstChild.nextSibling.textContent.trim(),
+                    Array.from(tr.querySelectorAll('.acc-grid-n')).filter(x => x.textContent.startsWith('CRPS')).length])""")
+                with_crps = {n: k for n, k in crps_rows if k}
+                chk.add(f"{scheme} accuracy: the scorecard gives every probabilistic system a CRPS, and only those",
+                        set(with_crps) == {"ForecastEx", "European AI Ensemble Mean", "American Ensemble", "Canadian Ensemble", "German Ensemble"}
+                        and all(k == 6 for k in with_crps.values()), str(with_crps))
                 # the grid and the systems table share one grouping and one order
                 grid_groups = page.eval_on_selector_all("#accGrid tr.acc-grid-grp th", "e=>e.map(x=>x.textContent.trim())")
                 table_groups = page.eval_on_selector_all("table.acc-sources tr.grp th", "e => e.map(x => x.firstChild.textContent.trim())")

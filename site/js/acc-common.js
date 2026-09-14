@@ -25,13 +25,14 @@ window.WXAcc = (() => {
     AIFS: 'European AI Ensemble Mean', ECMWF_IFS: 'European Ensemble Mean',
     GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
     HRRR: 'HRRR',
+    GEFS: 'American Ensemble', GEM_ENS: 'Canadian Ensemble', ICON_ENS: 'German Ensemble',
   };
   // a shorter name for a legend or a column head, where the full one wraps
   const SHORT = {
     FX: 'ForecastEx', NDFD: 'NWS', NBM: 'Blend', LAMP: 'Aviation', ECMWF: 'European', GFS: 'American',
     MOSMIX: 'German Stat.', ICON: 'German', GEM: 'Canadian', UKMO: 'UK', MF: 'French', JMA: 'Japanese',
     AIFS: 'Euro. AI', ECMWF_IFS: 'Euro. Ens.', GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
-    HRRR: 'HRRR',
+    HRRR: 'HRRR', GEFS: 'Amer. Ens.', GEM_ENS: 'Can. Ens.', ICON_ENS: 'Ger. Ens.',
   };
   /* One list, no sub-groups. Every system beside the exchange's own market is
      an alternative forecast system, presented the same way as the others: on
@@ -40,6 +41,25 @@ window.WXAcc = (() => {
   const TOOLS = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS', 'MOSMIX', 'ICON', 'GEM', 'UKMO', 'MF', 'JMA',
                  'AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR'];
   const ORDER = ['FX'].concat(TOOLS);
+  /* The systems that publish a spread. The European AI ensemble mean is one
+     of the systems above; the other three are rows of their own wherever the
+     page scores them, under the ids the registry gives them. Each ensemble
+     draws in the hue of its model family, the American ensemble in the
+     American model's, and a dash tells it from the single run beside it. */
+  const ENS_DASH = { AIFS: null, GEFS: '5 3', GEM_ENS: '2 2', ICON_ENS: '7 3 2 3' };
+  const FAMILY = { GEFS: 'GFS', GEM_ENS: 'GEM', ICON_ENS: 'ICON' };
+  const ENS_ROWS = Object.keys(ENS_DASH).filter(id => TOOLS.indexOf(id) < 0);
+  const ensDash = id => ENS_DASH[id] || null;
+  /* The page id of an ensemble the builder keys by its family (GEM, ICON),
+     read off the registry row that names it, so GEM's ensemble is never
+     mistaken for GEM's single run. */
+  function ensId(key) {
+    const reg = (window.WX && window.WX.forecastSystems && window.WX.forecastSystems.groups) || [];
+    for (const g of reg) {
+      for (const r of (g.systems || [])) if (r.ens === key) return r.id || r.key;
+    }
+    return { GEM: 'GEM_ENS', ICON: 'ICON_ENS' }[key] || key;
+  }
 
   /* The grouping and order of the forecast systems. One registry,
      config/forecast_systems.json, carried in config.js: the build renders the
@@ -55,7 +75,8 @@ window.WXAcc = (() => {
     const seen = new Set();
     const out = [];
     reg.forEach(g => {
-      const got = (g.systems || []).map(r => r.id).filter(id => id && want.has(id) && !seen.has(id));
+      // an ensemble with no system row of its own is known by its registry key
+      const got = (g.systems || []).map(r => r.id || r.key).filter(id => id && want.has(id) && !seen.has(id));
       got.forEach(id => seen.add(id));
       if (got.length) out.push({ key: g.key, title: g.title, note: g.note || '', ids: got });
     });
@@ -72,6 +93,7 @@ window.WXAcc = (() => {
   // competing colors.
   function color(id) {
     if (id === 'FX') return 'var(--accent)';
+    if (FAMILY[id]) return color(FAMILY[id]);
     const i = TOOLS.indexOf(id);
     return i >= 0 ? 'var(--t' + (i + 1) + ')' : 'var(--t-extra)';
   }
@@ -224,11 +246,23 @@ window.WXAcc = (() => {
      should print. Older files carry only a start, so that is the fallback. */
   function span(meta, id, metric) {
     const sy = meta && meta.systems && meta.systems[id];
-    if (!sy) return null;
+    if (!sy) return ensSpan(id, metric);
     const s = (metric && sy.byMetric && sy.byMetric[metric]) || sy.scored;
     if (s && s.start) return s;
     return sy.start ? { start: sy.start, end: null, days: null } : null;
   }
+  /* The span of an ensemble's probabilities, from the calibration file, which
+     is where the builder dates them. Filled once at init; an ensemble with a
+     system row of its own (the European AI) keeps that row's span in span(). */
+  const ENS_SPANS = {};
+  function ensSpans(cal) {
+    Object.keys((cal && cal.metric) || {}).forEach(met => {
+      const e = cal.metric[met].ensembles || {};
+      ENS_SPANS[met] = {};
+      Object.keys(e).forEach(k => { if (e[k].span && e[k].span.start) ENS_SPANS[met][ensId(k)] = e[k].span; });
+    });
+  }
+  const ensSpan = (id, metric) => ((ENS_SPANS[metric || 'high'] || {})[id]) || null;
   // 'since Feb 11' for a legend entry or a column head
   function since(meta, id, metric) {
     const s = span(meta, id, metric);
@@ -316,9 +350,13 @@ window.WXAcc = (() => {
     container.innerHTML = '';
     ids.forEach(id => {
       const e = h('span', { 'data-id': id });
-      e.appendChild(h('i', { style: 'border-color:' + color(id) + (id === 'FX' ? ';border-top-width:3px' : '') }));
+      e.appendChild(h('i', { style: 'border-color:' + color(id) + (id === 'FX' ? ';border-top-width:3px' : '')
+                                    + (ensDash(id) && opts.dashes ? ';border-top-style:dashed' : '') }));
       e.appendChild(document.createTextNode(opts.short ? short(id) : name(id)));
-      if (opts.meta) {
+      if (opts.since) {
+        const sn = opts.since(id);
+        if (sn) e.appendChild(h('span', { class: 'ks', text: sn }));
+      } else if (opts.meta) {
         const sn = since(opts.meta, id, opts.metric);
         if (sn) e.appendChild(h('span', { class: 'ks', text: sn }));
       }
@@ -556,7 +594,7 @@ window.WXAcc = (() => {
     if (!meta || !meta.systems) { notYet(host, NOT_PUBLISHED); return; }
     const st = { metric: 'high' };
     const paint = () => {
-      spanStrip(host, meta, ORDER, st.metric);
+      spanStrip(host, meta, ORDER.concat(ENS_ROWS), st.metric);
       if (!keyEl) return;
       keyEl.innerHTML = '';
       keyEl.appendChild(h('span', { class: 'kn',
@@ -600,6 +638,7 @@ window.WXAcc = (() => {
     D = { results: {} };
     keys.forEach((k, i) => { D[k] = got[i].data; D.results[k] = got[i].r; });
     D.meta = newestMeta(D);
+    ensSpans(D.cal);
     const st = $('#pageStatus');
     if (st) { st.innerHTML = ''; st.appendChild(statusEl(D)); }
     drawSpans(D);
@@ -614,7 +653,7 @@ window.WXAcc = (() => {
 
   return {
     init, load, trace, valid, data: () => D, FILES, CADENCE,
-    NAME, SHORT, TOOLS, ORDER, systemGroups, color, width, name, short, swatch,
+    NAME, SHORT, TOOLS, ORDER, ENS_ROWS, systemGroups, color, width, name, short, swatch, ensId, ensDash, ensSpan,
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
     tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,

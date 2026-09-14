@@ -229,8 +229,13 @@ counts are integers; a missing value is `null`.
 { meta, metric: {high: BLOCK, low: BLOCK} }
 BLOCK = { h: [36..0],
           cohorts: { own: SERIES, fixed30: SERIES },
-          own: { id: {h: [...], mae: [...], n: [...]} }  // per-horizon own span, no interval
+          own: { id: {h: [...], mae: [...], n: [...]} },  // per-horizon own span, no interval
+          crps: CRPS
         }
+CRPS = { h: [36..0],
+         cohorts: { own: { metar: CV, cli: CV }, fixed30: { metar: CV, cli: CV } } }
+CV = { systems: { FX|AIFS|GEFS|GEM|ICON: { crps: [per h], lo: [per h], hi: [per h], n: [per h] } },
+       beats: [per h: {k: int, of: int, ids: [ensemble keys beaten]}] }
 SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
                                        maeRaw: [per h], loRaw, hiRaw,          // forecast-only view
                                        maeCli: [per h], loCli, hiCli,          // climate-report frame
@@ -248,6 +253,19 @@ Field drops out of the frame.
 
 Bins with `n < 30` carry `null` values. `h` above 30 is present only where the
 cohort has members.
+
+`crps` is the lead curve's CRPS view, drawn when the reader picks CRPS as the
+score. The market is scored on its own standing ladder at each whole hour, and
+each ensemble at the same instant on the same strikes, from a normal curve on
+its own centre and spread with a strike the observations already cleared paid
+in full, so the two are one measurement on one grid. The days are the ones the
+market priced at that hour (restricted to the fixed sample in `fixed30`), and
+each ensemble is drawn on the part of them it covers. Ensembles are keyed by
+their calibration key; the page maps GEM and ICON to the registry rows
+`GEM_ENS` and `ICON_ENS` so they are never confused with the single runs. In
+the climate-report frame an ensemble is held to the National Weather Service
+report and the market keeps the settle, both on the city-days that hold a
+report. There is no forecast-only CRPS.
 
 ### dynamics.json
 
@@ -355,11 +373,21 @@ A city with fewer than 30 matched city-days for an alternative forecast system c
   cohorts: { own: ROWS, fixed30: ROWS },
   frames: ["metar", "cli"] }
 ROWS = [ { id, start, frame: { metar: CELLS, cli: CELLS } } ]
-CELLS = { h: { "30": { maeHigh, maeLow, meHigh, meLow, hr1High, crps (FX only), n, nLow, ssHigh, ssLo, ssHi } ... } }
+CELLS = { h: { "30": { maeHigh, maeLow, meHigh, meLow, hr1High, n, nLow, ssHigh, ssLo, ssHi,
+                       crps, crpsLow } ... } }   // crps keys only on rows with a distribution
 ```
 `ss` is the percent difference from the National Weather Service row on the
 same cells; a `null` interval means the paired interval covered zero. The 6 h
 column and the newsletter ranking were removed on 2026-09-14.
+
+The rows are every system in order, then the ensembles with no single-run row
+of their own, under their registry ids `GEFS`, `GEM_ENS` and `ICON_ENS`. An
+ensemble row scores its centre held at the running observed extreme, on the
+city-days the market priced. `crps` and `crpsLow` are present on the market's
+row, on the European AI row (the same product as its ensemble), and on the
+three ensemble rows; they are the mean CRPS over the cell's city-days that the
+distribution covers, `null` under 30 of them. The Canadian and German single
+runs never carry their ensemble's CRPS.
 
 The page draws the grid with the mean absolute error and then the mean error
 under each lead, each on the high and the low. It does not order the rows by
