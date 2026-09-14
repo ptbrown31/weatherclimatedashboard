@@ -397,6 +397,19 @@ market moves between forecast cycles. Then the coverage strip, then the
 conventions. Highs default, lows a tab on every figure. No commentary. The old
 lead curve stays published until this page is live.
 
+**The source tables.** The foot of the page lists every forecast system,
+the ForecastEx prediction market first and then the alternative systems in four
+families: raw numerical weather prediction models, numerical weather prediction
+with model output statistics, human forecasting systems, and AI systems. Each
+row says whether the system is deterministic, an ensemble mean, or
+probabilistic, and which figures it appears in; gives the provider's grid
+spacing, time step and update frequency; and links to its documentation. For
+the systems whose run times this record holds, the update frequency is the one
+measured from those run times. The record column is filled at load from the
+same spans as the coverage strip, and for an ensemble from the days its
+probabilities were scored on. A second table lists the other data sources
+behind the site, which the FAQ used to carry.
+
 **Spans are printed everywhere.** The systems do not share a record. The
 coverage strip draws one bar per system over the days it was scored on, with
 its own metric tabs. Every figure's method note carries a span line saying

@@ -569,3 +569,25 @@ a.acc-grid-dl{display:inline-block;font-size:12.5px;padding:4px 10px;border:1px 
 a.acc-grid-dl:hover{border-color:var(--rule)}
 .acc-grid-csv{font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink);background:var(--panel);
   border:1px solid var(--line);border-radius:5px;padding:8px 10px;margin:6px 0 10px;max-height:280px;overflow:auto;white-space:pre}
+
+/* The source tables at the foot of the accuracy page. A group row names the
+   family and says in a line what sets it apart; the kind is a small chip so a
+   probabilistic system stands out down a long column of deterministic ones. */
+.acc-sources-wrap{overflow-x:auto;margin:0 0 14px}
+table.acc-sources td{vertical-align:top;line-height:1.45}
+table.acc-sources td.sys{white-space:nowrap;font-weight:600}
+table.acc-sources tr.grp th{background:var(--shade);color:var(--navy);font-size:11.5px;padding:9px 10px 7px;border-top:1px solid var(--line)}
+table.acc-sources tr.grp th span{display:block;text-transform:none;letter-spacing:0;font-weight:400;color:var(--muted);font-size:12px;margin-top:2px}
+table.acc-sources td.kind{white-space:nowrap;font-size:12px}
+table.acc-sources td.kind span{display:block;color:var(--muted);font-weight:400;font-size:11px;white-space:normal}
+table.acc-sources td.rec{font-size:12px;color:var(--ink);min-width:9em}
+/* the grid, time step and update columns: wide enough that a value like
+   "Hourly, 3-hourly after 120 h" breaks once rather than word by word */
+table.acc-sources:not(.acc-feeds) td:nth-child(4){min-width:8.5em}
+table.acc-sources:not(.acc-feeds) td:nth-child(5){min-width:10.5em}
+table.acc-sources:not(.acc-feeds) td:nth-child(6){min-width:10em}
+table.acc-sources{min-width:1080px}
+table.acc-sources td.k-probabilistic{color:var(--accent);font-weight:600}
+table.acc-sources td.k-ensemble{color:var(--ink)}
+table.acc-sources td.k-deterministic{color:var(--muted)}
+table.acc-feeds{margin:0 0 10px}

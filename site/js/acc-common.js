@@ -45,7 +45,7 @@ window.WXAcc = (() => {
   // The exchange keeps the site accent so it is the line a reader finds
   // first. Every alternative forecast system takes one hue of a muted ramp
   // (--t1 to --t18 in site.css), in the reader's order, so they read as a
-  // family behind the ForecastEx prediction market rather than as eighteen
+  // family behind the ForecastEx prediction market rather than as seventeen
   // competing colors.
   function color(id) {
     if (id === 'FX') return 'var(--accent)';
@@ -550,6 +550,25 @@ window.WXAcc = (() => {
     paint();
   }
 
+  /* The record column of the forecast-systems table at the foot of the page.
+     A row names the system it describes by id; an ensemble row names the
+     calibration file's entry, whose span is the days its probabilities were
+     scored on. The AI model is both, so its cell carries the two. */
+  function fillRecords(D) {
+    const meta = D.meta;
+    const ens = (D.cal && D.cal.metric && D.cal.metric.high && D.cal.metric.high.ensembles) || {};
+    const fmt = sp => mdyY(sp.start) + (fin(sp.days) ? ', ' + int(sp.days) + ' days' : '');
+    document.querySelectorAll('table.acc-sources td.rec').forEach(td => {
+      const id = td.getAttribute('data-id'), eid = td.getAttribute('data-ens');
+      const own = id ? span(meta, id) : null;
+      const e = eid && ens[eid] && ens[eid].span && ens[eid].span.start ? ens[eid].span : null;
+      let text = '';
+      if (own && own.start) text = 'From ' + fmt(own);
+      if (e) text += (text ? '. Calibration from ' + mdyY(e.start) : 'From ' + fmt(e));
+      if (text) td.textContent = text;
+    });
+  }
+
   async function init() {
     tooltip();
     typeset(document);
@@ -561,6 +580,7 @@ window.WXAcc = (() => {
     const st = $('#pageStatus');
     if (st) { st.innerHTML = ''; st.appendChild(statusEl(D)); }
     drawSpans(D);
+    fillRecords(D);
     MODULES.forEach(([g, k]) => {
       const mod = window[g];
       if (!mod || typeof mod.draw !== 'function') return;

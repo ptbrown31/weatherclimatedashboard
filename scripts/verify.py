@@ -138,14 +138,14 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} faq: carries the four questions and both link lists",
                         faq_t.count("?") >= 4 and "Further reading" in faq_t and "Climate contracts" in faq_t,
                         f"chars={len(faq_t)}")
-                chk.add(f"{scheme} faq: the eleven tools survive with their links",
-                        page.locator(".prose li a").count() >= 11, str(page.locator(".prose li a").count()))
-                chk.add(f"{scheme} faq: the comparison questions name the publication they belong to",
-                        faq_t.count("IBKR Campus Publication") == 2 and "compared here" not in faq_t,
+                chk.add(f"{scheme} faq: the comparison question names the publication it belongs to",
+                        faq_t.count("IBKR Campus Publication") == 1 and "compared here" not in faq_t,
                         faq_t[:70])
-                chk.add(f"{scheme} faq: both publication headings reach the author's campus page",
-                        page.locator(".prose h2 a[href='https://www.interactivebrokers.com/campus/author/patrick1brown/']").count() == 2,
+                chk.add(f"{scheme} faq: the publication heading reaches the author's campus page",
+                        page.locator(".prose h2 a[href='https://www.interactivebrokers.com/campus/author/patrick1brown/']").count() == 1,
                         str(page.locator(".prose h2 a").count()))
+                chk.add(f"{scheme} faq: it points readers to the systems table on the accuracy page",
+                        page.locator(".prose a[href='accuracy.html#systems']").count() == 1, "")
                 order = page.eval_on_selector_all(".prose h2", "e => e.map(x => x.textContent)")
                 chk.add(f"{scheme} faq: the questions run in the order the owner set",
                         order == ["How do prediction markets work?",
@@ -153,9 +153,7 @@ def run(no_build: bool) -> int:
                                   "Are weather prediction markets accurate?",
                                   "How does a ForecastEx ladder become a single forecast temperature?",
                                   "How the daily temperature displays are built",
-                                  "Data sources",
                                   "What are the four canonical forecast systems compared in the IBKR Campus Publication?",
-                                  "What are all the forecast tools used in the IBKR Campus Publication?",
                                   "Further reading"], str(order)[:200])
                 # ---- the accuracy page: five figures from the record builder's files
                 #
@@ -701,11 +699,31 @@ def run(no_build: bool) -> int:
                         "not carrying this contract" in page.locator("#cBody").inner_text(),
                         page.locator("#cBody").inner_text()[:90])
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
-                page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(400)
-                faq_txt = page.locator(".prose").inner_text()
-                chk.add(f"{scheme} sources: the feed table moved to the FAQ",
-                        page.locator("#sources").count() == 1 and "aviationweather.gov METAR" in faq_txt,
-                        f"anchor={page.locator('#sources').count()}")
+                page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(600)
+                acc_src = page.locator(".wrap").inner_text()
+                groups = page.eval_on_selector_all("table.acc-sources tr.grp th", "e => e.map(x => x.firstChild.textContent.trim())")
+                kinds = set(page.eval_on_selector_all("table.acc-sources td.kind", "e => e.map(x => x.textContent.trim())"))
+                sys_links = page.locator("table.acc-sources td.sys a").count()
+                chk.add(f"{scheme} sources: every forecast system is listed with a link, the market first, then the four families",
+                        groups == ["Prediction market", "Raw numerical weather prediction models",
+                                   "Numerical weather prediction with model output statistics",
+                                   "Human forecasting systems", "AI systems"]
+                        and sys_links >= 21 and any(k.startswith("Deterministic") for k in kinds)
+                        and any(k.startswith("Probabilistic") for k in kinds),
+                        f"groups={groups} links={sys_links}")
+                heads = page.eval_on_selector_all("table.acc-sources:not(.acc-feeds) thead th", "e => e.map(x => x.textContent.trim())")
+                recs = page.eval_on_selector_all("table.acc-sources td.rec", "e => e.map(x => x.textContent.trim())")
+                chk.add(f"{scheme} sources: the table carries grid, time step, updates and a filled record for every row",
+                        heads == ["System", "What it is", "Kind", "Grid", "Time step", "Updates", "Record"]
+                        and len(recs) >= 21 and all(r.startswith("From ") for r in recs),
+                        f"heads={heads} unfilled={[r for r in recs if not r.startswith('From ')][:3]}")
+                chk.add(f"{scheme} sources: the feed table moved to the accuracy page",
+                        page.locator("#sources").count() == 1 and "aviationweather.gov METAR" in acc_src, "")
+                # every name in the table is a name the figures use
+                names = page.eval_on_selector_all("table.acc-sources td.sys a", "e => e.map(x => x.textContent.trim())")
+                known = set(page.evaluate("Object.values(WXAcc.NAME)")) | {"American Ensemble", "Canadian Ensemble", "German Ensemble"}
+                chk.add(f"{scheme} sources: the table names each system as the figures do",
+                        all(n in known for n in names), str([n for n in names if n not in known]))
                 page.goto(f"{srv.url}/about.html"); page.wait_for_timeout(400)
                 about_txt = page.locator(".wrap").inner_text()
                 chk.add(f"{scheme} about: an overview of the site and its author, not the detail",

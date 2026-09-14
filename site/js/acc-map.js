@@ -106,7 +106,7 @@ window.WXAccMap = (() => {
   function controls(bar) {
     bar.innerHTML = '';
     A.metricTabs(bar, k => { sel.metric = k; render(); }, sel.metric);
-    // the system is a select: eighteen names are too many for a row of tabs
+    // the system is a select: seventeen names are too many for a row of tabs
     const group = h('span', { class: 'tabgroup' });
     group.appendChild(h('span', { class: 'tl', text: 'Compare with' }));
     const s = h('select', { class: 'acc-map-sel', 'aria-label': 'Alternative forecast system' });
