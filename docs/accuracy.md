@@ -320,17 +320,16 @@ PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6]],
                reliability: [ per lead bin: CELL ],
                ensembles: { id: { metar: [ per lead bin: CELL ], cli: [...] } },
                brier: BRIER }
-CELL = { n, nCityDays, brier, reliability, resolution, x: [10], y: [10], count: [10], lo: [10], hi: [10], hist: [10] }
+CELL = { n, nCityDays, x: [10], y: [10], count: [10], lo: [10], hi: [10], hist: [10] }
 BRIER = { h: [36..0],
           strikes: { all: BF, nearMoney: BF } }        // BF = { metar: BSET, cli: BSET }
 BSET = { systems: { FX|AIFS|GEFS|GEM|ICON: { rms: [per h], lo, hi, brier: [per h], n: [contracts], days: [city-days] } },
          beats: [per h: {k, of, ids}] }
 ```
 
-A diagram's `reliability` is the square root of Murphy's REL on the ten price
-buckets, the root-mean-square gap between a bucket's mean price and its share
-paid, and `resolution` is RES over UNC, the share of the base-rate uncertainty
-the buckets resolve. The last lead bin (6 to 0 hours) was dropped on
+A diagram cell is the decile curve and its sample; the Brier score, reliability
+and resolution numbers it carried until 2026-09-15 are gone, since nothing drew
+them. The last lead bin (6 to 0 hours) was dropped on
 2026-09-15, since by then most contracts are settled or priced at a cent.
 
 `brier` is the Brier score by whole hour of lead, the mean over contracts of

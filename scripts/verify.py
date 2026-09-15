@@ -207,12 +207,13 @@ def run(no_build: bool) -> int:
                         and len(ensb) >= 4 and brier_sys == {"FX", "AIFS", "GEFS", "GEM", "ICON"} and same_n
                         and "drawn on the city-days all five share" in prob_note,
                         f"key={prob_key} brier={sorted(brier_sys)} same_n={same_n}")
-                rel_titles = page.eval_on_selector_all("#accDiag svg.acc-cal-rel text", "e => e.map(x => x.textContent).filter(t => t.startsWith('Reliability '))")
+                diag_txt = page.eval_on_selector_all("#accDiag svg.acc-cal-rel text", "e => e.map(x => x.textContent)")
+                lead_titles = [t for t in diag_txt if t.endswith("before the day ends")]
                 n_calc = page.locator("#accDiag circle").count()
-                chk.add(f"{scheme} accuracy: the reliability diagrams follow the charts, one per lead bin to six hours out",
-                        len(rel_titles) == 3 and all(re.match(r"^Reliability \d+\.\d c, resolution \d+%$", t) for t in rel_titles)
-                        and n_calc >= 10 and "6 to 0 h" not in " ".join(page.eval_on_selector_all("#accDiag text", "e => e.map(x => x.textContent)")),
-                        str(rel_titles[:2]))
+                chk.add(f"{scheme} accuracy: the reliability diagrams follow the charts, one per lead bin to six hours out, titled by lead and sample only",
+                        lead_titles == ["36 to 24 h before the day ends", "24 to 12 h before the day ends", "12 to 6 h before the day ends"]
+                        and n_calc >= 10 and not any(t.lower().startswith(("reliability", "resolution")) for t in diag_txt),
+                        str(lead_titles))
                 for tab in ("Fixed sample", "Two-sided books only", "NWS climate report", "Near-money strikes"):
                     before = page.locator("#accBrier").inner_html()
                     page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(500)

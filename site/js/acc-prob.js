@@ -41,7 +41,6 @@ window.WXAccProb = (() => {
 
   const fin = v => v != null && isFinite(v);
   const cents1 = v => (fin(v) ? (Math.round(v * 1000) / 10).toFixed(1) + ' c' : A.dash);
-  const pct0 = v => (fin(v) ? Math.round(v * 100) + '%' : A.dash);
   const view = () => (st.metric === 'high' ? 'Highs' : 'Lows') + ', '
     + COHORTS.find(c => c.key === st.cohort).label.toLowerCase()
     + (st.frame === 'cli' ? ', climate-report frame' : '');
@@ -144,7 +143,7 @@ window.WXAccProb = (() => {
     const rel = fx.reliability || [];
     const n = Math.min(bins.length, rel.length) || 1;
     const PW = n <= 3 ? 250 : 200;
-    const H = PW + 92, TOP = 52, GAP = (960 - 46 - 16 - PW * n) / Math.max(n - 1, 1);
+    const H = PW + 80, TOP = 40, GAP = (960 - 46 - 16 - PW * n) / Math.max(n - 1, 1);
     const svg = el('svg', { viewBox: '0 0 960 ' + H, class: 'acc-cal-rel' });
     const C_FX = A.color('FX');
     const maxCount = Math.max(1, ...rel.map(r => Math.max(0, ...(r.count || []).filter(fin))));
@@ -207,8 +206,6 @@ window.WXAccProb = (() => {
       const leadTxt = bins[i] ? bins[i][0] + ' to ' + bins[i][1] + ' h before the day ends' : 'lead bin ' + (i + 1);
       svg.appendChild(txt(leadTxt, { x: g.L, y: 13, 'font-size': 11, 'font-weight': 700, fill: 'var(--ink)' }));
       svg.appendChild(txt(A.int(r.n) + ' contracts, ' + A.int(r.nCityDays) + ' city-days', { x: g.L, y: 27, class: 'ax' }));
-      svg.appendChild(txt('Reliability ' + cents1(r.reliability) + ', resolution ' + pct0(r.resolution),
-                          { x: g.L, y: 41, class: 'ax', 'font-weight': 700 }));
       if (!pts.length) svg.appendChild(txt('no priced bin', { x: (g.L + g.R) / 2, y: (g.T + g.B) / 2, 'text-anchor': 'middle', class: 'axl' }));
     }
     svg.appendChild(txt('Yes price, cents', { x: 480, y: H - 6, 'text-anchor': 'middle', class: 'ax' }));
@@ -279,8 +276,7 @@ window.WXAccProb = (() => {
         'For the ForecastEx prediction market $p$ is the contract\u2019s Yes price, with both sides bid',
         { tex: 'p = \\frac{\\text{Yes bid} + (1 - \\text{No bid})}{2}' },
         'and with one side bid, the midpoint against the empty side at its limit, a missing Yes bid counting as 1 cent and a missing No bid as a 99-cent ask, since the one quoted side is the price to trade rather than a midpoint. A lone side at that limit is an empty book.',
-        'A contract’s price should equal the probability it pays off. A reliability diagram plots the average price in a ten-cent bucket against the share of the bucket’s contracts that paid, and honest prices fall on the diagonal. Each diagram’s title gives two numbers from Murphy’s decomposition of the Brier score, reliability, the root-mean-square gap between a bucket’s price and its share paid, and resolution, the share of the base-rate uncertainty the buckets resolve.',
-        { tex: '\\text{Reliability} = \\sqrt{\\tfrac{1}{N}\\textstyle\\sum_k n_k(\\bar p_k - \\bar y_k)^2} \\qquad \\text{Resolution} = \\frac{\\tfrac{1}{N}\\sum_k n_k(\\bar y_k - \\bar y)^2}{\\bar y(1-\\bar y)}' },
+        'A contract’s price should equal the probability it pays off. A reliability diagram plots the average price in a ten-cent bucket against the share of the bucket’s contracts that paid, and honest prices fall on the diagonal.',
       ],
       rules: [
         'For the ForecastEx prediction market the distribution is its price ladder. Its Yes price is read as above, or with the Price tab set to two-sided books, from books with both sides bid only. A book bidding one cent against ninety-nine cents is unquoted. CRPS reads the ladder as quoted, forced monotone across strikes by pooling violations and closed at the end strikes.',
@@ -290,7 +286,7 @@ window.WXAccProb = (() => {
         'Every system is scored at the same instant on the same strikes. Lead counts down to station-local midnight, the moment the target day ends; the ForecastEx prediction market is read on the last ladder snapshot of each hour and an ensemble on its most recent capture at or before that hour. Every chart and diagram uses only the contracts the ForecastEx prediction market quoted at hours when all four ensembles hold a reading, so every line is drawn on the same contracts and the same days.',
         'Near-money strikes are the middle listed strike of the day’s ladder and the strike on either side. The middle is fixed by the listing, before any lead is scored and whatever any system forecast, so it picks the same contracts for every system.',
         'Two sets of days are available, every day all five share, or those restricted to the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted.',
-        'The diagrams pool a bucket under 50 contracts toward the 50-cent bucket, and the two numbers in each title use the ten buckets as they are. The last six hours have no diagram, since by then most contracts are settled or priced at a cent.',
+        'The diagrams pool a bucket under 50 contracts toward the 50-cent bucket. The last six hours have no diagram, since by then most contracts are settled or priced at a cent.',
         'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, and a lead with under 30 city-days is not drawn. The beats strips count the ensembles the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference over the days both hold, resampled under the same draws, lies entirely in its favor.',
       ],
       span: sharedLine() + (es.length ? ' The ensembles’ spreads are on record from ' + A.mdyY(es[0]) + '.' : '')
