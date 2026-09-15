@@ -1,4 +1,4 @@
-/* Figure 4, the city map: where ForecastEx beats or trails a chosen alternative forecast system.
+/* The city map: where ForecastEx beats or trails a chosen alternative forecast system.
 
    The lead curve and the grid pool every station; a reader who trades one
    city wants to know whether the ForecastEx prediction market beat the system there. Each station
@@ -21,9 +21,8 @@ window.WXAccMap = (() => {
   // map is shifted down to leave one title line and one summary line above it.
   const TOP = 40, H = 600 + TOP;
   const WINDOWS = [
-    { key: 'morning', label: 'Morning 06 to 12 local', title: 'The standing value held on the morning of the target day, 06 to 12 in the station clock' },
-    { key: 'eve', label: 'Evening before, 18:00 local', title: 'The standing value held at 18:00 station time on the day before' },
-    { key: 'newsletter', label: 'Newsletter 5 PM to 5 AM ET', title: 'The hours the daily letter is written and read, 5 PM to 5 AM Eastern' },
+    { key: 'morning', label: 'Morning, 6 AM to noon', title: 'The average value held on the morning of the target day, 6 AM to noon station time' },
+    { key: 'eve', label: 'Evening before, 6 PM', title: 'The value held at 6 PM station time on the day before' },
   ];
   const FRAMES = [
     { key: 'metar', label: 'METAR settle', title: 'The system scored against the settle the contracts pay on' },
@@ -36,7 +35,7 @@ window.WXAccMap = (() => {
   // "the National Weather Service" but "GFS MOS": a name that opens with an
   // acronym takes no article
   const withArticle = id => (/^[A-Z]{2,}/.test(A.name(id)) ? '' : 'the ') + A.name(id);
-  const WNAME = { morning: 'morning 06 to 12 local', eve: 'evening before at 18:00 local', newsletter: 'newsletter hours, 5 PM to 5 AM ET' };
+  const WNAME = { morning: 'morning of the target day, 6 AM to noon', eve: 'evening before, 6 PM' };
   const FNAME = { metar: 'METAR settle frame', cli: 'NWS climate report frame' };
 
   let D = null, base = null, basePending = null;
@@ -96,8 +95,7 @@ window.WXAccMap = (() => {
   const piFill = pi => mix(pi >= 0 ? 'var(--ok)' : 'var(--bad)', Math.abs(pi) / scale.piCap);
   const maeFill = mae => mix('var(--navy)', mae / scale.maeCap);
   const signedPct = v => (v == null || isNaN(v) ? A.dash : (v > 0 ? '+' : v < 0 ? '−' : '') + A.f1(Math.abs(v)) + '%');
-  const minusPct = v => (v == null || isNaN(v) ? A.dash : (v < 0 ? '−' : '') + A.f1(Math.abs(v)) + '%');
-  const pctIv = (lo, hi) => (lo == null || hi == null ? A.dash : minusPct(lo) + ' to ' + minusPct(hi));
+  const pctIv = (lo, hi) => (lo == null || hi == null ? A.dash : signedPct(lo) + ' to ' + signedPct(hi));
   // the whole percent inside a dot, signed after rounding so a small value
   // never prints as a signed zero
   const wholePct = v => { if (v == null || isNaN(v)) return A.dash; const r = Math.round(v); return (r > 0 ? '+' : r < 0 ? '−' : '') + Math.abs(r); };
@@ -106,11 +104,12 @@ window.WXAccMap = (() => {
   function controls(bar) {
     bar.innerHTML = '';
     A.metricTabs(bar, k => { sel.metric = k; render(); }, sel.metric);
-    // the system is a select: seventeen names are too many for a row of tabs
+    // the system is a select: seventeen names are too many for a row of tabs;
+    // they are listed in the forecast systems table's order
     const group = h('span', { class: 'tabgroup' });
     group.appendChild(h('span', { class: 'tl', text: 'Compare with' }));
     const s = h('select', { class: 'acc-map-sel', 'aria-label': 'Alternative forecast system' });
-    A.TOOLS.forEach(id => s.appendChild(h('option', { value: id, text: A.name(id) })));
+    A.systemGroups(A.TOOLS).flatMap(g => g.ids).forEach(id => s.appendChild(h('option', { value: id, text: A.name(id) })));
     s.value = sel.tool;
     s.onchange = () => { sel.tool = s.value; render(); };
     group.appendChild(s);
@@ -132,8 +131,6 @@ window.WXAccMap = (() => {
       ['Improvement', signedPct(c.pi)],
       ['95 percent interval', pctIv(c.lo, c.hi)],
       ['Matched city-days', A.int(c.matched)],
-      ['ForecastEx changes in the window', A.f1(c.fxChanges)],
-      [A.short(sel.tool) + ' changes in the window', A.f1(c.toolChanges)],
     ], (straddles(c) ? 'The interval covers zero, so the dot is grey. ' : '') + foot);
   }
 
@@ -152,9 +149,9 @@ window.WXAccMap = (() => {
     let summary;
     if (!cells) summary = 'The file carries no values for this system in this frame.';
     else if (med && med.pi != null) {
-      summary = 'Median improvement across cities ' + signedPct(med.pi)
+      summary = 'Median improvement ' + signedPct(med.pi) + ' across the ' + A.int(med.cities) + ' cities with at least 30 matched city-days'
         + (med.lo != null && med.hi != null ? ', interval ' + pctIv(med.lo, med.hi) : '')
-        + ', ' + A.int(med.colored) + ' of ' + cities.length + ' cities colored';
+        + '; ' + A.int(med.colored) + ' of ' + cities.length + ' cities colored';
       if (sel.mode === 'mae') summary += '. Left dot ForecastEx, right dot the system, darker is the larger error';
     } else summary = 'No median published for this selection';
     svg.appendChild(txt(summary, { x: 16, y: 31, class: 'axl', fill: 'var(--muted)' }));
@@ -187,7 +184,7 @@ window.WXAccMap = (() => {
         dot.appendChild(el('circle', { cx: city.px, cy: city.py, r: 1.8, fill: 'var(--muted)', stroke: 'none' }));
       }
       const hollowWhy = !cells ? 'The system carries no values in this frame'
-        : excluded(city.id) ? 'Denver’s climate report stands in for Buckley Field, which the climate frame excludes'
+        : excluded(city.id) ? 'Buckley Field has no climate report of its own, so it drops out of the climate-report frame'
         : 'Under 30 matched city-days for this system';
       const ink = { 'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl', 'text-anchor': 'middle' };
       if (!c) {
@@ -320,7 +317,7 @@ window.WXAccMap = (() => {
         key.appendChild(sw('background:var(--panel);border:2px solid ' + A.color(sel.tool), 'right dot ' + A.name(sel.tool) + (ts ? ', ' + ts : '')));
       }
       key.appendChild(sw('background:var(--panel);border:1.2px dashed var(--muted)', 'hollow, under 30 matched city-days or excluded from the frame'));
-      key.appendChild(h('span', { class: 'kn', text: 'Dot size follows the matched count. Colorado Springs and Honolulu are not drawn. Colorado Springs was a test listing the exchange never carried, and Honolulu falls outside this page\u2019s scope.' }));
+      key.appendChild(h('span', { class: 'kn', text: 'Dot size follows the number of matched city-days.' }));
     }
 
     let n = 0, k = 0;
@@ -329,19 +326,18 @@ window.WXAccMap = (() => {
       title: 'Percent improvement by city',
       body: [
         'Each city is scored on the city-days where both the system and the ForecastEx prediction market have a value in the chosen window, so the comparison is always paired on the same days.',
-        { tex: 'MAE_{s,c} = \\text{mean over matched city-days of city } c \\text{ of } |v_s - \\text{settle}|' },
-        { tex: 'PI_c = 100 \\times \\frac{MAE_{sys,c} - MAE_{FX,c}}{MAE_{sys,c}}' },
-        'A positive $PI_c$ means ForecastEx had the smaller error in that city. A dot is grey when the bootstrap interval on the paired difference covers zero.',
+        { tex: 'PI_{s,c} = 100 \\times \\frac{MAE_{s,c} - MAE_{FX,c}}{MAE_{s,c}}' },
+        'where $MAE_{s,c}$ is system $s$\u2019s mean absolute error over the matched city-days of city $c$ and $MAE_{FX,c}$ the ForecastEx prediction market\u2019s on the same days. A positive $PI_{s,c}$ means ForecastEx had the smaller error in that city. A dot is grey when the bootstrap interval on $PI_{s,c}$ covers zero.',
       ],
       rules: [
-        'Windows are the morning of the target day, 6 AM to noon station time, the evening before at 6 PM station time, and the newsletter\u2019s own hours, 5 PM to 5 AM Eastern.',
+        'Two windows are available, the morning of the target day from 6 AM to noon station time, and the evening before at 6 PM station time.',
         'A city with fewer than 30 matched city-days is hollow.',
-        'A value is the mean over the window\u2019s instants of the system\u2019s standing value, its most recent forecast at or before each instant held at the running observed extreme, and the ForecastEx prediction market\u2019s is its median, where its ladder of Yes prices crosses fifty cents. The settle is the station\u2019s highest or lowest hourly METAR reading of the day rounded to the nearest whole degree.',
-        'Intervals are 95 percent bootstrap intervals over 1,000 resamples of the target dates, with the ForecastEx prediction market and the system resampled together so both sides of the difference move under the same draws.',
-        'The climate-report frame scores alternative forecast systems against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, so a gap between frames reflects that difference in definition rather than in forecast skill. Denver\u2019s climate-report figures stand in for Buckley Field, which has none of its own.',
+        'A city-day\u2019s value is the mean of the system\u2019s value at each whole hour of the window, its most recent forecast at or before that hour held at the running observed extreme, and it counts only when every hour of the window holds one. The ForecastEx prediction market\u2019s value is its median, where its ladder of Yes prices crosses fifty cents, held the same way. The settle is the station\u2019s highest or lowest hourly METAR reading of the day rounded to the nearest whole degree.',
+        'Intervals are 95 percent bootstrap intervals over 1,000 resamples of the target dates, with the ForecastEx prediction market and the system resampled together so both sides of the ratio move under the same draws.',
+        'The median above the map is taken over every city with at least 30 matched city-days, grey or colored, and its interval is the spread of that median across the same resamples.',
+        'The climate-report frame scores the alternative forecast system against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, while the ForecastEx prediction market keeps the settle it pays on, so a gap between frames reflects that difference in definition rather than in forecast skill. Buckley Field has no climate report of its own, only Denver\u2019s, so it drops out of that frame and is drawn hollow.',
       ],
-      span: A.spanLine(D.map && D.map.meta, ['FX', sel.tool], sel.metric,
-                       { lead: 'Records run from' }) + ' The pair is scored only where both hold a value.',
+      span: A.spanLine(D.map && D.map.meta, ['FX', sel.tool], sel.metric, { lead: 'Records run from' }),
       n: cells ? 'Sample ' + A.int(n) + ' matched city-days across ' + k + ' cities in this view.'
                : 'The file carries no values for this system in this frame.',
     });

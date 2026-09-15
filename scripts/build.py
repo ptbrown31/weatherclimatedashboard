@@ -86,10 +86,10 @@ def systems_rows(reg: dict) -> str:
             kind = r.get("kind", "")
             attrs = "".join(' data-%s="%s"' % (k, esc(r[k])) for k in ("id", "ens") if r.get(k))
             out.append('<tr><td class="sys"><a href="%s">%s</a></td><td>%s</td>'
-                       '<td class="kind k-%s">%s<span>%s</span></td><td>%s</td><td>%s</td><td>%s</td>'
+                       '<td class="kind k-%s">%s</td><td>%s</td><td>%s</td><td>%s</td>'
                        '<td class="rec"%s>&mdash;</td></tr>'
                        % (esc(r["url"]), esc(r["name"]), esc(r["what"]), esc(kind.split()[0].lower() if kind else ""),
-                          esc(kind), esc(r.get("where", "")), esc(r.get("grid", "")), esc(r.get("step", "")),
+                          esc(kind), esc(r.get("grid", "")), esc(r.get("step", "")),
                           esc(r.get("updates", "")), attrs))
     return "\n".join(out)
 

@@ -91,7 +91,7 @@ class Job(unittest.TestCase):
 
     # ------------------------------------------------------------ publishing
     def test_a_manifest_with_two_files_publishes_them_and_then_the_manifest(self):
-        files = {"availability.json": fixture("availability.json"),
+        files = {"map.json": fixture("map.json"),
                  "calibration.json": fixture("calibration.json")}
         self.ship(files)
         self.assertEqual(self.run_pass(), 0)
@@ -125,7 +125,7 @@ class Job(unittest.TestCase):
 
     # ---------------------------------------------------------- idempotence
     def test_the_same_build_a_second_time_writes_nothing(self):
-        files = {"availability.json": fixture("availability.json"),
+        files = {"map.json": fixture("map.json"),
                  "calibration.json": fixture("calibration.json")}
         self.ship(files)
         self.assertEqual(self.run_pass(), 0)
@@ -135,19 +135,19 @@ class Job(unittest.TestCase):
         self.assertEqual(self.st.deletes, [])
 
     def test_a_new_built_stamp_publishes_again(self):
-        files = {"availability.json": fixture("availability.json")}
+        files = {"map.json": fixture("map.json")}
         self.ship(files)
         self.assertEqual(self.run_pass(), 0)
         self.ship(files, built="2026-09-11T10:50:00Z")
         self.assertEqual(self.run_pass(), 0)
         self.assertEqual(self.published()["built"], "2026-09-11T10:50:00Z")
-        self.assertIn(accuracy.DST_PREFIX + "availability.json", [k for k, _c, _h in self.st.puts])
+        self.assertIn(accuracy.DST_PREFIX + "map.json", [k for k, _c, _h in self.st.puts])
 
     # ------------------------------------------------------------ transport
     def test_a_hash_mismatch_publishes_nothing_and_reports_it(self):
-        avail, cal = fixture("availability.json"), fixture("calibration.json")
-        self.ship({"availability.json": avail, "calibration.json": cal},
-                  entries=[entry("availability.json", avail),
+        mp, cal = fixture("map.json"), fixture("calibration.json")
+        self.ship({"map.json": mp, "calibration.json": cal},
+                  entries=[entry("map.json", mp),
                            entry("calibration.json", cal, sha256="0" * 64)])
         self.assertEqual(self.run_pass(), 1)
         self.assertEqual(self.st.puts, [])
@@ -157,39 +157,39 @@ class Job(unittest.TestCase):
         self.assertIn("sha256", failed[0]["reason"])
 
     def test_a_size_mismatch_is_a_transport_fault_too(self):
-        avail = fixture("availability.json")
-        self.ship({"availability.json": avail}, entries=[entry("availability.json", avail, size=len(avail) - 1)])
+        mp = fixture("map.json")
+        self.ship({"map.json": mp}, entries=[entry("map.json", mp, size=len(mp) - 1)])
         self.assertEqual(self.run_pass(), 1)
         self.assertEqual(self.st.puts, [])
         self.assertIn("size", archive.LAST_STATUS["failed"][0]["reason"])
 
     def test_a_listed_file_that_is_not_there_fails_the_build(self):
-        avail = fixture("availability.json")
-        self.ship({"availability.json": avail},
-                  entries=[entry("availability.json", avail), entry("grid.json", fixture("grid.json"))])
+        mp = fixture("map.json")
+        self.ship({"map.json": mp},
+                  entries=[entry("map.json", mp), entry("grid.json", fixture("grid.json"))])
         self.assertEqual(self.run_pass(), 1)
         self.assertEqual(self.st.puts, [])
         self.assertEqual(archive.LAST_STATUS["failed"][0], {"name": "grid.json", "reason": "missing"})
 
     def test_a_name_that_leaves_the_prefix_is_refused(self):
-        avail = fixture("availability.json")
-        self.ship({"availability.json": avail},
-                  entries=[entry("availability.json", avail), entry("../summary.json", avail)])
+        mp = fixture("map.json")
+        self.ship({"map.json": mp},
+                  entries=[entry("map.json", mp), entry("../summary.json", mp)])
         self.assertEqual(self.run_pass(), 1)
         self.assertEqual(self.st.puts, [])
 
     # ------------------------------------------------------------- the meta
     def test_a_file_failing_the_meta_check_is_skipped_and_reported(self):
-        good = fixture("availability.json")
+        good = fixture("map.json")
         body = json.loads(fixture("calibration.json"))
         body["meta"]["conventions"] = "v2"          # built under conventions the page does not draw
         bad = json.dumps(body).encode()
-        self.ship({"availability.json": good, "calibration.json": bad})
+        self.ship({"map.json": good, "calibration.json": bad})
         self.assertEqual(self.run_pass(), 0)
-        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "availability.json"), good)
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "map.json"), good)
         self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "calibration.json"))
         pub = self.published()
-        self.assertEqual(pub["files"], ["availability.json"])
+        self.assertEqual(pub["files"], ["map.json"])
         self.assertEqual([s["name"] for s in pub["skipped"]], ["calibration.json"])
         self.assertIn("conventions", pub["skipped"][0]["reason"])
         self.assertEqual([s["name"] for s in archive.LAST_STATUS["skipped"]], ["calibration.json"])
@@ -208,15 +208,14 @@ class Job(unittest.TestCase):
         self.assertIn("built", accuracy.check_meta("trace/2026-09-09.json", {"meta": {"date": "2026-09-09"}}))
 
     def test_the_fixtures_carry_the_stamps(self):
-        for name in ("availability.json", "calibration.json", "grid.json", "lead-curve.json",
-                     "map.json") + tuple(TRACES):
+        for name in ("calibration.json", "grid.json", "lead-curve.json", "map.json") + tuple(TRACES):
             self.assertIsNone(accuracy.check_meta(name, json.loads(fixture(name))), name)
 
     def test_a_file_that_is_not_json_is_skipped_not_fatal(self):
-        good, bad = fixture("availability.json"), b"{not json"
-        self.ship({"availability.json": good, "grid.json": bad})
+        good, bad = fixture("map.json"), b"{not json"
+        self.ship({"map.json": good, "grid.json": bad})
         self.assertEqual(self.run_pass(), 0)
-        self.assertEqual(self.published()["files"], ["availability.json"])
+        self.assertEqual(self.published()["files"], ["map.json"])
         self.assertEqual(self.published()["skipped"][0]["reason"], "not valid JSON")
 
     # -------------------------------------------------------------- pruning
@@ -226,7 +225,7 @@ class Job(unittest.TestCase):
         self.st.put(accuracy.DST_PREFIX + "trace/2026-07-01.json", b'{"meta":{"date":"2026-07-01"}}')
         self.st.put(accuracy.DST_PREFIX + "trace/2026-07-02.json", b'{"meta":{"date":"2026-07-02"}}')
         new = fixture(TRACE_OLD)
-        self.ship({TRACE_OLD: new, "availability.json": fixture("availability.json")})
+        self.ship({TRACE_OLD: new, "map.json": fixture("map.json")})
         self.assertEqual(self.run_pass(), 0)
         self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-07-01.json"))
         self.assertIsNone(self.st.get(accuracy.DST_PREFIX + "trace/2026-07-02.json"))
@@ -240,7 +239,7 @@ class Job(unittest.TestCase):
     def test_a_build_with_no_traces_clears_the_published_ones(self):
         for name in TRACES:
             self.st.put(accuracy.DST_PREFIX + name, fixture(name))
-        self.ship({"availability.json": fixture("availability.json")})
+        self.ship({"map.json": fixture("map.json")})
         self.assertEqual(self.run_pass(), 0)
         for name in TRACES:
             self.assertIsNone(self.st.get(accuracy.DST_PREFIX + name))
@@ -251,14 +250,14 @@ class Job(unittest.TestCase):
         # ships it without its stamps. Skipping the copy must not also delete
         # the copy already published, since the manifest still names it.
         self.st.put(accuracy.DST_PREFIX + TRACE_OLD, fixture(TRACE_OLD))
-        self.ship({TRACE_OLD: b'{"meta":{}}', "availability.json": fixture("availability.json")})
+        self.ship({TRACE_OLD: b'{"meta":{}}', "map.json": fixture("map.json")})
         self.assertEqual(self.run_pass(), 0)
         self.assertIsNotNone(self.st.get(accuracy.DST_PREFIX + TRACE_OLD))
         self.assertEqual(self.st.deletes, [])
 
     # ------------------------------------------------------------- deadline
     def test_out_of_time_leaves_the_published_set_alone(self):
-        self.ship({"availability.json": fixture("availability.json")})
+        self.ship({"map.json": fixture("map.json")})
         self.cfg["_deadline_end"] = 0.0             # the chain's budget is already spent
         self.assertEqual(self.run_pass(), 0)
         self.assertEqual(self.st.puts, [])
@@ -291,9 +290,9 @@ class Staleness(Job):
 
     def test_the_alarm_travels_on_the_health_channel_without_being_an_error(self):
         from pipeline import archive as arch
-        self.ship({"availability.json": fixture("availability.json")})
+        self.ship({"map.json": fixture("map.json")})
         # a manifest whose build is old: the pass still succeeds
-        old = manifest([entry("availability.json", fixture("availability.json"))],
+        old = manifest([entry("map.json", fixture("map.json"))],
                        built="2026-01-01T00:00:00Z")
         self.st.put(accuracy.SRC_MANIFEST, old)
         self.assertEqual(self.run_pass(), 0)

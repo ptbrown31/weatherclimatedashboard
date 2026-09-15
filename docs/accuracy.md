@@ -20,10 +20,8 @@ the international stations are outside this page's scope.
 **Clock.** One clock everywhere. For a city-day `i` with station-local date `D`,
 `T_i` is the station-local midnight that ends `D`, in UTC through the zone.
 Lead `h = (T_i - t) / 3600` in hours. An alternative forecast system's timestamp `t` is the moment its
-value was in the capture panel's hands (the capture time), which is an upper
-bound on its availability; the ForecastEx prediction market's timestamp is the ladder snapshot's own
-time. Issuance times are recorded only for nine of the seventeen sources and
-appear only as a sensitivity in the method note.
+value was captured, which is an upper bound on its availability; the
+ForecastEx prediction market's timestamp is the ladder snapshot's own time.
 
 **Truth.** The ForecastEx prediction market pays on the station's METAR settle: the day's extreme
 over hourly and special reports, rounded half up to a whole degree Fahrenheit,
@@ -113,7 +111,7 @@ mean absolute error less the capture's, in degrees:
 A positive number is a handicap against the reconstructed source. Most cells
 are a tenth of a degree or less against errors of about two degrees, and the
 median of the two values themselves is identical to a tenth. Two cells are
-large enough to matter and the page says so: the European model's highs, where
+large enough to matter: the European model's highs, where
 the reconstruction is about half a degree worse in the middle of the day, and
 the American model's lows, where it is nine tenths worse at 18 hours. The
 measurement is rebuilt with the record by `om_measure.py` beside the builder.
@@ -208,10 +206,17 @@ but only out to 18 hours, which cannot be drawn across this page's whole lead
 range, so the Open-Meteo rendering of the same model is the one kept and is
 named simply HRRR.
 
-Every export uses these ids. There are no sub-groups: every system beside the exchange's own market is an alternative forecast system and is presented the same way as the others.
+The three ensembles with no single-run row of their own are `GEFS` (American
+Ensemble), `GEM_ENS` (Canadian Ensemble) and `ICON_ENS` (German Ensemble);
+the calibration file keys them `GEFS`, `GEM` and `ICON`.
+
+Every file uses these ids. Every system beside the ForecastEx prediction
+market is an alternative forecast system. The page groups them into families
+only through `config/forecast_systems.json`, which orders the systems table
+and the scorecard grid alike.
 
 AIFS is ECMWF's AI forecasting system, captured directly as the hourly
-ensemble mean at eight runs a day rather than through the panel, so its daily
+ensemble mean at eight runs a day, so its daily
 extreme is taken here as the maximum and minimum of the captured hours over
 the station-local day, from each capture that covers the whole of it.
 
@@ -221,9 +226,9 @@ All files sit under `snapshots/accuracy/`. Every file carries
 
 ```
 meta: { schema, asof, built, window: {from, to}, roster: [ids], conventions: "v1",
-        cohorts: {fixed30: {from, cities, n_high, n_low}},
+        cohorts: {own: {from, cities, n_high, n_low}, fixed30: {...}},
         exclusions: [{reason, dates, count}],
-        systems: {id: {name, start, lag_p50_h, kind,
+        systems: {id: {name, start, kind,
                        scored: {start, end, days},
                        byMetric: {high: {start, end, days}, low: {...}}}} }
 ```
@@ -232,9 +237,12 @@ meta: { schema, asof, built, window: {from, to}, roster: [ids], conventions: "v1
 value at any grid hour, so it is when the source entered the capture. `scored`
 is narrower: the first and last target date the system was actually scored on
 and how many such dates there are, after exclusions. `byMetric` splits that by
-high and low, which the ForecastEx prediction market needs, since its highs were priced from the day
-the temperature board opened and its lows were too thinly quoted to score for
-some months after. The page prints the scored span, not the raw one.
+high and low, which the ForecastEx prediction market needs, since its highs
+and lows do not share a span. The page prints the scored span, not the raw
+one. `cohorts.own` counts the ForecastEx prediction market's own eligible
+city-days and `cohorts.fixed30` the fixed sample; `exclusions` is one entry
+per reason, `dates` its distinct dates and `count` what the builder counted
+for it, summed over highs and lows.
 
 `schema` is the string `accuracy-figures/1`. `asof` is the newest resolved
 target date; `built` the build time. Numbers are rounded to three decimals;
@@ -246,8 +254,8 @@ counts are integers; a missing value is `null`.
 { meta, metric: {high: BLOCK, low: BLOCK} }
 BLOCK = { h: [36..0],
           cohorts: { own: SERIES, fixed30: SERIES },
-          own: { id: {h: [...], mae: [...], n: [...]} },  // per-horizon own span, no interval
-          crps: CRPS
+          crps: CRPS,
+          converge: CONVERGE
         }
 CRPS = { h: [36..0],
          cohorts: { own: { metar: CV, cli: CV }, fixed30: { metar: CV, cli: CV } },
@@ -257,8 +265,8 @@ CV = { systems: { FX|AIFS|GEFS|GEM|ICON: { crps: [per h], lo: [per h], hi: [per 
 SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
                                        maeRaw: [per h], loRaw, hiRaw,          // forecast-only view
                                        maeCli: [per h], loCli, hiCli,          // climate-report frame
-                                       lastLiveH: int|null,                    // where the raw line ends
-                                       ageMedianH: [per h], changesPerHour: [per h] } },
+                                       n: [per h], nRaw, nCli,                 // the system's own city-days per view
+                                       lastLiveH: int|null } },                // where the raw line ends
            beats: [per h: {k: int, of: int, ids: [ids beaten]}],
            beatsRaw: [per h: ...],
            beatsCli: [per h: ...],
@@ -269,8 +277,11 @@ the National Weather Service report for the same date while the market keeps
 the settle it pays on, so the market's `maeCli` equals its `mae` and Buckley
 Field drops out of the frame.
 
-Bins with `n < 30` carry `null` values. `h` above 30 is present only where the
-cohort has members.
+`SERIES.n` is the ForecastEx prediction market's count of city-days per bin,
+which the page prints in its strip; each system's own `n`, `nRaw` and `nCli`
+count the city-days behind its value in each view. A system's bin with fewer
+than 30 carries `null` values. `h` above 30 is present only where the cohort
+has members.
 
 `crps` is the CRPS by lead that the probabilistic section draws. The market is
 scored on its own standing ladder at each whole hour, and each ensemble at the
@@ -289,7 +300,7 @@ report. There is no forecast-only CRPS.
 `converge` is time to converge, drawn under the error curve:
 
 ```
-converge: { h: [36..0],
+CONVERGE = { h: [36..0],
             tol1: { own|fixed30: { metar|cli: { systems: { id: { share: [per h], median, never } } } } },
             tol2: { ... } }
 ```
@@ -355,8 +366,7 @@ priced at every hour from 30 to 0, the lead curve's two day bases. The Yes-bid
 price rule was dropped from the file on 2026-09-15.
 
 Shapes the builder settled where the text above was loose: grid cells carry `nLow` beside `n`;
-availability exclusion rows carry `metric`; map cells are nested tool id then
-city id; `meta.cohorts` includes `fixed30`.
+map cells are nested tool id then city id.
 
 Four of the alternative forecast systems publish the spread of their ensemble
 members as well as a centre, so they are scored on the same contracts. Their
@@ -388,20 +398,28 @@ extreme.
 Two limits belong with these lines and are stated on the page: a system
 publishes a spread for each hour rather than for the extreme of several hours,
 so reading the spread at the hour of the extreme as the extreme's is this
-page's approximation and not the system's; and the level bias each carries in
-the error figures passes straight into its probability here, which shows up as
-reliability.
+page's approximation and not the system's; and the level bias in each
+ensemble's centre, which the scorecard's mean error shows, passes straight
+into its probability.
 
 ### map.json
 
 ```
 { meta, cities: [ { id, name, px, py, tz } ],
-  windows: { morning: "06 to 12 local", eve: "18:00 local the day before", newsletter: "5 PM to 5 AM ET" },
-  metric: { high: { window: { morning: CELLS, eve: CELLS, newsletter: CELLS } }, low: {...} } }
-CELLS = { frame: { metar: { toolId: { cityId: { fx: {mae, n}, tool: {mae, n}, pi, lo, hi, matched: n, fxChanges, toolChanges } | null } },
-                   cli:   { ... } }, median: { frame: { toolId: {pi, lo, hi, colored: int} } } }
+  windows: { morning: "6 AM to noon local", eve: "6 PM local the day before" },
+  metric: { high: { window: { morning: CELLS, eve: CELLS } }, low: {...} } }
+CELLS = { frame: { metar: { toolId: { cityId: { fx: {mae}, tool: {mae}, pi, lo, hi, matched } } },
+                   cli:   { ... } },
+          median: { metar: { toolId: {pi, lo, hi, cities, colored} }, cli: { ... } } }
 ```
-A city with fewer than 30 matched city-days for an alternative forecast system carries `null` values.
+A city-day's value in a window is the mean of the held value at each whole
+hour of it (h 18 to 12 for the morning, h 30 for the evening before), and
+counts only when every hour holds one. `pi` is 100 (1 - MAE_fx / MAE_tool)
+on the matched city-days, with its interval from the ratio under the shared
+draws. A city with fewer than 30 matched city-days carries `null` values. The
+median runs over every city with a value (`cities`), its interval from the
+per-draw median, and `colored` counts the cities whose own interval clears
+zero. The newsletter window and the change counts were removed on 2026-09-15.
 
 ### grid.json
 
@@ -411,12 +429,14 @@ A city with fewer than 30 matched city-days for an alternative forecast system c
   cohorts: { own: ROWS, fixed30: ROWS },
   frames: ["metar", "cli"] }
 ROWS = [ { id, start, frame: { metar: CELLS, cli: CELLS } } ]
-CELLS = { h: { "30": { maeHigh, maeLow, meHigh, meLow, hr1High, n, nLow, ssHigh, ssLo, ssHi,
+CELLS = { h: { "30": { maeHigh, maeLow, meHigh, meLow, n, nLow, ssHigh, ssLo, ssHi,
                        crps, crpsLow } ... } }   // crps keys only on rows with a distribution
 ```
-`ss` is the percent difference from the National Weather Service row on the
-same cells; a `null` interval means the paired interval covered zero. The 6 h
-column and the newsletter ranking were removed on 2026-09-14.
+`ssHigh` is the skill score on the high, 100 (1 - MAE_s / MAE_NWS) on the
+city-days the row shares with the National Weather Service row; `ssLo` and
+`ssHi` are `null` when its interval covered zero. The 6 h column and the
+newsletter ranking were removed on 2026-09-14, and the hour-one column on
+2026-09-15.
 
 The rows are every system in order, then the ensembles with no single-run row
 of their own, under their registry ids `GEFS`, `GEM_ENS` and `ICON_ENS`. An
@@ -433,12 +453,7 @@ score: it groups and orders them from `config/forecast_systems.json`, the same
 registry the forecast systems table at the foot of the page is rendered from
 at build time, so a change to the grouping or the order there moves both.
 
-### availability.json
-
-```
-{ meta, metric: { high: { h: [36..0], systems: { id: [n per h] } } },
-  exclusions: [ {reason, date, count} ], starts: { id: {perHorizon, fixedAnchor} } }
-```
+The standalone `availability.json` was retired on 2026-09-15; nothing drew it.
 
 ## 4. Transport
 
@@ -492,19 +507,16 @@ the ForecastEx prediction market first and then the alternative systems in four
 families: raw numerical weather prediction models, numerical weather prediction
 with model output statistics, human forecasting systems, and AI systems. Each
 row says whether the system is deterministic, an ensemble mean, or
-probabilistic, and which section it appears in; gives the provider's grid
-spacing, time step and update frequency; and links to its documentation. For
+probabilistic; gives the provider's grid spacing, time step and update
+frequency; and links to its documentation. For
 the systems whose run times this record holds, the update frequency is the one
 measured from those run times. The record column is filled at load from each
 system's scored span in the files' meta, and for an ensemble from the days its
 probabilities were scored on. A second table lists the other data sources
-behind the site, which the FAQ used to carry.
+behind this page.
 
 **Spans are printed everywhere.** The systems do not share a record. The
-systems table dates every record. Every figure's method note carries a span line saying
-which days that view used, every legend entry carries the date its system's
-record starts, and the scorecard grid carries a `Record since` column in every
-cohort, beside the cohort's own first day. A sample begins where the
-last of its members begins, and where the ForecastEx prediction market's own record runs back behind
-that, the note says so rather than letting the cohort's start stand in for the
-market's.
+systems table dates every record. Every figure's method note carries a span
+line saying which days that view used, the deterministic legend carries the
+date each system's record starts, and the scorecard grid carries a `Record
+since` column in every cohort.

@@ -40,19 +40,19 @@
 <div class="key" id="accProbKey"></div>
 <div id="accProbMethod"></div>
 <div class="secttl">CITY MAP</div>
-<p class="cap" style="margin-top:0">Compares ForecastEx prediction market error to each alternative forecast system’s error at each of the 24 cities, over the time window a reader would actually check, morning of, evening before, or newsletter hours, with the difference and its uncertainty interval.</p>
+<p class="cap" style="margin-top:0">Compares the ForecastEx prediction market&rsquo;s error with one alternative forecast system&rsquo;s in each of the 24 cities, on the morning of the target day or the evening before, as a percent improvement with its uncertainty interval.</p>
 <div class="bar acccontrols" id="accMapBar"></div>
 <div class="card"><svg id="accMap" viewBox="0 0 960 600"></svg></div>
 <div class="key" id="accMapKey"></div>
 <div id="accMapMethod"></div>
 <div class="secttl">SCORECARD GRID</div>
-<p class="cap" style="margin-top:0">Summarizes each system’s mean absolute error and mean error on the high and the low at three leads, with a CRPS for every system that publishes a distribution, scored against both the official settlement and the National Weather Service’s climate report.</p>
+<p class="cap" style="margin-top:0">Summarizes each system&rsquo;s mean absolute error and mean error on the high and the low at three leads, with a CRPS for every system that publishes a distribution, scored against the METAR settle or the National Weather Service climate report.</p>
 <div class="bar acccontrols" id="accGridBar"></div>
 <div class="card"><div id="accGrid"></div></div>
 <div class="key" id="accGridKey"></div>
 <div id="accGridMethod"></div>
 <div class="secttl" id="systems">FORECAST SYSTEMS</div>
-<p class="cap" style="margin-top:0">Every system on this page. A deterministic system issues one forecast per run. A probabilistic system publishes a spread of outcomes as well as a centre, which is what lets the probabilistic skill figures score it on the same contracts as the market. Grid spacing and time step are the provider&rsquo;s published values for the run behind each row. Update frequency is measured from this record&rsquo;s own capture where it holds the run times, and otherwise is the provider&rsquo;s published schedule. The record is how far back this page scores it.</p>
+<p class="cap" style="margin-top:0">Every system on this page. A deterministic system issues one forecast per run. A probabilistic system publishes a spread of outcomes as well as a centre, which is what lets the probabilistic skill figures score it on the same contracts as the ForecastEx prediction market. An ensemble mean is the average of an ensemble&rsquo;s members, scored as one value. Grid spacing and time step are the provider&rsquo;s published values for the run behind each row. Update frequency is measured from this record&rsquo;s own capture where it holds the run times, and otherwise is the provider&rsquo;s published schedule. The record is how far back this page scores it.</p>
 <div class="acc-sources-wrap"><table class="acc-sources">
 <thead><tr><th>System</th><th>What it is</th><th>Kind</th><th>Grid</th><th>Time step</th><th>Updates</th><th>Record</th></tr></thead>
 <tbody>
@@ -64,12 +64,10 @@
 <tbody>
 <tr><td>Observed temperature</td><td><a href="https://aviationweather.gov/data/metar/">aviationweather.gov METAR</a></td><td>Hourly reports plus special reports. The contracts settle on METAR observations, so this is the matching feed. The Iowa State Environmental Mesonet supplies the same reports for earlier dates.</td></tr>
 <tr><td>NWS climate report</td><td>National Weather Service daily climate reports</td><td>The report&rsquo;s daily high and low, the truth in the climate-report frame. Denver&rsquo;s report stands in for Buckley Field.</td></tr>
-<tr><td>Contract prices</td><td><a href="https://forecastex.com/">ForecastEx</a> public market data and its published trade archive</td><td>Every order is a bid to buy Yes or a bid to buy No, and the two sides of a contract sum to one dollar. Pages show the Yes bid and the No bid in cents, and a Yes price midway between the Yes bid and one dollar less the No bid. Nothing is fee adjusted. The exchange charges $0.01 per contract to each side at execution.</td></tr>
+<tr><td>Contract prices</td><td><a href="https://forecastex.com/">ForecastEx</a> public market data and its published trade archive</td><td>Every order is a bid to buy Yes or a bid to buy No, and the two sides of a contract sum to one dollar. This page reads a contract&rsquo;s Yes price as the midpoint of the Yes bid and one dollar less the No bid, never fee adjusted.</td></tr>
 <tr><td>Model forecast archive</td><td><a href="https://open-meteo.com/en/docs/historical-forecast-api">Open-Meteo</a></td><td>Past runs of the models Open-Meteo carries, used under its CC BY 4.0 licence.</td></tr>
 <tr><td>Statistical guidance archive</td><td><a href="https://mesonet.agron.iastate.edu/mos/">Iowa State Environmental Mesonet</a></td><td>Past MOS and LAMP bulletins, each as it was issued.</td></tr>
-<tr><td>Hurricanes</td><td>NHC CurrentStorms.json, NOAA GIS service, NHC wind speed probabilities, ATCF best tracks</td><td>Roster, geometry, five-day wind probabilities at coastal locations, and season counts, for the hurricane page.</td></tr>
-<tr><td>Live-storm wind probabilities</td><td>Reask (vendor), when enabled</td><td>Probability that the peak gust exceeds each threshold at the 163 reference locations the exchange&rsquo;s wind contracts settle at, shown as published with the vendor&rsquo;s mark. Off unless the site operator has enabled it with their own credential, and the hurricane page says which.</td></tr>
-<tr><td>Basemaps</td><td>US Census Bureau boundaries; Natural Earth countries</td><td>Public domain.</td></tr>
+<tr><td>Basemap</td><td>US Census Bureau boundaries</td><td>The state outlines under the city map. Public domain.</td></tr>
 </tbody></table>
 </div>
 <script src="js/common.js"></script>

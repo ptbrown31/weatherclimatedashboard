@@ -265,7 +265,7 @@ def run(no_build: bool) -> int:
                         lead_key >= 6, f"entries={lead_key}")
                 acc_st = page.locator("#pageStatus .status").inner_text() if page.locator("#pageStatus .status").count() else ""
                 chk.add(f"{scheme} accuracy: the status strip names the window and the build",
-                        "Data as of" in acc_st and re.search(r"window \d{4}-\d\d-\d\d to \d{4}-\d\d-\d\d", acc_st) is not None,
+                        "Data as of" in acc_st and re.search(r"target days [A-Z][a-z]{2} \d+ \d{4} to [A-Z][a-z]{2} \d+ \d{4}", acc_st) is not None,
                         acc_st[:90])
                 acc_body = page.locator("body").inner_text()
                 bad_words = sorted(set(m.group(0) for m in re.finditer(

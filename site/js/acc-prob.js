@@ -221,7 +221,7 @@ window.WXAccProb = (() => {
     return A.tooltip().rows('Prices ' + Math.round(edges[k] * 100) + ' to ' + Math.round(edges[k + 1] * 100) + ' c', [
       ['Mean price', fin(r.x[k]) ? Math.round(r.x[k] * 100) + ' c' : A.dash],
       ['Share that paid', A.pct1(r.y[k])],
-      ['95% Wilson interval', A.iv(r.lo && r.lo[k], r.hi && r.hi[k], A.pct1)],
+      ['95 percent Wilson interval', A.iv(r.lo && r.lo[k], r.hi && r.hi[k], A.pct1)],
       ['Contracts' + (pooled ? ' (pooled)' : ''), A.int(cnt)],
       ['Share of all contracts', A.pct1(r.hist && r.hist[k])],
       ['Lead bin', bin ? bin[0] + ' to ' + bin[1] + ' h' : A.dash],
@@ -263,7 +263,6 @@ window.WXAccProb = (() => {
     const { fx } = calBlocks();
     const rel = (fx && fx.reliability) || [];
     const nc = rel.reduce((s, r) => s + (fin(r.n) ? r.n : 0), 0);
-    const es = ['AIFS'].concat(A.ENS_ROWS).map(id => A.ensSpan(id, st.metric)).filter(s => s && s.start).map(s => s.start).sort();
     A.methodNote(meth, {
       title: 'CRPS, the Brier score and the reliability diagrams',
       body: [
@@ -275,22 +274,22 @@ window.WXAccProb = (() => {
         'where $p_{s,j}$ is system $s$’s probability that contract $j$ pays and $y_j$ is 1 when it paid. Summed over every one-degree strike of a ladder the Brier score would be CRPS again, which is why it is averaged per contract here. Pricing every contract at 50 cents scores 50 cents; a system that knew every outcome would score zero. Rankings are the same as on the Brier score itself.',
         'For the ForecastEx prediction market $p$ is the contract\u2019s Yes price, with both sides bid',
         { tex: 'p = \\frac{\\text{Yes bid} + (1 - \\text{No bid})}{2}' },
-        'and with one side bid, the midpoint against the empty side at its limit, a missing Yes bid counting as 1 cent and a missing No bid as a 99-cent ask, since the one quoted side is the price to trade rather than a midpoint. A lone side at that limit is an empty book.',
+        'and with one side bid, the midpoint against the empty side at its limit, a missing Yes bid counting as 1 cent and a missing No bid as a 99-cent ask. A lone side at that limit is an empty book.',
         'A contract’s price should equal the probability it pays off. A reliability diagram plots the average price in a ten-cent bucket against the share of the bucket’s contracts that paid, and honest prices fall on the diagonal.',
       ],
       rules: [
-        'For the ForecastEx prediction market the distribution is its price ladder. Its Yes price is read as above, or with the Price tab set to two-sided books, from books with both sides bid only. A book bidding one cent against ninety-nine cents is unquoted. CRPS reads the ladder as quoted, forced monotone across strikes by pooling violations and closed at the end strikes.',
-        'For an ensemble the distribution is read over the hours of the day still to come. Its centre is the highest (for a low, the lowest) of the ensemble’s hourly means from that moment to the end of the day, its spread is the members’ spread at that hour, and the day’s extreme is the more extreme of that and what has already been observed. Any strike the observations have not cleared pays only if the hours left reach it, and a contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed.',
-        'Two caveats belong with the ensembles. A model publishes a spread for each hour, not for the extreme of several hours, so reading the spread at the hour of the extreme as the extreme’s is an approximation this page makes. And the level bias each model carries in the error figures passes straight into its probability.',
+        'For the ForecastEx prediction market the distribution is its price ladder. The Brier score and the diagrams read each contract\u2019s Yes price under the rule the Price tab selects, the midpoint above or two-sided books only. CRPS always reads the midpoint ladder, forced monotone across strikes by pooling violations and closed at the end strikes.',
+        'For an ensemble the distribution is read over the hours of the day still to come. Its centre is the highest (for a low, the lowest) of the ensemble’s hourly means from that moment to the end of the day, its spread is the members’ spread at the hour that mean falls on, and the day’s extreme is the more extreme of that and what has already been observed. Any strike the observations have not cleared pays only if the hours left reach it, and a contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed.',
+        'Two caveats belong with the ensembles. A model publishes a spread for each hour, not for the extreme of several hours, so reading the spread at the hour of the extreme as the extreme’s is an approximation this page makes. And the level bias in each ensemble’s centre, which the mean error in the scorecard shows, passes straight into its probability.',
         'Every system is scored alike. A contract the observations have already settled is scored at 100 cents for every system, and every other probability is held to the exchange’s range of 1 to 99 cents, so no system is credited with a certainty a quote cannot express.',
-        'Every system is scored at the same instant on the same strikes. Lead counts down to station-local midnight, the moment the target day ends; the ForecastEx prediction market is read on the last ladder snapshot of each hour and an ensemble on its most recent capture at or before that hour. Every chart and diagram uses only the contracts the ForecastEx prediction market quoted at hours when all four ensembles hold a reading, so every line is drawn on the same contracts and the same days.',
+        'All five are read at the same instant on the same strikes. Lead counts down to station-local midnight, the moment the target day ends; the ForecastEx prediction market is read on the last ladder snapshot of each hour and an ensemble on its most recent capture at or before that hour. Every chart and diagram uses only the contracts the ForecastEx prediction market quoted at hours when all four ensembles hold a reading, so every line is drawn on the same contracts and the same days. CRPS also needs the ladder\u2019s median to be defined at that hour, so its city-day counts run slightly under the Brier score\u2019s.',
         'Near-money strikes are the middle listed strike of the day’s ladder and the strike on either side. The middle is fixed by the listing, before any lead is scored and whatever any system forecast, so it picks the same contracts for every system.',
-        'Two sets of days are available, every day all five share, or those restricted to the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted.',
+        'Two sets of days are available, every day all five share, or those restricted to the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0. Thin order books, dates with too few price snapshots and days with gaps in the observation record are excluded, and the counts are listed in the details under the scorecard.',
         'The diagrams pool a bucket under 50 contracts toward the 50-cent bucket. The last six hours have no diagram, since by then most contracts are settled or priced at a cent.',
         'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, and a lead with under 30 city-days is not drawn. The beats strips count the ensembles the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference over the days both hold, resampled under the same draws, lies entirely in its favor.',
       ],
-      span: sharedLine() + (es.length ? ' The ensembles’ spreads are on record from ' + A.mdyY(es[0]) + '.' : '')
-        + (st.frame === 'cli' ? ' In the climate-report frame each ensemble is scored against the National Weather Service climate report for the same date, a different definition of the day’s extreme that runs about a degree warmer on highs; the ForecastEx prediction market keeps the settle it pays on, and both are restricted to the city-days that hold a report.' : ''),
+      span: sharedLine()
+        + (st.frame === 'cli' ? ' In the climate-report frame each ensemble is scored against the National Weather Service climate report for the same date, a different definition of the day’s extreme that runs about a degree warmer on highs; the ForecastEx prediction market keeps the settle it pays on, and both are restricted to the city-days that hold a report, so Buckley Field, which has no climate report of its own, drops out.' : ''),
       n: 'Sample ' + A.int(nc) + ' ForecastEx contracts across the three diagram lead bins, ' + view().toLowerCase() + ', ' + priceName() + '. ' + A.windowAndBuilt(meta) + '.',
     });
   }
