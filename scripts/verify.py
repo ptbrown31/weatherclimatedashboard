@@ -185,11 +185,27 @@ def run(no_build: bool) -> int:
                 cal_bar = page.locator("#accCalBar").inner_text()
                 chk.add(f"{scheme} accuracy: the calibration figure drops the price-side and range toggles",
                         "Yes bid" not in cal_bar and "2 to 98" not in cal_bar, cal_bar.replace("\n", " | ")[:120])
+                cal_key = page.locator("#accCalKey").inner_text()
                 chk.add(f"{scheme} accuracy: the ensembles are scored on the same contracts as the market",
                         len(ensb) >= 2
-                        and all((e.get("frame", {}).get(f, {}).get("byLead", {}) or {}).get("brier")
-                                for e in ensb.values() for f in ("metar", "cli"))
-                        and "Ensemble" in cal_txt, f"systems={sorted(ensb)}")
+                        and all((e.get("frame", {}).get(f, {}).get("byLead", {}) or {}).get(k)
+                                for e in ensb.values() for f in ("metar", "cli") for k in ("reliability", "resolution"))
+                        and "Ensemble" in cal_key, f"systems={sorted(ensb)}")
+                # reliability and resolution replace the Brier bars and the dispersion panel
+                lead_txt = page.eval_on_selector_all("#accCal svg.acc-cal-lead text", "e => e.map(x => x.textContent).join(' ')")
+                rel_titles = page.eval_on_selector_all("#accCal svg.acc-cal-rel text", "e => e.map(x => x.textContent).filter(t => t.startsWith('Reliability '))")
+                chk.add(f"{scheme} accuracy: the calibration figure draws reliability and resolution by lead, and no Brier bars or dispersion panel",
+                        page.locator("#accCal svg.acc-cal-lead").count() == 1
+                        and "RMS calibration error" in lead_txt and "Share of uncertainty resolved" in lead_txt
+                        and page.locator("#accCal svg.acc-cal-lead path").count() >= 2 * (1 + len(ensb))
+                        and len(rel_titles) == 4 and all(re.match(r"^Reliability \d+\.\d c, resolution \d+%$", t) for t in rel_titles)
+                        and page.locator("#accCal svg.acc-cal-bars, #accCal svg.acc-cal-sharp").count() == 0
+                        and "ladder width" not in cal_txt.lower(), str(rel_titles[:2]))
+                page.locator("#accCal svg.acc-cal-lead rect[fill='transparent']").nth(20).hover(); page.wait_for_timeout(300)
+                cal_tip = page.locator("#tip").inner_text().lower() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: the calibration hover lists each system's reliability, resolution and Brier skill",
+                        "reliability" in cal_tip and "resolution" in cal_tip and "brier skill" in cal_tip and "amer. ens." in cal_tip,
+                        cal_tip.replace("\n", " | ")[:160])
                 n_calc, n_calr = page.locator("#accCal circle").count(), page.locator("#accCal rect").count()
                 chk.add(f"{scheme} accuracy: the calibration figure draws its bins and its bars",
                         n_calc >= 10 and n_calr >= 8, f"circles={n_calc} rects={n_calr}")

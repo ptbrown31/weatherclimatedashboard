@@ -304,16 +304,30 @@ Times are ISO UTC strings; sizes are kept under 1 MB gzipped per date.
   bins: { edges: [0,0.1,...,1.0] },
   metric: { high: { price: { mid: PRICEBLOCK, twoSided: PRICEBLOCK, yesBid: PRICEBLOCK } }, low: {...} } }
 PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6],[6,0]],
-               reliability: [ per lead bin: { n, nCityDays, brier, brierTrunc, retained,
+               reliability: [ per lead bin: { n, nCityDays, brier, reliability, resolution,
                                               x: [10], y: [10], count: [10], lo: [10], hi: [10],
                                               hist: [10] } ],
-               byLead: { h: [36,30,24,18,12,6,3,1], brier, lo, hi, brierBinned, rel, res, unc, brierTrunc, retained, bss, base, n },
-               // brier is the raw score; brierBinned = rel - res + unc on the ten price bins;
-               // brierTrunc keeps prices strictly inside (0.02, 0.98), retained is their share
-               sharpness: { h: [...], width: [...], maeMedian: [...], crps: [...], n: [...] },
-               // crps scores the whole ladder in degrees, against the median's error on the same axis
-               movedPerHour: { h: [...], contracts: [...] } }
+               byLead: BYLEAD }
+BYLEAD = { h: [36..0], n, brier, rel, res, unc, bss, base,
+           reliability, reliabilityLo, reliabilityHi,      // sqrt(rel), probability units
+           resolution, resolutionLo, resolutionHi }        // res / unc
 ```
+
+`rel`, `res` and `unc` are the terms of Murphy's decomposition of the Brier
+score on the ten price buckets, kept to five decimals, so the binned score is
+`rel - res + unc`; `brier` is the raw score. The page draws two numbers from
+them. `reliability` is `sqrt(rel)`, the root-mean-square gap between a bucket's
+mean price and its share paid (the RMS form of the expected calibration error),
+drawn in cents. `resolution` is `res / unc`, the share of the base-rate
+uncertainty the buckets resolve (the variance of the share paid across buckets
+over the variance of the outcome), drawn as a percent. `bss` is the raw Brier
+skill against the base rate, `base` the share paid. The intervals are 95
+percent bootstrap intervals over the shared date draws, so contracts on one
+date move together; a lead under 30 city-days carries nulls. The truncated
+score, the ladder-width and CRPS series and the strikes-moved counts were
+removed on 2026-09-15; the score of the whole distribution by lead is the lead
+curve's `crps` block.
+
 
 Shapes the builder settled where the text above was loose: trace `obs` rows
 are `[t, tempF, tempRounded, isSpeci]`; grid cells carry `nLow` beside `n`;
@@ -326,8 +340,7 @@ the same contracts:
 
 ```
 ensembles: { id: { name, frame: { metar: BLK, cli: BLK } } }
-BLK = { leadBins: [...], reliability: [ ... as above ... ],
-        byLead: { h, brier, n, crps, dispersion, bias, spread } }
+BLK = { leadBins: [...], reliability: [ ... as above ... ], byLead: BYLEAD }
 ```
 
 The climate-report frame recomputes the contract's own outcome against the
@@ -343,16 +356,11 @@ strike and a low when it falls half a degree under, which is how settlement
 rounds. The values are banked at the running observed extreme exactly as every
 other value on this page is. Nothing is fitted and no bias is removed.
 
-`dispersion` is the diagnostic that separates the two ways a probability can
-be wrong: the standard deviation of the standardised error with the level bias
-taken out, so one means the spread is the right size for the errors the system
-actually makes and two means it is half the size it should be. `bias` and
-`spread` are the level error and the mean spread in degrees. Two limits belong
-with these lines and are stated on the page: a system publishes a spread for
-each hour rather than for the day's extreme, so reading the peak hour's spread
-as the extreme's is this page's approximation and not the system's; and the
-level bias each carries in the error figures passes straight into its
-probability here.
+Two limits belong with these lines and are stated on the page: a system
+publishes a spread for each hour rather than for the day's extreme, so reading
+the peak hour's spread as the extreme's is this page's approximation and not
+the system's; and the level bias each carries in the error figures passes
+straight into its probability here, which shows up as reliability.
 
 ### map.json
 

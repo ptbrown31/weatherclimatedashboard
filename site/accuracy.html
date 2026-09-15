@@ -16,7 +16,7 @@
 <p class="sub">ForecastEx runs daily prediction markets on the high and low temperature in cities across the US. This page scores the ForecastEx prediction market against twenty alternative forecast systems, among them the National Weather Service point forecast, the National Blend of Models, the Aviation Forecast, statistical guidance from four model families, and models and ensembles from the US, Europe, Germany, Canada, the UK, France, and Japan, including ECMWF&rsquo;s AI forecasting system. Each is described at the foot of the page. Every comparison holds the city, the day, and the lead time fixed, and scores each system against the temperature the station recorded.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div class="secttl">LEAD CURVE</div>
-<p class="cap" style="margin-top:0">Average error of the ForecastEx prediction market and each alternative forecast system against the recorded temperature, plotted against hours remaining before the day ends. Bands show bootstrap uncertainty over the sample drawn.</p>
+<p class="cap" style="margin-top:0">Average error of the ForecastEx prediction market and each alternative forecast system against the recorded temperature, plotted against hours remaining before the day ends, or the CRPS of every system that publishes a distribution. Bands show bootstrap uncertainty over the sample drawn.</p>
 <div class="bar acccontrols" id="accLeadBar"></div>
 <div class="card"><svg id="accLead" viewBox="0 0 960 430"></svg></div>
 <div class="key" id="accLeadKey"></div>
@@ -28,13 +28,13 @@
 <div class="key" id="accMapKey"></div>
 <div id="accMapMethod"></div>
 <div class="secttl">SCORECARD GRID</div>
-<p class="cap" style="margin-top:0">Summarizes each system’s error, bias, and share of forecasts within one degree at four leads, scored against both the official settlement and the National Weather Service’s climate report, with each system’s percent difference from the National Weather Service shown alongside.</p>
+<p class="cap" style="margin-top:0">Summarizes each system’s mean absolute error and mean error on the high and the low at three leads, with a CRPS for every system that publishes a distribution, scored against both the official settlement and the National Weather Service’s climate report.</p>
 <div class="bar acccontrols" id="accGridBar"></div>
 <div class="card"><div id="accGrid"></div></div>
 <div class="key" id="accGridKey"></div>
 <div id="accGridMethod"></div>
 <div class="secttl">CALIBRATION</div>
-<p class="cap" style="margin-top:0">Checks whether a Yes price of, say, 70 cents paid out about 70 percent of the time, and scores that reliability with the Brier score, split out by lead and by which side of the book is used.</p>
+<p class="cap" style="margin-top:0">Checks whether a Yes price of, say, 70 cents paid out about 70 percent of the time, and how well the prices tell contracts that pay from contracts that do not, by lead, for the ForecastEx prediction market and the four ensembles.</p>
 <div class="bar acccontrols" id="accCalBar"></div>
 <div class="card"><div id="accCal"></div></div>
 <div class="key" id="accCalKey"></div>
@@ -62,7 +62,7 @@ when both sides are quoted. The ladder across strikes is forced monotone by pool
 <li><b>Uncertainty.</b> Every interval on this page is a 95 percent bootstrap over target dates, 1,000 resamples. When a figure shows the ForecastEx prediction market minus a system, both sides are resampled from the same draws, so the difference reflects paired variation, not independent noise in each side.</li>
 </ul>
 <div class="secttl" id="systems">FORECAST SYSTEMS</div>
-<p class="cap" style="margin-top:0">Every system on this page. A deterministic system issues one forecast per run. A probabilistic system publishes a spread of outcomes as well as a centre, which is what lets the calibration figure score it on the same contracts as the market. Grid spacing, time step and update frequency are the provider&rsquo;s published values for the run behind each row. The record is how far back this page scores it.</p>
+<p class="cap" style="margin-top:0">Every system on this page. A deterministic system issues one forecast per run. A probabilistic system publishes a spread of outcomes as well as a centre, which is what lets the calibration figure and the CRPS views score it on the same contracts as the market. Grid spacing, time step and update frequency are the provider&rsquo;s published values for the run behind each row. The record is how far back this page scores it.</p>
 <div class="acc-sources-wrap"><table class="acc-sources">
 <thead><tr><th>System</th><th>What it is</th><th>Kind</th><th>Grid</th><th>Time step</th><th>Updates</th><th>Record</th></tr></thead>
 <tbody>
