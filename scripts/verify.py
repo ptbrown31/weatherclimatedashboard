@@ -198,10 +198,15 @@ def run(no_build: bool) -> int:
                         and "CRPS" in prob_txt and "brier score as root mean square, cents" in prob_txt.lower()
                         and all(page.locator(f"{sel} path[stroke-dasharray]").count() >= 3 for sel in ("#accCrps", "#accBrier"))
                         and page.locator("#accRel, #accRes, #accSpans, ul.conv").count() == 0, f"widths={widths}")
-                chk.add(f"{scheme} accuracy: the probabilistic figures draw the market against the four ensembles on the same strikes",
+                brier_all = ((((cal_own.get("price", {}).get("mid", {}) or {}).get("brier", {}) or {}).get("strikes", {}) or {})
+                             .get("all", {}).get("metar", {}) or {}).get("systems", {})
+                same_n = len({tuple(v.get("n", [])) for v in brier_all.values()}) == 1
+                prob_note = page.locator("#accProbKey").inner_text()
+                chk.add(f"{scheme} accuracy: the probabilistic figures draw the market against the four ensembles on the same contracts and days",
                         prob_key[:1] == ["FX"] and set(prob_key[1:]) == {"AIFS", "GEFS", "GEM_ENS", "ICON_ENS"}
-                        and len(ensb) >= 4 and brier_sys == {"FX", "AIFS", "GEFS", "GEM", "ICON"},
-                        f"key={prob_key} brier={sorted(brier_sys)}")
+                        and len(ensb) >= 4 and brier_sys == {"FX", "AIFS", "GEFS", "GEM", "ICON"} and same_n
+                        and "drawn on the city-days all five share" in prob_note,
+                        f"key={prob_key} brier={sorted(brier_sys)} same_n={same_n}")
                 rel_titles = page.eval_on_selector_all("#accDiag svg.acc-cal-rel text", "e => e.map(x => x.textContent).filter(t => t.startsWith('Reliability '))")
                 n_calc = page.locator("#accDiag circle").count()
                 chk.add(f"{scheme} accuracy: the reliability diagrams follow the charts, one per lead bin to six hours out",
@@ -213,7 +218,7 @@ def run(no_build: bool) -> int:
                     page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(500)
                     chk.add(f"{scheme} accuracy: the {tab} tab redraws the Brier score",
                             page.locator("#accBrier").inner_html() != before, "")
-                for tab in ("Every day on record", "Yes price midpoint", "METAR settle", "Every quoted strike"):
+                for tab in ("Every shared day", "Yes price midpoint", "METAR settle", "Every quoted strike"):
                     page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(300)
                 page.locator("#accCrps rect[fill='transparent']").nth(24).hover(); page.wait_for_timeout(300)
                 crps_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""

@@ -37,9 +37,21 @@ climate report stands in for Buckley Field, so Buckley is excluded from the
 climate-report frame.
 
 **Market value.** For each ladder snapshot the Yes price per strike is the
-midpoint of the Yes bid and one dollar less the No bid when both are quoted,
-the single quoted side otherwise. A strike with no bid on either side is
-unquoted. A two-sided book bidding one cent against ninety-nine is unquoted.
+midpoint of the Yes bid and one dollar less the No bid when both are quoted.
+With one side quoted it is the midpoint against the empty side at its limit, a
+missing Yes bid counting as one cent and a missing No bid as a ninety-nine-cent
+ask (from 2026-09-15; before, the one quoted side was read as the price, which
+on a contract nobody bids Yes is the cost to buy Yes, not a midpoint). A strike
+with no bid on either side is unquoted, and so is a two-sided book bidding one
+cent against ninety-nine or a lone side sitting at that limit.
+
+**Probabilities scored alike.** Wherever a probability is scored (CRPS, the
+Brier score, the reliability diagrams), a contract the observations already
+settled is scored at 100 cents for every system, the market included, and
+every other probability is held to the exchange's range of 1 to 99 cents
+(`PRICE_MIN`, `PRICE_MAX`), so no system is credited with a certainty a quote
+cannot express. The probabilistic section draws every line on the city-day
+hours at which the market and all four ensembles hold a value.
 The ladder is made monotone in the strike by pooling adjacent violators. The
 crossing `x` is the linear interpolation of the 0.5 level between the two
 bracketing quoted strikes; a ladder that never crosses has no central value at
@@ -238,7 +250,8 @@ BLOCK = { h: [36..0],
           crps: CRPS
         }
 CRPS = { h: [36..0],
-         cohorts: { own: { metar: CV, cli: CV }, fixed30: { metar: CV, cli: CV } } }
+         cohorts: { own: { metar: CV, cli: CV }, fixed30: { metar: CV, cli: CV } },
+         shared: { own: { start, end, days }, fixed30: {...} } }
 CV = { systems: { FX|AIFS|GEFS|GEM|ICON: { crps: [per h], lo: [per h], hi: [per h], n: [per h] } },
        beats: [per h: {k: int, of: int, ids: [ensemble keys beaten]}] }
 SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
@@ -259,13 +272,14 @@ Field drops out of the frame.
 Bins with `n < 30` carry `null` values. `h` above 30 is present only where the
 cohort has members.
 
-`crps` is the lead curve's CRPS view, drawn when the reader picks CRPS as the
-score. The market is scored on its own standing ladder at each whole hour, and
-each ensemble at the same instant on the same strikes, from a normal curve on
-its own centre and spread with a strike the observations already cleared paid
-in full, so the two are one measurement on one grid. The days are the ones the
-market priced at that hour (restricted to the fixed sample in `fixed30`), and
-each ensemble is drawn on the part of them it covers. Ensembles are keyed by
+`crps` is the CRPS by lead that the probabilistic section draws. The market is
+scored on its own standing ladder at each whole hour, and each ensemble at the
+same instant on the same strikes, from a normal curve on its own centre and
+spread over the hours left in the day, every probability scored alike (section
+1), so the two are one measurement on one grid. The ladders are the ones the
+market priced at that hour (restricted to the fixed sample in `fixed30`) at
+which every ensemble also holds a reading, so every line is drawn on the same
+ladders (`shared`). Ensembles are keyed by
 their calibration key; the page maps GEM and ICON to the registry rows
 `GEM_ENS` and `ICON_ENS` so they are never confused with the single runs. In
 the climate-report frame an ensemble is held to the National Weather Service
@@ -300,12 +314,13 @@ prunes the published traces once a manifest stops listing them.
 { meta,
   bins: { edges: [0,0.1,...,1.0] },
   metric: { high: { cohorts: { own: COHORT, fixed30: COHORT } }, low: {...} } }
-COHORT = { price: { mid: PRICEBLOCK, twoSided: PRICEBLOCK }, ensembles: { id: ENSEMBLE } }
+COHORT = { price: { mid: PRICEBLOCK, twoSided: PRICEBLOCK }, ensembles: { id: { name, span } },
+           shared: { start, end, days } }     // the days every system holds a value on
 PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6]],
-               reliability: [ per lead bin: { n, nCityDays, brier, reliability, resolution,
-                                              x: [10], y: [10], count: [10], lo: [10], hi: [10],
-                                              hist: [10] } ],
+               reliability: [ per lead bin: CELL ],
+               ensembles: { id: { metar: [ per lead bin: CELL ], cli: [...] } },
                brier: BRIER }
+CELL = { n, nCityDays, brier, reliability, resolution, x: [10], y: [10], count: [10], lo: [10], hi: [10], hist: [10] }
 BRIER = { h: [36..0],
           strikes: { all: BF, nearMoney: BF } }        // BF = { metar: BSET, cli: BSET }
 BSET = { systems: { FX|AIFS|GEFS|GEM|ICON: { rms: [per h], lo, hi, brier: [per h], n: [contracts], days: [city-days] } },
@@ -322,11 +337,10 @@ the buckets resolve. The last lead bin (6 to 0 hours) was dropped on
 (p - y)^2, and `rms` its square root in probability units, which the page draws
 in cents: the typical gap between a contract's price and what it paid. Summed
 over every one-degree strike of a ladder the Brier score is CRPS, so it is
-averaged per contract here and reads in probability rather than degrees. The
-contracts are the market's own under the price rule at that hour; an ensemble
-is scored on exactly those contract rows (city, day, hour and strike), so on any
-city-day and hour every system is scored on the same strikes, and each ensemble
-is drawn on the part of the market's days its record covers. `all` is every
+averaged per contract here and reads in probability rather than degrees. The contracts are the market's own under the price rule at hours when all four
+ensembles hold a reading, and every system is scored on exactly those contract
+rows (city, day, hour and strike), so every line is drawn on the same contracts
+and the same days (`shared`). Every probability is scored alike (section 1). `all` is every
 quoted strike; `nearMoney` is the middle listed strike of the day's ladder and
 the strike on either side (`NEAR_MONEY_OFFSET`, the desk's own convention),
 fixed by the listing before any lead is scored. In `cli` the market keeps the
@@ -346,13 +360,10 @@ availability exclusion rows carry `metric`; map cells are nested tool id then
 city id; `meta.cohorts` includes `fixed30`.
 
 Four of the alternative forecast systems publish the spread of their ensemble
-members as well as a centre, so `metric.<m>.ensembles` carries them scored on
-the same contracts:
-
-```
-ENSEMBLE = { name, span, frame: { metar: BLK, cli: BLK } }
-BLK = { leadBins: [...], reliability: [ ... as above ... ] }
-```
+members as well as a centre, so they are scored on the same contracts. Their
+diagram cells sit under each price rule (`price.<rule>.ensembles`), on that
+rule's contracts, and `cohorts.<c>.ensembles.<id>` keeps the name and the span
+of days the system's probabilities could be scored on, for the systems table.
 
 The climate-report frame recomputes the contract's own outcome against the
 National Weather Service report for the same date, so a station whose report

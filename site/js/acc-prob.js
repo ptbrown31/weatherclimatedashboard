@@ -21,11 +21,11 @@ window.WXAccProb = (() => {
   const A = WXAcc;
 
   const COHORTS = [
-    { key: 'own', label: 'Every day on record', title: 'Each system scored on the city-days its own record covers' },
-    { key: 'fixed30', label: 'Fixed sample', title: 'City-days the ForecastEx prediction market priced at every hour from 30 to 0' },
+    { key: 'own', label: 'Every shared day', title: 'Every city-day and hour at which the ForecastEx prediction market and all four ensembles hold a value, so every line is drawn on the same contracts' },
+    { key: 'fixed30', label: 'Fixed sample', title: 'Those shared days restricted to the city-days the ForecastEx prediction market priced at every hour from 30 to 0' },
   ];
   const PRICE = [
-    { key: 'mid', label: 'Yes price midpoint', title: 'The Brier score and the diagrams read the midpoint of the Yes bid and one dollar less the No bid, the single quoted side when only one side is bid' },
+    { key: 'mid', label: 'Yes price midpoint', title: 'The Brier score and the diagrams read the midpoint of the Yes bid and one dollar less the No bid; with one side bid, the midpoint against the empty side at its limit, a missing Yes bid counting as 1 c and a missing No bid as a 99 c ask' },
     { key: 'twoSided', label: 'Two-sided books only', title: 'The Brier score and the diagrams read the midpoint on books with a bid on both sides only' },
   ];
   const STRIKES = [
@@ -86,9 +86,11 @@ window.WXAccProb = (() => {
     const co = m && m.cohorts && m.cohorts[st.cohort];
     const fx = co && co.price && co.price[st.price];
     const ensAll = (co && co.ensembles) || {};
+    // an ensemble's diagram cells sit under the price rule, on that rule's contracts
+    const cells = (fx && fx.ensembles) || {};
     const ens = ordered(Object.keys(ensAll)).map(e => ({ id: e.id, name: ensAll[e.key].name || A.name(e.id),
-                                                          blk: ((ensAll[e.key].frame || {})[st.frame]) || null }))
-      .filter(e => e.blk && e.blk.reliability);
+                                                          cells: (cells[e.key] || {})[st.frame] || null }))
+      .filter(e => Array.isArray(e.cells));
     return { fx, ens };
   }
 
@@ -187,7 +189,7 @@ window.WXAccProb = (() => {
         pts.push({ k, px, py, rad });
       });
       ens.forEach(e => {
-        const er = (e.blk.reliability || [])[i] || {};
+        const er = e.cells[i] || {};
         const ex = [], ey = [];
         (er.x || []).forEach((px, k) => {
           const py = er.y && er.y[k];
@@ -239,11 +241,23 @@ window.WXAccProb = (() => {
     const { ens } = calBlocks();
     const keyIds = ids.length ? ids : ['FX'].concat(ens.map(e => e.id));
     if (keyEl) {
-      A.key(keyEl, keyIds, { dashes: true, note: 'Bands are the ForecastEx prediction market’s 95 percent bootstrap interval; in the diagrams marker area is the contract count and the bar the 95 percent Wilson interval.',
-        since: id => { const s = id === 'FX' ? A.span(lead && lead.meta, 'FX', st.metric) : A.ensSpan(id, st.metric);
-                       return s && s.start ? 'since ' + A.mdy(s.start) : ''; } });
+      const m = cal && cal.metric && cal.metric[st.metric];
+      const sh = m && m.cohorts && m.cohorts[st.cohort] && m.cohorts[st.cohort].shared;
+      A.key(keyEl, keyIds, { dashes: true, since: () => '',
+        note: (sh && sh.start ? 'Every line is drawn on the city-days all five share, ' + A.mdy(sh.start) + ' to ' + A.mdy(sh.end) + ', ' + A.int(sh.days) + ' days. ' : '')
+          + 'Bands are the ForecastEx prediction market’s 95 percent bootstrap interval; in the diagrams marker area is the contract count and the bar the 95 percent Wilson interval.' });
     }
     method(meth);
+  }
+
+  // which days every line in the view was drawn on
+  function sharedLine() {
+    const m = cal && cal.metric && cal.metric[st.metric];
+    const sh = m && m.cohorts && m.cohorts[st.cohort] && m.cohorts[st.cohort].shared;
+    if (!sh || !sh.start) return '';
+    return 'Every line is drawn on the ' + A.int(sh.days) + ' days from ' + A.mdyY(sh.start) + ' to ' + A.mdyY(sh.end)
+      + ' on which the ForecastEx prediction market and all four ensembles hold a value'
+      + (st.cohort === 'fixed30' ? ', within the fixed sample.' : '.');
   }
 
   function method(meth) {
@@ -264,21 +278,22 @@ window.WXAccProb = (() => {
         'where $p_{s,j}$ is system $s$’s probability that contract $j$ pays and $y_j$ is 1 when it paid. Summed over every one-degree strike of a ladder the Brier score would be CRPS again, which is why it is averaged per contract here. Pricing every contract at 50 cents scores 50 cents; a system that knew every outcome would score zero. Rankings are the same as on the Brier score itself.',
         'For the ForecastEx prediction market $p$ is the contract\u2019s Yes price, with both sides bid',
         { tex: 'p = \\frac{\\text{Yes bid} + (1 - \\text{No bid})}{2}' },
-        'and the single quoted side when only one side is bid.',
+        'and with one side bid, the midpoint against the empty side at its limit, a missing Yes bid counting as 1 cent and a missing No bid as a 99-cent ask, since the one quoted side is the price to trade rather than a midpoint. A lone side at that limit is an empty book.',
         'A contract’s price should equal the probability it pays off. A reliability diagram plots the average price in a ten-cent bucket against the share of the bucket’s contracts that paid, and honest prices fall on the diagonal. Each diagram’s title gives two numbers from Murphy’s decomposition of the Brier score, reliability, the root-mean-square gap between a bucket’s price and its share paid, and resolution, the share of the base-rate uncertainty the buckets resolve.',
         { tex: '\\text{Reliability} = \\sqrt{\\tfrac{1}{N}\\textstyle\\sum_k n_k(\\bar p_k - \\bar y_k)^2} \\qquad \\text{Resolution} = \\frac{\\tfrac{1}{N}\\sum_k n_k(\\bar y_k - \\bar y)^2}{\\bar y(1-\\bar y)}' },
       ],
       rules: [
-        'For the ForecastEx prediction market the distribution is its price ladder. A contract’s Yes price is the midpoint of the Yes bid and one dollar less the No bid when both sides are bid, the single quoted side otherwise, or with the Price tab set to two-sided books, books with both sides bid only. A book bidding one cent against ninety-nine cents is unquoted. CRPS reads the ladder as quoted, forced monotone across strikes by pooling violations and closed at the end strikes.',
-        'For an ensemble the distribution is read over the hours of the day still to come. Its centre is the highest (for a low, the lowest) of the ensemble’s hourly means from that moment to the end of the day, its spread is the members’ spread at that hour, and the day’s extreme is the more extreme of that and what has already been observed. A strike the observations have already cleared is paid, any other pays only if the hours left reach it, and a contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed.',
+        'For the ForecastEx prediction market the distribution is its price ladder. Its Yes price is read as above, or with the Price tab set to two-sided books, from books with both sides bid only. A book bidding one cent against ninety-nine cents is unquoted. CRPS reads the ladder as quoted, forced monotone across strikes by pooling violations and closed at the end strikes.',
+        'For an ensemble the distribution is read over the hours of the day still to come. Its centre is the highest (for a low, the lowest) of the ensemble’s hourly means from that moment to the end of the day, its spread is the members’ spread at that hour, and the day’s extreme is the more extreme of that and what has already been observed. Any strike the observations have not cleared pays only if the hours left reach it, and a contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed.',
         'Two caveats belong with the ensembles. A model publishes a spread for each hour, not for the extreme of several hours, so reading the spread at the hour of the extreme as the extreme’s is an approximation this page makes. And the level bias each model carries in the error figures passes straight into its probability.',
-        'Every system is scored at the same instant on the same strikes. Lead counts down to station-local midnight, the moment the target day ends; the ForecastEx prediction market is read on the last ladder snapshot of each hour and an ensemble on its most recent capture at or before that hour. An ensemble is scored only on the contracts the ForecastEx prediction market quoted at that hour, so on any city-day and hour the two are scored on exactly the same strikes, and each ensemble is drawn on the part of the market’s days its record covers.',
+        'Every system is scored alike. A contract the observations have already settled is scored at 100 cents for every system, and every other probability is held to the exchange’s range of 1 to 99 cents, so no system is credited with a certainty a quote cannot express.',
+        'Every system is scored at the same instant on the same strikes. Lead counts down to station-local midnight, the moment the target day ends; the ForecastEx prediction market is read on the last ladder snapshot of each hour and an ensemble on its most recent capture at or before that hour. Every chart and diagram uses only the contracts the ForecastEx prediction market quoted at hours when all four ensembles hold a reading, so every line is drawn on the same contracts and the same days.',
         'Near-money strikes are the middle listed strike of the day’s ladder and the strike on either side. The middle is fixed by the listing, before any lead is scored and whatever any system forecast, so it picks the same contracts for every system.',
-        'Two sets of days are available, every day on record, or the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted.',
+        'Two sets of days are available, every day all five share, or those restricted to the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted.',
         'The diagrams pool a bucket under 50 contracts toward the 50-cent bucket, and the two numbers in each title use the ten buckets as they are. The last six hours have no diagram, since by then most contracts are settled or priced at a cent.',
         'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, and a lead with under 30 city-days is not drawn. The beats strips count the ensembles the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference over the days both hold, resampled under the same draws, lies entirely in its favor.',
       ],
-      span: A.cohortSpanLine(meta, st.cohort) + (es.length ? ' The ensembles’ spreads are on record from ' + A.mdyY(es[0]) + '.' : '')
+      span: sharedLine() + (es.length ? ' The ensembles’ spreads are on record from ' + A.mdyY(es[0]) + '.' : '')
         + (st.frame === 'cli' ? ' In the climate-report frame each ensemble is scored against the National Weather Service climate report for the same date, a different definition of the day’s extreme that runs about a degree warmer on highs; the ForecastEx prediction market keeps the settle it pays on, and both are restricted to the city-days that hold a report.' : ''),
       n: 'Sample ' + A.int(nc) + ' ForecastEx contracts across the three diagram lead bins, ' + view().toLowerCase() + ', ' + priceName() + '. ' + A.windowAndBuilt(meta) + '.',
     });
