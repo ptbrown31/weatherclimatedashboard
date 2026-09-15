@@ -2,22 +2,20 @@
 
    The systems that publish a distribution, the ForecastEx prediction
    market's price ladder and the four ensembles, scored on the same strikes
-   at the same instant. Three charts on the lead curve's axis, each the full
+   at the same instant. Two charts on the lead curve's axis, each the full
    width of the page and drawn by WXAcc.leadChart:
 
      CRPS, the score of the whole distribution in degrees (lead-curve.json,
-       metric.<m>.crps);
-     reliability, the root-mean-square gap between a price bucket and the
-       share of it that paid, in cents; and
-     resolution, the share of the base-rate uncertainty the prices resolve
-       (both from calibration.json, the halves of Murphy's decomposition of
-       the Brier score);
+       metric.<m>.crps); and
+     the Brier score, contract by contract, drawn as its square root in cents
+       (calibration.json, price.<rule>.brier), over every quoted strike or the
+       near-money strikes only;
 
-   then the reliability diagrams those two numbers summarise, one per lead
-   bin. Nothing here is computed; the module chooses which of the builder's
-   series to draw. The Days and Frame tabs reach every chart; the Price tab
-   changes the price rule the reliability, resolution and diagrams read, and
-   CRPS always reads the ladder as quoted. */
+   then the reliability diagrams, one per lead bin. Nothing here is computed;
+   the module chooses which of the builder's series to draw. The Days and
+   Frame tabs reach every chart; the Price tab changes the price rule the
+   Brier score and the diagrams read, and CRPS always reads the ladder as
+   quoted; the Strikes tab reaches the Brier score only. */
 window.WXAccProb = (() => {
   const { el, txt, $ } = WXC;
   const A = WXAcc;
@@ -27,14 +25,18 @@ window.WXAccProb = (() => {
     { key: 'fixed30', label: 'Fixed sample', title: 'City-days the ForecastEx prediction market priced at every hour from 30 to 0' },
   ];
   const PRICE = [
-    { key: 'mid', label: 'Yes price midpoint', title: 'Reliability, resolution and the diagrams read the midpoint of the Yes bid and one dollar less the No bid, the single quoted side when only one side is bid' },
-    { key: 'twoSided', label: 'Two-sided books only', title: 'Reliability, resolution and the diagrams read the midpoint on books with a bid on both sides only' },
+    { key: 'mid', label: 'Yes price midpoint', title: 'The Brier score and the diagrams read the midpoint of the Yes bid and one dollar less the No bid, the single quoted side when only one side is bid' },
+    { key: 'twoSided', label: 'Two-sided books only', title: 'The Brier score and the diagrams read the midpoint on books with a bid on both sides only' },
+  ];
+  const STRIKES = [
+    { key: 'all', label: 'Every quoted strike', title: 'The Brier score over every strike the ForecastEx prediction market quoted at that hour' },
+    { key: 'nearMoney', label: 'Near-money strikes', title: 'The Brier score over the middle listed strike of the day’s ladder and the strike on either side, where the outcome is least settled' },
   ];
   const FRAMES = [
     { key: 'metar', label: 'METAR settle', title: 'Every system scored against the settle the contracts pay on' },
     { key: 'cli', label: 'NWS climate report', title: 'The ensembles scored against the National Weather Service climate report for the same date; the ForecastEx prediction market keeps the settle it pays on' },
   ];
-  const st = { metric: 'high', cohort: 'own', price: 'mid', frame: 'metar' };
+  const st = { metric: 'high', cohort: 'own', price: 'mid', frame: 'metar', strikes: 'all' };
   let lead = null, cal = null, built = false;
 
   const fin = v => v != null && isFinite(v);
@@ -78,7 +80,7 @@ window.WXAccProb = (() => {
     return S.map(s => s.id);
   }
 
-  // ------------------------------------------------------------- reliability and resolution
+  // ------------------------------------------------------------- Brier score
   function calBlocks() {
     const m = cal && cal.metric && cal.metric[st.metric];
     const co = m && m.cohorts && m.cohorts[st.cohort];
@@ -86,44 +88,41 @@ window.WXAccProb = (() => {
     const ensAll = (co && co.ensembles) || {};
     const ens = ordered(Object.keys(ensAll)).map(e => ({ id: e.id, name: ensAll[e.key].name || A.name(e.id),
                                                           blk: ((ensAll[e.key].frame || {})[st.frame]) || null }))
-      .filter(e => e.blk && e.blk.byLead);
+      .filter(e => e.blk && e.blk.reliability);
     return { fx, ens };
   }
 
-  function drawMeasure(svg, key, spec) {
-    const { fx, ens } = calBlocks();
-    if (!fx || !fx.byLead) { A.notYet(svg, 'The file carries no block for this view.'); return; }
-    const by = fx.byLead, hs = by.h;
-    const arr = (b, k) => hs.map((_, i) => (b[k] && fin(b[k][i]) ? b[k][i] : null));
-    const S = [{ id: 'FX', smooth: true, v: arr(by, key), lo: arr(by, key + 'Lo'), hi: arr(by, key + 'Hi'), by }]
-      .concat(ens.map(e => ({ id: e.id, dash: A.ensDash(e.id), width: 1.8, v: arr(e.blk.byLead, key), by: e.blk.byLead })));
-    A.leadChart(svg, Object.assign({ hs, series: S, tip: (i, hh) => calTip(S, i, hh, key, spec.higherBetter) }, spec));
-  }
-
-  /* One hour of the reliability or resolution chart: every system's two
-     numbers, its Brier skill and Brier score, ordered by the chart's own
-     measure, best first. */
-  function calTip(S, i, hh, key, higherBetter) {
-    const v = (s, k) => (s.by[k] ? s.by[k][i] : null);
-    const rank = s => (fin(v(s, key)) ? (higherBetter ? -v(s, key) : v(s, key)) : Infinity);
-    let rows = '';
-    S.slice().sort((a, b) => rank(a) - rank(b)).forEach((s, k) => {
-      rows += '<tr' + (s.id === 'FX' ? ' class="tfx"' : '') + '><td>' + (k + 1) + '</td><td>' + A.swatch(s.id).replace(A.name(s.id), A.short(s.id))
-        + '</td><td>' + cents1(v(s, 'reliability')) + '</td><td>' + pct0(v(s, 'resolution'))
-        + '</td><td>' + pct0(v(s, 'bss')) + '</td><td>' + A.f3(v(s, 'brier')) + '</td><td>' + A.int(v(s, 'n')) + '</td></tr>';
+  /* The Brier score by lead, drawn as its square root in cents so it reads as
+     the typical gap between a contract's price and what it paid. Every
+     system is scored on the market's own contracts at the hour. */
+  function drawBrier(svg) {
+    const { fx } = calBlocks();
+    const b = fx && fx.brier;
+    const v = b && b.strikes && b.strikes[st.strikes] && b.strikes[st.strikes][st.frame];
+    if (!v || !v.systems || !v.systems.FX) { A.notYet(svg, 'The Brier score is not in the published record.'); return; }
+    const hs = b.h;
+    const clean = arr => hs.map((_, i) => (arr && fin(arr[i]) ? arr[i] : null));
+    const ens = ordered(Object.keys(v.systems).filter(k => k !== 'FX'));
+    const sys = v.systems;
+    const S = [{ id: 'FX', smooth: true, v: clean(sys.FX.rms), lo: clean(sys.FX.lo), hi: clean(sys.FX.hi), n: sys.FX.n || [], brier: sys.FX.brier || [] }]
+      .concat(ens.map(e => ({ id: e.id, dash: A.ensDash(e.id), width: 1.8, v: clean(sys[e.key].rms), n: sys[e.key].n || [], brier: sys[e.key].brier || [] })));
+    const beats = v.beats || [];
+    const strikesName = STRIKES.find(x => x.key === st.strikes).label.toLowerCase();
+    A.leadChart(svg, {
+      H: 400, hs, series: S, floor: 0.1, fmt: x => Math.round(x * 100) + ' c', name: true,
+      label: 'Brier score as root mean square, cents (lower is better)',
+      strips: { n: sys.FX.days || [], beats },
+      tip: (i, hh) => {
+        const bt = beats[i], d = (sys.FX.days || [])[i];
+        let sub = view() + ', ' + priceName() + ', ' + strikesName + '. ' + (fin(d) ? A.int(d) + ' city-days' : 'no sample') + '.';
+        if (bt && fin(bt.k)) sub += ' ForecastEx beats ' + bt.k + ' of ' + bt.of + ' ensembles.';
+        const f = S[0];
+        const foot = (fin(f.lo[i]) && fin(f.hi[i]) ? 'ForecastEx ' + A.iv(f.lo[i], f.hi[i], cents1) + ', 95 percent interval. ' : '')
+          + 'n is the number of contracts. The Brier score itself is the square of the value shown, ForecastEx '
+          + A.f3(f.brier[i]) + ' at this hour.';
+        return A.rankTip(A.leadTitle(hh), sub, S.map(x => ({ id: x.id, v: x.v[i], n: x.n[i] })), 'RMS', cents1, { foot });
+      },
     });
-    const fx = S[0];
-    let foot = '';
-    if (fin(v(fx, key + 'Lo')) && fin(v(fx, key + 'Hi'))) {
-      foot += 'ForecastEx ' + key + ' ' + A.iv(v(fx, key + 'Lo'), v(fx, key + 'Hi'), key === 'reliability' ? cents1 : pct0) + ', 95 percent interval. ';
-    }
-    if (fin(v(fx, 'base'))) {
-      foot += A.pct(v(fx, 'base')) + ' of the ForecastEx prediction market’s contracts paid, so pricing every one at that rate scores '
-        + A.f3(v(fx, 'unc')) + ', the uncertainty resolution is a share of.';
-    }
-    return '<b>' + A.leadTitle(hh) + '</b><div class="tsub">' + view() + ', ' + priceName() + '.</div>'
-      + '<table class="l3"><tr><th>#</th><th>System</th><th>Reliability</th><th>Resolution</th><th>Brier skill</th><th>Brier</th><th>Contracts</th></tr>'
-      + rows + '</table>' + (foot ? '<div class="tf">' + foot + '</div>' : '');
   }
 
   // ------------------------------------------------------------- reliability diagrams
@@ -142,7 +141,8 @@ window.WXAccProb = (() => {
     const bins = fx.leadBins || [];
     const rel = fx.reliability || [];
     const n = Math.min(bins.length, rel.length) || 1;
-    const H = 292, TOP = 52, PW = 200, GAP = (960 - 46 - 16 - PW * n) / Math.max(n - 1, 1);
+    const PW = n <= 3 ? 250 : 200;
+    const H = PW + 92, TOP = 52, GAP = (960 - 46 - 16 - PW * n) / Math.max(n - 1, 1);
     const svg = el('svg', { viewBox: '0 0 960 ' + H, class: 'acc-cal-rel' });
     const C_FX = A.color('FX');
     const maxCount = Math.max(1, ...rel.map(r => Math.max(0, ...(r.count || []).filter(fin))));
@@ -231,13 +231,10 @@ window.WXAccProb = (() => {
 
   // ------------------------------------------------------------- render
   function render() {
-    const crps = $('#accCrps'), relSvg = $('#accRel'), resSvg = $('#accRes'), diag = $('#accDiag');
+    const crps = $('#accCrps'), brier = $('#accBrier'), diag = $('#accDiag');
     const keyEl = $('#accProbKey'), meth = $('#accProbMethod');
     const ids = crps ? drawCrps(crps) : [];
-    if (relSvg) drawMeasure(relSvg, 'reliability', { H: 360, floor: 0.1, fmt: v => Math.round(v * 100) + ' c',
-                                                     label: 'Reliability, RMS calibration error, cents (lower is better)' });
-    if (resSvg) drawMeasure(resSvg, 'resolution', { H: 360, ymax: 1, higherBetter: true, fmt: v => Math.round(v * 100) + '%',
-                                                    label: 'Resolution, share of uncertainty resolved (higher is better)' });
+    if (brier) drawBrier(brier);
     if (diag) diagrams(diag);
     const { ens } = calBlocks();
     const keyIds = ids.length ? ids : ['FX'].concat(ens.map(e => e.id));
@@ -257,29 +254,33 @@ window.WXAccProb = (() => {
     const nc = rel.reduce((s, r) => s + (fin(r.n) ? r.n : 0), 0);
     const es = ['AIFS'].concat(A.ENS_ROWS).map(id => A.ensSpan(id, st.metric)).filter(s => s && s.start).map(s => s.start).sort();
     A.methodNote(meth, {
-      title: 'CRPS, reliability and resolution',
+      title: 'CRPS, the Brier score and the reliability diagrams',
       body: [
         'CRPS, the continuous ranked probability score, measures a whole forecast distribution against what happened, in degrees. It shrinks as probability gathers near the observed value, and a forecast that puts all its probability on one whole degree scores its absolute error, so it reads on the same scale as the mean absolute error above.',
         { tex: 'CRPS_s(h) = \\frac{1}{N_h}\\sum_{i=1}^{N_h} \\sum_{k} \\left( F_{s,i,h}(k) - \\mathbb{1}[o_i \\le k] \\right)^2' },
-        'where $F_{s,i,h}(k)$ is system $s$’s probability that city-day $i$ settles at or below $k$ as it stood at lead $h$, $k$ runs over whole degrees across the ForecastEx prediction market’s strikes, and $o_i$ is the settle. On a ladder that sum is the Brier score of every one-degree contract added up.',
-        'A contract’s price should equal the probability it pays off. The Brier score splits into three terms over ten price buckets, Murphy’s decomposition.',
-        { tex: 'BS = \\frac{1}{N}\\sum_{j=1}^{N} (p_j - y_j)^2 = REL - RES + UNC' },
-        { tex: 'REL = \\frac{1}{N}\\sum_k n_k(\\bar p_k - \\bar y_k)^2 \\qquad RES = \\frac{1}{N}\\sum_k n_k(\\bar y_k - \\bar y)^2 \\qquad UNC = \\bar y(1-\\bar y)' },
-        '$y_j$ is 1 when contract $j$ paid, and bucket $k$ holds $n_k$ contracts with mean price $\\bar p_k$ and share paid $\\bar y_k$. REL is the penalty for buckets that pay away from their price, RES the credit for buckets that pay away from the base rate $\\bar y$, and UNC the score of pricing every contract at the base rate.',
-        { tex: '\\text{Reliability} = \\sqrt{REL} \\qquad \\text{Resolution} = \\frac{RES}{UNC} \\qquad \\text{Brier skill} = \\frac{RES - REL}{UNC}' },
-        'Reliability is the root-mean-square gap between a bucket’s price and its share paid, the root-mean-square form of the expected calibration error, so 4 cents means a typical bucket paid about 4 percentage points away from its price. Resolution is the variance of the share paid across buckets over the variance of the outcome, zero when every bucket pays at the base rate and 100 percent when every bucket pays all or nothing. Resolution ignores whether prices are honest and reliability has no sign, so the reliability diagrams show which way a bucket misses.',
+        'where $F_{s,i,h}(k)$ is system $s$’s probability that city-day $i$ settles at or below $k$ as it stood at lead $h$, $k$ runs over whole degrees across the ForecastEx prediction market’s strikes, and $o_i$ is the settle, the station’s highest or lowest hourly METAR reading of the day rounded to the nearest whole degree.',
+        'The Brier score takes the same squared gaps contract by contract instead of adding them up over a ladder, so it reads in probability rather than in degrees and every contract counts the same whatever its ladder. It is drawn as its square root, in cents, the typical gap between a contract’s price and what the contract paid, 0 or 100 cents.',
+        { tex: 'BS_s(h) = \\frac{1}{N_h}\\sum_{j=1}^{N_h} (p_{s,j} - y_j)^2 \\qquad \\text{drawn as } 100\\sqrt{BS_s(h)} \\text{ cents}' },
+        'where $p_{s,j}$ is system $s$’s probability that contract $j$ pays and $y_j$ is 1 when it paid. Summed over every one-degree strike of a ladder the Brier score would be CRPS again, which is why it is averaged per contract here. Pricing every contract at 50 cents scores 50 cents; a system that knew every outcome would score zero. Rankings are the same as on the Brier score itself.',
+        'For the ForecastEx prediction market $p$ is the contract\u2019s Yes price, with both sides bid',
+        { tex: 'p = \\frac{\\text{Yes bid} + (1 - \\text{No bid})}{2}' },
+        'and the single quoted side when only one side is bid.',
+        'A contract’s price should equal the probability it pays off. A reliability diagram plots the average price in a ten-cent bucket against the share of the bucket’s contracts that paid, and honest prices fall on the diagonal. Each diagram’s title gives two numbers from Murphy’s decomposition of the Brier score, reliability, the root-mean-square gap between a bucket’s price and its share paid, and resolution, the share of the base-rate uncertainty the buckets resolve.',
+        { tex: '\\text{Reliability} = \\sqrt{\\tfrac{1}{N}\\textstyle\\sum_k n_k(\\bar p_k - \\bar y_k)^2} \\qquad \\text{Resolution} = \\frac{\\tfrac{1}{N}\\sum_k n_k(\\bar y_k - \\bar y)^2}{\\bar y(1-\\bar y)}' },
       ],
       rules: [
-        'For the ForecastEx prediction market the distribution is its price ladder, the Yes prices read as probabilities. CRPS reads the ladder as quoted, monotone and closed at the end strikes. Reliability, resolution and the diagrams read one strike on the last snapshot of each hour under the price rule the Price tab selects.',
+        'For the ForecastEx prediction market the distribution is its price ladder. A contract’s Yes price is the midpoint of the Yes bid and one dollar less the No bid when both sides are bid, the single quoted side otherwise, or with the Price tab set to two-sided books, books with both sides bid only. A book bidding one cent against ninety-nine cents is unquoted. CRPS reads the ladder as quoted, forced monotone across strikes by pooling violations and closed at the end strikes.',
         'For an ensemble the distribution is read over the hours of the day still to come. Its centre is the highest (for a low, the lowest) of the ensemble’s hourly means from that moment to the end of the day, its spread is the members’ spread at that hour, and the day’s extreme is the more extreme of that and what has already been observed. A strike the observations have already cleared is paid, any other pays only if the hours left reach it, and a contract pays when the unrounded extreme reaches half a degree past the strike, which is how settlement rounds. Nothing is fitted and no bias is removed.',
-        'Two caveats belong with the ensembles. A model publishes a spread for each hour, not for the extreme of several hours, so reading the spread at the hour of the extreme as the extreme’s is an approximation this page makes. And the level bias each model carries in the error figures passes straight into its probability, which shows up as reliability.',
-        'Every system is scored at the same instant on the same strikes, on the city-days the ForecastEx prediction market priced at that hour, and each ensemble is drawn on the part of those days its record covers. Two sets of days are available, every day on record, or the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0.',
-        'Buckets are ten cents wide. The diagrams pool a bucket under 50 contracts toward the 50-cent bucket, and reliability and resolution use the ten buckets as they are. Reliability has a floor set by sampling of about 50 divided by the square root of n percentage points for a bucket of n contracts near 50 cents.',
-        'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, and a lead with under 30 city-days is not drawn. The beats strip under CRPS counts the ensembles the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference over the days both hold lies entirely in its favor.',
+        'Two caveats belong with the ensembles. A model publishes a spread for each hour, not for the extreme of several hours, so reading the spread at the hour of the extreme as the extreme’s is an approximation this page makes. And the level bias each model carries in the error figures passes straight into its probability.',
+        'Every system is scored at the same instant on the same strikes. Lead counts down to station-local midnight, the moment the target day ends; the ForecastEx prediction market is read on the last ladder snapshot of each hour and an ensemble on its most recent capture at or before that hour. An ensemble is scored only on the contracts the ForecastEx prediction market quoted at that hour, so on any city-day and hour the two are scored on exactly the same strikes, and each ensemble is drawn on the part of the market’s days its record covers.',
+        'Near-money strikes are the middle listed strike of the day’s ladder and the strike on either side. The middle is fixed by the listing, before any lead is scored and whatever any system forecast, so it picks the same contracts for every system.',
+        'Two sets of days are available, every day on record, or the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted.',
+        'The diagrams pool a bucket under 50 contracts toward the 50-cent bucket, and the two numbers in each title use the ten buckets as they are. The last six hours have no diagram, since by then most contracts are settled or priced at a cent.',
+        'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, and a lead with under 30 city-days is not drawn. The beats strips count the ensembles the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference over the days both hold, resampled under the same draws, lies entirely in its favor.',
       ],
       span: A.cohortSpanLine(meta, st.cohort) + (es.length ? ' The ensembles’ spreads are on record from ' + A.mdyY(es[0]) + '.' : '')
-        + (st.frame === 'cli' ? ' In the climate-report frame each ensemble is scored against the National Weather Service report for the same date, the ForecastEx prediction market keeps the settle it pays on, and both are restricted to the city-days that hold a report.' : ''),
-      n: 'Sample ' + A.int(nc) + ' ForecastEx contracts across the four lead bins, ' + view().toLowerCase() + ', ' + priceName() + '. ' + A.windowAndBuilt(meta) + '.',
+        + (st.frame === 'cli' ? ' In the climate-report frame each ensemble is scored against the National Weather Service climate report for the same date, a different definition of the day’s extreme that runs about a degree warmer on highs; the ForecastEx prediction market keeps the settle it pays on, and both are restricted to the city-days that hold a report.' : ''),
+      n: 'Sample ' + A.int(nc) + ' ForecastEx contracts across the three diagram lead bins, ' + view().toLowerCase() + ', ' + priceName() + '. ' + A.windowAndBuilt(meta) + '.',
     });
   }
 
@@ -289,6 +290,7 @@ window.WXAccProb = (() => {
     A.tabs(bar, COHORTS, k => { st.cohort = k; render(); }, { initial: st.cohort, label: 'Days' });
     A.tabs(bar, PRICE, k => { st.price = k; render(); }, { initial: st.price, label: 'Price' });
     A.tabs(bar, FRAMES, k => { st.frame = k; render(); }, { initial: st.frame, label: 'Frame' });
+    A.tabs(bar, STRIKES, k => { st.strikes = k; render(); }, { initial: st.strikes, label: 'Strikes' });
     built = true;
   }
 
@@ -300,7 +302,7 @@ window.WXAccProb = (() => {
     cal = D && D.cal;
     if ((!lead || !lead.metric) && (!cal || !cal.metric)) {
       if (bar) bar.innerHTML = '';
-      ['#accCrps', '#accRel', '#accRes'].forEach(s => { if ($(s)) A.notYet($(s), A.NOT_PUBLISHED); });
+      ['#accCrps', '#accBrier'].forEach(s => { if ($(s)) A.notYet($(s), A.NOT_PUBLISHED); });
       if ($('#accDiag')) A.notYet($('#accDiag'), A.NOT_PUBLISHED);
       return;
     }

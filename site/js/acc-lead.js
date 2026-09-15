@@ -147,7 +147,7 @@ window.WXAccLead = (() => {
       body: [
         'Error is mean absolute error, the average gap in degrees between a system’s call and what the station recorded, at a given lead.',
         { tex: 'MAE_s(h) = \\frac{1}{N_h}\\sum_{i=1}^{N_h} \\left| f_{s,i}(h) - o_i \\right|' },
-        'where $f_{s,i}(h)$ is system $s$’s value for city-day $i$ at lead $h$, and $o_i$ is the settle.',
+        'where $f_{s,i}(h)$ is system $s$’s value for city-day $i$ at lead $h$, and $o_i$ is the settle, the station’s highest or lowest hourly METAR reading of the day rounded to the nearest whole degree. Lead counts down to station-local midnight, the moment the target day ends.',
         'A system’s value at a given lead is its most recent reading at or before that moment. Once a high or low has actually occurred, no forecast is shown as implying something more extreme, values are held at the running observed extreme. The ForecastEx prediction market’s value is its median, where its price ladder crosses fifty cents, rounded up for highs and down for lows to match whole-degree settlement. A median that would have to be read across two or more strikes with no price is left undefined, since late in the day a ladder often quotes only its far strikes and a line drawn across the empty run would invent a value the prices do not state.',
         'Time to converge measures how early a system locks onto the temperature the day ends on and stays there. For a tolerance of $d$ degrees, a city-day has converged by lead $h$ if its value was within $d$ degrees of the truth at every hour from $h$ to the end of the day at which it held a value.',
         { tex: 'C_s(h; d) = \\frac{1}{N}\\left|\\{\\, i : |f_{s,i}(h\') - o_i| \\le d \\text{ for every } h\' \\le h \\,\\}\\right|' },
@@ -155,14 +155,15 @@ window.WXAccLead = (() => {
         'The two charts answer different questions. Error is the average miss at each hour. Convergence rewards a value that is right and then does not move, so a forecast that is rarely revised can converge early on the days it happens to be right while a value that follows each report, and is closer on average, can step outside the tolerance on the way and have to converge again.',
       ],
       rules: [
-        'Bins run hourly from 36 hours before the day ends to zero, and an error bin needs at least 30 matched city-days before it’s drawn.',
+        'An alternative forecast system’s value is its most recent forecast captured at or before the moment, and the ForecastEx prediction market’s is read on its most recent ladder snapshot. A contract’s Yes price is the midpoint of the Yes bid and one dollar less the No bid when both sides are bid, the single quoted side otherwise, and a book bidding one cent against ninety-nine is unquoted. The ladder is forced monotone across strikes by pooling violations before its fifty-cent crossing is read.',
+        'Bins run hourly from 36 hours before the day ends to zero, and an error bin needs at least 30 matched city-days before it’s drawn. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted.',
         'Two sets of days are available, every day on each system’s own record, or a fixed sample of the city-days the ForecastEx prediction market priced at every hour from 30 to 0.',
         'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates.',
-        'The beats strip counts the systems the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference in error over the days both hold lies entirely in its favor.',
+        'The beats strip counts the systems the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference in error over the days both hold, both sides resampled under the same draws, lies entirely in its favor.',
         'Bins above 30 hours are hatched because a ladder lists at a fixed clock time, so the eastern stations reach 36 hours before the western ones do, and hovering shows which dates and time zones fill those bins.',
       ],
       span: A.cohortSpanLine(meta, state.cohort) + (state.frame === 'cli'
-        ? ' In the climate-report frame each alternative forecast system is scored against the National Weather Service report for the same date, the ForecastEx prediction market keeps the settle it pays on, and Buckley Field drops out because Denver’s report stands in for it.'
+        ? ' In the climate-report frame each alternative forecast system is scored against the National Weather Service report for the same date, a different definition of the day\u2019s extreme that runs about a degree warmer on highs, the ForecastEx prediction market keeps the settle it pays on, and Buckley Field drops out because Denver’s report stands in for it.'
         : ''),
       n: 'Sample ' + (fin(nCo) ? A.int(nCo) : A.dash) + ' city-days in ' + noun + (co.from ? ' from ' + co.from : '')
         + ', each system drawn on the part of that record it covers. ' + A.windowAndBuilt(meta) + '.',

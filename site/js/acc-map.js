@@ -336,7 +336,8 @@ window.WXAccMap = (() => {
       rules: [
         'Windows are the morning of the target day, 6 AM to noon station time, the evening before at 6 PM station time, and the newsletter\u2019s own hours, 5 PM to 5 AM Eastern.',
         'A city with fewer than 30 matched city-days is hollow.',
-        'Intervals are the same bootstrap used throughout the page, with the ForecastEx prediction market and system differences resampled together so both sides move under the same draws.',
+        'A value is the mean over the window\u2019s instants of the system\u2019s standing value, its most recent forecast at or before each instant held at the running observed extreme, and the ForecastEx prediction market\u2019s is its median, where its ladder of Yes prices crosses fifty cents. The settle is the station\u2019s highest or lowest hourly METAR reading of the day rounded to the nearest whole degree.',
+        'Intervals are 95 percent bootstrap intervals over 1,000 resamples of the target dates, with the ForecastEx prediction market and the system resampled together so both sides of the difference move under the same draws.',
         'The climate-report frame scores alternative forecast systems against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, so a gap between frames reflects that difference in definition rather than in forecast skill. Denver\u2019s climate-report figures stand in for Buckley Field, which has none of its own.',
       ],
       span: A.spanLine(D.map && D.map.meta, ['FX', sel.tool], sel.metric,

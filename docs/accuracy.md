@@ -301,31 +301,41 @@ prunes the published traces once a manifest stops listing them.
   bins: { edges: [0,0.1,...,1.0] },
   metric: { high: { cohorts: { own: COHORT, fixed30: COHORT } }, low: {...} } }
 COHORT = { price: { mid: PRICEBLOCK, twoSided: PRICEBLOCK }, ensembles: { id: ENSEMBLE } }
-PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6],[6,0]],
+PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6]],
                reliability: [ per lead bin: { n, nCityDays, brier, reliability, resolution,
                                               x: [10], y: [10], count: [10], lo: [10], hi: [10],
                                               hist: [10] } ],
-               byLead: BYLEAD }
-BYLEAD = { h: [36..0], n, brier, rel, res, unc, bss, base,
-           reliability, reliabilityLo, reliabilityHi,      // sqrt(rel), probability units
-           resolution, resolutionLo, resolutionHi }        // res / unc
+               brier: BRIER }
+BRIER = { h: [36..0],
+          strikes: { all: BF, nearMoney: BF } }        // BF = { metar: BSET, cli: BSET }
+BSET = { systems: { FX|AIFS|GEFS|GEM|ICON: { rms: [per h], lo, hi, brier: [per h], n: [contracts], days: [city-days] } },
+         beats: [per h: {k, of, ids}] }
 ```
 
-`rel`, `res` and `unc` are the terms of Murphy's decomposition of the Brier
-score on the ten price buckets, kept to five decimals, so the binned score is
-`rel - res + unc`; `brier` is the raw score. The page draws two numbers from
-them. `reliability` is `sqrt(rel)`, the root-mean-square gap between a bucket's
-mean price and its share paid (the RMS form of the expected calibration error),
-drawn in cents. `resolution` is `res / unc`, the share of the base-rate
-uncertainty the buckets resolve (the variance of the share paid across buckets
-over the variance of the outcome), drawn as a percent. `bss` is the raw Brier
-skill against the base rate, `base` the share paid. The intervals are 95
-percent bootstrap intervals over the shared date draws, so contracts on one
-date move together; a lead under 30 city-days carries nulls. The truncated
-score, the ladder-width and CRPS series and the strikes-moved counts were
-removed on 2026-09-15; the score of the whole distribution by lead is the lead
-curve's `crps` block.
+A diagram's `reliability` is the square root of Murphy's REL on the ten price
+buckets, the root-mean-square gap between a bucket's mean price and its share
+paid, and `resolution` is RES over UNC, the share of the base-rate uncertainty
+the buckets resolve. The last lead bin (6 to 0 hours) was dropped on
+2026-09-15, since by then most contracts are settled or priced at a cent.
 
+`brier` is the Brier score by whole hour of lead, the mean over contracts of
+(p - y)^2, and `rms` its square root in probability units, which the page draws
+in cents: the typical gap between a contract's price and what it paid. Summed
+over every one-degree strike of a ladder the Brier score is CRPS, so it is
+averaged per contract here and reads in probability rather than degrees. The
+contracts are the market's own under the price rule at that hour; an ensemble
+is scored on exactly those contract rows (city, day, hour and strike), so on any
+city-day and hour every system is scored on the same strikes, and each ensemble
+is drawn on the part of the market's days its record covers. `all` is every
+quoted strike; `nearMoney` is the middle listed strike of the day's ladder and
+the strike on either side (`NEAR_MONEY_OFFSET`, the desk's own convention),
+fixed by the listing before any lead is scored. In `cli` the market keeps the
+settle and both are restricted to the city-days holding a report. `lo` and
+`hi` are the square roots of the date-bootstrap interval of the
+contract-weighted mean; `beats` is the paired difference of per-city-day means
+at each hour. A lead under 30 city-days carries nulls. The reliability and
+resolution series by lead that stood here from 2026-09-15 were replaced by
+this block the same day.
 
 `own` scores every eligible city-day and `fixed30` the city-days the market
 priced at every hour from 30 to 0, the lead curve's two day bases. The Yes-bid
@@ -341,7 +351,7 @@ the same contracts:
 
 ```
 ENSEMBLE = { name, span, frame: { metar: BLK, cli: BLK } }
-BLK = { leadBins: [...], reliability: [ ... as above ... ], byLead: BYLEAD }
+BLK = { leadBins: [...], reliability: [ ... as above ... ] }
 ```
 
 The climate-report frame recomputes the contract's own outcome against the
@@ -443,24 +453,29 @@ from this side, so nothing else would notice.
 ## 5. The page
 
 Two kinds of chart against lead, a city map, the scorecard grid and
-reliability diagrams, each section with a method note carrying the estimator
-and the sampling rule behind a "Show details of calculation" button, and a
-status strip naming the window and the build time. In order:
+reliability diagrams, each section with a method note carrying the estimator,
+the sampling rule and the conventions it depends on (the settle, the clock,
+the market's price and median, the exclusions, the bootstrap) behind a "Show
+details of calculation" button, and a status strip naming the window and the
+build time. In order:
 
 - **Deterministic skill.** One value per system, the ForecastEx prediction
   market's being the median of its ladder: mean absolute error by lead, and
   under it on the same axis time to converge (`lead-curve.json`).
 - **Probabilistic skill.** Every system that publishes a distribution, the
   market's ladder and the four ensembles: CRPS by lead (`lead-curve.json`
-  `crps`), reliability by lead and resolution by lead (`calibration.json`),
-  each as wide as the error curve, then the reliability diagrams by lead bin.
-- **City map**, **scorecard grid**, the coverage strip, the conventions, and
-  the source tables.
+  `crps`) and the Brier score by lead (`calibration.json` `brier`), each as
+  wide as the error curve, then the reliability diagrams for the three lead
+  bins to six hours out.
+- **City map**, **scorecard grid** and the source tables. The coverage strip
+  and the conventions list were removed on 2026-09-15: the systems table
+  carries every record's span, and each method note carries the conventions
+  its section uses.
 
 Highs default, lows a tab on every figure. No commentary. Every chart against
 lead is drawn by one helper (`WXAcc.leadChart`), so the axis, the hatching of
 the partial bins above 30 hours, the market's band and the step drawing of a
-forecast look the same on all five.
+forecast look the same on all four.
 
 **The source tables.** The foot of the page lists every forecast system,
 the ForecastEx prediction market first and then the alternative systems in four
@@ -470,14 +485,13 @@ row says whether the system is deterministic, an ensemble mean, or
 probabilistic, and which section it appears in; gives the provider's grid
 spacing, time step and update frequency; and links to its documentation. For
 the systems whose run times this record holds, the update frequency is the one
-measured from those run times. The record column is filled at load from the
-same spans as the coverage strip, and for an ensemble from the days its
+measured from those run times. The record column is filled at load from each
+system's scored span in the files' meta, and for an ensemble from the days its
 probabilities were scored on. A second table lists the other data sources
 behind the site, which the FAQ used to carry.
 
 **Spans are printed everywhere.** The systems do not share a record. The
-coverage strip draws one bar per system over the days it was scored on, with
-its own metric tabs. Every figure's method note carries a span line saying
+systems table dates every record. Every figure's method note carries a span line saying
 which days that view used, every legend entry carries the date its system's
 record starts, and the scorecard grid carries a `Record since` column in every
 cohort, beside the cohort's own first day. A sample begins where the

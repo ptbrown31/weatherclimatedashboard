@@ -183,46 +183,48 @@ def run(no_build: bool) -> int:
                                                    return r ? [getComputedStyle(t).color, getComputedStyle(r).color] : null; }""")
                 chk.add(f"{scheme} accuracy: the ForecastEx row in a hover table is set in the hover box's ink",
                         bool(tip_ink) and tip_ink[0] == tip_ink[1], str(tip_ink))
-                # ---- probabilistic skill: CRPS, reliability and resolution at full width, then the diagrams
+                # ---- probabilistic skill: CRPS and the Brier score at full width, then the diagrams
                 cal_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/calibration.json").read().decode())
-                ensb = (((cal_file.get("metric", {}).get("high", {}) or {}).get("cohorts", {}) or {}).get("own", {}) or {}).get("ensembles", {})
-                widths = page.evaluate("""() => ['#accLead', '#accCrps', '#accRel', '#accRes'].map(s => {
+                cal_own = (((cal_file.get("metric", {}).get("high", {}) or {}).get("cohorts", {}) or {}).get("own", {}) or {})
+                ensb = cal_own.get("ensembles", {})
+                brier_sys = set(((((cal_own.get("price", {}).get("mid", {}) or {}).get("brier", {}) or {}).get("strikes", {}) or {})
+                                 .get("nearMoney", {}).get("cli", {}) or {}).get("systems", {}))
+                widths = page.evaluate("""() => ['#accLead', '#accCrps', '#accBrier'].map(s => {
                     const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : 0; })""")
                 prob_key = page.eval_on_selector_all("#accProbKey > span[data-id]", "e => e.map(x => x.getAttribute('data-id'))")
-                prob_txt = " ".join(page.eval_on_selector_all("#accCrps text, #accRel text, #accRes text", "e => e.map(x => x.textContent)"))
-                chk.add(f"{scheme} accuracy: CRPS, reliability and resolution each take the full width of the lead curve",
+                prob_txt = " ".join(page.eval_on_selector_all("#accCrps text, #accBrier text", "e => e.map(x => x.textContent)"))
+                chk.add(f"{scheme} accuracy: CRPS and the Brier score each take the full width of the lead curve, and nothing else is charted by lead",
                         widths[0] > 0 and all(abs(w - widths[0]) <= 2 for w in widths)
-                        and "CRPS" in prob_txt and "rms calibration error" in prob_txt.lower() and "share of uncertainty resolved" in prob_txt.lower()
-                        and all(page.locator(f"{sel} path[stroke-dasharray]").count() >= 3 for sel in ("#accCrps", "#accRel", "#accRes")),
-                        f"widths={widths}")
-                chk.add(f"{scheme} accuracy: the probabilistic figures draw the market against the four ensembles",
+                        and "CRPS" in prob_txt and "brier score as root mean square, cents" in prob_txt.lower()
+                        and all(page.locator(f"{sel} path[stroke-dasharray]").count() >= 3 for sel in ("#accCrps", "#accBrier"))
+                        and page.locator("#accRel, #accRes, #accSpans, ul.conv").count() == 0, f"widths={widths}")
+                chk.add(f"{scheme} accuracy: the probabilistic figures draw the market against the four ensembles on the same strikes",
                         prob_key[:1] == ["FX"] and set(prob_key[1:]) == {"AIFS", "GEFS", "GEM_ENS", "ICON_ENS"}
-                        and len(ensb) >= 4
-                        and all((e.get("frame", {}).get(f, {}).get("byLead", {}) or {}).get(k)
-                                for e in ensb.values() for f in ("metar", "cli") for k in ("reliability", "resolution")),
-                        f"key={prob_key} systems={sorted(ensb)}")
+                        and len(ensb) >= 4 and brier_sys == {"FX", "AIFS", "GEFS", "GEM", "ICON"},
+                        f"key={prob_key} brier={sorted(brier_sys)}")
                 rel_titles = page.eval_on_selector_all("#accDiag svg.acc-cal-rel text", "e => e.map(x => x.textContent).filter(t => t.startsWith('Reliability '))")
                 n_calc = page.locator("#accDiag circle").count()
-                chk.add(f"{scheme} accuracy: the reliability diagrams follow the charts, one per lead bin",
-                        len(rel_titles) == 4 and all(re.match(r"^Reliability \d+\.\d c, resolution \d+%$", t) for t in rel_titles)
-                        and n_calc >= 10, str(rel_titles[:2]))
-                for tab in ("Fixed sample", "Two-sided books only", "NWS climate report"):
-                    before = page.locator("#accRel").inner_html()
+                chk.add(f"{scheme} accuracy: the reliability diagrams follow the charts, one per lead bin to six hours out",
+                        len(rel_titles) == 3 and all(re.match(r"^Reliability \d+\.\d c, resolution \d+%$", t) for t in rel_titles)
+                        and n_calc >= 10 and "6 to 0 h" not in " ".join(page.eval_on_selector_all("#accDiag text", "e => e.map(x => x.textContent)")),
+                        str(rel_titles[:2]))
+                for tab in ("Fixed sample", "Two-sided books only", "NWS climate report", "Near-money strikes"):
+                    before = page.locator("#accBrier").inner_html()
                     page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(500)
-                    chk.add(f"{scheme} accuracy: the {tab} tab redraws the reliability chart",
-                            page.locator("#accRel").inner_html() != before, "")
-                for tab in ("Every day on record", "Yes price midpoint", "METAR settle"):
+                    chk.add(f"{scheme} accuracy: the {tab} tab redraws the Brier score",
+                            page.locator("#accBrier").inner_html() != before, "")
+                for tab in ("Every day on record", "Yes price midpoint", "METAR settle", "Every quoted strike"):
                     page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(300)
                 page.locator("#accCrps rect[fill='transparent']").nth(24).hover(); page.wait_for_timeout(300)
                 crps_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
                 chk.add(f"{scheme} accuracy: the CRPS hover ranks the distributions against ForecastEx",
                         "crps" in crps_tip.lower() and "vs forecastex" in crps_tip.lower() and "Amer. Ens." in crps_tip,
                         crps_tip.replace("\n", " | ")[-160:])
-                page.locator("#accRes rect[fill='transparent']").nth(20).hover(); page.wait_for_timeout(300)
-                res_tip = page.locator("#tip").inner_text().lower() if page.locator("#tip").count() else ""
-                chk.add(f"{scheme} accuracy: the resolution hover lists each system's reliability, resolution and Brier skill",
-                        "reliability" in res_tip and "resolution" in res_tip and "brier skill" in res_tip and "amer. ens." in res_tip,
-                        res_tip.replace("\n", " | ")[:160])
+                page.locator("#accBrier rect[fill='transparent']").nth(20).hover(); page.wait_for_timeout(300)
+                brier_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: the Brier hover ranks the distributions in cents against ForecastEx",
+                        "rms" in brier_tip.lower() and "vs forecastex" in brier_tip.lower() and "Amer. Ens." in brier_tip
+                        and re.search(r"\d+\.\d c", brier_tip) is not None, brier_tip.replace("\n", " | ")[-160:])
                 # ---- the method notes wait behind a button
                 btns = page.locator("button.accnote-btn")
                 hidden = page.eval_on_selector_all(".accnote", "e => e.map(x => x.hidden)")
@@ -246,14 +248,8 @@ def run(no_build: bool) -> int:
                              if "=" not in nt["eq"] or not re.search(r"\b(?:Sample|n)\s*=?\s*[\d,]*\d", nt["n"])]
                 chk.add(f"{scheme} accuracy: every method note holds an estimator and a counted sample",
                         len(notes) == 4 and not bad_notes, f"notes={len(notes)} bad={bad_notes}")
-                # ---- how far back each record goes, stated everywhere it matters
-                # The systems do not share a span, so a reader comparing two
-                # figures has to be told which days each one drew on.
-                n_bars = page.locator("svg.spanstrip rect").count()
-                strip_txt = page.locator("#accSpans").inner_text() if page.locator("#accSpans").count() else ""
-                chk.add(f"{scheme} accuracy: the coverage strip draws a bar for every system",
-                        n_bars >= 12 and re.search(r"[A-Z][a-z]{2} \d+ . [\d,]+ days", strip_txt) is not None,
-                        f"bars={n_bars}")
+                # ---- how far back each record goes: every note names its days, and the
+                # systems table dates every record now that the coverage strip is gone
                 spans = page.eval_on_selector_all(".accnote", "e => e.map(x => (x.querySelector('.rule.span') || {textContent: ''}).textContent)")
                 chk.add(f"{scheme} accuracy: every method note says which days its figure drew on",
                         len(spans) == 4 and all((t or "").strip() for t in spans),

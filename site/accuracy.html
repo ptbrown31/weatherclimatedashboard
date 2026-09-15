@@ -27,15 +27,13 @@
 <div class="key" id="accLeadKey"></div>
 <div id="accLeadMethod"></div>
 <div class="secttl">PROBABILISTIC SKILL</div>
-<p class="cap" style="margin-top:0">The whole distribution, for every system that publishes one, the ForecastEx prediction market&rsquo;s price ladder and four ensembles, scored on the same contracts by hours remaining before the day ends. CRPS scores the distribution in degrees, reliability says how far prices sit from what paid, resolution how well they tell contracts that pay from contracts that do not, and the reliability diagrams show the prices behind those two numbers.</p>
+<p class="cap" style="margin-top:0">The whole distribution, for every system that publishes one, the ForecastEx prediction market&rsquo;s price ladder and four ensembles, scored on the same contracts by hours remaining before the day ends. CRPS scores the distribution in degrees, the Brier score contract by contract in cents, and the reliability diagrams show how the prices behind those scores paid.</p>
 <div class="bar acccontrols" id="accProbBar"></div>
 <div class="card">
 <div class="accsub">CRPS by lead</div>
 <svg id="accCrps" viewBox="0 0 960 400"></svg>
-<div class="accsub">Reliability by lead</div>
-<svg id="accRel" viewBox="0 0 960 360"></svg>
-<div class="accsub">Resolution by lead</div>
-<svg id="accRes" viewBox="0 0 960 360"></svg>
+<div class="accsub">Brier score by lead</div>
+<svg id="accBrier" viewBox="0 0 960 400"></svg>
 <div class="accsub">Reliability diagrams by lead bin</div>
 <div id="accDiag"></div>
 </div>
@@ -53,22 +51,6 @@
 <div class="card"><div id="accGrid"></div></div>
 <div class="key" id="accGridKey"></div>
 <div id="accGridMethod"></div>
-<div class="secttl">RECORD LENGTH</div>
-<p class="cap" style="margin-top:0">The systems on this page did not all start on the same day. Each bar covers the days that system was actually scored on, after thin order books, short capture windows and gaps in the observation record were excluded. A figure that matches systems to each other can only use the days they share, so it starts where the last of them starts. </p>
-<div class="card"><div id="accSpans"></div></div>
-<div class="key" id="accSpansKey"></div>
-<div class="secttl">CONVENTIONS</div>
-<ul class="conv">
-<li><b>Span.</b> Every figure names the days it drew on. The ForecastEx prediction market has priced daily highs since the exchange opened its temperature board; its lows were too thinly quoted to score for some months after that; and the alternative forecast systems start at different dates. Each system&rsquo;s span is printed beside it, and every comparison between two systems is made on the days the pair share.</li>
-<li><b>Clock.</b> Lead counts down to station-local midnight, the moment the target day ends. An alternative forecast system&rsquo;s lead is timed to when its forecast was captured, the ForecastEx prediction market&rsquo;s lead is timed to the ladder snapshot itself.</li>
-<li><b>Truth.</b> Every system is scored against the station&rsquo;s METAR settle, the day&rsquo;s highest or lowest hourly reading, rounded to the nearest whole degree. A toggle rescores alternative forecast systems against the National Weather Service&rsquo;s climate report instead, a different definition of the day&rsquo;s extreme that runs about a degree warmer on highs.</li>
-<li><b>Prediction market value.</b> A contract&rsquo;s Yes price is the midpoint between the Yes bid and one dollar minus the No bid,
-<span class="eq" data-tex="p = \frac{\text{Yes bid} + (1 - \text{No bid})}{2}">p = (Yes bid + (1 - No bid)) / 2</span>
-when both sides are quoted. The ladder across strikes is forced monotone by pooling any violations, and the ForecastEx prediction market&rsquo;s temperature is where it crosses fifty cents, rounded up for highs and down for lows to match whole-degree settlement. A crossing that would have to be read across two or more strikes with no price is left undefined.</li>
-<li><b>Forecast value.</b> An alternative forecast system&rsquo;s value at any moment is its most recent forecast at or before that moment for the target date. By default that value is held at the running observed extreme, so a forecast high is never shown below a high that already occurred, and a forecast low is never shown above a low that already occurred.</li>
-<li><b>Sample.</b> Every system is scored on the city-days its own record covers and the ForecastEx prediction market priced, and every comparison between two systems is made on the days the pair share. A fixed sample is available that restricts the days to those the ForecastEx prediction market priced at every hour from 30 to 0, so a curve&rsquo;s slope cannot come from the sample changing underneath it. Thin order books, short recording windows and days with gaps in the observation record are excluded and counted, and a bin needs at least 30 city-days before it&rsquo;s drawn.</li>
-<li><b>Uncertainty.</b> Every interval on this page is a 95 percent bootstrap over target dates, 1,000 resamples. When a figure shows the ForecastEx prediction market minus a system, both sides are resampled from the same draws, so the difference reflects paired variation, not independent noise in each side.</li>
-</ul>
 <div class="secttl" id="systems">FORECAST SYSTEMS</div>
 <p class="cap" style="margin-top:0">Every system on this page. A deterministic system issues one forecast per run. A probabilistic system publishes a spread of outcomes as well as a centre, which is what lets the probabilistic skill figures score it on the same contracts as the market. Grid spacing, time step and update frequency are the provider&rsquo;s published values for the run behind each row. The record is how far back this page scores it.</p>
 <div class="acc-sources-wrap"><table class="acc-sources">

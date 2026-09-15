@@ -521,10 +521,6 @@ button.accnote-btn{margin:8px 0 0;font-size:12px}
 .tip table.l3 tr.tfx td{font-weight:700;color:var(--tip-ink)}
 /* the record a key entry covers, printed after the name it belongs to */
 [id^="acc"].key .ks{color:var(--muted);opacity:.85;margin-left:5px;font-style:italic}
-/* the coverage strip: one bar per system over the window */
-svg.spanstrip{display:block;width:100%;height:auto}
-svg.spanstrip text.ax{font-size:11px;fill:var(--muted)}
-svg.spanstrip line.grid{stroke:var(--line);stroke-width:1}
 /* an estimator, set as mathematics. KaTeX draws it; a display block gets room
    above and below and scrolls on its own when a long one meets a narrow screen,
    so the note never pushes the page sideways. .texraw is the fallback when
@@ -533,19 +529,10 @@ svg.spanstrip line.grid{stroke:var(--line);stroke-width:1}
 .eq .katex-display{margin:0}
 .eq .katex{font-size:1.06em}
 .accnote .mi{color:var(--ink)}
-.accnote .mi .katex,.conv .mi .katex{font-size:1.02em}
+.accnote .mi .katex{font-size:1.02em}
 .texraw{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel);
   border:1px solid var(--line);border-radius:5px;padding:7px 10px;display:block;text-align:left;white-space:pre-wrap}
-.conv{margin:0 0 6px;padding-left:18px;max-width:78ch}
-.conv li{font-size:13px;line-height:1.55;margin:0 0 6px;color:var(--ink)}
-.conv li b{color:var(--navy)}
 .accsub{font-size:12px;font-weight:700;color:var(--navy);margin:8px 2px 4px}
-/* figure 2 of the accuracy page: the trace's date and city selects sit inside
-   the card above the trace, and the default rule reads as a caption under it */
-.acc-dyn-tracebar{margin:4px 4px 6px;gap:8px 14px}
-.acc-dyn-tracebar label{font-size:11.5px;color:var(--muted)}
-.acc-dyn-tracebar select{padding:4px 8px;font-size:12.5px}
-.acc-dyn-rule{margin:2px 6px 10px}
 /* accuracy city map: the round swatches in its key and the tool select in its bar */
 .key i.acc-map-sw{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px;vertical-align:-1px;border:1px solid var(--rule);box-sizing:border-box}
 .acc-map-ramp{display:inline-flex;gap:2px;vertical-align:middle;margin:0 6px}

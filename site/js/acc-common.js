@@ -306,44 +306,6 @@ window.WXAcc = (() => {
     return 'Scored from ' + mdyY(c.from) + ' to ' + mdyY(meta.asof)
       + ' on the days the ForecastEx prediction market priced at every hour from 30 to 0.';
   }
-  /* The coverage strip: one row per system, a bar over the days it was
-     scored on, drawn against the whole window so the reader sees at a
-     glance that the ForecastEx prediction market's record is the long one. */
-  function spanStrip(host, meta, ids, metric) {
-    if (typeof host === 'string') host = $(host);
-    if (!host || !meta) return null;
-    const w = meta.window || {};
-    const rows = (ids || ORDER).map(id => ({ id, s: span(meta, id, metric) })).filter(r => r.s);
-    if (!rows.length || !w.from || !w.to) return null;
-    const t = iso => Date.parse(iso + 'T00:00:00Z');
-    const RH = 19, L = 188, R = 872, T = 26;
-    const H = T + rows.length * RH + 34;
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'spanstrip' });
-    const x = scale(t(w.from), t(w.to), L, R);
-    const months = [];
-    let d = new Date(t(w.from));
-    d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
-    while (d.getTime() <= t(w.to)) {
-      months.push(d.getTime());
-      d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
-    }
-    months.forEach(m => {
-      svg.appendChild(el('line', { x1: x(m), x2: x(m), y1: T - 8, y2: T + rows.length * RH - 6, class: 'grid' }));
-      svg.appendChild(txt(MON[new Date(m).getUTCMonth()], { x: x(m), y: T - 12, 'text-anchor': 'middle', class: 'ax' }));
-    });
-    rows.forEach((r, i) => {
-      const y = T + i * RH;
-      svg.appendChild(txt(name(r.id), { x: L - 10, y: y + 4, 'text-anchor': 'end', class: 'ax' }));
-      const x0 = x(t(r.s.start)), x1 = x(t(r.s.end || w.to));
-      svg.appendChild(el('rect', { x: x0, y: y - 5, width: Math.max(2, x1 - x0), height: 9, rx: 2,
-                                   fill: color(r.id), 'fill-opacity': r.id === 'FX' ? 0.95 : 0.6 }));
-      svg.appendChild(txt(mdy(r.s.start) + (r.s.days ? ' · ' + int(r.s.days) + ' days' : ''),
-                          { x: R + 8, y: y + 4, class: 'ax' }));
-    });
-    host.innerHTML = '';
-    host.appendChild(svg);
-    return svg;
-  }
 
   // ------------------------------------------------------------- key
   // the legend under a figure: one entry per id, a colored rule and the name
@@ -744,30 +706,6 @@ window.WXAcc = (() => {
   /* The coverage strip and its own controls: highs and lows are different
      records for the ForecastEx prediction market, so the strip carries the same metric tabs every
      figure does. */
-  function drawSpans(D) {
-    const host = $('#accSpans'), keyEl = $('#accSpansKey');
-    if (!host) return;
-    const meta = D.meta;
-    if (!meta || !meta.systems) { notYet(host, NOT_PUBLISHED); return; }
-    const st = { metric: 'high' };
-    const paint = () => {
-      spanStrip(host, meta, ORDER.concat(ENS_ROWS), st.metric);
-      if (!keyEl) return;
-      keyEl.innerHTML = '';
-      keyEl.appendChild(h('span', { class: 'kn',
-        text: 'Bars cover the days each system was scored on the '
-          + (st.metric === 'high' ? 'daily high' : 'daily low')
-          + '. The date and the day count are printed at the right of each bar. '
-
-          + spanLine(meta, ['FX'], st.metric, { lead: 'The ForecastEx prediction market\u2019s own record runs from' }) }));
-    };
-    const bar = host.parentNode && host.parentNode.parentNode
-      ? host.parentNode.insertAdjacentElement('beforebegin', h('div', { class: 'bar acccontrols' }))
-      : null;
-    if (bar) metricTabs(bar, k => { st.metric = k; paint(); }, st.metric);
-    paint();
-  }
-
   /* The record column of the forecast-systems table at the foot of the page.
      A row names the system it describes by id; an ensemble row names the
      calibration file's entry, whose span is the days its probabilities were
@@ -798,7 +736,6 @@ window.WXAcc = (() => {
     ensSpans(D.cal);
     const st = $('#pageStatus');
     if (st) { st.innerHTML = ''; st.appendChild(statusEl(D)); }
-    drawSpans(D);
     fillRecords(D);
     MODULES.forEach(([g, k]) => {
       const mod = window[g];
@@ -814,8 +751,7 @@ window.WXAcc = (() => {
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
     tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,
-    mdy, mdyY, span, since, spanLine, cohortSpanLine, spanStrip,
-    drawSpans,
+    mdy, mdyY, span, since, spanLine, cohortSpanLine,
     W, frame, clear, scale, leadChart, rankTip, leadTitle, leadScale, ticks, niceStep, xAxis, yAxis, leadAxis, lineSeries, dots, band, label,
     notYet, NOT_PUBLISHED,
   };
