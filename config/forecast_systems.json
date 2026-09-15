@@ -197,7 +197,7 @@
      "where": "deterministic skill",
      "grid": "The settlement station itself",
      "step": "3-hourly, to 72 h",
-     "updates": "Four times a day",
+     "updates": "Every 6 hours",
      "id": "NBS_MOS"
     },
     {
@@ -221,7 +221,7 @@
      "where": "deterministic skill",
      "grid": "The settlement station itself",
      "step": "3-hourly, to 72 h",
-     "updates": "Four times a day",
+     "updates": "Every 6 hours",
      "id": "GFS_MOS"
     },
     {
@@ -233,7 +233,7 @@
      "where": "deterministic skill",
      "grid": "The settlement station itself",
      "step": "3-hourly, to 72 h",
-     "updates": "Twice a day",
+     "updates": "Every 12 hours",
      "id": "NAM_MOS"
     },
     {
@@ -245,7 +245,7 @@
      "where": "deterministic skill",
      "grid": "The settlement airport’s station in DWD’s list, which lacks Buckley, Hobby and Midway",
      "step": "Hourly, to 240 h",
-     "updates": "Hourly for the first day, four times a day beyond",
+     "updates": "Every 6 hours",
      "id": "MOSMIX"
     }
    ]
@@ -264,7 +264,7 @@
      "where": "deterministic skill",
      "grid": "2.5 km",
      "step": "Hourly for the first 36 h",
-     "updates": "About every 30 minutes through day 3",
+     "updates": "About twice a day, amended as needed",
      "id": "NDFD"
     }
    ]
