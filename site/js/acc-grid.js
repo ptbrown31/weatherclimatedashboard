@@ -11,7 +11,8 @@
    prediction market's ladder and the four ensembles) carries its CRPS under
    each error cell, footnoted, because a distribution says more than its
    centre does. The three ensembles with no single-run row of their own are
-   rows here, scored on their ensemble mean.
+   rows here, scored on the centre of their ensemble over the hours left in
+   the day.
 
    The shading on the high-error cell is the paired difference from the
    National Weather Service row on the same city-days, per lead, so a column
@@ -228,7 +229,7 @@ window.WXAccGrid = (() => {
     host.appendChild(h('div', { class: 'acc-grid-foot acc-grid-top', text: 'Lead in hours before the station-local midnight that ends the target day. Each cell prints its value and its sample of city-days. Rows are grouped and ordered as in the forecast systems table at the foot of the page.' }));
     host.appendChild(h('div', { class: 'acc-grid-scroll' }, [buildTable(groups)]));
     const foot = ['† CRPS in degrees for every system that publishes a distribution, the ForecastEx prediction market’s ladder and each ensemble’s normal curve read at the same strikes at the same hour. It is scored against the same truth as the cell, on the cell’s city-days that the distribution covers.',
-                  'The American, Canadian and German ensemble rows score the ensemble mean, held at the running observed extreme like every other value, on the city-days the ForecastEx prediction market priced.'];
+                  'The American, Canadian and German ensemble rows score the ensemble’s centre, the highest (for a low, the lowest) hourly ensemble mean over the hours left in the day, held at the running observed extreme like every other value, on the city-days the ForecastEx prediction market priced.'];
     if (state.frame === 'cli') foot.push('In the climate-report frame every alternative forecast system is scored against the National Weather Service climate report for the same date, the ForecastEx prediction market stays scored against the settle, and Buckley Field is excluded because Denver’s report stands in for it.');
     foot.forEach(t => host.appendChild(h('div', { class: 'acc-grid-foot', text: t })));
     renderKey();

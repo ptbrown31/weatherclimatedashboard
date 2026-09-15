@@ -42,8 +42,13 @@ the single quoted side otherwise. A strike with no bid on either side is
 unquoted. A two-sided book bidding one cent against ninety-nine is unquoted.
 The ladder is made monotone in the strike by pooling adjacent violators. The
 crossing `x` is the linear interpolation of the 0.5 level between the two
-bracketing strikes; a ladder that never crosses has no central value at that
-snapshot and is counted as missing. The whole-degree value is `ceil(x)` for
+bracketing quoted strikes; a ladder that never crosses has no central value at
+that snapshot and is counted as missing, and so does one whose bracketing
+quoted strikes have two or more listed strikes with no price between them
+(`MEDIAN_MAX_UNQUOTED_RUN`, from 2026-09-15). Late in the day a ladder often
+quotes only its far strikes, 68 at 3 cents and 76 at 98 cents with nothing
+between, and a straight line across that run would put the median at 72 when
+the prices say only that it lies between 68 and 76. The whole-degree value is `ceil(x)` for
 highs and `floor(x)` for lows, because settlement is strict.
 
 **Market sources.** The ladder is reconstructed from two records. The first is
@@ -344,19 +349,28 @@ National Weather Service report for the same date, so a station whose report
 stands in for another drops out of it. The market keeps the settle its
 contracts pay on in either frame, since that is what they pay on.
 
-The reading is a normal curve centred on that system's own forecast of the
-day's extreme, which is the extreme of its hourly ensemble means over the
-station-local day, with its own member spread at the hour that extreme falls
-on. A high pays when the unrounded extreme reaches half a degree past the
-strike and a low when it falls half a degree under, which is how settlement
-rounds. The values are banked at the running observed extreme exactly as every
-other value on this page is. Nothing is fitted and no bias is removed.
+The reading is taken over the hours of the day still to come, from the
+standing capture (the builder's `ens_standing` frame, from 2026-09-15). At a
+standing instant the centre is the extreme of the capture's hourly ensemble
+means over the station-local hours from that instant to the end of the day,
+with the member spread at the hour that extreme falls on, and the day's
+extreme is the larger (for a low, the smaller) of that and the observed extreme
+so far. So a strike the observations already cleared is paid, any other pays
+only if the hours left reach it (a normal curve on that centre and spread), and
+at the end of the day, with no hours left, nothing more can. A high pays when
+the unrounded extreme reaches half a degree past the strike and a low when it
+falls half a degree under, which is how settlement rounds. Nothing is fitted
+and no bias is removed. Read over the whole day instead, a 4 pm peak kept its
+spread at 11 pm and gave a real chance to strikes the day could no longer
+reach. The scorecard's ensemble rows take the same centre, held at the observed
+extreme.
 
 Two limits belong with these lines and are stated on the page: a system
-publishes a spread for each hour rather than for the day's extreme, so reading
-the peak hour's spread as the extreme's is this page's approximation and not
-the system's; and the level bias each carries in the error figures passes
-straight into its probability here, which shows up as reliability.
+publishes a spread for each hour rather than for the extreme of several hours,
+so reading the spread at the hour of the extreme as the extreme's is this
+page's approximation and not the system's; and the level bias each carries in
+the error figures passes straight into its probability here, which shows up as
+reliability.
 
 ### map.json
 
