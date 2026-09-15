@@ -1,16 +1,17 @@
-/* Shared ground for the five accuracy figures.
+/* Shared ground for the accuracy figures.
 
-   The page draws five figures from six files the record builder ships,
+   The page draws its figures from five files the record builder ships,
    every one under the conventions in docs/accuracy.md. This module owns
    what the figures share so they agree with each other without meaning to:
    the naming and order of the systems, one color per system, the loading
    of the files and the status strip built from their meta, the method note
    under each figure, and the small geometry the SVG figures draw with.
 
-   Each figure module (acc-lead, acc-dyn, acc-cal, acc-map, acc-grid) exports
-   draw(D), where D is the bundle init() assembles. A figure module owns its
-   own tabs, its own tooltips and its own method note; it borrows the helpers
-   here so a band, a line or a lead axis looks the same on every figure. */
+   Each figure module (acc-lead, acc-prob, acc-map, acc-grid) exports draw(D),
+   where D is the bundle init() assembles. A figure module owns its own tabs,
+   its own tooltips and its own method note; it borrows the helpers here so a
+   band, a line or a lead axis looks the same on every figure, and every chart
+   against lead is drawn by leadChart. */
 window.WXAcc = (() => {
   const { el, txt, h, $ } = WXC;
 
@@ -119,12 +120,11 @@ window.WXAcc = (() => {
   const iv = (lo, hi, f) => (lo == null || hi == null ? dash : (f || f1)(lo) + ' to ' + (f || f1)(hi));
 
   // ------------------------------------------------------------- files
-  // Six files under snapshots/accuracy/, daily from the builder, so the
+  // Five files under snapshots/accuracy/, daily from the builder, so the
   // cadence is a day and stale means two. A file counts only when it carries
   // the meta the contract requires; the old lead curve sits at the same path
   // until this page is live and must not be read as the new one.
-  const FILES = { lead: 'lead-curve', dyn: 'dynamics', cal: 'calibration', map: 'map', grid: 'grid',
-                  avail: 'availability' };
+  const FILES = { lead: 'lead-curve', cal: 'calibration', map: 'map', grid: 'grid', avail: 'availability' };
   const CADENCE = 1440;
   const valid = d => !!(d && d.meta && d.meta.schema != null && d.meta.asof && d.meta.conventions);
   async function load(name, loose) {
@@ -132,8 +132,6 @@ window.WXAcc = (() => {
     const ok = r.data && (loose ? !!r.data.meta : valid(r.data));
     return { data: ok ? r.data : null, r };
   }
-  // a trace file for one target date; its meta is {date, built} only
-  const trace = date => load('trace/' + date, true);
 
   // ------------------------------------------------------------- status
   const plur = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
@@ -255,9 +253,13 @@ window.WXAcc = (() => {
      is where the builder dates them. Filled once at init; an ensemble with a
      system row of its own (the European AI) keeps that row's span in span(). */
   const ENS_SPANS = {};
+  const calEnsembles = (cal, met) => {
+    const m = cal && cal.metric && cal.metric[met];
+    return (m && ((m.cohorts && m.cohorts.own && m.cohorts.own.ensembles) || m.ensembles)) || {};
+  };
   function ensSpans(cal) {
     Object.keys((cal && cal.metric) || {}).forEach(met => {
-      const e = cal.metric[met].ensembles || {};
+      const e = calEnsembles(cal, met);
       ENS_SPANS[met] = {};
       Object.keys(e).forEach(k => { if (e[k].span && e[k].span.start) ENS_SPANS[met][ensId(k)] = e[k].span; });
     });
@@ -405,7 +407,22 @@ window.WXAcc = (() => {
   function methodNote(container, spec) {
     if (!container) return null;
     container.innerHTML = '';
+    /* The note is for a reader who wants the arithmetic, so it waits behind
+       a button. Whether it is open is kept on the container, so a tab change
+       that redraws the note leaves it as the reader left it. */
+    const open = container.dataset.open === '1';
+    const btn = h('button', { class: 'vbtn accnote-btn', type: 'button', 'aria-expanded': open ? 'true' : 'false',
+                              text: (open ? 'Hide' : 'Show') + ' details of calculation' });
     const box = h('div', { class: 'accnote' });
+    box.hidden = !open;
+    btn.onclick = () => {
+      const now = box.hidden;
+      box.hidden = !now;
+      container.dataset.open = now ? '1' : '0';
+      btn.setAttribute('aria-expanded', now ? 'true' : 'false');
+      btn.textContent = (now ? 'Hide' : 'Show') + ' details of calculation';
+    };
+    container.appendChild(btn);
     if (spec.title) box.appendChild(h('div', { class: 'nt', text: spec.title }));
     (spec.body || []).forEach(item => {
       if (item && item.tex) { tex(box.appendChild(h('div', { class: 'eq' })), item.tex, true); return; }
@@ -567,12 +584,152 @@ window.WXAcc = (() => {
       host.appendChild(h('p', { class: 'cap', text: msg }));
     }
   }
+  /* Every chart against lead on the page, drawn one way.
+
+     Lead runs down to the right, so the day ends at the right edge and a
+     curve is read the way the day is lived. A series marked smooth (the
+     ForecastEx prediction market, quoted every ten minutes) is drawn through
+     the bin centers with its band; any other series is a step, one flat tread
+     per hourly bin, because a forecast's value changes only when a cycle lands.
+     Bins above 30 h are hatched because the sample there is partial.
+
+     spec = { H, hs, series: [{ id, v, lo?, hi?, smooth?, dash?, lastLiveH? }],
+              ymax? (fixed top) | floor (least top), fmt, label,
+              strips?: { n: [per h], beats: [per h {k, of}], ofLabel? },
+              tip: (i, h) => html, name? (label the market's line), empty? }
+     Returns { g, x, y }, or null when nothing was drawable. */
+  function leadChart(svg, spec) {
+    const hs = spec.hs || [];
+    const H = spec.H || 380;
+    if (!hs.length || !(spec.series || []).some(s => (s.v || []).some(fin))) {
+      notYet(svg, spec.empty || 'This view is not in the published record.');
+      return null;
+    }
+    const hmax = Math.max.apply(null, hs);
+    const strips = spec.strips || null;
+    const g = frame(H, { L: 70, T: 24, B: strips ? H - 118 : H - 58 });
+    const x = scale(hmax + 0.5, -0.5, g.L, g.R);
+    let top = spec.ymax;
+    if (top == null) {
+      top = 0;
+      spec.series.forEach(s => (s.v || []).concat(s.hi || []).forEach(v => { if (fin(v) && v > top) top = v; }));
+      top = Math.max(spec.floor || 0, top * 1.08);
+    }
+    const step = niceStep(top, 5);
+    const y = scale(0, top, g.B, g.T);
+    clear(svg, H);
+    const hid = 'hatch-' + (svg.id || 'lead');
+    const defs = el('defs');
+    const pat = el('pattern', { id: hid, patternUnits: 'userSpaceOnUse', width: 7, height: 7, patternTransform: 'rotate(45)' });
+    pat.appendChild(el('line', { x1: 0, y1: 0, x2: 0, y2: 7, stroke: 'var(--rule)', 'stroke-width': 1.1, 'stroke-opacity': 0.55 }));
+    defs.appendChild(pat);
+    svg.appendChild(defs);
+    yAxis(svg, g, y, ticks(0, top, step), spec.fmt, spec.label);
+    if (hmax > 30) {
+      svg.appendChild(el('rect', { x: x(hmax + 0.5), y: g.T, width: x(30.5) - x(hmax + 0.5), height: g.B - g.T,
+                                   fill: 'url(#' + hid + ')', stroke: 'none', 'pointer-events': 'none' }));
+      svg.appendChild(txt('partial sample above 30 h', { x: (x(hmax + 0.5) + x(30.5)) / 2, y: g.T + 12, 'text-anchor': 'middle', class: 'ax' }));
+    }
+    leadAxis(svg, g, x, hmax, 0, 'Hours before the end of the target day');
+    const px = (arr, f) => (arr || []).map(v => (fin(v) ? f(v) : null));
+    const stepLineAt = (vals, attrs) => {
+      const xs = [], ys = [];
+      hs.forEach((hh, i) => {
+        if (fin(vals[i])) { xs.push(x(hh + 0.5), x(hh - 0.5)); ys.push(y(vals[i]), y(vals[i])); }
+        else { xs.push(null, null); ys.push(null, null); }
+      });
+      return lineSeries(svg, xs, ys, attrs);
+    };
+    const cx = hs.map(hh => x(hh));
+    const smooth = spec.series.filter(s => s.smooth);
+    smooth.forEach(s => { if (s.lo && s.hi) band(svg, cx, px(s.lo, y), px(s.hi, y), color(s.id)); });
+    spec.series.filter(s => !s.smooth).forEach(s => {
+      stepLineAt(s.v || [], Object.assign({ stroke: color(s.id), 'stroke-width': s.width || width(s.id) },
+                                          s.dash ? { 'stroke-dasharray': s.dash } : {}));
+      if (fin(s.lastLiveH)) {
+        const i = hs.indexOf(s.lastLiveH);
+        if (i >= 0 && fin(s.v[i])) svg.appendChild(el('circle', { cx: x(s.lastLiveH - 0.5), cy: y(s.v[i]), r: 3.2, fill: color(s.id),
+                                                                  stroke: 'var(--panel)', 'stroke-width': 1.2, 'pointer-events': 'none' }));
+      }
+    });
+    smooth.forEach(s => lineSeries(svg, cx, px(s.v, y), { stroke: color(s.id), 'stroke-width': width(s.id) }));
+    if (spec.name && smooth.length) {
+      const s = smooth[0], i0 = (s.v || []).findIndex(fin);
+      if (i0 >= 0) label(svg, x(hs[i0]) + 4, y(s.v[i0]) + 14, name(s.id), color(s.id));
+    }
+    let bottom = g.B;
+    if (strips) {
+      const beats = strips.beats || [], nPer = strips.n || [];
+      const of = beats.reduce((m, b) => (b && fin(b.of) ? Math.max(m, b.of) : m), 0);
+      const ofVaries = beats.some(b => b && fin(b.of) && b.of > 0 && b.of !== of);
+      const s1 = g.B + 48, s2 = s1 + 24, sh = 20;
+      bottom = s2 + sh;
+      svg.appendChild(txt('city-days', { x: g.L - 8, y: s1 + 13.5, 'text-anchor': 'end', class: 'ax', 'font-size': 9.5 }));
+      if (ofVaries) {
+        svg.appendChild(txt('beats, of', { x: g.L - 8, y: s2 + 9, 'text-anchor': 'end', class: 'ax', 'font-size': 9 }));
+        svg.appendChild(txt(strips.ofLabel || 'scored', { x: g.L - 8, y: s2 + 18.5, 'text-anchor': 'end', class: 'ax', 'font-size': 9 }));
+      } else {
+        svg.appendChild(txt('beats, of ' + of, { x: g.L - 8, y: s2 + 13.5, 'text-anchor': 'end', class: 'ax', 'font-size': 9.5 }));
+      }
+      hs.forEach((hh, i) => {
+        const x0 = x(hh + 0.5), w = x(hh - 0.5) - x0;
+        const n = nPer[i], b = beats[i];
+        svg.appendChild(el('rect', { x: x0, y: s1, width: w, height: sh, fill: 'var(--shade)', stroke: 'var(--panel)', 'stroke-width': 1, 'pointer-events': 'none' }));
+        if (fin(n)) svg.appendChild(txt(String(n), { x: x0 + w / 2, y: s1 + 13.5, 'text-anchor': 'middle', 'font-size': 8.5,
+                                                     fill: n < 30 ? 'var(--muted)' : 'var(--ink)', 'pointer-events': 'none' }));
+        // the beats cell darkens with the share of systems the market came in under
+        const share = b && fin(b.k) && b.of ? b.k / b.of : null;
+        svg.appendChild(el('rect', { x: x0, y: s2, width: w, height: sh, fill: share == null ? 'var(--shade)' : 'var(--accent)',
+                                     'fill-opacity': share == null ? 1 : 0.08 + 0.42 * share, stroke: 'var(--panel)', 'stroke-width': 1, 'pointer-events': 'none' }));
+        if (share != null) svg.appendChild(txt(String(b.k), { x: x0 + w / 2, y: s2 + 13.5, 'text-anchor': 'middle', 'font-size': 8.5,
+                                                              fill: 'var(--ink)', 'pointer-events': 'none' }));
+      });
+    }
+    // hover: one column per bin over the frame and any strips
+    const guide = el('rect', { x: 0, y: g.T, width: 0, height: bottom - g.T, fill: 'var(--ink)', 'fill-opacity': 0.06,
+                               stroke: 'none', 'pointer-events': 'none', visibility: 'hidden' });
+    svg.appendChild(guide);
+    hs.forEach((hh, i) => {
+      const x0 = x(hh + 0.5), w = x(hh - 0.5) - x0;
+      const r = el('rect', { x: x0, y: g.T, width: w, height: bottom - g.T, fill: 'transparent', stroke: 'none' });
+      r.addEventListener('mouseenter', () => { guide.setAttribute('x', x0); guide.setAttribute('width', w); guide.setAttribute('visibility', 'visible'); });
+      r.addEventListener('mouseleave', () => guide.setAttribute('visibility', 'hidden'));
+      if (spec.tip) hover(r, () => spec.tip(i, hh));
+      svg.appendChild(r);
+    });
+    return { g, x, y };
+  }
+
+  /* A standings table for one hour of a lead chart: every system ordered by
+     its score there, best first, with how far each sits from ForecastEx as a
+     share of ForecastEx's own score. rows = [{id, v, n}]; higherBetter flips
+     the order and the sign for a score where more is better. */
+  function rankTip(title, sub, rows, col, fmtv, opts) {
+    opts = opts || {};
+    const hb = !!opts.higherBetter;
+    const fx = (rows.find(r => r.id === 'FX') || {}).v;
+    const rel = v => (fin(v) && fin(fx) && fx > 0 ? 100 * (v - fx) / fx : null);
+    const relTxt = v => (v == null ? dash : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(0) + '%');
+    const key = r => (fin(r.v) ? (hb ? -r.v : r.v) : Infinity);
+    const sorted = rows.slice().sort((a, b) => key(a) - key(b));
+    let body = '';
+    sorted.forEach((r, k) => {
+      body += '<tr' + (r.id === 'FX' ? ' class="tfx"' : '') + '><td>' + (k + 1) + '</td><td>'
+        + swatch(r.id).replace(name(r.id), short(r.id)) + '</td><td>' + fmtv(r.v) + '</td><td>'
+        + (r.id === 'FX' || opts.noRel ? dash : relTxt(rel(r.v))) + '</td><td>' + int(r.n) + '</td></tr>';
+    });
+    return '<b>' + title + '</b><div class="tsub">' + sub + '</div>'
+      + '<table class="l3"><tr><th>#</th><th>System</th><th>' + col + '</th><th>vs ForecastEx</th><th>n</th></tr>'
+      + body + '</table>' + (opts.foot ? '<div class="tf">' + opts.foot + '</div>' : '');
+  }
+  const leadTitle = hh => (hh === 0 ? 'The hour the day ends' : hh + ' hour' + (hh === 1 ? '' : 's') + ' before the day ends');
+
   const NOT_PUBLISHED = 'This figure has not been published yet. The record is built daily on the machine that holds the capture.';
 
   // ------------------------------------------------------------- init
   // the bundle the figures draw from; kept so a tab change can redraw
   let D = null;
-  const MODULES = [['WXAccLead', 'lead'], ['WXAccMap', 'map'], ['WXAccGrid', 'grid'], ['WXAccCal', 'cal'], ['WXAccDyn', 'dyn']];
+  const MODULES = [['WXAccLead', 'lead'], ['WXAccProb', 'prob'], ['WXAccMap', 'map'], ['WXAccGrid', 'grid']];
   // anything written as mathematics in the page's own markup, set once the
   // typesetter is loaded; the element's text is the source, so a page that
   // loses the typesetter still reads
@@ -617,7 +774,7 @@ window.WXAcc = (() => {
      scored on. The AI model is both, so its cell carries the two. */
   function fillRecords(D) {
     const meta = D.meta;
-    const ens = (D.cal && D.cal.metric && D.cal.metric.high && D.cal.metric.high.ensembles) || {};
+    const ens = calEnsembles(D.cal, 'high');
     const fmt = sp => mdyY(sp.start) + (fin(sp.days) ? ', ' + int(sp.days) + ' days' : '');
     document.querySelectorAll('table.acc-sources td.rec').forEach(td => {
       const id = td.getAttribute('data-id'), eid = td.getAttribute('data-ens');
@@ -652,14 +809,14 @@ window.WXAcc = (() => {
   }
 
   return {
-    init, load, trace, valid, data: () => D, FILES, CADENCE,
+    init, load, valid, data: () => D, FILES, CADENCE,
     NAME, SHORT, TOOLS, ORDER, ENS_ROWS, systemGroups, color, width, name, short, swatch, ensId, ensDash, ensSpan,
     f1, f2, f3, deg1, signed1, pct, pct1, int, hours, iv, dash,
     windowAndBuilt, newestMeta, statusEl, isoShort,
     tabs, metricTabs, key, methodNote, tex, mathText, typeset, tooltip, hover,
     mdy, mdyY, span, since, spanLine, cohortSpanLine, spanStrip,
     drawSpans,
-    W, frame, clear, scale, leadScale, ticks, niceStep, xAxis, yAxis, leadAxis, lineSeries, dots, band, label,
+    W, frame, clear, scale, leadChart, rankTip, leadTitle, leadScale, ticks, niceStep, xAxis, yAxis, leadAxis, lineSeries, dots, band, label,
     notYet, NOT_PUBLISHED,
   };
 })();

@@ -24,14 +24,17 @@ NOW = dt.datetime(2026, 9, 10, 17, 5, tzinfo=dt.timezone.utc)
 BUILT = "2026-09-10T16:53:34Z"
 
 
-# The two trace dates in the fixture set are whichever the last sample refresh
-# kept, so the tests name them from the directory rather than pinning dates that
-# move with every rebuild of the record.
-TRACES = sorted("trace/" + n for n in os.listdir(os.path.join(FIXTURES, "trace")) if n.endswith(".json"))
+# The builder stopped writing per-date trace files on 2026-09-15, so the sample
+# set carries none. The job still prunes any trace a manifest no longer lists,
+# which is how the published ones are cleared, so the tests make two of their own.
+TRACES = ["trace/2026-09-12.json", "trace/2026-09-13.json"]
 TRACE_OLD, TRACE_NEW = TRACES[0], TRACES[-1]
 
 
 def fixture(name: str) -> bytes:
+    if name.startswith("trace/"):
+        date = name[len("trace/"):-len(".json")]
+        return json.dumps({"meta": {"date": date, "built": BUILT}, "obs": []}).encode()
     with open(os.path.join(FIXTURES, name), "rb") as fh:
         return fh.read()
 
@@ -205,7 +208,7 @@ class Job(unittest.TestCase):
         self.assertIn("built", accuracy.check_meta("trace/2026-09-09.json", {"meta": {"date": "2026-09-09"}}))
 
     def test_the_fixtures_carry_the_stamps(self):
-        for name in ("availability.json", "calibration.json", "dynamics.json", "grid.json", "lead-curve.json",
+        for name in ("availability.json", "calibration.json", "grid.json", "lead-curve.json",
                      "map.json") + tuple(TRACES):
             self.assertIsNone(accuracy.check_meta(name, json.loads(fixture(name))), name)
 
@@ -233,6 +236,15 @@ class Job(unittest.TestCase):
                                                    accuracy.DST_PREFIX + "trace/2026-07-02.json"])
         pub = self.published()
         self.assertEqual((pub["traceKept"], pub["tracePruned"]), (1, 2))
+
+    def test_a_build_with_no_traces_clears_the_published_ones(self):
+        for name in TRACES:
+            self.st.put(accuracy.DST_PREFIX + name, fixture(name))
+        self.ship({"availability.json": fixture("availability.json")})
+        self.assertEqual(self.run_pass(), 0)
+        for name in TRACES:
+            self.assertIsNone(self.st.get(accuracy.DST_PREFIX + name))
+        self.assertEqual((self.published()["traceKept"], self.published()["tracePruned"]), (0, 2))
 
     def test_a_listed_trace_is_kept_even_when_this_build_skipped_it(self):
         # an earlier build published the trace; this build lists it again but

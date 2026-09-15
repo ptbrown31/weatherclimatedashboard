@@ -267,42 +267,35 @@ the climate-report frame an ensemble is held to the National Weather Service
 report and the market keeps the settle, both on the city-days that hold a
 report. There is no forecast-only CRPS.
 
-### dynamics.json
+`converge` is time to converge, drawn under the error curve:
 
 ```
-{ meta,
-  converge: { metric: { tol1: { metar: CONV, cli: CONV }, tol2: { ... } } },
-    // CONV = { h: [36..0], systems: { id: { share: [...], median: number|null, never: number } } }
-    // cli holds each alternative forecast system to the climate report instead;
-    // the market keeps the settle its contracts pay on in either frame
-  rate: { byLead: { metric: { h: [36..0], systems: { id: [changes per hour] } } },
-          byLocalHour: { metric: { hour: [0..23], fx: [...], fxLo, fxHi, tools: { id: [...] } } },
-          perCityDay: { metric: { fx: {median, q1, q3}, tools: { id: median } } } },
-  event: { metric: { k: [0,10,...,120], systems: { id: { delta: [...], lo, hi } }, events: int } },
-  traceIndex: { dates: [YYYY-MM-DD], default: {date, city}, byDate: { date: { city: { maeH12: number, changes: int } } } } }
+converge: { h: [36..0],
+            tol1: { own|fixed30: { metar|cli: { systems: { id: { share: [per h], median, never } } } } },
+            tol2: { ... } }
 ```
 
-### trace/{date}.json
-
-One file per target date, the last 60 kept.
-
-```
-{ meta: {date, built}, cities: { id: {
-    tz, dayStart, dayEnd, settleHigh, settleLow, listing,
-    obs: [[t, tempF, isSpeci]],                 // hourly plus special reports, settle-rounded temp too
-    bank: { high: [[t, v]], low: [[t, v]] },
-    market: { high: [[t, ceil, x, q10, q90, nStrikes, twoSided]], low: [...] },
-    strikes: { high: [[t, strike, p, state]] } , // state: 2 two-sided, 1 bid only, -1 ask only, 0 empty, 9 is 1/99
-    tools: { id: { high: [[t, raw]], low: [[t, raw]], lastLive: t } } } } }
-```
-Times are ISO UTC strings; sizes are kept under 1 MB gzipped per date.
+`share[i]` is the share of a system's city-days whose held value was within
+the tolerance (1 or 2 degrees) of the truth at every hour from `h[i]` to the end
+of the day at which it held a value. An hour with no value, a gap in the
+market's book or a crossing outside its ladder, is no evidence either way and
+does not break the run; the days are the ones the system held a value on at
+any lead. `median` is the lead at which half the days had converged,
+interpolated between whole hours, and `never` the share that had not by the
+end of the day. It is on the held value only: a raw record stops at a
+forecast's last update, after which every later hour would pass for want of a
+value. The frames and day bases are the lead curve's. The standalone
+`dynamics.json` (changes per hour, the event strip and the traced city-day)
+and the per-date `trace/` files were retired on 2026-09-15; the site's job
+prunes the published traces once a manifest stops listing them.
 
 ### calibration.json
 
 ```
 { meta,
   bins: { edges: [0,0.1,...,1.0] },
-  metric: { high: { price: { mid: PRICEBLOCK, twoSided: PRICEBLOCK, yesBid: PRICEBLOCK } }, low: {...} } }
+  metric: { high: { cohorts: { own: COHORT, fixed30: COHORT } }, low: {...} } }
+COHORT = { price: { mid: PRICEBLOCK, twoSided: PRICEBLOCK }, ensembles: { id: ENSEMBLE } }
 PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6],[6,0]],
                reliability: [ per lead bin: { n, nCityDays, brier, reliability, resolution,
                                               x: [10], y: [10], count: [10], lo: [10], hi: [10],
@@ -329,8 +322,11 @@ removed on 2026-09-15; the score of the whole distribution by lead is the lead
 curve's `crps` block.
 
 
-Shapes the builder settled where the text above was loose: trace `obs` rows
-are `[t, tempF, tempRounded, isSpeci]`; grid cells carry `nLow` beside `n`;
+`own` scores every eligible city-day and `fixed30` the city-days the market
+priced at every hour from 30 to 0, the lead curve's two day bases. The Yes-bid
+price rule was dropped from the file on 2026-09-15.
+
+Shapes the builder settled where the text above was loose: grid cells carry `nLow` beside `n`;
 availability exclusion rows carry `metric`; map cells are nested tool id then
 city id; `meta.cohorts` includes `fixed30`.
 
@@ -339,7 +335,7 @@ members as well as a centre, so `metric.<m>.ensembles` carries them scored on
 the same contracts:
 
 ```
-ensembles: { id: { name, frame: { metar: BLK, cli: BLK } } }
+ENSEMBLE = { name, span, frame: { metar: BLK, cli: BLK } }
 BLK = { leadBins: [...], reliability: [ ... as above ... ], byLead: BYLEAD }
 ```
 
@@ -432,19 +428,32 @@ from this side, so nothing else would notice.
 
 ## 5. The page
 
-Five figures, each with a method note carrying the estimator and the sampling
-rule, and a status strip naming the window and the build time. In order: the
-lead curve; the city map; the scorecard grid; calibration and Brier; how the
-market moves between forecast cycles. Then the coverage strip, then the
-conventions. Highs default, lows a tab on every figure. No commentary. The old
-lead curve stays published until this page is live.
+Two kinds of chart against lead, a city map, the scorecard grid and
+reliability diagrams, each section with a method note carrying the estimator
+and the sampling rule behind a "Show details of calculation" button, and a
+status strip naming the window and the build time. In order:
+
+- **Deterministic skill.** One value per system, the ForecastEx prediction
+  market's being the median of its ladder: mean absolute error by lead, and
+  under it on the same axis time to converge (`lead-curve.json`).
+- **Probabilistic skill.** Every system that publishes a distribution, the
+  market's ladder and the four ensembles: CRPS by lead (`lead-curve.json`
+  `crps`), reliability by lead and resolution by lead (`calibration.json`),
+  each as wide as the error curve, then the reliability diagrams by lead bin.
+- **City map**, **scorecard grid**, the coverage strip, the conventions, and
+  the source tables.
+
+Highs default, lows a tab on every figure. No commentary. Every chart against
+lead is drawn by one helper (`WXAcc.leadChart`), so the axis, the hatching of
+the partial bins above 30 hours, the market's band and the step drawing of a
+forecast look the same on all five.
 
 **The source tables.** The foot of the page lists every forecast system,
 the ForecastEx prediction market first and then the alternative systems in four
 families: raw numerical weather prediction models, numerical weather prediction
 with model output statistics, human forecasting systems, and AI systems. Each
 row says whether the system is deterministic, an ensemble mean, or
-probabilistic, and which figures it appears in; gives the provider's grid
+probabilistic, and which section it appears in; gives the provider's grid
 spacing, time step and update frequency; and links to its documentation. For
 the systems whose run times this record holds, the update frequency is the one
 measured from those run times. The record column is filled at load from the

@@ -164,51 +164,76 @@ def run(no_build: bool) -> int:
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(2500)
                 n_lead = page.locator("#accLead path").count()
                 chk.add(f"{scheme} accuracy: the lead curve draws the market and every system", n_lead >= 3, f"paths={n_lead}")
-                n_dyn, n_dynp = page.locator("#accDyn svg").count(), page.locator("#accDyn svg path").count()
-                chk.add(f"{scheme} accuracy: the convergence figure draws both panels", n_dyn == 2 and n_dynp >= 6,
-                        f"svgs={n_dyn} paths={n_dynp}")
-                # the systems that publish a spread are scored on the same contracts
+                # ---- deterministic skill: the error curve with time to converge under it
+                n_conv = page.locator("#accConv path").count()
+                chk.add(f"{scheme} accuracy: time to converge sits under the error curve and draws every system",
+                        n_conv >= 6 and page.locator("#accDyn, #accCal").count() == 0
+                        and "CRPS" not in page.locator("#accLeadBar").inner_text(), f"paths={n_conv}")
+                conv_before = page.locator("#accConv").inner_html()
+                page.locator("#accLeadBar button", has_text="Within 2").first.click(); page.wait_for_timeout(500)
+                chk.add(f"{scheme} accuracy: the tolerance tab redraws time to converge",
+                        page.locator("#accConv").inner_html() != conv_before, "")
+                page.locator("#accLeadBar button", has_text="Within 1").first.click(); page.wait_for_timeout(300)
+                page.locator("#accConv rect[fill='transparent']").nth(16).hover(); page.wait_for_timeout(300)
+                conv_tip = page.locator("#tip").inner_text().lower() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: the convergence hover ranks the systems and gives each one's half-way lead",
+                        "converged" in conv_tip and "half by" in conv_tip, conv_tip.replace("\n", " | ")[:140])
+                # the market's row in a hover table reads in the hover box's own ink
+                tip_ink = page.evaluate("""() => { const t = document.querySelector('#tip'); const r = t && t.querySelector('tr.tfx td');
+                                                   return r ? [getComputedStyle(t).color, getComputedStyle(r).color] : null; }""")
+                chk.add(f"{scheme} accuracy: the ForecastEx row in a hover table is set in the hover box's ink",
+                        bool(tip_ink) and tip_ink[0] == tip_ink[1], str(tip_ink))
+                # ---- probabilistic skill: CRPS, reliability and resolution at full width, then the diagrams
                 cal_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/calibration.json").read().decode())
-                ensb = (cal_file.get("metric", {}).get("high", {}) or {}).get("ensembles", {})
-                cal_txt = page.locator("#accCal").inner_text()
-                # the frame tab reaches the reliability panels and the convergence figure too
-                cal_metar = page.locator("#accCal").inner_html()
-                page.locator("#accCalBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(700)
-                chk.add(f"{scheme} accuracy: the reliability panels redraw in the climate-report frame",
-                        page.locator("#accCal").inner_html() != cal_metar, "")
-                page.locator("#accCalBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
-                dyn_metar = page.locator("#accDyn").inner_html()
-                page.locator("#accDynBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(700)
-                chk.add(f"{scheme} accuracy: the convergence figure redraws in the climate-report frame",
-                        page.locator("#accDyn").inner_html() != dyn_metar, "")
-                page.locator("#accDynBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
-                cal_bar = page.locator("#accCalBar").inner_text()
-                chk.add(f"{scheme} accuracy: the calibration figure drops the price-side and range toggles",
-                        "Yes bid" not in cal_bar and "2 to 98" not in cal_bar, cal_bar.replace("\n", " | ")[:120])
-                cal_key = page.locator("#accCalKey").inner_text()
-                chk.add(f"{scheme} accuracy: the ensembles are scored on the same contracts as the market",
-                        len(ensb) >= 2
+                ensb = (((cal_file.get("metric", {}).get("high", {}) or {}).get("cohorts", {}) or {}).get("own", {}) or {}).get("ensembles", {})
+                widths = page.evaluate("""() => ['#accLead', '#accCrps', '#accRel', '#accRes'].map(s => {
+                    const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : 0; })""")
+                prob_key = page.eval_on_selector_all("#accProbKey > span[data-id]", "e => e.map(x => x.getAttribute('data-id'))")
+                prob_txt = " ".join(page.eval_on_selector_all("#accCrps text, #accRel text, #accRes text", "e => e.map(x => x.textContent)"))
+                chk.add(f"{scheme} accuracy: CRPS, reliability and resolution each take the full width of the lead curve",
+                        widths[0] > 0 and all(abs(w - widths[0]) <= 2 for w in widths)
+                        and "CRPS" in prob_txt and "rms calibration error" in prob_txt.lower() and "share of uncertainty resolved" in prob_txt.lower()
+                        and all(page.locator(f"{sel} path[stroke-dasharray]").count() >= 3 for sel in ("#accCrps", "#accRel", "#accRes")),
+                        f"widths={widths}")
+                chk.add(f"{scheme} accuracy: the probabilistic figures draw the market against the four ensembles",
+                        prob_key[:1] == ["FX"] and set(prob_key[1:]) == {"AIFS", "GEFS", "GEM_ENS", "ICON_ENS"}
+                        and len(ensb) >= 4
                         and all((e.get("frame", {}).get(f, {}).get("byLead", {}) or {}).get(k)
-                                for e in ensb.values() for f in ("metar", "cli") for k in ("reliability", "resolution"))
-                        and "Ensemble" in cal_key, f"systems={sorted(ensb)}")
-                # reliability and resolution replace the Brier bars and the dispersion panel
-                lead_txt = page.eval_on_selector_all("#accCal svg.acc-cal-lead text", "e => e.map(x => x.textContent).join(' ')")
-                rel_titles = page.eval_on_selector_all("#accCal svg.acc-cal-rel text", "e => e.map(x => x.textContent).filter(t => t.startsWith('Reliability '))")
-                chk.add(f"{scheme} accuracy: the calibration figure draws reliability and resolution by lead, and no Brier bars or dispersion panel",
-                        page.locator("#accCal svg.acc-cal-lead").count() == 1
-                        and "RMS calibration error" in lead_txt and "Share of uncertainty resolved" in lead_txt
-                        and page.locator("#accCal svg.acc-cal-lead path").count() >= 2 * (1 + len(ensb))
-                        and len(rel_titles) == 4 and all(re.match(r"^Reliability \d+\.\d c, resolution \d+%$", t) for t in rel_titles)
-                        and page.locator("#accCal svg.acc-cal-bars, #accCal svg.acc-cal-sharp").count() == 0
-                        and "ladder width" not in cal_txt.lower(), str(rel_titles[:2]))
-                page.locator("#accCal svg.acc-cal-lead rect[fill='transparent']").nth(20).hover(); page.wait_for_timeout(300)
-                cal_tip = page.locator("#tip").inner_text().lower() if page.locator("#tip").count() else ""
-                chk.add(f"{scheme} accuracy: the calibration hover lists each system's reliability, resolution and Brier skill",
-                        "reliability" in cal_tip and "resolution" in cal_tip and "brier skill" in cal_tip and "amer. ens." in cal_tip,
-                        cal_tip.replace("\n", " | ")[:160])
-                n_calc, n_calr = page.locator("#accCal circle").count(), page.locator("#accCal rect").count()
-                chk.add(f"{scheme} accuracy: the calibration figure draws its bins and its bars",
-                        n_calc >= 10 and n_calr >= 8, f"circles={n_calc} rects={n_calr}")
+                                for e in ensb.values() for f in ("metar", "cli") for k in ("reliability", "resolution")),
+                        f"key={prob_key} systems={sorted(ensb)}")
+                rel_titles = page.eval_on_selector_all("#accDiag svg.acc-cal-rel text", "e => e.map(x => x.textContent).filter(t => t.startsWith('Reliability '))")
+                n_calc = page.locator("#accDiag circle").count()
+                chk.add(f"{scheme} accuracy: the reliability diagrams follow the charts, one per lead bin",
+                        len(rel_titles) == 4 and all(re.match(r"^Reliability \d+\.\d c, resolution \d+%$", t) for t in rel_titles)
+                        and n_calc >= 10, str(rel_titles[:2]))
+                for tab in ("Fixed sample", "Two-sided books only", "NWS climate report"):
+                    before = page.locator("#accRel").inner_html()
+                    page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(500)
+                    chk.add(f"{scheme} accuracy: the {tab} tab redraws the reliability chart",
+                            page.locator("#accRel").inner_html() != before, "")
+                for tab in ("Every day on record", "Yes price midpoint", "METAR settle"):
+                    page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(300)
+                page.locator("#accCrps rect[fill='transparent']").nth(24).hover(); page.wait_for_timeout(300)
+                crps_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: the CRPS hover ranks the distributions against ForecastEx",
+                        "crps" in crps_tip.lower() and "vs forecastex" in crps_tip.lower() and "Amer. Ens." in crps_tip,
+                        crps_tip.replace("\n", " | ")[-160:])
+                page.locator("#accRes rect[fill='transparent']").nth(20).hover(); page.wait_for_timeout(300)
+                res_tip = page.locator("#tip").inner_text().lower() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: the resolution hover lists each system's reliability, resolution and Brier skill",
+                        "reliability" in res_tip and "resolution" in res_tip and "brier skill" in res_tip and "amer. ens." in res_tip,
+                        res_tip.replace("\n", " | ")[:160])
+                # ---- the method notes wait behind a button
+                btns = page.locator("button.accnote-btn")
+                hidden = page.eval_on_selector_all(".accnote", "e => e.map(x => x.hidden)")
+                ok_btn = btns.count() == 4 and all(hidden) and btns.first.inner_text().strip() == "Show details of calculation"
+                if btns.count():
+                    btns.first.click(); page.wait_for_timeout(200)
+                    ok_btn = ok_btn and page.eval_on_selector_all(".accnote", "e => e.map(x => x.hidden)")[0] is False \
+                        and btns.first.inner_text().strip() == "Hide details of calculation"
+                    btns.first.click(); page.wait_for_timeout(100)
+                chk.add(f"{scheme} accuracy: every method note is behind a Show details of calculation button",
+                        ok_btn, f"buttons={btns.count()} hidden={hidden}")
                 n_mapc, n_mapp = page.locator("#accMap circle").count(), page.locator("#accMap path").count()
                 chk.add(f"{scheme} accuracy: the city map draws the states and the stations",
                         n_mapc >= 3 and n_mapp >= 1, f"circles={n_mapc} paths={n_mapp}")
@@ -220,7 +245,7 @@ def run(no_build: bool) -> int:
                 bad_notes = [i for i, nt in enumerate(notes)
                              if "=" not in nt["eq"] or not re.search(r"\b(?:Sample|n)\s*=?\s*[\d,]*\d", nt["n"])]
                 chk.add(f"{scheme} accuracy: every method note holds an estimator and a counted sample",
-                        len(notes) == 5 and not bad_notes, f"notes={len(notes)} bad={bad_notes}")
+                        len(notes) == 4 and not bad_notes, f"notes={len(notes)} bad={bad_notes}")
                 # ---- how far back each record goes, stated everywhere it matters
                 # The systems do not share a span, so a reader comparing two
                 # figures has to be told which days each one drew on.
@@ -231,7 +256,7 @@ def run(no_build: bool) -> int:
                         f"bars={n_bars}")
                 spans = page.eval_on_selector_all(".accnote", "e => e.map(x => (x.querySelector('.rule.span') || {textContent: ''}).textContent)")
                 chk.add(f"{scheme} accuracy: every method note says which days its figure drew on",
-                        len(spans) == 5 and all((t or "").strip() for t in spans),
+                        len(spans) == 4 and all((t or "").strip() for t in spans),
                         str([(t or "")[:40] for t in spans]))
                 lead_key = page.locator("#accLeadKey .ks").count()
                 chk.add(f"{scheme} accuracy: the lead curve's key dates every system's record",
@@ -2821,25 +2846,6 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: the lead curve redraws in the climate-report frame",
                         page.locator("#accLead").inner_html() != lead_metar, "")
                 page.locator("#accLeadBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
-                # the CRPS view: the market's ladder against every ensemble, on the held value only
-                page.locator("#accLeadBar button", has_text="CRPS").first.click(); page.wait_for_timeout(600)
-                crps_key = page.eval_on_selector_all("#accLeadKey > span[data-id]", "e => e.map(x => x.getAttribute('data-id'))")
-                crps_axis = page.eval_on_selector_all("#accLead text", "e => e.map(x => x.textContent)")
-                value_hidden = page.eval_on_selector_all("#accLeadBar .tabgroup", "e => e.filter(g => g.hidden).map(g => g.textContent)")
-                crps_note = page.locator("#accLeadMethod").inner_text()
-                chk.add(f"{scheme} accuracy: the lead curve's CRPS view draws the market against the four ensembles",
-                        crps_key[:1] == ["FX"] and set(crps_key[1:]) == {"AIFS", "GEFS", "GEM_ENS", "ICON_ENS"}
-                        and any("CRPS" in t for t in crps_axis) and "CRPS by lead" in crps_note
-                        and page.locator("#accLead path[stroke-dasharray]").count() >= 3
-                        and len(value_hidden) == 1 and "What a reader held" in value_hidden[0],
-                        f"key={crps_key} hidden={value_hidden}")
-                page.locator("#accLead rect[fill='transparent']").nth(12).hover(); page.wait_for_timeout(300)
-                crps_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
-                chk.add(f"{scheme} accuracy: the CRPS hover ranks the distributions against ForecastEx",
-                        # the header is set in capitals by the stylesheet, and innerText follows it
-                        "crps" in crps_tip.lower() and "vs forecastex" in crps_tip.lower() and "Amer. Ens." in crps_tip,
-                        crps_tip.replace("\n", " | ")[-160:])
-                page.locator("#accLeadBar button", has_text="MAE").first.click(); page.wait_for_timeout(400)
                 # the map earns a color only where the paired interval clears zero
                 fills = page.eval_on_selector_all("#accMap circle", "e=>e.map(x=>x.getAttribute('fill')||'')")
                 colored = sum(1 for f in fills if f.startswith("color-mix("))

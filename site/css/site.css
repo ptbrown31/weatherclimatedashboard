@@ -96,6 +96,15 @@ text{font-family:inherit}
 .tip .tf{margin-top:4px;opacity:.75;font-size:11px}
 .tip[data-pinned="1"]{pointer-events:auto;user-select:text;outline:1px solid var(--accent)}
 .tip .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(128,128,128,.7)}
+/* The hover box is drawn in the opposite theme to the page, dark on a light
+   page and light on a dark one, so a system's swatch inside it takes the
+   other theme's value of its color; the page's own value would sit dark on
+   dark or light on light. The ForecastEx row is set in bold. */
+.tip{--accent:#7FB0EA; --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t12:#9FD4AA; --t13:#EDB98C; --t14:#BDB2EC; --t15:#8CC6E3; --t16:#DBC088; --t17:#E7A3BB; --t18:#AEC8E0; --t-extra:#8C97A3;}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .tip{--accent:#1E5AA0; --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t12:#3F6B45; --t13:#8F5530; --t14:#57499A; --t15:#245A76; --t16:#6E5730; --t17:#8A3F58; --t18:#47657E; --t-extra:#9AA3AD;}
+}
+:root[data-theme="dark"] .tip{--accent:#1E5AA0; --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t12:#3F6B45; --t13:#8F5530; --t14:#57499A; --t15:#245A76; --t16:#6E5730; --t17:#8A3F58; --t18:#47657E; --t-extra:#9AA3AD;}
 @media (prefers-reduced-motion: reduce){.tip{transition:none}}
 /* city page */
 /* The two maps side by side, finishing at the same height.
@@ -494,6 +503,9 @@ tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
 [id^="acc"].key .kn{white-space:normal;flex-basis:100%}
 @media (max-width:640px){[id^="acc"].key span{white-space:normal}}
 [id^="acc"].key .kn{color:var(--muted);font-style:italic}
+/* the method note waits behind a button under each figure */
+button.accnote-btn{margin:8px 0 0;font-size:12px}
+.accnote[hidden]{display:none}
 .accnote{background:var(--shade);border-left:3px solid var(--rule);padding:9px 13px 8px;margin:10px 0 4px;
   font-size:12px;line-height:1.5;color:var(--muted);border-radius:0 6px 6px 0}
 .accnote .nt{font-weight:700;color:var(--navy);font-size:12px;margin-bottom:3px}
@@ -503,9 +515,10 @@ tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
    sampling rules above it because it is the one the reader checks before
    comparing two figures to each other */
 .accnote .rule.span{margin-top:5px;color:var(--ink);font-weight:600}
-/* the market's own row in the lead-curve standings, so the eye finds it
-   wherever the ranking has put it at that hour */
-.tip table.l3 tr.tfx td{font-weight:700;color:var(--ink)}
+/* the market's own row in a hover standings table, so the eye finds it
+   wherever the ranking has put it at that hour. It takes the hover box's own
+   ink: the page's ink is the box's ground color in both themes. */
+.tip table.l3 tr.tfx td{font-weight:700;color:var(--tip-ink)}
 /* the record a key entry covers, printed after the name it belongs to */
 [id^="acc"].key .ks{color:var(--muted);opacity:.85;margin-left:5px;font-style:italic}
 /* the coverage strip: one bar per system over the window */
