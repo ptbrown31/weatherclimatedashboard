@@ -8,6 +8,7 @@
 #   ops/aws/deploy.sh site        # build both targets for deployment and upload them
 #   ops/aws/deploy.sh check       # is it alive: manifest as-of, alarms, schedules
 #   ops/aws/deploy.sh vendor      # the live-storm lane: stack deploy with the vendor base URL and key
+#   ops/aws/deploy.sh paper PDF   # the working paper, replacing the last version at the same URL
 #
 # Settings come from ops/aws/deploy.env (copy deploy.env.example; gitignored)
 # or from the environment. Nothing here stores a credential: the AWS CLI's own
@@ -197,13 +198,38 @@ phase_site() {
   [ -n "$bucket" ] || die "stack has no BucketName output; run the stack phase first"
   say "building both targets for deployment (no sample data bundled)"
   (cd "$ROOT" && WX_DOMAIN="$DOMAIN" python3 scripts/build.py --deploy)
-  say "uploading the standalone site to s3://$bucket/ (data/ and embed/ are never touched by this sync)"
-  upload_target "$ROOT/dist/standalone" "s3://$bucket" --exclude "data/*" --exclude "embed/*"
+  say "uploading the standalone site to s3://$bucket/ (data/, embed/ and papers/ are never touched by this sync)"
+  upload_target "$ROOT/dist/standalone" "s3://$bucket" --exclude "data/*" --exclude "embed/*" --exclude "papers/*"
   say "uploading the embed to s3://$bucket/embed/"
   upload_target "$ROOT/dist/embed" "s3://$bucket/embed"
   say "invalidating the CDN cache"
   aws cloudfront create-invalidation --distribution-id "$dist" --paths "/*" --query "Invalidation.{Id:Id,Status:Status}" --output table
   say "site: $(output SiteUrl)"
+}
+
+# The working paper. One PDF at one fixed key, so a new version replaces the old
+# one at the same URL and every link to it keeps working. The PDF is not in the
+# repository, which would keep every version in its history, so the owner passes
+# its path. The site sync excludes papers/, so a site deploy never prunes it.
+# Five minutes of browser cache, and the upload invalidates the path at the CDN,
+# so a new version is served within minutes of the upload.
+PAPER_KEY="papers/Brown_2026_Improvement_of_Daily_Temperature_Forecasts_from_a_Prediction_Market.pdf"
+CC_PAPER="public, max-age=300"
+
+phase_paper() {
+  need aws "brew install awscli"
+  local src="${1:-}" bucket dist url
+  [ -n "$src" ] && [ -f "$src" ] || die "give the path of the PDF, as in ops/aws/deploy.sh paper ~/Downloads/paper.pdf"
+  [ "$(head -c 5 "$src")" = "%PDF-" ] || die "$src does not start like a PDF"
+  bucket="$(output BucketName)"; dist="$(output DistributionId)"; url="$(output SiteUrl)"
+  [ -n "$bucket" ] || die "stack has no BucketName output; run the stack phase first"
+  say "uploading $src ($(wc -c < "$src" | tr -d ' ') bytes) to s3://$bucket/$PAPER_KEY"
+  aws s3 cp "$src" "s3://$bucket/$PAPER_KEY" --only-show-errors \
+      --content-type application/pdf --cache-control "$CC_PAPER" \
+      --content-disposition "inline; filename=\"${PAPER_KEY##*/}\""
+  say "invalidating the paper's path at the CDN"
+  aws cloudfront create-invalidation --distribution-id "$dist" --paths "/$PAPER_KEY" --query "Invalidation.{Id:Id,Status:Status}" --output table
+  say "paper: ${url}${PAPER_KEY}"
 }
 
 phase_check() {
@@ -242,6 +268,7 @@ case "${1:-}" in
   site)      phase_site ;;
   check)     phase_check ;;
   vendor)    phase_vendor ;;
+  paper)     phase_paper "${2:-}" ;;
   all)       phase_preflight; phase_stack; phase_code; phase_seed; phase_site; phase_check ;;
-  *) sed -n '2,14p' "$0"; exit 2 ;;
+  *) sed -n '2,15p' "$0"; exit 2 ;;
 esac

@@ -129,8 +129,9 @@ window.WXAccProb = (() => {
   // ------------------------------------------------------------- reliability diagrams
   /* Four panels, one per lead bin, share paid against price. The marker
      area is the contract count, so a bin of 10,000 tail contracts and a
-     bin of 500 central ones are seen for what they are; the bar is the
-     Wilson interval on the share paid; the inset is the price histogram,
+     bin of 500 central ones are seen for what they are. No interval is
+     drawn per bin, because contracts on one city-day share a single outcome
+     and a binomial interval would be too narrow. The inset is the price histogram,
      the raw share of contracts in each decile before any pooling, which is
      the sharpness of the prices. The ensembles are plain lines on the same
      contracts. */
@@ -178,9 +179,6 @@ window.WXAccProb = (() => {
       (r.x || []).forEach((px, k) => {
         const py = r.y && r.y[k];
         if (!fin(px) || !fin(py)) return;
-        if (fin(r.lo && r.lo[k]) && fin(r.hi && r.hi[k])) {
-          svg.appendChild(el('line', { x1: x(px), x2: x(px), y1: y(r.lo[k]), y2: y(r.hi[k]), stroke: C_FX, 'stroke-width': 1.4, 'pointer-events': 'none' }));
-        }
         const cnt = r.count && r.count[k];
         const rad = 2.2 + 7 * Math.sqrt((fin(cnt) ? cnt : 0) / maxCount);
         svg.appendChild(el('circle', { cx: x(px), cy: y(py), r: rad, fill: C_FX, 'fill-opacity': 0.45, stroke: C_FX,
@@ -221,7 +219,6 @@ window.WXAccProb = (() => {
     return A.tooltip().rows('Prices ' + Math.round(edges[k] * 100) + ' to ' + Math.round(edges[k + 1] * 100) + ' c', [
       ['Mean price', fin(r.x[k]) ? Math.round(r.x[k] * 100) + ' c' : A.dash],
       ['Share that paid', A.pct1(r.y[k])],
-      ['95 percent Wilson interval', A.iv(r.lo && r.lo[k], r.hi && r.hi[k], A.pct1)],
       ['Contracts' + (pooled ? ' (pooled)' : ''), A.int(cnt)],
       ['Share of all contracts', A.pct1(r.hist && r.hist[k])],
       ['Lead bin', bin ? bin[0] + ' to ' + bin[1] + ' h' : A.dash],
@@ -242,7 +239,7 @@ window.WXAccProb = (() => {
       const sh = m && m.cohorts && m.cohorts[st.cohort] && m.cohorts[st.cohort].shared;
       A.key(keyEl, keyIds, { dashes: true, since: () => '',
         note: (sh && sh.start ? 'Every line is drawn on the city-days all five share, ' + A.mdy(sh.start) + ' to ' + A.mdy(sh.end) + ', ' + A.int(sh.days) + ' days. ' : '')
-          + 'Bands are the ForecastEx prediction market’s 95 percent bootstrap interval; in the diagrams marker area is the contract count and the bar the 95 percent Wilson interval.' });
+          + 'Bands are the ForecastEx prediction market’s 95 percent bootstrap interval; in the diagrams marker area is the contract count.' });
     }
     method(meth);
   }
@@ -268,7 +265,7 @@ window.WXAccProb = (() => {
       body: [
         'CRPS, the continuous ranked probability score, measures a whole forecast distribution against what happened, in degrees. It shrinks as probability gathers near the observed value, and a forecast that puts all its probability on one whole degree scores its absolute error, so it reads on the same scale as the mean absolute error above.',
         { tex: 'CRPS_s(h) = \\frac{1}{N_h}\\sum_{i=1}^{N_h} \\sum_{k} \\left( F_{s,i,h}(k) - \\mathbb{1}[o_i \\le k] \\right)^2' },
-        'where $F_{s,i,h}(k)$ is system $s$’s probability that city-day $i$ settles at or below $k$ as it stood at lead $h$, $k$ runs over whole degrees across the ForecastEx prediction market’s strikes, and $o_i$ is the settle, the station’s highest or lowest hourly METAR reading of the day rounded to the nearest whole degree.',
+        'where $F_{s,i,h}(k)$ is system $s$’s probability that city-day $i$ settles at or below $k$ as it stood at lead $h$, $k$ runs over whole degrees across the ForecastEx prediction market’s strikes, and $o_i$ is the settle, the station’s highest or lowest METAR reading of the day rounded to the nearest whole degree.',
         'The Brier score takes the same squared gaps contract by contract instead of adding them up over a ladder, so it reads in probability rather than in degrees and every contract counts the same whatever its ladder. It is drawn as its square root, in cents, the typical gap between a contract’s price and what the contract paid, 0 or 100 cents.',
         { tex: 'BS_s(h) = \\frac{1}{N_h}\\sum_{j=1}^{N_h} (p_{s,j} - y_j)^2 \\qquad \\text{drawn as } 100\\sqrt{BS_s(h)} \\text{ cents}' },
         'where $p_{s,j}$ is system $s$’s probability that contract $j$ pays and $y_j$ is 1 when it paid. Summed over every one-degree strike of a ladder the Brier score would be CRPS again, which is why it is averaged per contract here. Pricing every contract at 50 cents scores 50 cents; a system that knew every outcome would score zero. Rankings are the same as on the Brier score itself.',
@@ -285,7 +282,7 @@ window.WXAccProb = (() => {
         'All five are read at the same instant on the same strikes. Lead counts down to station-local midnight, the moment the target day ends; the ForecastEx prediction market is read on the last ladder snapshot of each hour and an ensemble on its most recent capture at or before that hour. Every chart and diagram uses only the contracts the ForecastEx prediction market quoted at hours when all four ensembles hold a reading, so every line is drawn on the same contracts and the same days. CRPS also needs the ladder\u2019s median to be defined at that hour, so its city-day counts run slightly under the Brier score\u2019s.',
         'Near-money strikes are the middle listed strike of the day’s ladder and the strike on either side. The middle is fixed by the listing, before any lead is scored and whatever any system forecast, so it picks the same contracts for every system.',
         'Two sets of days are available, every day all five share, or those restricted to the fixed sample the ForecastEx prediction market priced at every hour from 30 to 0. Thin order books, dates with too few price snapshots and days with gaps in the observation record are excluded, and the counts are listed in the details under the scorecard.',
-        'The diagrams pool a bucket under 50 contracts toward the 50-cent bucket. The last six hours have no diagram, since by then most contracts are settled or priced at a cent.',
+        'The diagrams pool a bucket under 50 contracts toward the 50-cent bucket. The last six hours have no diagram, since by then most contracts are settled or priced at a cent. No interval is drawn on a bucket, because contracts on the same city-day share one outcome and are not independent, and intervals from resampling whole dates run 1.6 to 3.2 times wider than binomial ones.',
         'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates, and a lead with under 30 city-days is not drawn. The beats strips count the ensembles the ForecastEx prediction market beat at that hour, meaning the 95 percent interval of the paired difference over the days both hold, resampled under the same draws, lies entirely in its favor.',
       ],
       span: sharedLine()

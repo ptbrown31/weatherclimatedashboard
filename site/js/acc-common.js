@@ -171,7 +171,10 @@ window.WXAcc = (() => {
     const cached = Object.keys(FILES).some(k => D.results[k] && D.results[k].source === 'cache');
     const stale = mins == null || mins > 2 * CADENCE;
     const when = isNaN(built) ? 'unknown time' : WXC.clockFull(built, Intl.DateTimeFormat().resolvedOptions().timeZone);
-    const w = meta.window || {};
+    // the days the ForecastEx record is scored on, which is the span the
+    // working paper quotes, rather than the wider window the builder reads
+    const fx = ((meta.systems || {}).FX || {}).scored || {};
+    const w = fx.start && fx.end ? { from: fx.start, to: fx.end } : (meta.window || {});
     let text = 'Data as of ' + when + (mins == null ? '' : ' (' + ago(mins) + ')')
       + (w.from && w.to ? ' · target days ' + mdyY(w.from) + ' to ' + mdyY(w.to) : '')
       + (stale ? '; updates are normally daily and the record is behind' : ' · updates daily');

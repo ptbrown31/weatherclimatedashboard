@@ -50,8 +50,8 @@ window.WXAccMap = (() => {
   };
   const toolCells = () => { const w = cellsOf(); const f = w && w.frame && w.frame[sel.frame]; return (f && f[sel.tool]) || null; };
   const medianOf = () => { const w = cellsOf(); const f = w && w.median && w.median[sel.frame]; return (f && f[sel.tool]) || null; };
-  // Buckley Field has no climate report of its own; Denver's stands in, so
-  // the contract excludes it from that frame and the dot is drawn hollow
+  // Buckley Field has no climate report of its own, only Denver's, so it is
+  // left out of that frame and the dot is drawn hollow
   const excluded = id => sel.frame === 'cli' && id === 'KBKF';
   const straddles = c => c.lo != null && c.hi != null && c.lo <= 0 && c.hi >= 0;
 
@@ -332,7 +332,7 @@ window.WXAccMap = (() => {
       rules: [
         'Two windows are available, the morning of the target day from 6 AM to noon station time, and the evening before at 6 PM station time.',
         'A city with fewer than 30 matched city-days is hollow.',
-        'A city-day\u2019s value is the mean of the system\u2019s value at each whole hour of the window, its most recent forecast at or before that hour held at the running observed extreme, and it counts only when every hour of the window holds one. The ForecastEx prediction market\u2019s value is its median, where its ladder of Yes prices crosses fifty cents, held the same way. The settle is the station\u2019s highest or lowest hourly METAR reading of the day rounded to the nearest whole degree.',
+        'A city-day\u2019s value is the mean of the system\u2019s value at each whole hour of the window, its most recent forecast at or before that hour held at the running observed extreme, and it counts only when every hour of the window holds one. The ForecastEx prediction market\u2019s value is its median, where its ladder of Yes prices crosses fifty cents, held the same way. The settle is the station\u2019s highest or lowest METAR reading of the day rounded to the nearest whole degree.',
         'Intervals are 95 percent bootstrap intervals over 1,000 resamples of the target dates, with the ForecastEx prediction market and the system resampled together so both sides of the ratio move under the same draws.',
         'The median above the map is taken over every city with at least 30 matched city-days, grey or colored, and its interval is the spread of that median across the same resamples.',
         'The climate-report frame scores the alternative forecast system against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, while the ForecastEx prediction market keeps the settle it pays on, so a gap between frames reflects that difference in definition rather than in forecast skill. Buckley Field has no climate report of its own, only Denver\u2019s, so it drops out of that frame and is drawn hollow.',

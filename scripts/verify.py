@@ -281,9 +281,16 @@ def run(no_build: bool) -> int:
                 acc_served = strip_markup(urllib.request.urlopen(f"{srv.url}/accuracy.html").read().decode())
                 chk.add(f"{scheme} accuracy: the page serves its own text without running a script",
                         len(acc_served.split()) >= 300, f"words={len(acc_served.split())}")
+                # the working paper sits at one fixed URL that each new version replaces
+                paper_sel = "a[href='papers/Brown_2026_Improvement_of_Daily_Temperature_Forecasts_from_a_Prediction_Market.pdf']"
+                acc_paper = page.locator(f".wrap {paper_sel}").count()
+                no_wilson = "wilson" not in page.locator("#accProbKey").inner_text().lower()
                 page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(400)
                 chk.add(f"{scheme} accuracy: the FAQ still reaches the page",
                         page.locator(".prose a[href='accuracy.html']").count() >= 1, "")
+                chk.add(f"{scheme} accuracy: the page and the FAQ link the working paper at its fixed URL, and the diagrams claim no per-bin interval",
+                        acc_paper == 1 and page.locator(f".prose {paper_sel}").count() == 1 and no_wilson,
+                        f"accuracy={acc_paper} wilson_free={no_wilson}")
                 page.goto(f"{srv.url}/daily-temperature-markets.html"); page.wait_for_timeout(500)
                 art_t = " ".join(" ".join(t.split()) for t in page.locator(".prose").all_inner_texts())
                 chk.add(f"{scheme} article: the settlement convention is stated exactly",

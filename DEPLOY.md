@@ -118,7 +118,7 @@ Set `data_base_url` in `config/site.json` to `/data` (the default) and `domain` 
 domain, then build for deployment and upload both targets:
 
     python3 scripts/build.py --deploy
-    aws s3 sync dist/standalone s3://<BucketName>/ --delete --exclude "data/*" --exclude "embed/*"
+    aws s3 sync dist/standalone s3://<BucketName>/ --delete --exclude "data/*" --exclude "embed/*" --exclude "papers/*"
     aws s3 cp dist/standalone/js s3://<BucketName>/js/ --recursive \
         --cache-control "public, max-age=3600, stale-while-revalidate=86400"
     aws s3 cp dist/standalone/css s3://<BucketName>/css/ --recursive \
@@ -286,6 +286,22 @@ steps above. Nothing under `snapshots/accuracy/` changes until a manifest exists
 the old curve stays published until then. After the first accuracy pass the builder's file has
 replaced it and `export_accuracy.py` is not run again. The job deletes nothing outside
 `snapshots/accuracy/trace/`.
+
+## 12a. The working paper
+
+The accuracy page and the FAQ link to the working paper at one fixed URL,
+
+    https://<domain>/papers/Brown_2026_Improvement_of_Daily_Temperature_Forecasts_from_a_Prediction_Market.pdf
+
+Each new version replaces the last at that URL, so the links never change. The PDF is kept out of
+the repository, which would hold every version in its history. Upload a version with
+
+    ops/aws/deploy.sh paper <path to the PDF>
+
+which writes it to that key with a five-minute browser cache and invalidates the path at the CDN.
+The site sync in section 6 excludes `papers/`, so deploying the site never removes the paper, and
+the paper upload touches nothing else. A clean checkout serves no paper, so the link returns 404 in
+local mode.
 
 ## Cloudflare alternative
 
