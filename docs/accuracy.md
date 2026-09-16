@@ -86,8 +86,15 @@ The archive is indexed by valid hour, not by run: for each hour it carries
 that hour's value in the run of one day earlier and of two days earlier. So
 the reconstruction reads, at an instant and for a target day, the extreme over
 the hours of that day still to come, each hour taken from the freshest
-archived run that existed at the instant, which is the one-day run for an hour
-within a day of it and the two-day run beyond. That makes the reconstruction a
+archived run already published at the instant, which is the one-day run for an
+hour within a day of it and the two-day run beyond. A run counts as published at
+its initialization plus the delay Open-Meteo's own availability metadata reports
+for that model (`om_backfill.PUBLISH_DELAY_H`), from 1.6 hours for the HRRR
+values the American Model's series returns within a day to 9.55 hours for the
+Japanese Model, so a reading is never credited with a run a reader could not
+yet have had. Until 2026-09-16 archived runs were credited at initialization,
+which let a reading use a run up to about ten hours before it was out and
+lowered those systems' 30-hour errors by up to 0.12 degrees. That makes the reconstruction a
 remaining-window source, scored the way the Aviation Forecast and the Blend
 already are, with the observation bank supplying what already happened. It
 also makes it stale against a live capture by up to a run cycle, because the
@@ -114,7 +121,9 @@ median of the two values themselves is identical to a tenth. Two cells are
 large enough to matter: the European model's highs, where
 the reconstruction is about half a degree worse in the middle of the day, and
 the American model's lows, where it is nine tenths worse at 18 hours. The
-measurement is rebuilt with the record by `om_measure.py` beside the builder.
+measurement is rebuilt with the record by `om_measure.py` beside the builder,
+and the table was measured while archived runs were still credited at
+initialization.
 
 The four statistical guidance sources have a second archive, Iowa State's,
 which keeps every bulletin as it was issued with its cycle time and its
