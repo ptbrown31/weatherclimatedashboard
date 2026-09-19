@@ -169,6 +169,30 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: time to converge sits under the error curve and draws every system",
                         n_conv >= 6 and page.locator("#accDyn, #accCal").count() == 0
                         and "CRPS" not in page.locator("#accLeadBar").inner_text(), f"paths={n_conv}")
+                # ---- the second axis on the error curve, and lead counted back from the extreme
+                sec_day = page.locator("#accLead path.acc-sec").count()
+                lead_svg = page.locator("#accLead").text_content()
+                page.locator("#accLead rect[fill='transparent']").nth(26).hover(); page.wait_for_timeout(300)
+                day_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: the error curve carries the share of city-days whose extreme was already observed on a second axis",
+                        sec_day == 1 and "already observed" in lead_svg and "100%" in lead_svg
+                        and "had already seen the day" in day_tip, f"sec={sec_day} tip={day_tip[-120:]!r}")
+                frame_grp = page.locator("#accLeadBar .tabgroup", has_text="METAR settle")
+                page.locator("#accLeadBar button", has_text="Before the extreme").first.click(); page.wait_for_timeout(600)
+                rel_txt = page.locator("#accLead").text_content()
+                rel_paths = page.locator("#accLead path").count()
+                sec_rel = page.locator("#accLead path.acc-sec").count()
+                page.locator("#accLead rect[fill='transparent']").nth(2).hover(); page.wait_for_timeout(300)
+                rel_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
+                chk.add(f"{scheme} accuracy: Before the extreme redraws the error curve by hours before the extreme, with its own second axis and no frame tabs",
+                        "Hours before the day’s extreme was observed" in rel_txt and "target day begins" not in rel_txt
+                        and rel_paths >= 6 and sec_rel == 1 and "forecast this far ahead" in rel_txt
+                        and frame_grp.is_hidden() and "before the extreme" in rel_tip
+                        and "earlier report had already reached" in rel_tip,
+                        f"paths={rel_paths} sec={sec_rel} framehidden={frame_grp.is_hidden()} tip={rel_tip[:80]!r}")
+                page.locator("#accLeadBar button", has_text="Before the day ends").first.click(); page.wait_for_timeout(400)
+                chk.add(f"{scheme} accuracy: Before the day ends restores the lead from the end of the day and the frame tabs",
+                        "Hours before the end of the target day" in page.locator("#accLead").text_content() and frame_grp.is_visible(), "")
                 conv_before = page.locator("#accConv").inner_html()
                 page.locator("#accLeadBar button", has_text="Within 2").first.click(); page.wait_for_timeout(500)
                 chk.add(f"{scheme} accuracy: the tolerance tab redraws time to converge",

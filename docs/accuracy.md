@@ -264,7 +264,8 @@ counts are integers; a missing value is `null`.
 BLOCK = { h: [36..0],
           cohorts: { own: SERIES, fixed30: SERIES },
           crps: CRPS,
-          converge: CONVERGE
+          converge: CONVERGE,
+          relative: RELATIVE
         }
 CRPS = { h: [36..0],
          cohorts: { own: { metar: CV, cli: CV }, fixed30: { metar: CV, cli: CV } },
@@ -279,7 +280,13 @@ SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
            beats: [per h: {k: int, of: int, ids: [ids beaten]}],
            beatsRaw: [per h: ...],
            beatsCli: [per h: ...],
-           binNote: [per h: {dates: [from, to], zones: {tz: count}} | null] }
+           binNote: [per h: {dates: [from, to], zones: {tz: count}} | null],
+           observed: [per h: share 0..1 | null] }                  // extreme already observed
+RELATIVE = { anchor: "last", k: [1..K],
+             cohorts: { own|fixed30: { systems: { id: { mae, lo, hi, n, maeRaw, loRaw, hiRaw, nRaw } },   // per k
+                                       beats: [per k], beatsRaw: [per k],
+                                       n: [per k], nDays: int,
+                                       share: [per k], tieShare: [per k] } } }
 ```
 In the climate-report frame each alternative forecast system is scored against
 the National Weather Service report for the same date while the market keeps
@@ -291,6 +298,26 @@ which the page prints in its strip; each system's own `n`, `nRaw` and `nCli`
 count the city-days behind its value in each view. A system's bin with fewer
 than 30 carries `null` values. `h` above 30 is present only where the cohort
 has members.
+
+`observed[i]` is the share of the market's scored city-days at `h[i]` whose
+extreme had already been observed, some METAR report at or before that
+instant having reached the settle value. It is zero above 24 h, before the
+target day begins, and the page draws it on a second axis under the error
+curve.
+
+`relative` is the same error curve with lead counted back from the report that
+set the day's extreme, using only the instants before that report, so every
+value scored is a forecast made before the extreme happened. The extreme's time
+is the last report of the day that reached the settle value
+(`C.EXTREME_ANCHOR = "last"`; temperatures are whole degrees, so the value often
+recurs, and the last report keeps the most hours). Bin `k` holds the instants
+between `k - 1` and `k` hours before it. Each system keeps its own rows and its
+held value (and the forecast-only value in `maeRaw`), METAR frame only. `n` is
+the market's count per bin and `nDays` its city-days in the cohort, `share` is
+`n / nDays`, the share of its city-days holding a forecast that far ahead, and
+`tieShare` the share of the bin's market instants at which an earlier report had
+already reached the settle value. `k` runs to the last bin where any system has
+30 city-days in the own cohort.
 
 `crps` is the CRPS by lead that the probabilistic section draws. The market is
 scored on its own standing ladder at each whole hour, and each ensemble at the

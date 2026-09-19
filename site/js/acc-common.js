@@ -453,10 +453,11 @@ window.WXAcc = (() => {
                                             transform: 'rotate(-90 17 ' + (g.T + g.B) / 2 + ')', class: 'ax' }));
   }
   // the lead axis every 6 h, with the day boundary named where it is in range
-  function leadAxis(svg, g, x, hmax, hmin, label) {
+  // (dayLine false for a lead that is not counted from the end of the day)
+  function leadAxis(svg, g, x, hmax, hmin, label, dayLine) {
     hmin = hmin == null ? 0 : hmin;
     xAxis(svg, g, x, ticks(hmin, hmax, 6), v => v + 'h', label || 'Hours before the end of the target day');
-    if (hmax >= 24 && hmin <= 24) {
+    if (dayLine !== false && hmax >= 24 && hmin <= 24) {
       svg.appendChild(el('line', { x1: x(24), x2: x(24), y1: g.T, y2: g.B, class: 'grid', 'stroke-dasharray': '4 4' }));
       svg.appendChild(txt('the target day begins', { x: x(24) - 6, y: g.T + 12, 'text-anchor': 'end', class: 'ax' }));
     }
@@ -556,9 +557,12 @@ window.WXAcc = (() => {
       return null;
     }
     const hmax = Math.max.apply(null, hs);
+    const hmin = Math.min.apply(null, hs);
     const strips = spec.strips || null;
-    const g = frame(H, { L: 70, T: 24, B: strips ? H - 118 : H - 58 });
-    const x = scale(hmax + 0.5, -0.5, g.L, g.R);
+    const sec = spec.secondary && (spec.secondary.v || []).some(fin) ? spec.secondary : null;
+    // a second axis on the right takes room from the frame for its labels
+    const g = frame(H, Object.assign({ L: 70, T: 24, B: strips ? H - 118 : H - 58 }, sec ? { R: 884 } : {}));
+    const x = scale(hmax + 0.5, hmin - 0.5, g.L, g.R);
     let top = spec.ymax;
     if (top == null) {
       top = 0;
@@ -575,12 +579,12 @@ window.WXAcc = (() => {
     defs.appendChild(pat);
     svg.appendChild(defs);
     yAxis(svg, g, y, ticks(0, top, step), spec.fmt, spec.label);
-    if (hmax > 30) {
+    if (spec.hatch !== false && hmax > 30) {
       svg.appendChild(el('rect', { x: x(hmax + 0.5), y: g.T, width: x(30.5) - x(hmax + 0.5), height: g.B - g.T,
                                    fill: 'url(#' + hid + ')', stroke: 'none', 'pointer-events': 'none' }));
       svg.appendChild(txt('partial sample above 30 h', { x: (x(hmax + 0.5) + x(30.5)) / 2, y: g.T + 12, 'text-anchor': 'middle', class: 'ax' }));
     }
-    leadAxis(svg, g, x, hmax, 0, 'Hours before the end of the target day');
+    leadAxis(svg, g, x, hmax, hmin, spec.xLabel || 'Hours before the end of the target day', spec.dayLine);
     const px = (arr, f) => (arr || []).map(v => (fin(v) ? f(v) : null));
     const stepLineAt = (vals, attrs) => {
       const xs = [], ys = [];
@@ -603,6 +607,22 @@ window.WXAcc = (() => {
       }
     });
     smooth.forEach(s => lineSeries(svg, cx, px(s.v, y), { stroke: color(s.id), 'stroke-width': width(s.id) }));
+    /* The second axis: a share from 0 to 100 percent on the right, drawn as a
+       dashed ink line so it is never taken for a system. It carries context for
+       the error curves (how much of the sample the observations had already
+       decided, or how much of it reaches this far), not a score. */
+    if (sec) {
+      const ys = scale(0, 1, g.B, g.T);
+      svg.appendChild(el('line', { x1: g.R, x2: g.R, y1: g.T, y2: g.B, stroke: 'var(--rule)', 'stroke-width': 1, 'pointer-events': 'none' }));
+      [0, 0.25, 0.5, 0.75, 1].forEach(v => svg.appendChild(txt(Math.round(v * 100) + '%', { x: g.R + 6, y: ys(v) + 3.5, class: 'ax' })));
+      if (sec.label) {
+        const cy = (g.T + g.B) / 2;
+        svg.appendChild(txt(sec.label, { x: W - 10, y: cy, 'text-anchor': 'middle', class: 'ax',
+                                         transform: 'rotate(90 ' + (W - 10) + ' ' + cy + ')' }));
+      }
+      lineSeries(svg, cx, (sec.v || []).map(v => (fin(v) ? ys(v) : null)),
+                 { stroke: 'var(--ink)', 'stroke-width': 1.4, 'stroke-dasharray': '5 4', class: 'acc-sec' });
+    }
     if (spec.name && smooth.length) {
       const s = smooth[0], i0 = (s.v || []).findIndex(fin);
       if (i0 >= 0) label(svg, x(hs[i0]) + 4, y(s.v[i0]) + 14, name(s.id), color(s.id));

@@ -37,8 +37,13 @@ window.WXAccLead = (() => {
     { key: 'tol2', label: 'Within 2 °F', title: 'Converged when within two degrees of the truth at every hour from that lead on' },
   ];
 
-  const state = { metric: 'high', cohort: 'own', value: 'held', frame: 'metar', tol: 'tol1' };
-  let file = null, built = false;
+  const LEADS = [
+    { key: 'day', label: 'Before the day ends', title: 'Lead counted back from station-local midnight at the end of the target day' },
+    { key: 'extreme', label: 'Before the extreme', title: 'Lead counted back from the report that set the day’s extreme, using only the hours before it' },
+  ];
+
+  const state = { metric: 'high', cohort: 'own', value: 'held', frame: 'metar', tol: 'tol1', lead: 'day' };
+  let file = null, built = false, leadGroup = null, frameGroup = null;
 
   const fin = v => v != null && isFinite(v);
   const cohortName = key => (COHORTS.find(c => c.key === key) || {}).label || key;
@@ -70,9 +75,17 @@ window.WXAccLead = (() => {
       if (keyEl) keyEl.innerHTML = '';
       return;
     }
+    // the lead can be counted from the end of the day or back from the extreme;
+    // the second exists only where the file carries it, and it is METAR-framed
+    const hasRel = !!(block.relative && Array.isArray(block.relative.k) && block.relative.k.length);
+    if (leadGroup) leadGroup.hidden = !hasRel;
+    const rel = hasRel && state.lead === 'extreme';
+    if (frameGroup) frameGroup.hidden = rel;
+    if (rel) { renderRelative(block, svg, conv, keyEl, methEl); return; }
     const raw = state.value === 'raw';
     const hs = block.h;
     const ids = A.ORDER.filter(id => series.systems[id]);
+    const observed = series.observed || [];
     const S = ids.map(id => seriesFor(id, series.systems[id], raw, hs, state.frame));
     const beats = (raw ? series.beatsRaw : state.frame === 'cli' ? series.beatsCli : series.beats) || [];
     const notes = series.binNote || [];
@@ -82,6 +95,7 @@ window.WXAccLead = (() => {
     A.leadChart(svg, {
       H: 430, hs, series: S, floor: 1, fmt: v => A.f1(v) + '°', label: 'Mean absolute error, °F (lower is better)',
       name: true, strips: { n: series.n || [], beats, ofLabel: raw ? 'live record' : 'scored' },
+      secondary: { v: observed, label: 'City-days with the extreme already observed, dashed' },
       tip: (i, hh) => {
         const n = (series.n || [])[i], b = beats[i], note = notes[i];
         let sub = view + '. ForecastEx ' + (fin(n) ? A.int(n) + ' city-days' : 'no sample') + (fin(n) && n < 30 ? ', under the 30 a bin needs' : '') + '.';
@@ -91,8 +105,9 @@ window.WXAccLead = (() => {
         if (note && Array.isArray(note.dates)) {
           const z = note.zones || {};
           foot += 'Partial sample, target days ' + A.mdyY(note.dates[0]) + ' to ' + A.mdyY(note.dates[1])
-            + (Object.keys(z).length ? ', zones ' + Object.keys(z).map(tz => String(tz).split('/').pop().replace(/_/g, ' ') + ' ' + A.int(z[tz])).join(', ') : '') + '.';
+            + (Object.keys(z).length ? ', zones ' + Object.keys(z).map(tz => String(tz).split('/').pop().replace(/_/g, ' ') + ' ' + A.int(z[tz])).join(', ') : '') + '. ';
         }
+        if (fin(observed[i])) foot += A.pct(observed[i]) + ' of these city-days had already seen the day’s extreme. ';
         foot += 'n is each system’s own city-days at this hour.';
         return A.rankTip(A.leadTitle(hh), sub, S.map(s => ({ id: s.id, v: s.v[i], n: s.n[i] })), 'MAE °F', A.f2, { foot });
       },
@@ -102,7 +117,63 @@ window.WXAccLead = (() => {
     if (keyEl) {
       A.key(keyEl, ids, { meta: file.meta, metric: state.metric,
         note: (raw ? 'A dot marks each alternative forecast system’s last live update for the day. ' : '')
-          + 'The band is the ForecastEx prediction market’s 95 percent bootstrap interval.' });
+          + 'The band is the ForecastEx prediction market’s 95 percent bootstrap interval. The dashed line, right axis, is the share of its city-days whose extreme had already been observed.' });
+    }
+    methodNote(methEl);
+  }
+
+  /* The same error curves with lead counted back from the report that set the
+     day's extreme instead of from the end of the day. Only the hours before
+     that report are scored, so every value is a forecast made before the
+     extreme happened. The builder's relative block carries each system's
+     curve by whole hours before the extreme, the share of the market's
+     city-days holding a forecast that far ahead, and the share of those hours
+     at which an earlier report had already reached the settle value. */
+  function renderRelative(block, svg, conv, keyEl, methEl) {
+    const rb = block.relative;
+    const co = rb.cohorts && rb.cohorts[state.cohort];
+    if (!co || !co.systems) {
+      A.notYet(svg, 'This view is not in the published record.');
+      if (keyEl) keyEl.innerHTML = '';
+      return;
+    }
+    const raw = state.value === 'raw';
+    const ks = rb.k;
+    const ids = A.ORDER.filter(id => co.systems[id]);
+    const pick = (sy, a) => (raw ? sy[a + 'Raw'] : sy[a]) || [];
+    const S = ids.map(id => {
+      const sy = co.systems[id];
+      return { id, v: pick(sy, 'mae').map(v => (fin(v) ? v : null)), lo: pick(sy, 'lo'), hi: pick(sy, 'hi'),
+               n: pick(sy, 'n'), smooth: id === 'FX' };
+    });
+    const beats = (raw ? co.beatsRaw : co.beats) || [];
+    const share = co.share || [], tie = co.tieShare || [];
+    const base = (state.metric === 'high' ? 'Highs' : 'Lows') + ', ' + cohortName(state.cohort).toLowerCase() + ', '
+      + (raw ? 'forecast only' : 'what a reader held');
+    const kTitle = k => (k === 1 ? 'The hour before the extreme' : k + ' hours before the extreme');
+    A.leadChart(svg, {
+      H: 430, hs: ks, series: S, floor: 1, fmt: v => A.f1(v) + '°', label: 'Mean absolute error, °F (lower is better)',
+      name: true, xLabel: 'Hours before the day’s extreme was observed', dayLine: false, hatch: false,
+      strips: { n: co.n || [], beats, ofLabel: raw ? 'live record' : 'scored' },
+      secondary: { v: share, label: 'City-days with a forecast this far ahead, dashed' },
+      tip: (i, k) => {
+        const n = (co.n || [])[i], b = beats[i];
+        let sub = base + ', METAR settle. ForecastEx ' + (fin(n) ? A.int(n) + ' city-days' : 'no sample')
+          + (fin(n) && n < 30 ? ', under the 30 a bin needs' : '') + '.';
+        if (b && fin(b.k)) sub += ' ForecastEx beats ' + b.k + ' of ' + b.of + ' systems.';
+        const fx = S[0];
+        let foot = fx && fin(fx.lo[i]) && fin(fx.hi[i]) ? 'ForecastEx band ' + A.iv(fx.lo[i], fx.hi[i], A.f2) + '. ' : '';
+        if (fin(share[i])) foot += A.pct(share[i]) + ' of the ForecastEx prediction market’s city-days hold a forecast this far ahead. ';
+        if (fin(tie[i])) foot += 'At ' + A.pct(tie[i]) + ' of them an earlier report had already reached the day’s extreme value. ';
+        foot += 'n is each system’s own city-days at this lead.';
+        return A.rankTip(kTitle(k), sub, S.map(x => ({ id: x.id, v: x.v[i], n: x.n[i] })), 'MAE °F', A.f2, { foot });
+      },
+    });
+    drawConverge(conv, block, ids, base + (state.frame === 'cli' ? ', climate-report frame' : ''));
+    if (keyEl) {
+      A.key(keyEl, ids, { meta: file.meta, metric: state.metric,
+        note: (raw ? 'Forecast only, each system’s value as issued before the extreme. ' : '')
+          + 'The band is the ForecastEx prediction market’s 95 percent bootstrap interval. The dashed line, right axis, is the share of its city-days holding a forecast this far ahead of the extreme.' });
     }
     methodNote(methEl);
   }
@@ -156,10 +227,12 @@ window.WXAccLead = (() => {
         'Time to converge measures how early a system locks onto the temperature the day ends on and stays there. For a tolerance of $d$ degrees, a city-day has converged by lead $h$ if its value was within $d$ degrees of the truth at every hour from $h$ to the end of the day at which it had a value.',
         { tex: 'C_s(h; d) = \\frac{1}{N}\\left|\\{\\, i : |f_{s,i}(h\') - o_i| \\le d \\text{ for every } h\' \\le h \\,\\}\\right|' },
         'It is measured on the held value in either view, since a forecast-only record stops at the last update. An hour with no value, a gap in the ForecastEx prediction market’s book or an undefined median, does not break the run.',
+        'The dashed line on the right axis of the error chart is the share of the ForecastEx prediction market’s city-days at that hour whose extreme had already been observed, some METAR report at or before that moment having reached the settle. It is zero before the target day begins. Once it nears 100 percent every held value is pinned to the observed extreme, which is why the curves flatten late in the day.',
+        'The Before the extreme view counts lead back from the report that set the day’s extreme instead of from the end of the day, and scores only the hours before that report, so every value is a forecast made before the extreme happened. The extreme’s time is the last report of the day that reached the settle value. Temperatures are whole degrees, so that value often recurs at consecutive reports, and the hover gives the share of city-days at each lead where an earlier report had already reached it. Its dashed line is the share of the ForecastEx prediction market’s city-days holding a forecast that far ahead of the extreme. This view is scored against the METAR settle only.',
         'The two charts answer different questions. Error is the average miss at each hour. Convergence rewards a value that is right and then does not move, so a forecast that is rarely revised can converge early on the days it happens to be right while a value that follows each report, and is closer on average, can step outside the tolerance on the way and have to converge again.',
       ],
       rules: [
-        'Bins run hourly from 36 hours before the day ends to zero, and a system’s bin needs at least 30 city-days before it is drawn. The ForecastEx prediction market is drawn as a line through the bins with its band, since its prices move between hours, and each alternative forecast system as one step per bin, since its value changes only when a new forecast arrives.',
+        'Bins run hourly from 36 hours before the day ends to zero, and in the Before the extreme view bin $k$ holds the moments between $k-1$ and $k$ hours before the extreme’s report. A system’s bin needs at least 30 city-days before it is drawn. The ForecastEx prediction market is drawn as a line through the bins with its band, since its prices move between hours, and each alternative forecast system as one step per bin, since its value changes only when a new forecast arrives.',
         'Two sets of days are available, every city-day the ForecastEx prediction market priced at that hour, or only the fixed sample of city-days it priced at every hour from 30 to 0.',
         'Thin order books, dates with too few price snapshots and days with gaps in the observation record are excluded, and the counts are listed in the details under the scorecard.',
         'Bands are 95 percent bootstrap intervals over 1,000 resamples of the target dates.',
@@ -179,7 +252,10 @@ window.WXAccLead = (() => {
     A.metricTabs(bar, k => { state.metric = k; render(); }, state.metric);
     A.tabs(bar, COHORTS, k => { state.cohort = k; render(); }, { initial: state.cohort, label: 'Days' });
     A.tabs(bar, VALUES, k => { state.value = k; render(); }, { initial: state.value, label: 'Value' });
+    A.tabs(bar, LEADS, k => { state.lead = k; render(); }, { initial: state.lead, label: 'Lead' });
+    leadGroup = bar.lastElementChild;
     A.tabs(bar, FRAMES, k => { state.frame = k; render(); }, { initial: state.frame, label: 'Frame' });
+    frameGroup = bar.lastElementChild;
     A.tabs(bar, TOLS, k => { state.tol = k; render(); }, { initial: state.tol, label: 'Converged' });
     built = true;
   }
