@@ -597,9 +597,16 @@ window.WXAcc = (() => {
     const cx = hs.map(hh => x(hh));
     const smooth = spec.series.filter(s => s.smooth);
     smooth.forEach(s => { if (s.lo && s.hi) band(svg, cx, px(s.lo, y), px(s.hi, y), color(s.id)); });
+    /* An alternative is drawn as one step per bin where the bin is a clock
+       hour, because its value holds until the next forecast is issued. Where
+       the axis is not clock time (lead counted back from the extreme, which
+       falls at a different hour on every city-day) a step claims a flatness
+       the data does not have, so those series are drawn as plain lines. */
     spec.series.filter(s => !s.smooth).forEach(s => {
-      stepLineAt(s.v || [], Object.assign({ stroke: color(s.id), 'stroke-width': s.width || width(s.id) },
-                                          s.dash ? { 'stroke-dasharray': s.dash } : {}));
+      const attrs = Object.assign({ stroke: color(s.id), 'stroke-width': s.width || width(s.id) },
+                                  s.dash ? { 'stroke-dasharray': s.dash } : {});
+      if (spec.steps === false) lineSeries(svg, cx, px(s.v || [], y), attrs);
+      else stepLineAt(s.v || [], attrs);
       if (fin(s.lastLiveH)) {
         const i = hs.indexOf(s.lastLiveH);
         if (i >= 0 && fin(s.v[i])) svg.appendChild(el('circle', { cx: x(s.lastLiveH - 0.5), cy: y(s.v[i]), r: 3.2, fill: color(s.id),

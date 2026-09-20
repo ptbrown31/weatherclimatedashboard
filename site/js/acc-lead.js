@@ -153,7 +153,7 @@ window.WXAccLead = (() => {
     const kTitle = k => (k === 1 ? 'The hour before the extreme' : k + ' hours before the extreme');
     A.leadChart(svg, {
       H: 430, hs: ks, series: S, floor: 1, fmt: v => A.f1(v) + '°', label: 'Mean absolute error, °F (lower is better)',
-      name: true, xLabel: 'Hours before the day’s extreme was observed', dayLine: false, hatch: false,
+      name: true, xLabel: 'Hours before the day’s extreme was observed', dayLine: false, hatch: false, steps: false,
       strips: { n: co.n || [], beats, ofLabel: raw ? 'live record' : 'scored' },
       secondary: { v: share, label: 'City-days with a forecast this far ahead, dashed' },
       tip: (i, k) => {
@@ -165,6 +165,9 @@ window.WXAccLead = (() => {
         let foot = fx && fin(fx.lo[i]) && fin(fx.hi[i]) ? 'ForecastEx band ' + A.iv(fx.lo[i], fx.hi[i], A.f2) + '. ' : '';
         if (fin(share[i])) foot += A.pct(share[i]) + ' of the ForecastEx prediction market’s city-days hold a forecast this far ahead. ';
         if (fin(tie[i])) foot += 'At ' + A.pct(tie[i]) + ' of them an earlier report had already reached the day’s extreme value. ';
+        // past the point where most days drop out, the sample is the days whose
+        // extreme came late, which are harder for every system
+        if (fin(share[i]) && share[i] < 0.5) foot += 'Under half of the city-days reach this far, since only those whose extreme came late enough can be scored here, and a late extreme is a harder day for every system. ';
         foot += 'n is each system’s own city-days at this lead.';
         return A.rankTip(kTitle(k), sub, S.map(x => ({ id: x.id, v: x.v[i], n: x.n[i] })), 'MAE °F', A.f2, { foot });
       },
@@ -229,6 +232,7 @@ window.WXAccLead = (() => {
         'It is measured on the held value in either view, since a forecast-only record stops at the last update. An hour with no value, a gap in the ForecastEx prediction market’s book or an undefined median, does not break the run.',
         'The dashed line on the right axis of the error chart is the share of the ForecastEx prediction market’s city-days at that hour whose extreme had already been observed, some METAR report at or before that moment having reached the settle. It is zero before the target day begins. Once it nears 100 percent every held value is pinned to the observed extreme, which is why the curves flatten late in the day.',
         'The Before the extreme view counts lead back from the report that set the day’s extreme instead of from the end of the day, and scores only the hours before that report, so every value is a forecast made before the extreme happened. The extreme’s time is the last report of the day that reached the settle value. Temperatures are whole degrees, so that value often recurs at consecutive reports, and the hover gives the share of city-days at each lead where an earlier report had already reached it. Its dashed line is the share of the ForecastEx prediction market’s city-days holding a forecast that far ahead of the extreme. This view is scored against the METAR settle only.',
+        'The record reaches 36 hours before the day ends, so a city-day can only be scored as far ahead of its extreme as that window allows. A low near sunrise falls about 18 hours before the day ends and drops out of the sample beyond about 19 hours before it, which leaves the days whose extreme came late, and those are harder for every system. That is what lifts the curves where the dashed line falls under half. In this view an alternative forecast system is drawn as a line rather than one step per bin, since each bin holds a different clock hour at every station.',
         'The two charts answer different questions. Error is the average miss at each hour. Convergence rewards a value that is right and then does not move, so a forecast that is rarely revised can converge early on the days it happens to be right while a value that follows each report, and is closer on average, can step outside the tolerance on the way and have to converge again.',
       ],
       rules: [

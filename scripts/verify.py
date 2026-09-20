@@ -177,6 +177,12 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} accuracy: the error curve carries the share of city-days whose extreme was already observed on a second axis",
                         sec_day == 1 and "already observed" in lead_svg and "100%" in lead_svg
                         and "had already seen the day" in day_tip, f"sec={sec_day} tip={day_tip[-120:]!r}")
+                seg_of = """() => {
+                  // stroked series only: the market's band is a filled path with two points per bin
+                  const ps = [...document.querySelectorAll('#accLead path')].filter(
+                    p => p.getAttribute('fill') === 'none' && !p.classList.contains('acc-sec'));
+                  return Math.max.apply(null, ps.map(p => (p.getAttribute('d') || '').split(/[ML]/).length - 1)); }"""
+                day_seg = page.evaluate(seg_of)
                 frame_grp = page.locator("#accLeadBar .tabgroup", has_text="METAR settle")
                 page.locator("#accLeadBar button", has_text="Before the extreme").first.click(); page.wait_for_timeout(600)
                 rel_txt = page.locator("#accLead").text_content()
@@ -184,6 +190,11 @@ def run(no_build: bool) -> int:
                 sec_rel = page.locator("#accLead path.acc-sec").count()
                 page.locator("#accLead rect[fill='transparent']").nth(2).hover(); page.wait_for_timeout(300)
                 rel_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
+                # an alternative is one step per bin in the day view and a plain line here,
+                # where a bin is not a clock hour
+                rel_seg = page.evaluate(seg_of)
+                chk.add(f"{scheme} accuracy: an alternative is one step per clock hour in the day view and a plain line where the lead is not a clock hour",
+                        day_seg > 60 and 10 <= rel_seg <= 40, f"day={day_seg} relative={rel_seg}")
                 chk.add(f"{scheme} accuracy: Before the extreme redraws the error curve by hours before the extreme, with its own second axis and no frame tabs",
                         "Hours before the day’s extreme was observed" in rel_txt and "target day begins" not in rel_txt
                         and rel_paths >= 6 and sec_rel == 1 and "forecast this far ahead" in rel_txt
