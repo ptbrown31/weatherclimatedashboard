@@ -53,15 +53,14 @@ window.WXAccGrid = (() => {
      what the builder counted for that reason, and a ladder is one city-day on
      one of highs or lows; a reason whose count is not a number of things
      worth printing is given by its dates alone. */
+  // the systems that issue a daily extreme of their own and are scored against the climate report
+  const OWN_MAX = ['NDFD', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS'];
   const REASON = {
     backfill_rows: e => int(e.count) + ' forecast rows recorded after the fact rather than when they were available',
     ecmwf_ifs_lag_rows: e => int(e.count) + ' European Ensemble Mean forecasts recorded under five hours after their run',
-    thin_city_day: e => int(e.count) + ' ladders with a Yes bid on under half their strikes at both 30 and 18 hours before the day ended',
-    thin_date: e => int(e.count) + ' ladders on dates when over half the cities’ ladders were that thin',
-    capture_short: e => int(e.dates) + ' date' + (e.dates === 1 ? '' : 's') + ' with too few price snapshots to score',
-    empty_local_hour: e => int(e.count) + ' city-days with a local clock hour holding no METAR report',
+    no_settlement: e => int(e.count) + ' city-days with no settlement value to score against',
+    no_market_median: e => int(e.count) + ' city-days whose ladder never crossed 50 cents inside its strikes, so the market has no median',
     quarantined_settle: e => int(e.count) + ' settle' + (e.count === 1 ? '' : 's') + ' set aside after review',
-    odd_day_length: e => int(e.count) + ' city-days of 23 or 25 hours at the daylight saving changes',
   };
 
   // ------------------------------------------------------------- formats
@@ -140,7 +139,7 @@ window.WXAccGrid = (() => {
   function tipFor(row, L, cell) {
     const nm = A().name(row.id);
     const frameName = state.frame === 'cli' && row.id !== 'FX' ? 'NWS climate report'
-      : state.frame === 'target' && row.id === 'NDFD' ? 'NWS climate report, inside the forecast’s window' : 'METAR settle';
+      : state.frame === 'target' && OWN_MAX.includes(row.id) ? 'NWS climate report, inside the forecast’s window' : 'METAR settle';
     const pairs = [
       ['Days', COHORTS.find(c => c.key === state.cohort).label],
       ['Truth', frameName],

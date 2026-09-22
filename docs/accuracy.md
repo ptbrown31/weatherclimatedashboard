@@ -28,20 +28,23 @@ over hourly and special reports, rounded half up to a whole degree Fahrenheit,
 over the station-local clock day. Highs pay when `settle > strike` strictly;
 lows when `settle < strike` strictly. The ForecastEx prediction market is always scored against the
 settle. By default each alternative forecast system is scored against the observation its daily
-value is built to predict, the own-target frame (owner's decision 2026-09-21). For every
-alternative but one that is the settle, since each daily value is the extreme of the system's hourly
-forecasts over the calendar day, which predicts the extreme of the hourly reports. The exception is
-the National Weather Service forecast, whose daily value is its own product, a daytime maximum for
-07 to 19 local standard time and an overnight minimum for 19 to 08. It is scored against the
-climate report on the city-days whose report puts the extreme inside that window (for a low, 00 to
-08, the part of the window the report's calendar day covers; `C.NWS_WINDOW_LST`), and not on the
-other city-days, where it was not predicting the day's extreme. Two toggles remain. The METAR
+value is built to predict, the own-target frame (owner's decision 2026-09-21). For the
+alternatives that issue values at fixed hours that is the settle, since the daily value is the
+extreme of those hours over the calendar day, which predicts the extreme of the hourly reports.
+Four are the exception, each issuing a daily extreme of its own, a daytime maximum for 07 to 19
+local standard time and an overnight minimum for 19 to 08: the National Weather Service forecast
+and the station guidance of the GFS, the NAM and the National Blend of Models (`C.OWN_MAX_SYSTEMS`),
+the last three read from the bulletin's own X/N and TXN rows rather than the maximum of its
+temperature row. They are scored against the climate report on the city-days whose report puts the
+extreme inside that window (for a low, 00 to 08, the part of the window the report's calendar day
+covers; `C.NWS_WINDOW_LST`), and not on the other city-days, where they were not predicting the
+day's extreme. Two toggles remain. The METAR
 settle frame scores every alternative against the settle, that forecast included. The
 climate-report frame scores every alternative against the National Weather Service climate report
 for the same date, which is a different definition of the day's extreme (a rounded five-minute
 mean over the standard-time day) and runs about a degree warmer on highs. Denver's climate report
-stands in for Buckley Field, so Buckley is excluded from the climate-report frame and, for the
-forecast, from the own-target frame.
+stands in for Buckley Field, so Buckley is excluded from the climate-report frame and, for those
+four, from the own-target frame.
 
 **Market value.** For each ladder snapshot the Yes price per strike is the
 midpoint of the Yes bid and one dollar less the No bid when both are quoted.
@@ -179,15 +182,23 @@ underneath it. Every comparison between two systems, the skill score and the
 percent improvement alike, is computed on the days the pair share, so a
 system's own span never has to match another's.
 
-**Exclusions**, counted and printed, never silent: backfilled forecast rows;
-European-ensemble rows captured under five hours after their nominal run;
-thin-book city-days (the ladder standing at the 30 h anchor and the one
-standing at the 18 h anchor both have under half their listed strikes carrying
-a Yes bid, or no crossing, which is what keeps a ladder still filling in the
-minutes after listing from counting as thin); thin-book dates (over half the
-listed cities thin on that metric, excluded for every system); capture-short dates (under 120 ladder snapshots); city-days with an
-empty local hour in the report record; two quarantined low settles; days of
-other than 24 hours.
+**Exclusions.** A city-day is scored unless it cannot be built (owner's
+decision 2026-09-25): it is dropped only when it has no settlement value, which
+includes a settle set aside after review, or when the market has no median at
+any lead, that is when the ladder never crossed 50 cents inside its listed
+strikes. The rules that used to exclude a city-day are still computed and
+reported, never applied: a thin book at both anchors, a thin date, too few
+price snapshots, an empty local hour in the report record, and a day of other
+than 24 hours at the daylight saving changes. Two notes are printed beside
+them, also never silent: backfilled forecast rows, and European-ensemble rows
+captured under five hours after their nominal run.
+
+**Capped captures.** The forecast feed returns at most 5,000 rows per request,
+so a capture that reached the limit came back cut at a valid time and stored a
+maximum over part of the day. Where the cut explains the stored value exactly,
+the reading is replaced by the full-day value rebuilt from the rows the feed
+held at that capture's instant (`ACC_WETHR_REPL`); anything that differs for
+another reason is left as captured.
 
 **Uncertainty.** Bootstrap over target dates, 1,000 draws, seed 20260910, 95
 percent percentile intervals. A drawn bin needs 30 city-days. Paired
@@ -437,14 +448,18 @@ stands in for another drops out of it. The market keeps the settle its
 contracts pay on in either frame, since that is what they pay on.
 
 The reading is taken over the hours of the day still to come, from the
-standing capture (the builder's `ens_standing` frame, from 2026-09-15). At a
-standing instant the centre is the extreme of the capture's hourly ensemble
-means over the station-local hours from that instant to the end of the day,
-with the member spread at the hour that extreme falls on, and the day's
-extreme is the larger (for a low, the smaller) of that and the observed extreme
-so far. So a strike the observations already cleared is paid, any other pays
-only if the hours left reach it (a normal curve on that centre and spread), and
-at the end of the day, with no hours left, nothing more can. A high pays when
+standing capture (the builder's `ens_standing` and `ens_hours` frames). At a
+standing instant the distribution of the day's extreme is built from every one
+of the capture's station-local hours from that instant to the end of the day,
+with the hourly errors taken as perfectly correlated (owner's decision
+2026-09-25): the extreme is above a strike exactly when one of those hours is,
+so a high pays with chance one less the normal probability at the smallest of
+(strike + 0.5 - mean) / spread over those hours, and a low is the mirror. The
+centre of that distribution is the extreme of the hourly means, the same value
+the scorecard row carries. The day's extreme is the larger (for a low, the
+smaller) of that and the observed extreme so far. So a strike the observations
+already cleared is paid, any other pays only if the hours left reach it, and at
+the end of the day, with no hours left, nothing more can. A high pays when
 the unrounded extreme reaches half a degree past the strike and a low when it
 falls half a degree under, which is how settlement rounds. Nothing is fitted
 and no bias is removed. Read over the whole day instead, a 4 pm peak kept its
@@ -454,10 +469,10 @@ extreme.
 
 Two limits belong with these lines and are stated on the page: a system
 publishes a spread for each hour rather than for the extreme of several hours,
-so reading the spread at the hour of the extreme as the extreme's is this
-page's approximation and not the system's; and the level bias in each
-ensemble's centre, which the scorecard's mean error shows, passes straight
-into its probability.
+and taking the hourly errors as perfectly correlated stands in for the members
+it does not publish, which widens the distribution slightly; and the level bias
+in each ensemble's centre, which the scorecard's mean error shows, passes
+straight into its probability.
 
 ### map.json
 
@@ -465,14 +480,14 @@ into its probability.
 { meta, cities: [ { id, name, px, py, tz } ],
   windows: { morning: "6 AM to noon local", eve: "6 PM local the day before" },
   metric: { high: { window: { morning: CELLS, eve: CELLS } }, low: {...} } }
-CELLS = { frame: { target: { NDFD: { cityId: {...} } },         // own-target frame, the forecast alone
+CELLS = { frame: { target: { sysId: { cityId: {...} } },        // own-target frame, the four that issue one
                    metar: { toolId: { cityId: { fx: {mae}, tool: {mae}, pi, lo, hi, matched } } },
                    cli:   { ... } },
-          median: { target: { NDFD: {...} }, metar: { toolId: {pi, lo, hi, cities, colored} }, cli: { ... } } }
+          median: { target: { sysId: {...} }, metar: { toolId: {pi, lo, hi, cities, colored} }, cli: { ... } } }
 ```
-The own-target frame holds only the National Weather Service forecast, against the climate report
-on the city-days it puts the maximum (minimum) inside the forecast's window; every other tool's
-own-target cells are its METAR cells, and the page reads them from there.
+The own-target frame holds the four systems that issue a daily extreme of their own, against the
+climate report on the city-days it puts the maximum (minimum) inside their window; every other
+tool's own-target cells are its METAR cells, and the page reads them from there.
 A city-day's value in a window is the mean of the held value at each whole
 hour of it (h 18 to 12 for the morning, h 30 for the evening before), and
 counts only when every hour holds one. `pi` is 100 (1 - MAE_fx / MAE_tool)

@@ -65,7 +65,10 @@ window.WXAccMap = (() => {
   // Buckley Field has no climate report of its own, only Denver's, so it is
   // left out of that frame, and of the own-target frame for the National
   // Weather Service forecast, and the dot is drawn hollow
-  const excluded = id => id === 'KBKF' && (sel.frame === 'cli' || (sel.frame === 'target' && sel.tool === 'NDFD'));
+  // Denver's climate report stands in for Buckley, so Buckley drops out wherever the report is the truth:
+  // the climate-report frame, and the own-target frame for the four systems that issue a daily extreme
+  const OWN_MAX = ['NDFD', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS'];
+  const excluded = id => id === 'KBKF' && (sel.frame === 'cli' || (sel.frame === 'target' && OWN_MAX.includes(sel.tool)));
   const straddles = c => c.lo != null && c.hi != null && c.lo <= 0 && c.hi >= 0;
 
   /* The scales are fixed over the whole file, every metric, window, frame
