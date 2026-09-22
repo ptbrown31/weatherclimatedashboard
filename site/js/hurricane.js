@@ -137,9 +137,14 @@ window.WXHur = (() => {
     return out;
   }
   const regionKey = label => REGION_ALIAS[label] || label;
-  // the view a landfall region is drawn on: the geometry tags Hawaii's state and
-  // counties as Pacific, and every other region is an Atlantic one
-  const regionBasin = label => (GEO && GEO.basins && GEO.basins[regionKey(label)]) || 'AL';
+  /* The views a landfall region is drawn on. The geometry tags Hawaii's state and counties
+     Pacific, Mexico and Honduras both oceans, since the landfall contract names no ocean and
+     each has a coastline on both, and everything else Atlantic. */
+  const regionBasins = label => {
+    const v = GEO && GEO.basins && GEO.basins[regionKey(label)];
+    return Array.isArray(v) ? v : (v ? [v] : ['AL']);
+  };
+  const regionHere = label => regionBasins(label).indexOf(basin) >= 0;
   /* Nothing from one ocean on the other's view.
 
      A basin is a different question, so the Pacific view carries no Atlantic
@@ -155,7 +160,7 @@ window.WXHur = (() => {
   const EXPECT = (window.WX && WX.expected) || {};
   const expectLandfall = () => (EXPECT.landfall || []).filter(e => (e.basin || 'AL') === basin);
   // the landfall contracts whose region is on the view being looked at
-  const landfallHere = () => { const m = market('HLF'); return m ? m.contracts.filter(c => regionBasin(c.label) === basin) : []; };
+  const landfallHere = () => { const m = market('HLF'); return m ? m.contracts.filter(c => regionHere(c.label)) : []; };
 
   // ---- the map
   function drawNhc(svg, X, Y, b, g) {
@@ -487,21 +492,21 @@ window.WXHur = (() => {
       // a region is drawn only where some part of it is inside the view, so the
       // Pacific view does not carry invisible, focusable copies of the Caribbean
       const inView = rr => rr.some(r => r.some(q => q[0] >= b0 && q[0] <= b1 && q[1] >= la0 && q[1] <= la1));
-      // a country is shaded on the view its contract is listed on (the Atlantic
-      // board carries every country), so the Pacific view shows Mexico as land
-      // with a pointer to that board rather than as a priced region
+      // a country is shaded on the views its contract is listed on, so a country that
+      // faces both oceans is priced on both, and one that faces only the other ocean is
+      // drawn as land with a pointer to the board that prices it
       Object.entries(GEO.countries || {}).forEach(([nm, rr]) => {
         if (!inView(rr)) return;
         const label = Object.keys(lf || {}).find(k => regionKey(k) === nm) || nm;
-        if (regionBasin(label) === basin) { const [f, t, u] = fillFor(label, nm); poly(rr, f, 'var(--map-line)', .6 * g, t, u, nm); return; }
+        if (regionHere(label)) { const [f, t, u] = fillFor(label, nm); poly(rr, f, 'var(--map-line)', .6 * g, t, u, nm); return; }
         const listed = lf && lf[label];
         poly(rr, 'var(--map-land)', 'var(--map-line)', .6 * g,
-             tip.rows(esc(nm), [], listed ? 'its landfall contract is priced on the Atlantic view' : null));
+             tip.rows(esc(nm), [], listed ? 'its landfall contract is priced on the ' + (regionBasins(label).indexOf('AL') >= 0 ? 'Atlantic' : 'Pacific') + ' view' : null));
       });
       (NATION || []).forEach(r => poly([r], 'var(--map-land)', 'var(--map-line)', .6 * g));
       // a state or county is drawn on its own view only
-      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { if (regionBasin(nm) !== basin) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7 * g, t, u, nm); });
-      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { if (regionBasin(nm) !== basin) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8 * g, t, u, nm); });
+      Object.entries(GEO.states || {}).forEach(([nm, rr]) => { if (!regionHere(nm)) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7 * g, t, u, nm); });
+      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { if (!regionHere(nm)) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8 * g, t, u, nm); });
     }
     const counts = drawNhc(svg, X, Y, basin, g);
     // the reference locations: small dots, scaled by the vendor's P(gust > 80 mph) when the lane is live

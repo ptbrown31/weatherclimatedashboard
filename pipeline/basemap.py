@@ -49,9 +49,12 @@ COASTAL = {"Maine", "New Hampshire", "Massachusetts", "Rhode Island", "Connectic
            "New York", "New Jersey", "Pennsylvania", "Delaware", "Maryland", "Virginia",
            "North Carolina", "South Carolina", "Georgia", "Florida", "Alabama",
            "Mississippi", "Louisiana", "Texas", "Hawaii"}
-# the view of the hurricane page a region is drawn on: Hawaii and its counties on the
-# Pacific view, every other region on the Atlantic one
+# the views of the hurricane page a region is drawn on. The landfall contract names no
+# ocean, so a region is carried on the view of every basin whose storms can reach it:
+# Hawaii and its counties are Pacific only, Mexico and Honduras have coastlines on both
+# oceans and are carried on both views, and every other listed region is Atlantic only.
 PACIFIC = lambda name: name == "Hawaii" or name.endswith(", Hawaii")
+BOTH_OCEANS = {"Mexico", "Honduras"}
 
 # Albers equal-area conic, standard parallels 29.5 / 45.5, origin 37.5N 96W
 P1, P2, LAT0, LON0 = map(math.radians, (29.5, 45.5, 37.5, -96.0))
@@ -291,7 +294,8 @@ def build_assets(cities: list) -> dict:
         if rr:
             counties[label] = rr
             cocent[label] = centroid(rr)
-    basins = {nm: "EP" for nm in list(states_ll) + list(counties) if PACIFIC(nm)}
+    basins = {nm: ["EP"] for nm in list(states_ll) + list(counties) if PACIFIC(nm)}
+    basins.update({nm: ["AL", "EP"] for nm in countries if nm in BOTH_OCEANS})
 
     # the exchange's hurricane wind reference locations (the vendor's registry,
     # vendored as geo/reask_locations.csv): id, name and position only

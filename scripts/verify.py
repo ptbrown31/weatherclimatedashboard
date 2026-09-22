@@ -1715,14 +1715,18 @@ def run(no_build: bool) -> int:
                         bool(part and "Lowell" in part["live"] and "Honolulu" in part["live"]
                              and "Nothing is listed or quoted for Lowell" in part["live"]),
                         str(part and part["live"][:170]))
-                chk.add(f"{scheme} basins: with nothing listed for this ocean the landfall board is not shown",
-                        bool(part and not part["lfShown"]), str(part and part["landfall"][:150]))
+                # the landfall contract names no ocean, so this view carries the regions a Pacific
+                # storm can reach and none of the Atlantic-only ones
+                chk.add(f"{scheme} basins: the landfall board carries the regions this ocean can reach",
+                        bool(part and part["lfShown"] and "Mexico" in part["landfall"]
+                             and "Honduras" in part["landfall"] and "Florida" not in part["landfall"]
+                             and "Cuba" not in part["landfall"]), str(part and part["landfall"][:150]))
                 chk.add(f"{scheme} basins: the count panels stay off the Pacific view",
                         bool(part and part["counts"] == "none"), str(part and part["counts"]))
                 pnote = page.evaluate('() => ((document.querySelector("#pacificNote") || {}).textContent || "")')
                 chk.add(f"{scheme} basins: the note agrees with the board it is describing",
-                        "landfall board is on the Atlantic view too" in pnote
-                        and "listed above" not in pnote, pnote[-150:])
+                        "listed above" in pnote
+                        and "landfall board is on the Atlantic view too" not in pnote, pnote[-150:])
                 page.locator("#b1").click(); page.wait_for_timeout(600)
                 back = page.evaluate('() => ((document.querySelector("#liveStorms") || {}).textContent || "")')
                 chk.add(f"{scheme} basins: switching back restores the Atlantic storm",
@@ -2126,18 +2130,22 @@ def run(no_build: bool) -> int:
                 # ---- the Pacific view: a landfall region there (Hawaii, as the exchange lists it) is
                 # listed, drawn and priced on that view and kept off the Atlantic one
                 lf_txt = page.locator("#landfall").inner_text()
-                chk.add(f"{scheme} landfall: the Atlantic board lists no Pacific region",
-                        "Hawaii" not in lf_txt and page.locator("#landfall .lrow").count() >= 5, lf_txt[:60])
+                chk.add(f"{scheme} landfall: the Atlantic board lists no Pacific-only region",
+                        "Hawaii" not in lf_txt and "Mexico" in lf_txt
+                        and page.locator("#landfall .lrow").count() >= 5, lf_txt[:60])
                 chk.add(f"{scheme} landfall: the caption carries the 50-mile border clause and the eye rule",
                         "50 miles" in lf_txt and "eye crossing" in lf_txt
                         and "per-side execution fee" not in lf_txt, lf_txt[-160:])
                 page.locator("#b2").click(); page.wait_for_timeout(600)
                 ep_txt = page.locator("#landfall").inner_text()
                 ep_rows = page.locator("#landfall .lrow").count()
-                chk.add(f"{scheme} pacific: the landfall board lists only the Pacific region",
-                        page.locator("#landfallSect").is_visible() and ep_rows == 1 and "Hawaii" in ep_txt
+                # the Pacific view carries Hawaii and the regions that face both oceans, since the
+                # landfall contract names no ocean; the Atlantic-only regions stay off it
+                chk.add(f"{scheme} pacific: the landfall board lists the regions a Pacific storm can reach",
+                        page.locator("#landfallSect").is_visible() and "Hawaii" in ep_txt
+                        and "Mexico" in ep_txt and "Florida" not in ep_txt and "Cuba" not in ep_txt
                         and "Atlantic view" in page.locator("#pacificNote").inner_text(),
-                        f"rows={ep_rows} {ep_txt[:60]}")
+                        f"rows={ep_rows} {ep_txt[:80]}")
                 chk.add(f"{scheme} pacific: the count panels stay on the Atlantic view",
                         not page.locator("#atlanticOnly").is_visible() and "listed above" in page.locator("#pacificNote").inner_text(),
                         page.locator("#pacificNote").inner_text()[:80])
