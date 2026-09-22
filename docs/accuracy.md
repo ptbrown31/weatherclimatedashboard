@@ -27,12 +27,21 @@ ForecastEx prediction market's timestamp is the ladder snapshot's own time.
 over hourly and special reports, rounded half up to a whole degree Fahrenheit,
 over the station-local clock day. Highs pay when `settle > strike` strictly;
 lows when `settle < strike` strictly. The ForecastEx prediction market is always scored against the
-settle. Alternative forecast systems are scored against the settle by default and, through a toggle,
-against the National Weather Service climate report for the same date, which is
-a different definition of the day's extreme (a rounded five-minute mean over
-the standard-time day) and runs about a degree warmer on highs. Denver's
-climate report stands in for Buckley Field, so Buckley is excluded from the
-climate-report frame.
+settle. By default each alternative forecast system is scored against the observation its daily
+value is built to predict, the own-target frame (owner's decision 2026-09-21). For every
+alternative but one that is the settle, since each daily value is the extreme of the system's hourly
+forecasts over the calendar day, which predicts the extreme of the hourly reports. The exception is
+the National Weather Service forecast, whose daily value is its own product, a daytime maximum for
+07 to 19 local standard time and an overnight minimum for 19 to 08. It is scored against the
+climate report on the city-days whose report puts the extreme inside that window (for a low, 00 to
+08, the part of the window the report's calendar day covers; `C.NWS_WINDOW_LST`), and not on the
+other city-days, where it was not predicting the day's extreme. Two toggles remain. The METAR
+settle frame scores every alternative against the settle, that forecast included. The
+climate-report frame scores every alternative against the National Weather Service climate report
+for the same date, which is a different definition of the day's extreme (a rounded five-minute
+mean over the standard-time day) and runs about a degree warmer on highs. Denver's climate report
+stands in for Buckley Field, so Buckley is excluded from the climate-report frame and, for the
+forecast, from the own-target frame.
 
 **Market value.** For each ladder snapshot the Yes price per strike is the
 midpoint of the Yes bid and one dollar less the No bid when both are quoted.
@@ -276,15 +285,19 @@ SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
                                        maeRaw: [per h], loRaw, hiRaw,          // forecast-only view
                                        maeCli: [per h], loCli, hiCli,          // climate-report frame
                                        n: [per h], nRaw, nCli,                 // the system's own city-days per view
+                                       maeTarget, loTarget, hiTarget, nTarget, // own-target frame, NDFD only
+                                       maeRawTarget, loRawTarget, hiRawTarget, nRawTarget,
                                        lastLiveH: int|null } },                // where the raw line ends
            beats: [per h: {k: int, of: int, ids: [ids beaten]}],
            beatsRaw: [per h: ...],
            beatsCli: [per h: ...],
+           beatsTarget: [per h: ...], beatsRawTarget: [per h: ...],     // own-target frame
            binNote: [per h: {dates: [from, to], zones: {tz: count}} | null],
            observed: [per h: share 0..1 | null] }                  // extreme already observed
 RELATIVE = { anchor: "last", k: [1..K],
-             cohorts: { own|fixed30: { systems: { id: { mae, lo, hi, n, maeRaw, loRaw, hiRaw, nRaw } },   // per k
-                                       beats: [per k], beatsRaw: [per k],
+             cohorts: { own|fixed30: { systems: { id: { mae, lo, hi, n, maeRaw, loRaw, hiRaw, nRaw,   // per k
+                                                        maeTarget ... nRawTarget } },   // NDFD only
+                                       beats: [per k], beatsRaw: [per k], beatsTarget: [per k], beatsRawTarget: [per k],
                                        n: [per k], nDays: int,
                                        share: [per k], tieShare: [per k] } } }
 ```
@@ -292,6 +305,13 @@ In the climate-report frame each alternative forecast system is scored against
 the National Weather Service report for the same date while the market keeps
 the settle it pays on, so the market's `maeCli` equals its `mae` and Buckley
 Field drops out of the frame.
+
+In the own-target frame only the National Weather Service forecast (`NDFD`) is scored against
+anything but the settle, so only its entry carries the `...Target` series; every other system's
+own-target series is its METAR series, and a page reads a missing `maeTarget` as `mae` (and a
+missing `maeRawTarget` as `maeRaw`). `beatsTarget` and `beatsRawTarget` are the market's paired
+comparisons in that frame. The forecast-only view has an own-target version (`maeRawTarget`);
+the climate-report frame has none, so its forecast-only view is the METAR one.
 
 `SERIES.n` is the ForecastEx prediction market's count of city-days per bin,
 which the page prints in its strip; each system's own `n`, `nRaw` and `nCli`
@@ -312,7 +332,8 @@ is the last report of the day that reached the settle value
 (`C.EXTREME_ANCHOR = "last"`; temperatures are whole degrees, so the value often
 recurs, and the last report keeps the most hours). Bin `k` holds the instants
 between `k - 1` and `k` hours before it. Each system keeps its own rows and its
-held value (and the forecast-only value in `maeRaw`), METAR frame only. `n` is
+held value (and the forecast-only value in `maeRaw`), in the METAR frame and, for the National
+Weather Service forecast, in the own-target frame, which the page draws. `n` is
 the market's count per bin and `nDays` its city-days in the cohort, `share` is
 `n / nDays`, the share of its city-days holding a forecast that far ahead, and
 `tieShare` the share of the bin's market instants at which an earlier report had
@@ -337,7 +358,7 @@ report. There is no forecast-only CRPS.
 
 ```
 CONVERGE = { h: [36..0],
-            tol1: { own|fixed30: { metar|cli: { systems: { id: { share: [per h], median, never } } } } },
+            tol1: { own|fixed30: { target|metar|cli: { systems: { id: { share: [per h], median, never } } } } },
             tol2: { ... } }
 ```
 
@@ -444,10 +465,14 @@ into its probability.
 { meta, cities: [ { id, name, px, py, tz } ],
   windows: { morning: "6 AM to noon local", eve: "6 PM local the day before" },
   metric: { high: { window: { morning: CELLS, eve: CELLS } }, low: {...} } }
-CELLS = { frame: { metar: { toolId: { cityId: { fx: {mae}, tool: {mae}, pi, lo, hi, matched } } },
+CELLS = { frame: { target: { NDFD: { cityId: {...} } },         // own-target frame, the forecast alone
+                   metar: { toolId: { cityId: { fx: {mae}, tool: {mae}, pi, lo, hi, matched } } },
                    cli:   { ... } },
-          median: { metar: { toolId: {pi, lo, hi, cities, colored} }, cli: { ... } } }
+          median: { target: { NDFD: {...} }, metar: { toolId: {pi, lo, hi, cities, colored} }, cli: { ... } } }
 ```
+The own-target frame holds only the National Weather Service forecast, against the climate report
+on the city-days it puts the maximum (minimum) inside the forecast's window; every other tool's
+own-target cells are its METAR cells, and the page reads them from there.
 A city-day's value in a window is the mean of the held value at each whole
 hour of it (h 18 to 12 for the morning, h 30 for the evening before), and
 counts only when every hour holds one. `pi` is 100 (1 - MAE_fx / MAE_tool)
@@ -463,14 +488,16 @@ zero. The newsletter window and the change counts were removed on 2026-09-15.
 { meta,
   h: [30, 18, 12],
   cohorts: { own: ROWS, fixed30: ROWS },
-  frames: ["metar", "cli"] }
-ROWS = [ { id, start, frame: { metar: CELLS, cli: CELLS } } ]
+  frames: ["target", "metar", "cli"] }
+ROWS = [ { id, start, frame: { target: CELLS, metar: CELLS, cli: CELLS } } ]
 CELLS = { h: { "30": { maeHigh, maeLow, meHigh, meLow, n, nLow, ssHigh, ssLo, ssHi,
                        crps, crpsLow } ... } }   // crps keys only on rows with a distribution
 ```
 `ssHigh` is the skill score on the high, 100 (1 - MAE_s / MAE_NWS) on the
 city-days the row shares with the National Weather Service row; `ssLo` and
-`ssHi` are `null` when its interval covered zero. The 6 h column and the
+`ssHi` are `null` when its interval covered zero. In the own-target frame the National Weather
+Service row, and every skill score against it, uses that forecast's own target. A distribution's
+CRPS in that frame is its METAR-frame score, since its own target is the settle. The 6 h column and the
 newsletter ranking were removed on 2026-09-14, and the hour-one column on
 2026-09-15.
 
@@ -518,7 +545,10 @@ reliability diagrams, each section with a method note carrying the estimator,
 the sampling rule and the conventions it depends on (the settle, the clock,
 the market's price and median, the exclusions, the bootstrap) behind a "Show
 details of calculation" button, and a status strip naming the window and the
-build time. In order:
+build time. The deterministic sections (error by lead, the map and the scorecard) open in the
+own-target frame, with the METAR settle and climate-report frames one toggle away; the
+probabilistic sections score the market and the ensembles against the settle, which is each one's
+own target. In order:
 
 - **Deterministic skill.** One value per system, the ForecastEx prediction
   market's being the median of its ladder: mean absolute error by lead, and

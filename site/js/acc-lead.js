@@ -1,7 +1,8 @@
 /* Deterministic skill: one value per system, scored by lead.
 
    Two charts on one lead axis from lead-curve.json (docs/accuracy.md section
-   3). The first is mean absolute error against the settle, the ForecastEx
+   3). The first is mean absolute error against each system's own target (the
+   settle for all but the National Weather Service forecast), the ForecastEx
    prediction market's median (the whole degree where its ladder crosses fifty
    cents) against every alternative forecast system's single value. The
    second, under it, is time to converge: the share of city-days whose value
@@ -24,10 +25,16 @@ window.WXAccLead = (() => {
     { key: 'own', label: 'Every day on record', title: 'Every city-day the ForecastEx prediction market priced at that hour, each system scored on the ones its own record covers' },
     { key: 'fixed30', label: 'Fixed sample', title: 'Only the city-days the ForecastEx prediction market priced at every hour from 30 to 0, so the bins from 30 to 0 hold the same days' },
   ];
+  // Own target is the default: each system against the observation its daily
+  // value is built to predict. Only the National Weather Service forecast's
+  // differs, a daytime high or overnight low scored against the climate report
+  // on the days the report puts the extreme inside that window.
   const FRAMES = [
-    { key: 'metar', label: 'METAR settle', title: 'Every system scored against the settle the contracts pay on' },
+    { key: 'target', label: 'Own target', title: 'Each system scored against the observation it is built to predict: the METAR settle for the ForecastEx prediction market and every alternative forecast system but one, and for the National Weather Service forecast, a daytime high and overnight low, its climate report on the days the report puts the extreme inside the forecast’s window' },
+    { key: 'metar', label: 'METAR settle', title: 'Every system, the National Weather Service forecast included, scored against the settle the contracts pay on' },
     { key: 'cli', label: 'NWS climate report', title: 'Alternative forecast systems scored against the National Weather Service climate report for the same date; the ForecastEx prediction market keeps the settle it pays on' },
   ];
+  const FRAME_NOTE = { target: '', metar: ', METAR-settle frame', cli: ', climate-report frame' };
   const VALUES = [
     { key: 'held', label: 'What a reader held', title: 'Each value held at the running observed extreme, never below a high or above a low already observed, the number a reader with the observations was holding' },
     { key: 'raw', label: 'Forecast only', title: 'Each forecast as issued, ending at the system’s last update of the day' },
@@ -42,7 +49,7 @@ window.WXAccLead = (() => {
     { key: 'extreme', label: 'Before the extreme', title: 'Lead counted back from the report that set the day’s extreme, using only the hours before it' },
   ];
 
-  const state = { metric: 'high', cohort: 'own', value: 'held', frame: 'metar', tol: 'tol1', lead: 'day' };
+  const state = { metric: 'high', cohort: 'own', value: 'held', frame: 'target', tol: 'tol1', lead: 'day' };
   let file = null, built = false, leadGroup = null, frameGroup = null;
 
   const fin = v => v != null && isFinite(v);
@@ -53,15 +60,32 @@ window.WXAccLead = (() => {
      lastLiveH: the file already leaves later bins null, and the cut keeps the
      line honest against a builder that fills them. */
   function seriesFor(id, sys, raw, hs, frame) {
-    const cli = frame === 'cli';
-    const pick = (a, b, c) => (raw ? sys[a] : cli ? sys[c] : sys[b]) || [];
-    const mae = pick('maeRaw', 'mae', 'maeCli'), lo = pick('loRaw', 'lo', 'loCli'), hi = pick('hiRaw', 'hi', 'hiCli');
-    const n = pick('nRaw', 'n', 'nCli');
+    const pick = base => field(sys, base, raw, frame) || [];
+    const mae = pick('mae'), lo = pick('lo'), hi = pick('hi'), n = pick('n');
     const cut = raw && id !== 'FX' && fin(sys.lastLiveH) ? sys.lastLiveH : null;
     const keep = i => (cut == null || hs[i] >= cut);
     const at = arr => hs.map((_, i) => (keep(i) && fin(arr[i]) ? arr[i] : null));
     return { id, v: at(mae), lo: at(lo), hi: at(hi), n: hs.map((_, i) => (keep(i) && fin(n[i]) ? n[i] : null)),
              smooth: id === 'FX', lastLiveH: cut };
+  }
+
+  /* A system's series for a view: base 'mae', 'lo', 'hi' or 'n'. The forecast
+     only view has a METAR and an own-target version; the climate-report frame
+     carries none, so there it is the METAR one, as it always was. A file built
+     before the own-target frame existed reads as METAR. */
+  function field(sys, base, raw, frame) {
+    if (frame === 'target') {
+      const t = sys[base + (raw ? 'RawTarget' : 'Target')];
+      if (t) return t;
+    }
+    return sys[base + (raw ? 'Raw' : frame === 'cli' ? 'Cli' : '')];
+  }
+  function beatsFor(series, raw, frame) {
+    if (frame === 'target') {
+      const t = raw ? series.beatsRawTarget : series.beatsTarget;
+      if (t) return t;
+    }
+    return (raw ? series.beatsRaw : frame === 'cli' ? series.beatsCli : series.beats) || [];
   }
 
   function render() {
@@ -76,7 +100,8 @@ window.WXAccLead = (() => {
       return;
     }
     // the lead can be counted from the end of the day or back from the extreme;
-    // the second exists only where the file carries it, and it is METAR-framed
+    // the second exists only where the file carries it, and it is drawn in the
+    // own-target frame
     const hasRel = !!(block.relative && Array.isArray(block.relative.k) && block.relative.k.length);
     if (leadGroup) leadGroup.hidden = !hasRel;
     const rel = hasRel && state.lead === 'extreme';
@@ -87,10 +112,10 @@ window.WXAccLead = (() => {
     const ids = A.ORDER.filter(id => series.systems[id]);
     const observed = series.observed || [];
     const S = ids.map(id => seriesFor(id, series.systems[id], raw, hs, state.frame));
-    const beats = (raw ? series.beatsRaw : state.frame === 'cli' ? series.beatsCli : series.beats) || [];
+    const beats = beatsFor(series, raw, state.frame);
     const notes = series.binNote || [];
     const view = (state.metric === 'high' ? 'Highs' : 'Lows') + ', ' + cohortName(state.cohort).toLowerCase() + ', '
-      + (raw ? 'forecast only' : 'what a reader held') + (state.frame === 'cli' ? ', climate-report frame' : '');
+      + (raw ? 'forecast only' : 'what a reader held') + FRAME_NOTE[state.frame];
 
     A.leadChart(svg, {
       H: 430, hs, series: S, floor: 1, fmt: v => A.f1(v) + '°', label: 'Mean absolute error, °F (lower is better)',
@@ -140,13 +165,13 @@ window.WXAccLead = (() => {
     const raw = state.value === 'raw';
     const ks = rb.k;
     const ids = A.ORDER.filter(id => co.systems[id]);
-    const pick = (sy, a) => (raw ? sy[a + 'Raw'] : sy[a]) || [];
+    const pick = (sy, a) => field(sy, a, raw, 'target') || [];
     const S = ids.map(id => {
       const sy = co.systems[id];
       return { id, v: pick(sy, 'mae').map(v => (fin(v) ? v : null)), lo: pick(sy, 'lo'), hi: pick(sy, 'hi'),
                n: pick(sy, 'n'), smooth: id === 'FX' };
     });
-    const beats = (raw ? co.beatsRaw : co.beats) || [];
+    const beats = beatsFor(co, raw, 'target');
     const share = co.share || [], tie = co.tieShare || [];
     const base = (state.metric === 'high' ? 'Highs' : 'Lows') + ', ' + cohortName(state.cohort).toLowerCase() + ', '
       + (raw ? 'forecast only' : 'what a reader held');
@@ -158,7 +183,7 @@ window.WXAccLead = (() => {
       secondary: { v: share, label: 'City-days with a forecast this far ahead, dashed' },
       tip: (i, k) => {
         const n = (co.n || [])[i], b = beats[i];
-        let sub = base + ', METAR settle. ForecastEx ' + (fin(n) ? A.int(n) + ' city-days' : 'no sample')
+        let sub = base + '. ForecastEx ' + (fin(n) ? A.int(n) + ' city-days' : 'no sample')
           + (fin(n) && n < 30 ? ', under the 30 a bin needs' : '') + '.';
         if (b && fin(b.k)) sub += ' ForecastEx beats ' + b.k + ' of ' + b.of + ' systems.';
         const fx = S[0];
@@ -172,7 +197,7 @@ window.WXAccLead = (() => {
         return A.rankTip(kTitle(k), sub, S.map(x => ({ id: x.id, v: x.v[i], n: x.n[i] })), 'MAE °F', A.f2, { foot });
       },
     });
-    drawConverge(conv, block, ids, base + (state.frame === 'cli' ? ', climate-report frame' : ''));
+    drawConverge(conv, block, ids, base, 'target');
     if (keyEl) {
       A.key(keyEl, ids, { meta: file.meta, metric: state.metric,
         note: (raw ? 'Forecast only, each system’s value as issued before the extreme. ' : '')
@@ -185,11 +210,11 @@ window.WXAccLead = (() => {
      converge block for the day basis, frame and tolerance shown. It is always
      on the value a reader held: a forecast-only record stops at the last
      update, after which every hour would pass for want of a value. */
-  function drawConverge(svg, block, ids, view) {
+  function drawConverge(svg, block, ids, view, frame) {
     if (!svg) return;
     const cv = block.converge;
     const co = cv && cv[state.tol] && cv[state.tol][state.cohort];
-    const fr = co && co[state.frame];
+    const fr = co && (co[frame || state.frame] || co.metar);
     if (!fr || !fr.systems || !Array.isArray(cv.h)) { A.notYet(svg, 'Time to converge is not in the published record.'); return; }
     const hs = cv.h;
     const tolName = TOLS.find(t => t.key === state.tol).label.replace('Within', 'within');
@@ -222,16 +247,17 @@ window.WXAccLead = (() => {
     A.methodNote(container, {
       title: 'Mean absolute error and time to converge',
       body: [
-        'Mean absolute error is the average gap in degrees between a system’s value and the settle at a given lead.',
+        'Mean absolute error is the average gap in degrees between a system’s value and the observation it is built to predict, at a given lead.',
         { tex: 'MAE_s(h) = \\frac{1}{N_h}\\sum_{i=1}^{N_h} \\left| f_{s,i}(h) - o_i \\right|' },
-        'where $f_{s,i}(h)$ is system $s$’s value for city-day $i$ at $h$ hours before the day ends at station-local midnight, and $o_i$ is the settle, the station’s highest or lowest METAR reading of the day rounded to the nearest whole degree.',
+        'where $f_{s,i}(h)$ is system $s$’s value for city-day $i$ at $h$ hours before the day ends at station-local midnight, and $o_i$ is that observation. For the ForecastEx prediction market and every alternative forecast system but one it is the settle, the station’s highest or lowest METAR reading of the day rounded to the nearest whole degree, which the contracts pay on and which the extreme of a system’s hourly forecasts predicts.',
+        'The exception is the National Weather Service forecast. Its daily value is a daytime high for 7 AM to 7 PM and an overnight low for 7 PM to 8 AM local standard time, so in the default own-target frame it is scored against the Service’s climate report on the city-days whose report puts the extreme inside that window, for a low between midnight and 8 AM, the part of the window the report’s day covers. On the other city-days that forecast was not predicting the day’s extreme and is not scored. Buckley Field has no climate report of its own, only Denver’s, so the forecast is not scored there in this frame. The METAR settle frame scores every system against the settle, that forecast included, and the climate-report frame scores every alternative forecast system against the report on every date.',
         'An alternative forecast system’s value at a lead is its most recent forecast at or before that moment, timed by when it was captured. Eight systems are carried back to February from a forecast archive before their live capture began, and an archived run is credited only from the time it was published, its initialization plus the publication delay the archive reports for that model. In the default view it is held at the running observed extreme, so a forecast high is never shown below a high already observed and a forecast low never above a low already observed. The forecast-only view shows the forecast as issued and ends at the system’s last update of the day.',
         'The ForecastEx prediction market’s value is its median, where its ladder of Yes prices crosses fifty cents, rounded up for highs and down for lows to match whole-degree settlement, read on its most recent ladder snapshot if that is under an hour old and held the same way. A contract’s Yes price is the midpoint of the Yes bid and one dollar less the No bid. With one side bid it is the midpoint against the empty side at its limit, a missing Yes bid counting as 1 cent and a missing No bid as a 99-cent ask, and a book bidding one cent against ninety-nine, or a lone side at that limit, is empty. The ladder is forced monotone across strikes before the crossing is read, and a crossing that would have to be read across two or more strikes with no price is left undefined. Before 17 June 2026 the ladder comes from the exchange’s published trade record instead, each strike’s last traded price carried forward hourly.',
         'Time to converge measures how early a system locks onto the temperature the day ends on and stays there. For a tolerance of $d$ degrees, a city-day has converged by lead $h$ if its value was within $d$ degrees of the truth at every hour from $h$ to the end of the day at which it had a value.',
         { tex: 'C_s(h; d) = \\frac{1}{N}\\left|\\{\\, i : |f_{s,i}(h\') - o_i| \\le d \\text{ for every } h\' \\le h \\,\\}\\right|' },
         'It is measured on the held value in either view, since a forecast-only record stops at the last update. An hour with no value, a gap in the ForecastEx prediction market’s book or an undefined median, does not break the run.',
         'The dashed line on the right axis of the error chart is the share of the ForecastEx prediction market’s city-days at that hour whose extreme had already been observed, some METAR report at or before that moment having reached the settle. It is zero before the target day begins. Once it nears 100 percent every held value is pinned to the observed extreme, which is why the curves flatten late in the day.',
-        'The Before the extreme view counts lead back from the report that set the day’s extreme instead of from the end of the day, and scores only the hours before that report, so every value is a forecast made before the extreme happened. The extreme’s time is the last report of the day that reached the settle value. Temperatures are whole degrees, so that value often recurs at consecutive reports, and the hover gives the share of city-days at each lead where an earlier report had already reached it. Its dashed line is the share of the ForecastEx prediction market’s city-days holding a forecast that far ahead of the extreme. This view is scored against the METAR settle only.',
+        'The Before the extreme view counts lead back from the report that set the day’s extreme instead of from the end of the day, and scores only the hours before that report, so every value is a forecast made before the extreme happened. The extreme’s time is the last report of the day that reached the settle value. Temperatures are whole degrees, so that value often recurs at consecutive reports, and the hover gives the share of city-days at each lead where an earlier report had already reached it. Its dashed line is the share of the ForecastEx prediction market’s city-days holding a forecast that far ahead of the extreme. This view is drawn in the own-target frame.',
         'The record reaches 36 hours before the day ends, so a city-day can only be scored as far ahead of its extreme as that window allows. A low near sunrise falls about 18 hours before the day ends and drops out of the sample beyond about 19 hours before it, which leaves the days whose extreme came late, and those are harder for every system. That is what lifts the curves where the dashed line falls under half. In this view an alternative forecast system is drawn as a line rather than one step per bin, since each bin holds a different clock hour at every station.',
         'The two charts answer different questions. Error is the average miss at each hour. Convergence rewards a value that is right and then does not move, so a forecast that is rarely revised can converge early on the days it happens to be right while a value that follows each report, and is closer on average, can step outside the tolerance on the way and have to converge again.',
       ],
@@ -245,6 +271,8 @@ window.WXAccLead = (() => {
       ],
       span: A.cohortSpanLine(meta, state.cohort, state.metric) + (state.frame === 'cli'
         ? ' In the climate-report frame each alternative forecast system is scored against the National Weather Service climate report for the same date, a different definition of the day’s extreme that runs about a degree warmer on highs, and the ForecastEx prediction market keeps the settle it pays on. Buckley Field has no climate report of its own, only Denver’s, so it drops out of that frame.'
+        : state.frame === 'metar'
+        ? ' In the METAR settle frame the National Weather Service forecast is also scored against the settle, a different definition of the day’s extreme from its daytime high and overnight low, which is why its error is larger here than in the own-target frame.'
         : ''),
       n: 'Sample ' + (fin(nCo) ? A.int(nCo) : A.dash) + ' city-days in ' + noun + (co.from ? ' from ' + A.mdyY(co.from) : '')
         + '. ' + A.windowAndBuilt(meta) + '.',

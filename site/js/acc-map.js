@@ -24,7 +24,11 @@ window.WXAccMap = (() => {
     { key: 'morning', label: 'Morning, 6 AM to noon', title: 'The average value held on the morning of the target day, 6 AM to noon station time' },
     { key: 'eve', label: 'Evening before, 6 PM', title: 'The value held at 6 PM station time on the day before' },
   ];
+  // Own target is the default: the system against the observation it is built
+  // to predict, which differs from the settle only for the National Weather
+  // Service forecast (docs/accuracy.md)
   const FRAMES = [
+    { key: 'target', label: 'Own target', title: 'The system scored against the observation it is built to predict: the settle, or for the National Weather Service forecast its climate report on the days the report puts the extreme inside the forecast’s window' },
     { key: 'metar', label: 'METAR settle', title: 'The system scored against the settle the contracts pay on' },
     { key: 'cli', label: 'NWS climate report', title: 'The system scored against the National Weather Service climate report for the same date' },
   ];
@@ -36,10 +40,10 @@ window.WXAccMap = (() => {
   // acronym takes no article
   const withArticle = id => (/^[A-Z]{2,}/.test(A.name(id)) ? '' : 'the ') + A.name(id);
   const WNAME = { morning: 'morning of the target day, 6 AM to noon', eve: 'evening before, 6 PM' };
-  const FNAME = { metar: 'METAR settle frame', cli: 'NWS climate report frame' };
+  const FNAME = { target: 'own-target frame', metar: 'METAR settle frame', cli: 'NWS climate report frame' };
 
   let D = null, base = null, basePending = null;
-  const sel = { metric: 'high', tool: 'NDFD', win: 'morning', frame: 'metar', mode: 'pi' };
+  const sel = { metric: 'high', tool: 'NDFD', win: 'morning', frame: 'target', mode: 'pi' };
   let scale = null;
 
   // ------------------------------------------------------------- readers
@@ -48,11 +52,20 @@ window.WXAccMap = (() => {
     const w = m && m.window && m.window[sel.win];
     return w || null;
   };
-  const toolCells = () => { const w = cellsOf(); const f = w && w.frame && w.frame[sel.frame]; return (f && f[sel.tool]) || null; };
-  const medianOf = () => { const w = cellsOf(); const f = w && w.median && w.median[sel.frame]; return (f && f[sel.tool]) || null; };
+  // the own-target frame carries only the systems whose own target is not the
+  // settle, the National Weather Service forecast; every other system's is its
+  // METAR-frame entry
+  const inFrame = (w, part, id) => {
+    const f = w && w[part] && w[part][sel.frame];
+    if (f && f[id]) return f[id];
+    return sel.frame === 'target' ? ((w && w[part] && w[part].metar) || {})[id] || null : null;
+  };
+  const toolCells = () => inFrame(cellsOf(), 'frame', sel.tool);
+  const medianOf = () => inFrame(cellsOf(), 'median', sel.tool);
   // Buckley Field has no climate report of its own, only Denver's, so it is
-  // left out of that frame and the dot is drawn hollow
-  const excluded = id => sel.frame === 'cli' && id === 'KBKF';
+  // left out of that frame, and of the own-target frame for the National
+  // Weather Service forecast, and the dot is drawn hollow
+  const excluded = id => id === 'KBKF' && (sel.frame === 'cli' || (sel.frame === 'target' && sel.tool === 'NDFD'));
   const straddles = c => c.lo != null && c.hi != null && c.lo <= 0 && c.hi >= 0;
 
   /* The scales are fixed over the whole file, every metric, window, frame
@@ -184,7 +197,8 @@ window.WXAccMap = (() => {
         dot.appendChild(el('circle', { cx: city.px, cy: city.py, r: 1.8, fill: 'var(--muted)', stroke: 'none' }));
       }
       const hollowWhy = !cells ? 'The system carries no values in this frame'
-        : excluded(city.id) ? 'Buckley Field has no climate report of its own, so it drops out of the climate-report frame'
+        : excluded(city.id) ? (sel.frame === 'cli' ? 'Buckley Field has no climate report of its own, so it drops out of the climate-report frame'
+          : 'Buckley Field has no climate report of its own, so the National Weather Service forecast is not scored there in the own-target frame')
         : 'Under 30 matched city-days for this system';
       const ink = { 'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)', class: 'lbl', 'text-anchor': 'middle' };
       if (!c) {
@@ -335,6 +349,7 @@ window.WXAccMap = (() => {
         'A city-day\u2019s value is the mean of the system\u2019s value at each whole hour of the window, its most recent forecast at or before that hour held at the running observed extreme, and it counts only when every hour of the window holds one. The ForecastEx prediction market\u2019s value is its median, where its ladder of Yes prices crosses fifty cents, held the same way. The settle is the station\u2019s highest or lowest METAR reading of the day rounded to the nearest whole degree.',
         'Intervals are 95 percent bootstrap intervals over 1,000 resamples of the target dates, with the ForecastEx prediction market and the system resampled together so both sides of the ratio move under the same draws.',
         'The median above the map is taken over every city with at least 30 matched city-days, grey or colored, and its interval is the spread of that median across the same resamples.',
+        'The default own-target frame scores each system against the observation it is built to predict. That is the settle for every alternative forecast system but the National Weather Service forecast, a daytime high for 7 AM to 7 PM and an overnight low for 7 PM to 8 AM local standard time, which is scored against the Service\u2019s climate report on the city-days whose report puts the extreme inside that window. Buckley Field has no climate report of its own, so that forecast is not scored there in this frame. The METAR settle frame scores every system against the settle.',
         'The climate-report frame scores the alternative forecast system against the National Weather Service\u2019s climate report instead of the METAR settle, a definition that runs about a degree warmer on highs, while the ForecastEx prediction market keeps the settle it pays on, so a gap between frames reflects that difference in definition rather than in forecast skill. Buckley Field has no climate report of its own, only Denver\u2019s, so it drops out of that frame and is drawn hollow.',
       ],
       span: A.spanLine(D.map && D.map.meta, ['FX', sel.tool], sel.metric, { lead: 'Records run from' }),
@@ -352,7 +367,7 @@ window.WXAccMap = (() => {
     fitScales();
     // the first system in the file that the select can name, when the default is absent
     const first = toolCells() ? sel.tool : A.TOOLS.find(id => {
-      const w = cellsOf(); return w && w.frame && w.frame[sel.frame] && w.frame[sel.frame][id];
+      return inFrame(cellsOf(), 'frame', id);
     });
     if (first) sel.tool = first;
     const bar = $('#accMapBar');

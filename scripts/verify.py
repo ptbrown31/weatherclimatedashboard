@@ -2884,6 +2884,29 @@ def run(no_build: bool) -> int:
                         and page.locator("#accGridBar button", has_text="Lows").count() == 0, str(heads_t[:12]))
                 chk.add(f"{scheme} accuracy: the scorecard has no CSV or newsletter controls",
                         "CSV" not in grid_bar and "Newsletter" not in grid_bar, grid_bar.replace("\n", " | ")[:100])
+                # every deterministic section opens in the own-target frame, and the METAR
+                # settle frame moves only the National Weather Service forecast's line
+                on_target = [page.locator(f"{bar} button.vbtn.on", has_text="Own target").count() for bar in ("#accLeadBar", "#accGridBar", "#accMapBar")]
+                chk.add(f"{scheme} accuracy: the error curve, the scorecard and the map open in the own-target frame",
+                        on_target == [1, 1, 1], str(on_target))
+                lead_target = page.locator("#accLead").inner_html()
+                page.locator("#accLeadBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(600)
+                lead_settle = page.locator("#accLead").inner_html()
+                page.locator("#accLeadBar button", has_text="Own target").first.click(); page.wait_for_timeout(600)
+                chk.add(f"{scheme} accuracy: the METAR settle frame redraws the error curve and Own target restores it",
+                        lead_settle != lead_target and page.locator("#accLead").inner_html() == lead_target, "")
+                def nws_cells():
+                    row = page.locator("#accGrid tr", has_text="National Weather Service").first
+                    return row.inner_text() if row.count() else ""
+                nws_target = nws_cells()
+                page.locator("#accGridBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(500)
+                nws_settle = nws_cells()
+                lamp_settle = page.locator("#accGrid tr", has_text="Aviation Forecast").first.inner_text()
+                page.locator("#accGridBar button", has_text="Own target").first.click(); page.wait_for_timeout(500)
+                lamp_target = page.locator("#accGrid tr", has_text="Aviation Forecast").first.inner_text()
+                chk.add(f"{scheme} accuracy: the scorecard's National Weather Service row changes with the frame and the Aviation Forecast's does not",
+                        bool(nws_target) and nws_target != nws_settle and lamp_target == lamp_settle,
+                        f"nws target={nws_target[:60]!r} settle={nws_settle[:60]!r}")
                 # the climate-report frame is offered on the lead curve as it is on the map
                 lead_metar = page.locator("#accLead").inner_html()
                 page.locator("#accLeadBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(600)
@@ -2900,6 +2923,14 @@ def run(no_build: bool) -> int:
                 grey = sum(1 for f in fills if f == "var(--line)")
                 chk.add(f"{scheme} accuracy: the map greys or hollows a station whose interval covers zero or that the frame excludes",
                         grey + dashed >= 1, f"grey={grey} hollow={dashed}")
+                # in the own-target frame the forecast is not scored at Buckley Field, which has no report of its own
+                page.locator("#accMapBar button", has_text="Own target").first.click(); page.wait_for_timeout(500)
+                map_target_hollow = page.locator("#accMap circle[stroke-dasharray]").count()
+                page.locator("#accMapBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(500)
+                map_settle_hollow = page.locator("#accMap circle[stroke-dasharray]").count()
+                page.locator("#accMapBar button", has_text="Own target").first.click(); page.wait_for_timeout(500)
+                chk.add(f"{scheme} accuracy: the own-target map hollows Buckley Field for the National Weather Service forecast",
+                        map_target_hollow >= map_settle_hollow + 1, f"target={map_target_hollow} settle={map_settle_hollow}")
                 # a row per system in the matched cohort, the market first
                 grid_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/grid.json").read().decode())
                 matched = [r["id"] for r in grid_file.get("cohorts", {}).get("own", []) if r.get("id")]

@@ -41,8 +41,12 @@ window.WXAccGrid = (() => {
     { key: 'own', label: 'Every day on record', title: 'Every city-day the ForecastEx prediction market priced at that hour, each system scored on the ones its own record covers' },
     { key: 'fixed30', label: 'Fixed sample', title: 'Only the city-days the ForecastEx prediction market priced at every hour from 30 to 0' },
   ];
+  // Own target is the default: each system against the observation it is built
+  // to predict, which differs from the settle only for the National Weather
+  // Service forecast (docs/accuracy.md)
   const FRAMES = [
-    { key: 'metar', label: 'METAR settle', title: 'Systems scored against the station’s METAR settle, the truth the ForecastEx prediction market pays on' },
+    { key: 'target', label: 'Own target', title: 'Each system scored against the observation it is built to predict: the METAR settle for all but the National Weather Service forecast, which is scored against its climate report on the days the report puts the extreme inside the forecast’s window' },
+    { key: 'metar', label: 'METAR settle', title: 'Every system, the National Weather Service forecast included, scored against the station’s METAR settle, the truth the ForecastEx prediction market pays on' },
     { key: 'cli', label: 'NWS climate report', title: 'Alternative forecast systems scored against the National Weather Service climate report for the same date; the ForecastEx prediction market keeps the settle it pays on' },
   ];
   /* Each exclusion the builder counts, as a reader reads it. The count is of
@@ -73,7 +77,7 @@ window.WXAccGrid = (() => {
   // ------------------------------------------------------------- state
   let host = null, bar = null, keyEl = null, methodEl = null;
   let grid = null;
-  const state = { cohort: 'own', frame: 'metar' };
+  const state = { cohort: 'own', frame: 'target' };
   let controlsBuilt = false;
 
   // ------------------------------------------------------------- data access
@@ -135,7 +139,8 @@ window.WXAccGrid = (() => {
   // the tooltip for every cell of one (row, lead) group
   function tipFor(row, L, cell) {
     const nm = A().name(row.id);
-    const frameName = state.frame === 'cli' && row.id !== 'FX' ? 'NWS climate report' : 'METAR settle';
+    const frameName = state.frame === 'cli' && row.id !== 'FX' ? 'NWS climate report'
+      : state.frame === 'target' && row.id === 'NDFD' ? 'NWS climate report, inside the forecast’s window' : 'METAR settle';
     const pairs = [
       ['Days', COHORTS.find(c => c.key === state.cohort).label],
       ['Truth', frameName],
@@ -237,6 +242,7 @@ window.WXAccGrid = (() => {
     host.appendChild(h('div', { class: 'acc-grid-scroll' }, [buildTable(groups)]));
     const foot = ['† CRPS in degrees for every system that publishes a distribution, the ForecastEx prediction market’s ladder and each ensemble’s normal curve read at the same strikes at the same hour. It is scored against the same truth as the cell, on the cell’s city-days that the distribution covers.',
                   'The American, Canadian and German ensemble rows score the ensemble’s centre, the highest (for a low, the lowest) hourly ensemble mean over the hours left in the day, held at the running observed extreme like every other value.'];
+    if (state.frame === 'target') foot.push('Each system is scored against the observation it is built to predict. That is the METAR settle for every row but the National Weather Service, whose forecast is a daytime high for 7 AM to 7 PM and an overnight low for 7 PM to 8 AM local standard time. It is scored against the Service’s climate report on the city-days whose report puts the extreme inside that window, and the skill scores are measured against it there.');
     if (state.frame === 'cli') foot.push('In the climate-report frame every alternative forecast system is scored against the National Weather Service climate report for the same date and the ForecastEx prediction market keeps the settle it pays on. Buckley Field has no climate report of its own, only Denver’s, so it drops out of that frame.');
     foot.forEach(t => host.appendChild(h('div', { class: 'acc-grid-foot', text: t })));
     renderKey();
@@ -275,7 +281,7 @@ window.WXAccGrid = (() => {
           + (e.reason !== 'capture_short' && fin(e.dates) ? ' (' + int(e.dates) + ' date' + (e.dates === 1 ? '' : 's') + ')' : '')).join('; ') + '.'
       : null;
     const rules = [
-      'An alternative forecast system’s value at a lead is its most recent forecast at or before that moment, held at the running observed extreme. The ForecastEx prediction market’s value is its median, where its ladder of Yes prices crosses fifty cents, held the same way. The settle is the station’s highest or lowest METAR reading of the day rounded to the nearest whole degree. In the climate-report frame an alternative forecast system is scored against the National Weather Service climate report for the same date instead, and the ForecastEx prediction market keeps the settle it pays on.',
+      'An alternative forecast system’s value at a lead is its most recent forecast at or before that moment, held at the running observed extreme. The ForecastEx prediction market’s value is its median, where its ladder of Yes prices crosses fifty cents, held the same way. The settle is the station’s highest or lowest METAR reading of the day rounded to the nearest whole degree. In the default own-target frame every system is scored against the settle except the National Weather Service forecast, which is scored against its climate report on the city-days whose report puts the extreme inside the forecast’s window. In the METAR settle frame every system is scored against the settle. In the climate-report frame an alternative forecast system is scored against the National Weather Service climate report for the same date instead, and the ForecastEx prediction market keeps the settle it pays on.',
       'For CRPS the ForecastEx prediction market’s distribution is its ladder of Yes prices, forced monotone across strikes and closed at the end strikes. An ensemble’s is a normal curve centred on the highest (for a low, the lowest) of its hourly means over the hours left in the day, with the members’ spread at the hour that mean falls on and nothing fitted, read at the same strikes at the same hour. Every system’s probabilities are scored alike, a contract the observations already settled at 100 cents and every other held to the exchange’s range of 1 to 99 cents.',
       'Two sets of days are available, every city-day the ForecastEx prediction market priced at that hour, or only the fixed sample of city-days it priced at every hour from 30 to 0.',
     ];
