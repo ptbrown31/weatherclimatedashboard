@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysis resolution</title>
+<meta name="description" content="How a proposed settlement framework would have resolved daily weather at fifty population centres, read from NOAA's hourly RTMA and URMA analyses rather than station reports.">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+<h1>Analysis resolution</h1>
+<p class="sub" id="anaStatement">A proposed settlement framework. No contract settles on it. Daily high, low, peak gust,
+mean wind and precipitation at the fifty most populous places of the lower 48 states, read from NOAA&rsquo;s hourly
+2.5 km analyses (RTMA within the hour, URMA about seven hours later) instead of a station&rsquo;s reports, and
+resolved the way the exchange&rsquo;s daily contracts resolve, whole units rounded half up, away from zero, and
+strictly above or below a strike.</p>
+<div class="bar" id="anaBar"><span id="pageStatus"></span></div>
+<div id="anaMap" class="card"></div>
+<div id="locPanel" hidden></div>
+<div class="prose" id="anaMethod"></div>
+<p class="cap" id="foot"></p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/analysis.js"></script>
+<script>WXAnalysis.init();</script>
+</body>
+</html>

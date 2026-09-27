@@ -26,6 +26,22 @@ VPC has outbound internet access by default, so no NAT is needed. The
 runtime needs tz data for the IANA zones: Amazon Linux 2023 images carry it;
 if ZoneInfo fails at import, add the `tzdata` wheel to the deployment.
 
+The analysis lane (pipeline/analysis.py) is the memory-heavy job, measured
+on 2026-09-27 on real RTMA and URMA files on the Mac with ru_maxrss, one
+process per hour, no instrumentation: one product-hour read with its four
+map frames peaks at 199 to 236 MB under python 3.13.5 and 184 to 227 MB
+under 3.9.6, from a 22 to 29 MB baseline with the lattice and the locations
+loaded, in 1 to 2 s of wall time. The analysis fields are sampled cell by
+cell (the 64,000 lattice cells and the fifty places, never the 3.7 million
+floats of a field); the complex-packed precipitation is decoded whole with
+its ints converted in place. A whole pass of the local job (a fresh root,
+a 100 s budget, 21 hours backfilled with frames and the days rebuilt)
+peaked at 314 MB ru_maxrss under 3.13.5 with the hour cache and the grid
+index alive beside the reads. The 512 MB function holds that beside
+boto3; do not cut MemorySize below it without measuring this lane again. Not measured on
+Linux (no docker on the Mac), so the CloudWatch REPORT line's Max Memory
+Used after the first landing passes is the number to record here.
+
 Alarms: the handler raises, which marks the invocation as an error for
 CloudWatch, when every request in a pass failed OR when any enabled source
 has failed for FAIL_STREAK_ALARM passes in a row (health.json). A source

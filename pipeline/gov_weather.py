@@ -15,6 +15,7 @@ Sources, all US government, all public domain, no key and no subscription.
   api.weather.gov       CLI text product            -> official daily climate report
   NHC / NOAA GIS        storms, cones, tracks       -> the hurricane page
   NHC HURDAT2           Atlantic best-track archive -> the season pace figure
+  NOAA Open Data (S3)   RTMA and URMA GRIB2 analyses -> the analysis resolution page
 
 Run it standalone for a quick look at three stations:
     python3 -m pipeline.gov_weather KLAX KPHX
@@ -118,6 +119,90 @@ def _head(url: str) -> bool:
         if e.code in (403, 404):
             return False
         raise
+
+
+# ---------------------------------------------------------------------------
+# NOAA Open Data: the RTMA and URMA analysis buckets (pipeline/analysis.py).
+#
+# Public S3 buckets, no credentials. Each hourly analysis file is about 85 MB
+# and carries thirteen or fourteen messages; the lane reads the .idx sidecar
+# and range-fetches only the three it needs, so a Range request is the normal
+# call here and a whole-object GET is for the sidecar and the small
+# precipitation files. S3 honours HTTP/1.1 byte ranges and answers 206; a 200
+# would mean the range was ignored and the whole object came back, which the
+# helper slices rather than trusts. As with _head(), a 403 on a public bucket
+# is a missing key: the next hour's file is 403 until it lands.
+# ---------------------------------------------------------------------------
+NODD_RTMA = "https://noaa-rtma-pds.s3.amazonaws.com"
+NODD_URMA = "https://noaa-urma-pds.s3.amazonaws.com"
+
+
+def _fetch_absent(url: str, tries: int, timeout: int, headers: dict, with_headers: bool = False):
+    """GET with the required header; None when the object is not there (403
+    or 404), the body otherwise (with the response headers when asked).
+    Other failures retry with the same back-off as _fetch() and raise once
+    the tries are used up."""
+    for attempt in range(tries):
+        try:
+            req = urllib.request.Request(url, headers=dict(headers, **{"User-Agent": USER_AGENT}))
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                body = r.read()
+                return (body, r.headers) if with_headers else body
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404):
+                return None
+            # A client error other than 429 will not change on retry.
+            if 400 <= e.code < 500 and e.code != 429:
+                raise
+            if attempt == tries - 1:
+                raise
+            time.sleep(2.5 * (attempt + 1))
+        except Exception:
+            if attempt == tries - 1:
+                raise
+            time.sleep(2.5 * (attempt + 1))
+    raise RuntimeError("unreachable")
+
+
+def fetch_bytes(url: str, tries: int = 3, timeout: int = 60) -> Optional[bytes]:
+    """A whole object from NOAA Open Data (an .idx sidecar, a precipitation
+    file); None when it is not there yet."""
+    return _fetch_absent(url, tries, timeout, {})
+
+
+def _content_range_total(value: Optional[str]) -> Optional[int]:
+    """The object length from a 206's Content-Range (`bytes 10-19/1234`),
+    None when the header is absent or the length is unknown (`*`)."""
+    if not value:
+        return None
+    m = re.match(r"\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", value)
+    if not m or m.group(3) == "*":
+        return None
+    return int(m.group(3))
+
+
+def fetch_range(url: str, start: int, end: int, tries: int = 3, timeout: int = 60) -> Optional[bytes]:
+    """Bytes start to end inclusive of an object (one GRIB2 message out of an
+    analysis file, from the .idx offsets); None when the object is not there.
+    A server that ignores the range and sends the whole object gets sliced,
+    so the caller receives exactly the bytes it asked for. The one shorter
+    body accepted is a range that ran past the end of the object: the .idx
+    sidecar cannot give the last message's end, the caller asks for a
+    generous range, and S3 clamps it and answers 206 with the bytes that
+    exist, saying so in Content-Range. Anything else short is an error."""
+    got = _fetch_absent(url, tries, timeout, {"Range": f"bytes={start}-{end}"}, with_headers=True)
+    if got is None:
+        return None
+    body, hdrs = got
+    want = end - start + 1
+    if len(body) == want:
+        return body
+    if len(body) > want:
+        return body[start:end + 1]
+    total = _content_range_total(hdrs.get("Content-Range") if hdrs is not None else None)
+    if total is not None and end >= total - 1 and len(body) == total - start:
+        return body
+    raise RuntimeError(f"range {start}-{end} of {url}: {len(body)} bytes for {want}")
 
 
 def c_to_f(c: float) -> float:
@@ -765,10 +850,17 @@ CLD_PCT = {"CL": 0, "FW": 19, "SC": 44, "BK": 75, "OV": 100}
 
 # the element rows each bulletin family carries, beyond the temperature the
 # rest of the pipeline already reads. SKY is percent; CLD is categorical.
-WX_ELEMENTS = {"nbh": ("TMP", "DPT", "SKY", "WDR", "WSP"),
-               "nbs": ("TMP", "DPT", "SKY", "WDR", "WSP"),
-               "lamp": ("TMP", "DPT", "CLD", "WDR", "WSP"),
+WX_ELEMENTS = {"nbh": ("TMP", "DPT", "SKY", "WDR", "WSP", "GST", "GSD"),
+               "nbs": ("TMP", "DPT", "SKY", "WDR", "WSP", "GST", "GSD"),
+               "lamp": ("TMP", "DPT", "CLD", "WDR", "WSP", "WGS"),
                "mav": ("TMP", "DPT", "CLD", "WDR", "WSP")}
+
+# the gust row, which each family labels its own way and MAV does not carry at
+# all. The blend prints GST with GSD beside it, its spread; LAMP prints WGS and
+# writes NG, no gust, where it forecasts none, which parses to nothing and is
+# the right answer rather than a missing value. Gusts are in knots, as WSP is,
+# and become miles per hour at display like every other wind on this site.
+GUST_LABEL = {"nbh": "GST", "nbs": "GST", "lamp": "WGS", "mav": None}
 
 
 # ---- the NWS hourly forecast's elements, for the same panels. The gridpoint
@@ -841,6 +933,7 @@ def parse_wx_block(block: str, family: str) -> dict:
                 break
     times = column_times(cycle, cols.get(hour_label, []))
     get = lambda lab, i: (cols.get(lab) or [None] * n)[i]
+    gust_label = GUST_LABEL.get(family)
     rows = []
     for i, t in enumerate(times):
         if t is None:
@@ -853,7 +946,9 @@ def parse_wx_block(block: str, family: str) -> dict:
                      "sky_pct": sky if sky is not None else CLD_PCT.get(cover),
                      "cover": cover,
                      "wdir": get("WDR", i) * 10 if get("WDR", i) is not None else None,
-                     "wspd": float(get("WSP", i)) if get("WSP", i) is not None else None})
+                     "wspd": float(get("WSP", i)) if get("WSP", i) is not None else None,
+                     "gust": float(get(gust_label, i)) if gust_label and get(gust_label, i) is not None else None,
+                     "gust_sd": float(get("GSD", i)) if get("GSD", i) is not None else None})
     return {"cycle": cycle, "rows": rows}
 
 

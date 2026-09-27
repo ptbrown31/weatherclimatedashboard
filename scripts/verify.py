@@ -73,8 +73,27 @@ class Server:
 
 
 class Check:
-    def __init__(self):
+    """The collector, and the filter that makes iterating on one area bearable.
+
+    A full pass is both colour schemes over every page and every interaction,
+    which is minutes. While working on one panel that is mostly waiting, so
+    `--scheme light` halves it and `--only` narrows the page sweep.
+
+    A filtered run must never be mistaken for a clean one. `filtered` is set the
+    moment anything is narrowed, and the summary line says so in place of the
+    usual count, because the failure this guards against is someone reading
+    "0 failed" off a run that skipped the section holding the bug.
+    """
+
+    def __init__(self, only: str = "", schemes=("light", "dark")):
         self.results = []
+        self.only = only or ""
+        self.schemes = tuple(schemes)
+        self.filtered = bool(self.only) or self.schemes != ("light", "dark")
+
+    def wants(self, tag: str) -> bool:
+        """Whether a named area is in scope for this run."""
+        return not self.only or re.search(self.only, tag, re.I) is not None
 
     def add(self, name: str, ok: bool, detail: str = ""):
         self.results.append({"name": name, "ok": bool(ok), "detail": detail})
@@ -96,19 +115,19 @@ def errors_of(page):
     return errs
 
 
-def run(no_build: bool) -> int:
+def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
     from playwright.sync_api import sync_playwright
     os.makedirs(OUT, exist_ok=True)
     if not no_build:
         subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "build.py")], check=True, cwd=ROOT)
-    chk = Check()
+    chk = Check(only=only, schemes=schemes)
     srv = Server("standalone")
     emb = Server("embed")
     bad = Server("standalone", fail=True)
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch()
-            for scheme in ("light", "dark"):
+            for scheme in chk.schemes:
                 ctx = browser.new_context(color_scheme=scheme, viewport={"width": 1200, "height": 900})
                 page = ctx.new_page()
                 errs = errors_of(page)
@@ -122,7 +141,15 @@ def run(no_build: bool) -> int:
                          ("electricity-renewables.html", "#panels svg path", "electricity series"), ("about.html", "footer.site", "footer"),
                          ("faq.html", ".prose h2", "the FAQ questions"), ("accuracy.html", "#accLead path", "the lead curve"),
                          ("daily-temperature-markets.html", ".prose h2", "the article sections"),
+                         ("hourly-temperature-markets.html", "#board section.prod", "the listed hourly cities"),
+                         ("wind-markets.html", "#board section.prod", "the wind cities"),
+                         ("analysis-resolution.html", "#vmap, #anaMap", "analysis resolution page"),
+                         ("tropical-cyclone-markets.html", ".basincard svg.minimap", "a map per basin"),
                          ("allocator.html", "#allocSvg", "the allocation chart")]
+                # a narrowed run walks only the pages it asked for; the sweep is
+                # the part of a pass that is pure page loading, so this is where
+                # skipping actually buys time rather than only hiding output
+                pages = [pg for pg in pages if chk.wants(pg[0] + " " + pg[2])]
                 for path, sel, what in pages:
                     page.goto(f"{srv.url}/{path}")
                     page.wait_for_timeout(900)
@@ -349,7 +376,8 @@ def run(no_build: bool) -> int:
                 refs = page.eval_on_selector_all("header.site .refnav a", "els => els.map(e => e.textContent)")
                 chk.add(f"{scheme} nav: two branches on the first row", l1 == ["Climate & Weather", "Energy"], str(l1))
                 chk.add(f"{scheme} nav: the second row carries that branch's categories",
-                        l2[:2] == ["Daily Temperatures", "Tropical Cyclones"] and len(l2) == 5, str(l2))
+                        l2[:3] == ["Daily Temperatures", "Hourly Temperatures", "Tropical Cyclones"]
+                        and len(l2) == 7, str(l2))
                 chk.add(f"{scheme} nav: reference pages sit apart from the hierarchy",
                         "Trading temp markets" in refs and "FAQ" in refs and "City" not in refs, str(refs))
                 on = page.eval_on_selector_all("header.site nav a.on", "els => els.map(e => e.textContent)")
@@ -360,10 +388,802 @@ def run(no_build: bool) -> int:
                                   (f"{srv.url}/category.html?c=fossil-fuels", ["Energy", "Fossil Fuels"]),
                                   (f"{srv.url}/contract.html?id=OP", ["Energy", "Fossil Fuels"]),
                                   (f"{srv.url}/hurricane.html", ["Climate & Weather", "Tropical Cyclones"]),
+                                  (f"{srv.url}/tropical-cyclone-markets.html", ["Climate & Weather", "Tropical Cyclones"]),
                                   (f"{srv.url}/city.html?station=KLAX", ["Climate & Weather", "Daily Temperatures"])):
                     page.goto(url); page.wait_for_timeout(800)
                     got = page.eval_on_selector_all("header.site nav a.on", "els => els.map(e => e.textContent)")
                     chk.add(f"{scheme} nav: {url.split('/')[-1][:34]} knows its branch", got == want, f"{got} want {want}")
+                _iso_z = lambda t: t.strftime("%Y-%m-%dT%H:00:00Z")
+                # ---- the wind panel: the forecast it draws forward, the hover, and a
+                #      ladder column that keeps its place before a strike exists.
+                # The samples carry no wind at all, so the observation and the
+                # guidance are routed rather than taken from them.
+                # dated off the clock: "the hours still to come" is measured against
+                # now, so a fixed date would leave nothing ahead and the comparison
+                # the panel draws would never be exercised
+                _now = dt.datetime.now(dt.timezone.utc)
+                # the day is the STATION's, not UTC's. Between midnight and four in
+                # the morning Zulu the two disagree, and the plot's window runs from
+                # local midnight, so a UTC date put every routed observation before
+                # the start of the window and the panel drew nothing
+                from zoneinfo import ZoneInfo as _Z
+                DAY = _now.astimezone(_Z("America/New_York")).strftime("%Y-%m-%d")
+                # samples/ predates the third contract day, so the routed roster
+                # has to carry it or the board draws two buttons and the checks
+                # for the first unopened day pass on an absence
+                DAY2 = (_now.astimezone(_Z("America/New_York")).date()
+                        + dt.timedelta(days=2)).isoformat()
+                _past = [_now - dt.timedelta(hours=k) for k in (5, 4, 3, 2)]
+                w_rows = [{"t": t.strftime("%Y-%m-%dT%H:54:00Z"), "tempF": 66.0, "tempC": 18.9, "type": "METAR",
+                           "wspd": 9.0 + i, "wgst": (24.0 if i == 3 else None)} for i, t in enumerate(_past)]
+                _ahead = [_now + dt.timedelta(hours=k) for k in (1, 2, 3)]
+
+                def wind_routes(route):
+                    u = route.request.url
+                    if u.endswith("/summary.json"):
+                        # the ladder takes its day from the ROSTER, so the routed board
+                        # and the routed observations have to sit on the day the roster
+                        # names or the panel treats its own readings as another day's
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        market_file = "/market/" in u
+                        for c in d.get("cities") or []:
+                            if c.get("station") in ("KBOS", "KDFW"):
+                                c["markers"] = dict(c.get("markers") or {}, day=DAY)
+                                # a value on the map, so its labels exist to be measured.
+                                # The map colours by the exchange's central wind now, which
+                                # lives in the MARKET summary, so the figure has to go there
+                                # rather than on the roster row
+                                c["windPeak"] = {"v": 24.0, "kt": 24, "mph": 28, "from": "gust",
+                                                 "t": w_rows[3]["t"], "type": "METAR"}
+                                if market_file:
+                                    c["listed"] = True
+                                    c["day"] = DAY
+                                    c["dayAfter"] = DAY2
+                                    c["impliedWindToday"] = 31.5
+                                    c["quotedWindToday"] = 5
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    # a second station with readings and no book at all, so the page
+                    # carries both column states at once
+                    if u.endswith("/obs/KDFW.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["rows"] = w_rows
+                        d["wind"] = {"today": {"date": DAY, "n": len(w_rows), "unit": "kt",
+                                               "peak": {"v": 20.0, "t": w_rows[3]["t"], "type": "METAR",
+                                                        "from": "speed", "mph": 23, "kt": 20}}}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/obs/KBOS.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["rows"] = w_rows
+                        d["wind"] = {"today": {"date": DAY, "n": len(w_rows), "unit": "kt",
+                                               "peak": {"v": 24.0, "t": w_rows[3]["t"], "type": "METAR",
+                                                        "from": "gust", "mph": 28, "kt": 24}}}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/market/KBOS.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        # the four books a ladder has to tell apart. The first is the
+                        # one the live board actually carried: a resting Yes bid with
+                        # no opposite side, which read as "no bids" while the price
+                        # test was being taken on a row whose units were already cents
+                        d["symbols"] = dict(d.get("symbols") or {},
+                                            wind={"symbol": "MGBOS", "name": "Boston Max Wind Speed",
+                                                  "conid": 991, "productConid": 990})
+                        book = [{"strike": 19.0, "bid": 0.94, "ask": None, "mid": 0.94, "conidYes": 9901},
+                                {"strike": 33.0, "bid": 0.01, "ask": 0.99, "mid": 0.5, "conidYes": 9902},
+                                {"strike": 38.0, "bid": 0.40, "ask": 0.46, "mid": 0.43, "conidYes": 9903},
+                                {"strike": 43.0, "bid": None, "ask": None, "mid": None, "conidYes": 9904}]
+                        # the ladder is keyed on the day the ROSTER names, not the one in
+                        # this file, so the book goes under both rather than being placed
+                        # on a day nothing looks up
+                        days = dict(d.get("days") or {})
+                        for k in {DAY, (d.get("markers") or {}).get("day")} - {None}:
+                            days[k] = dict(days.get(k) or {}, wind=book)
+                        d["days"] = days
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/forecast/KBOS.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        # a quiet forward hour: a sustained wind and NO gust, which is
+                        # the case a gust-only line gets wrong
+                        d["nbm"] = {"cycle": _iso_z(_now), "hourlyFrom": _iso_z(_ahead[0]), "txn": {},
+                                    "hourly": [{"t": _iso_z(t), "tempF": 70.0, "tempC": 21.1,
+                                                "wspd": 26.0, "gust": (None if i == 0 else 12.0)}
+                                               for i, t in enumerate(_ahead)]}
+                        # the forecast office's product as it actually arrives: a
+                        # sustained wind every hour and no gust column at all. It
+                        # sits ahead of the blend in the family order, and taking
+                        # the first family with any wind drew its sustained line
+                        # where the blend had gusts
+                        d["nws"] = {"hourly": [{"t": _iso_z(t), "tempF": 70.0, "tempC": 21.1, "wspd": 9.0}
+                                               for t in _ahead]}
+                        for k in ("lamp", "mav"):
+                            d.pop(k, None)
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", wind_routes)
+                page.goto(f"{srv.url}/wind-markets.html")
+                page.wait_for_timeout(1800)
+                wp = page.evaluate("""() => {
+                  const svg = document.querySelector('#board svg.ts');
+                  if (!svg) return null;
+                  const txt = [...svg.querySelectorAll('text')].map(t => t.textContent);
+                  return { bands: svg.querySelectorAll('rect.hband').length,
+                           legend: txt.filter(t => /Peak so far|Gusts|Sustained|forecast| gust| sustained/.test(t)),
+                           title: txt.filter(t => /Thresholds/.test(t)),
+                           empty: txt.filter(t => /no strikes listed/.test(t)),
+                           peaks: txt.some(t => t === 'Peak'),
+                           caps: [...document.querySelectorAll('#board section p.cap')].map(p => p.textContent) };
+                }""")
+                chk.add(f"{scheme} wind panel: the plot draws a hover band per reading",
+                        bool(wp and wp["bands"] >= 6), str(wp and wp["bands"]))
+                # every family that forecasts wind gets its own line, as on the
+                # temperature panel. The Blend and LAMP publish an hourly gust; the
+                # gridpoint's hourly product publishes only a sustained wind, and
+                # each says on its own label which column it is drawing
+                chk.add(f"{scheme} wind panel: every forecasting family gets a line, not just one",
+                        bool(wp and len([t for t in wp["legend"] if " gust" in t or " sustained" in t]) >= 2),
+                        str(wp and wp["legend"]))
+                chk.add(f"{scheme} wind panel: a family names the column it draws",
+                        bool(wp and any("Blend gust" in t for t in wp["legend"])
+                             and any(" sustained" in t for t in wp["legend"])), str(wp and wp["legend"]))
+                chk.add(f"{scheme} wind panel: each family's day peak sits beside the ladder",
+                        bool(wp and wp.get("peaks")), str(wp and wp.get("peaks")))
+                # the routed station has a book and the rest of the board does not, so
+                # both states are on the page at once and each keeps its column
+                allcols = page.evaluate("""() => {
+                  const svgs = [...document.querySelectorAll('#board svg.ts')];
+                  const txt = svgs.flatMap(s => [...s.querySelectorAll('text')].map(t => t.textContent));
+                  return { titles: txt.filter(t => /Thresholds/.test(t)).length,
+                           empty: txt.filter(t => /no strikes listed/.test(t)).length };
+                }""")
+                chk.add(f"{scheme} wind panel: the threshold column keeps its place before a strike exists",
+                        bool(allcols["titles"] >= 2 and allcols["empty"] >= 1), str(allcols))
+                # 26 kt is 30 mph and the hour has no gust at all, so a gust-only
+                # line would have read 14 mph there and understated the day
+                chk.add(f"{scheme} wind panel: guidance is compared against the peak so far",
+                        bool(wp and any("30 mph" in c and "28 mph" in c for c in wp["caps"])),
+                        str(wp and wp["caps"])[:170])
+                hov = page.evaluate("""async () => {
+                  const svg = document.querySelector('#board svg.ts');
+                  const b = [...svg.querySelectorAll('rect.hband')];
+                  const out = [];
+                  for (const i of [0, b.length - 1]) {
+                    const r = b[i].getBoundingClientRect();
+                    b[i].dispatchEvent(new MouseEvent('mousemove',
+                      {clientX: r.x + r.width / 2, clientY: r.y + 20, bubbles: true}));
+                    await new Promise(z => setTimeout(z, 120));
+                    out.push((document.querySelector('#tip') || {}).innerText || '');
+                  }
+                  return out;
+                }""")
+                # the variable map zooms the way the basin map does, and its dots
+                # hold their on-screen size while doing it. The label size has to
+                # ride in `style`: the class carries a font-size in the stylesheet,
+                # a CSS rule beats a presentation attribute, and a px size inside a
+                # scaled viewBox is in user units, so a city's name grew with the
+                # zoom until it covered three states
+                zm = page.evaluate("""async () => {
+                  const svg = document.querySelector('#vmap');
+                  if (!svg) return null;
+                  const vbw = () => +svg.getAttribute('viewBox').split(' ')[2];
+                  const dotR = () => {
+                    const c = svg.querySelector('#vdots g.dot circle:nth-child(2)');
+                    return c ? +c.getAttribute('r') : null;
+                  };
+                  const lab = () => {
+                    const t = svg.querySelector('#vdots text');
+                    return t ? parseFloat((t.style.fontSize || '0').replace('px', '')) : null;
+                  };
+                  const w0 = vbw(), r0 = dotR(), f0 = lab();
+                  const plus = [...document.querySelectorAll('#vmapZoom button')].find(b => b.textContent === '+');
+                  plus.click(); plus.click();
+                  await new Promise(z => setTimeout(z, 420));
+                  const w1 = vbw(), r1 = dotR(), f1 = lab();
+                  const level = (document.querySelector('#vmapZoomLevel') || {}).textContent || '';
+                  const grab = svg.classList.contains('grab');
+                  const reset = [...document.querySelectorAll('#vmapZoom button')].find(b => b.textContent === 'Reset');
+                  reset.click();
+                  await new Promise(z => setTimeout(z, 420));
+                  return { w0, w1, back: vbw(), r0, r1, f0, f1, level, grab,
+                           screen0: r0 && w0 ? r0 / w0 : null, screen1: r1 && w1 ? r1 / w1 : null };
+                }""")
+                chk.add(f"{scheme} wind map: zooming in narrows the view and says so",
+                        bool(zm and zm["w1"] < zm["w0"] and "\u00d7" in zm["level"] and zm["grab"]),
+                        str(zm and [zm["w0"], zm["w1"], zm["level"], zm["grab"]]))
+                chk.add(f"{scheme} wind map: Reset returns the whole country",
+                        bool(zm and abs(zm["back"] - zm["w0"]) < 0.01), str(zm and [zm["back"], zm["w0"]]))
+                chk.add(f"{scheme} wind map: a dot holds its on-screen size through the zoom",
+                        bool(zm and zm["r1"] and zm["r1"] < zm["r0"]
+                             and abs(zm["screen1"] - zm["screen0"]) < zm["screen0"] * 0.05),
+                        str(zm and [zm["r0"], zm["r1"], zm["screen0"], zm["screen1"]]))
+                chk.add(f"{scheme} wind map: a label holds its on-screen size too",
+                        bool(zm and zm["f0"] and zm["f1"] and zm["f1"] < zm["f0"]), str(zm and [zm["f0"], zm["f1"]]))
+
+                lad = page.evaluate("""() => {
+                  const svg = document.querySelector('#board svg.ts');
+                  const txt = [...svg.querySelectorAll('text')].map(t => t.textContent);
+                  return { cents: txt.filter(t => /\\u00a2$/.test(t)),
+                           none: txt.filter(t => /^no (price|bids)$/.test(t)),
+                           yes: svg.querySelectorAll("rect[fill='var(--yes)']").length };
+                }""")
+                # a one-sided book is a real resting bid and keeps its price; a book at
+                # one against ninety-nine is the exchange's placeholder and has none;
+                # a strike nobody has quoted has no book at all. Three different states
+                chk.add(f"{scheme} wind ladder: a one-sided resting bid keeps its price",
+                        "94\u00a2" in lad["cents"], str(lad["cents"]))
+                chk.add(f"{scheme} wind ladder: a placeholder book shows no price and a two-sided book both sides",
+                        "no price" in lad["none"] and "43\u00a2" in lad["cents"] and "57\u00a2" in lad["cents"],
+                        str([lad["cents"], lad["none"]]))
+                chk.add(f"{scheme} wind ladder: a strike with no book at all reads differently",
+                        "no bids" in lad["none"] and lad["yes"] >= 2, str([lad["none"], lad["yes"]]))
+                # the bars open the strike they show, the way every other ladder's do
+                barurl = page.evaluate("""() => {
+                  const b = [...document.querySelectorAll('#board svg.ts rect[fill=\"var(--yes)\"]')];
+                  return b.map(x => x.getAttribute('data-contract-url') || '');
+                }""")
+                chk.add(f"{scheme} wind ladder: a priced bar opens that strike on the exchange",
+                        bool(barurl and all("conid_yes=" in u for u in barurl) and len(set(barurl)) == len(barurl)),
+                        str(barurl)[:150])
+                # the two columns explained once on the page, from the ASOS manual
+                note = page.evaluate("""() => {
+                  const n = [...document.querySelectorAll('.wnote')];
+                  return { n: n.length, text: n.length ? n[0].textContent : '' };
+                }""")
+                chk.add(f"{scheme} wind note: one explanation of the two columns, not one per city",
+                        note["n"] == 1, str(note["n"]))
+                chk.add(f"{scheme} wind note: it states what each column measures and cites the manual",
+                        all(t in note["text"] for t in ("two-minute average", "at least 9 knots",
+                                                        "5 knots above it", "held for ten minutes",
+                                                        "10 knots above the lowest five-second wind",
+                                                        "14 knots", "an hourly accumulation", "ASOS User")),
+                        note["text"][:120])
+                chk.add(f"{scheme} wind panel: the hover names both columns and the ten-knot rule",
+                        bool(hov and any("Sustained" in t for t in hov)
+                             and any("ten knots" in t or "none at this hour" in t for t in hov)),
+                        str(hov)[:180])
+                page.unroute("**/data/snapshots/**")
+
+                # ---- the day control, and the desk's anticipated ladder
+                #
+                # The exchange opens tomorrow's wind board during today, so the
+                # board carries the same Today/Tomorrow control the daily
+                # temperature board has, and the map above it follows the same
+                # day. Where the exchange has opened nothing, the desk's own
+                # figure stands in: hatched, in percent rather than cents, with
+                # no link to a book that does not exist, and gone the moment a
+                # real price exists. That last part is enforced in the pipeline
+                # (tests/test_market.py), so what is checked here is that a
+                # figure never draws as a price.
+                DESK_DAY = None
+
+                def desk_routes(route):
+                    u = route.request.url
+                    if u.endswith("/catalogue/wind.json"):
+                        # the listing is rebuilt once a day. Age it hard: the strip
+                        # reports one age against one cadence, and mixing a daily
+                        # file into a ten-minute one made the page say "6 hours ago,
+                        # updates every 10 minutes" while the market data behind it
+                        # was minutes old. The listing has its own louder failure.
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["asof"] = "2026-01-01T00:00:00Z"
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/summary.json") and "/market/" not in u:
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        for c in d.get("cities") or []:
+                            c["markers"] = dict(c.get("markers") or {}, dayAfter=DAY2)
+                            if c.get("station") == "KBOS":
+                                c["markers"] = dict(c["markers"], day=DAY)
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/market/KBOS.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        # no exchange ladder at all, and the desk's figures instead
+                        d["days"] = {}
+                        d["markers"] = dict(d.get("markers") or {}, day=DAY)
+                        d["anticipated"] = {DAY: {"source": "desk", "asof": "2026-09-25T09:00:00Z",
+                                                  "rows": [{"strike": 25.0, "p": 0.86},
+                                                           {"strike": 35.0, "p": 0.58},
+                                                           {"strike": 45.0, "p": 0.27}]}}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/obs/KBOS.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["rows"] = w_rows
+                        d["today"] = dict(d.get("today") or {}, date=DAY)
+                        d["wind"] = {"today": {"date": DAY, "n": len(w_rows), "unit": "kt",
+                                               "peak": {"v": 24, "kt": 24, "mph": 28, "from": "gust",
+                                                        "t": w_rows[3]["t"], "type": "METAR"}}}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                DESK_DAY = DAY
+                page.route("**/data/snapshots/**", desk_routes)
+                page.goto(f"{srv.url}/wind-markets.html")
+                page.wait_for_timeout(2200)
+                btns = page.eval_on_selector_all("#windDays button", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} wind days: the board offers today, tomorrow and the first unopened day",
+                        len(btns) == 3 and btns[:2] == ["Today", "Tomorrow"], str(btns))
+                chk.add(f"{scheme} wind days: the third day is named by its weekday, not 'day after'",
+                        len(btns) == 3 and btns[2] in ("Monday", "Tuesday", "Wednesday", "Thursday",
+                                                       "Friday", "Saturday", "Sunday"), str(btns))
+                chk.add(f"{scheme} wind days: exactly one is pressed",
+                        page.locator("#windDays button.on").count() == 1, "")
+                strip = page.locator("#pageStatus").inner_text()
+                # the routed listing is aged to January, far older than samples/
+                # itself, so the test is whether THAT age reaches the line rather
+                # than whether the fixture happens to be fresh (it is not)
+                _days = re.search(r"(\d+)\s+days ago", strip)
+                chk.add(f"{scheme} wind board: a day-old listing does not set the live freshness line",
+                        not _days or int(_days.group(1)) < 100, strip[:120])
+                cap1 = page.locator("#vmapCap").inner_text()
+                chk.add(f"{scheme} wind map: the caption names the exchange's centre, not the peak so far",
+                        "central wind" in cap1 and "today" in cap1 and "so far" not in cap1, cap1)
+                desk = page.evaluate("""() => {
+                  const secs = [...document.querySelectorAll('#board section')];
+                  const sec = secs.find(s => /Boston/.test(s.querySelector('h2').textContent));
+                  if (!sec) return null;
+                  const svg = sec.querySelector('svg.ts');
+                  const txt = [...svg.querySelectorAll('text')].map(t => t.textContent);
+                  const hatched = [...svg.querySelectorAll('rect')]
+                      .filter(r => (r.getAttribute('fill') || '').indexOf('url(#') === 0).length;
+                  return { hatched, titles: txt.filter(t => /Thresholds/.test(t)),
+                           pct: txt.filter(t => /^\d+%$/.test(t)),
+                           cents: txt.filter(t => /\u00a2$/.test(t)),
+                           links: svg.querySelectorAll('a').length,
+                           caps: [...sec.querySelectorAll('p.cap')].map(p => p.textContent).join(' ') };
+                }""")
+                chk.add(f"{scheme} anticipated ladder: it draws, hatched",
+                        bool(desk and desk["hatched"] >= 3), str(desk and desk["hatched"]))
+                chk.add(f"{scheme} anticipated ladder: it is labelled in percent, never in cents",
+                        bool(desk and desk["pct"] and not desk["cents"]),
+                        str(desk and (desk["pct"], desk["cents"])))
+                chk.add(f"{scheme} anticipated ladder: no link to a book that does not exist",
+                        bool(desk and desk["links"] == 0), str(desk and desk["links"]))
+                chk.add(f"{scheme} anticipated ladder: it says it is an estimate and what replaces it",
+                        bool(desk and "Estimated, contract not yet listed" in desk["caps"]
+                             and "as soon as the contract lists" in desk["caps"]),
+                        (desk or {}).get("caps", "")[:140])
+                chk.add(f"{scheme} anticipated ladder: it never says where the estimate came from",
+                        bool(desk and not re.search(r"\bdesk\b|DWM|internal|pricer|our model",
+                                                    desk["caps"], re.I)),
+                        (desk or {}).get("caps", "")[:140])
+                chk.add(f"{scheme} anticipated ladder: the column names itself an estimate",
+                        bool(desk and "estimated" in " ".join(desk.get("titles") or []).lower()),
+                        str((desk or {}).get("titles")))
+                # the day control moves the map with the boards
+                page.locator("#windDays button", has_text="Tomorrow").first.click()
+                page.wait_for_timeout(2200)
+                cap2 = page.locator("#vmapCap").inner_text()
+                chk.add(f"{scheme} wind days: the map follows the board's day",
+                        "tomorrow" in cap2 and cap2 != cap1, cap2)
+                chk.add(f"{scheme} wind days: the pressed button follows the selection",
+                        page.locator("#windDays button.on").first.inner_text() == "Tomorrow", "")
+                if len(btns) == 3:
+                    page.locator("#windDays button", has_text=btns[2]).first.click()
+                    page.wait_for_timeout(2200)
+                    cap3 = page.locator("#vmapCap").inner_text()
+                    chk.add(f"{scheme} wind days: the map names the third day the way its button does",
+                            btns[2] in cap3, cap3)
+                    chk.add(f"{scheme} wind days: the listing count names the day it counted",
+                            btns[2] in page.locator("#pageStatus").inner_text(),
+                            page.locator("#pageStatus").inner_text()[-50:])
+                # a dot on a board that already carries that station's panel scrolls
+                # to it rather than leaving the page for the same chart elsewhere
+                page.goto(f"{srv.url}/wind-markets.html"); page.wait_for_timeout(2200)
+                sid = page.evaluate("""() => {
+                  const s = document.querySelector('#board section[id^=wind-]');
+                  return s ? s.id.replace('wind-', '') : null;
+                }""")
+                if sid:
+                    page.evaluate("() => window.scrollTo(0, 0)")
+                    page.click(f'#vmap g.dot[data-station="{sid}"]')
+                    page.wait_for_timeout(1400)
+                    land = page.evaluate("""(s) => {
+                      const el = document.getElementById('wind-' + s);
+                      return { top: Math.round(el.getBoundingClientRect().top),
+                               y: Math.round(window.scrollY), path: location.pathname };
+                    }""", sid)
+                    chk.add(f"{scheme} wind map: a dot scrolls to that station's panel",
+                            land["y"] > 0 and abs(land["top"] - 12) <= 20, str(land))
+                    chk.add(f"{scheme} wind map: picking a listed station does not leave the board",
+                            "wind-markets" in land["path"], land["path"])
+                page.unroute("**/data/snapshots/**")
+
+                # ---- the analysis resolution page: a proposed settlement
+                #      framework, unlisted, drawn from samples/snapshots/analysis
+                #
+                # The page computes nothing, so the checks are that each control
+                # moves what it says it moves, that a place opens with its day in
+                # full, and that the hypothetical ladder can never be read as a
+                # market: hatched, Yes or No and nothing else, no cents, no link.
+                ANA = "analysis-resolution.html"
+                ANA_SNAP = os.path.join(ROOT, "samples", "snapshots", "analysis")
+                # The fixtures are a real local run of the job, so the day and
+                # the hours the checks drive come from the fixture index files
+                # rather than from dates written into this script: the newest
+                # day whose New York URMA day is complete (final pills), the
+                # oldest day (routed away for the hollow-dot check), and the
+                # last two URMA temperature frames listed on a day the page
+                # can select (the stepper).
+                with open(os.path.join(ANA_SNAP, "index.json")) as fh:
+                    ana_index = json.load(fh)
+                ana_days = list(ana_index["days"])
+                ana_day = None
+                ana_entries = {}          # New York's entry per fixture day
+                for d_ in reversed(ana_days):
+                    with open(os.path.join(ANA_SNAP, "days", d_ + ".json")) as fh:
+                        e_ = (json.load(fh).get("locations") or {}).get("new-york-ny") or {}
+                    ana_entries[d_] = e_
+                    if ana_day is None and (e_.get("urma") or {}).get("complete") and (e_.get("urma") or {}).get("precip"):
+                        ana_day = d_
+                chk.add(f"{scheme} analysis fixtures: a day with a complete New York URMA entry", ana_day is not None, str(ana_days))
+                ana_day = ana_day or ana_days[-1]
+                with open(os.path.join(ANA_SNAP, "grid", "index.json")) as fh:
+                    ana_ut = (json.load(fh).get("frames") or {}).get("urma", {}).get("temp", {})
+                ana_fday = next((d_ for d_ in sorted(ana_ut, reverse=True) if d_ in ana_days and len(ana_ut[d_]) >= 2), None)
+                chk.add(f"{scheme} analysis fixtures: two URMA temperature frames on a selectable day", ana_fday is not None, str(ana_ut))
+                ana_hours = sorted(ana_ut.get(ana_fday) or ["15", "16"])[-2:]
+                page.goto(f"{srv.url}/{ANA}"); page.wait_for_timeout(2200)
+                ana_state = """() => ({
+                  legend: document.querySelector('#anaLegend').textContent,
+                  href: document.querySelector('#anaFrame').getAttribute('href') || '',
+                  cap: document.querySelector('#anaCap').textContent,
+                  dots: document.querySelectorAll('#vdots g.dot').length,
+                  stmt: document.querySelector('.sub').textContent,
+                  robots: (document.querySelector('meta[name=robots]') || {}).content || '',
+                  header: !!document.querySelector('header.site'), footer: !!document.querySelector('footer.site'),
+                  url: location.search })"""
+                a0 = page.evaluate(ana_state)
+                chk.add(f"{scheme} analysis: the statement is on the page and the page is not offered to search",
+                        "No contract settles on it" in a0["stmt"] and "noindex" in a0["robots"], a0["robots"])
+                chk.add(f"{scheme} analysis: the chrome draws for a page outside the navigation",
+                        a0["header"] and a0["footer"], str([a0["header"], a0["footer"]]))
+                chk.add(f"{scheme} analysis: fifty places and a frame under them",
+                        a0["dots"] == 50 and a0["href"].startswith("data:image/png"), str([a0["dots"], a0["href"][:22]]))
+                page.click('button[data-var="gust"]'); page.wait_for_timeout(900)
+                a1 = page.evaluate(ana_state)
+                chk.add(f"{scheme} analysis: the variable button changes the legend and the frame",
+                        "Peak gust" in a1["legend"] and a1["legend"] != a0["legend"]
+                        and a1["href"].startswith("data:image/png") and a1["href"] != a0["href"]
+                        and "var=gust" in a1["url"], a1["legend"][:60])
+                page.click('button[data-var="high"]'); page.click('button[data-product="rtma"]'); page.wait_for_timeout(900)
+                a2 = page.evaluate(ana_state)
+                chk.add(f"{scheme} analysis: the product button changes the legend and the frame",
+                        "RTMA" in a2["legend"] and a2["legend"] != a0["legend"]
+                        and a2["href"].startswith("data:image/png") and a2["href"] != a0["href"]
+                        and "product=rtma" in a2["url"], a2["legend"][:60])
+                # the stepper walks the last two URMA temperature frames the
+                # fixtures list; the oldest day's file is routed away so the
+                # day select lands on a day with no file
+                ana_gone = ana_days[0] if ana_days[0] != ana_fday else ana_days[-1]
+
+                def ana_routes(route):
+                    u = route.request.url
+                    if u.endswith(f"/analysis/days/{ana_gone}.json"):
+                        return route.fulfill(status=404, body="not there")
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", ana_routes)
+                page.goto(f"{srv.url}/{ANA}?var=high&product=urma&day={ana_fday}&hour={ana_hours[1]}"); page.wait_for_timeout(2200)
+                c0 = page.locator("#anaCap").inner_text()
+                page.locator("#anaStep button[title='previous hour']").click(); page.wait_for_timeout(900)
+                c1 = page.locator("#anaCap").inner_text()
+                chk.add(f"{scheme} analysis: the hour stepper changes the caption",
+                        f"{ana_hours[1]}:00 UTC" in c0 and f"{ana_hours[0]}:00 UTC" in c1 and c1 != c0
+                        and f"hour={ana_hours[0]}" in page.evaluate("location.search"), c1[:80])
+                page.select_option("#anaDay", ana_gone); page.wait_for_timeout(900)
+                c2 = page.locator("#anaCap").inner_text()
+                chk.add(f"{scheme} analysis: the day select changes the caption and the address",
+                        ana_gone in c2 and c2 != c1 and f"day={ana_gone}" in page.evaluate("location.search"), c2[:80])
+                chk.add(f"{scheme} analysis: a day with no file draws every place hollow",
+                        page.locator("#vdots circle.absent").count() == 50, str(page.locator("#vdots circle.absent").count()))
+                page.unroute("**/data/snapshots/**")
+                # a dot opens the place, with its day in full
+                page.goto(f"{srv.url}/{ANA}?var=high&product=urma&day={ana_day}"); page.wait_for_timeout(2200)
+                page.click('#vmap g.dot[data-loc="new-york-ny"]'); page.wait_for_timeout(1400)
+                pn = page.evaluate("""() => {
+                  const p = document.querySelector('#locPanel');
+                  const hatched = [...p.querySelectorAll('rect.hatched')];
+                  return { hidden: p.hidden, h2: (p.querySelector('h2') || {}).textContent || '',
+                           rows: p.querySelectorAll('tbody tr').length, cards: p.querySelectorAll('.anacard').length,
+                           hatched: hatched.length, fills: [...new Set(hatched.map(r => r.getAttribute('fill')))],
+                           links: p.querySelectorAll('[data-contract-url], a').length,
+                           rungs: [...new Set([...p.querySelectorAll('text.anarung')].map(t => t.textContent))].sort(),
+                           series: p.querySelectorAll('svg.ts path.anaseries').length,
+                           resolved: p.querySelectorAll('svg.ts line.anares').length,
+                           text: p.textContent, url: location.search };
+                }""")
+                chk.add(f"{scheme} analysis: a dot opens the place with 24 hour rows and five cards",
+                        not pn["hidden"] and pn["h2"].startswith("New York") and pn["rows"] == 24 and pn["cards"] == 5
+                        and "loc=new-york-ny" in pn["url"], str([pn["h2"], pn["rows"], pn["cards"]]))
+                chk.add(f"{scheme} analysis: both analyses and the resolved value are drawn",
+                        pn["series"] == 2 and pn["resolved"] == 1, str([pn["series"], pn["resolved"]]))
+                chk.add(f"{scheme} analysis: the hypothetical rungs are hatched and say Yes or No only",
+                        pn["hatched"] >= 5 and pn["fills"] == ["url(#wxHatch)"] and pn["rungs"] == ["No", "Yes"],
+                        str([pn["hatched"], pn["fills"], pn["rungs"]]))
+                chk.add(f"{scheme} analysis: no rung carries a link or a price, and the panel keeps the exchange's language",
+                        pn["links"] == 0 and "¢" not in pn["text"]
+                        and not re.search(r"\b(ask|sell|offer|bid)\b", pn["text"], re.I)
+                        and "No contract settles on it" in pn["text"], str(pn["links"]))
+                # the provisional pill, on a day whose URMA is short of 24 hours
+                def ana_partial(route):
+                    u = route.request.url
+                    if u.endswith(f"/analysis/days/{ana_day}.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        e = d["locations"]["new-york-ny"]["urma"]
+                        e.update({"hours": 17, "complete": False, "final": False})
+                        # precipitation resolves at the first COMPLETE pass, so a
+                        # partial day has not resolved either
+                        if e.get("precip"):
+                            e["precip"].update({"resolved": False, "resolvedAt": None, "revised": None})
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", ana_partial)
+                page.goto(f"{srv.url}/{ANA}?product=urma&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                pills = page.eval_on_selector_all("#locPanel .anapill", "e => e.map(x => x.textContent)")
+                chk.add(f"{scheme} analysis: ?loc= opens the panel on load",
+                        page.evaluate("!document.querySelector('#locPanel').hidden") and len(pills) == 5, str(len(pills)))
+                chk.add(f"{scheme} analysis: the provisional pill appears when URMA is incomplete, with the count",
+                        all("provisional" in p_ and "17 of 24 hours" in p_ for p_ in pills)
+                        and page.locator('#vdots g.dot[data-loc="new-york-ny"] circle.prov').count() == 1, str(pills[:2]))
+                page.unroute("**/data/snapshots/**")
+                # the wording follows the state: a value that can still move is
+                # running, one that cannot is resolved, a closed day's is closed.
+                # The partial route above is still on for the first read
+                ana_rule = "() => (document.querySelector('#locPanel text.anareslbl') || {}).textContent || ''"
+                page.route("**/data/snapshots/**", ana_partial)
+                page.goto(f"{srv.url}/{ANA}?var=high&product=urma&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                r_part = page.evaluate(ana_rule)
+                page.unroute("**/data/snapshots/**")
+                page.goto(f"{srv.url}/{ANA}?var=precip&product=urma&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                r_final = page.evaluate(ana_rule)
+                # the running precipitation curve ends on the file's own total
+                # once the day is complete: the last point of the solid line
+                # sits on the resolved rule
+                ana_end = page.evaluate("""() => {
+                  const p = document.querySelector('#locPanel');
+                  const d = p.querySelectorAll('svg.ts path.anaseries')[1].getAttribute('d').trim();
+                  const last = d.split(/[ML]/).filter(Boolean).pop().trim().split(' ');
+                  const tip = p.querySelectorAll('rect.hband');
+                  return { y: +last[1], rule: +p.querySelector('line.anares').getAttribute('y1'), bands: tip.length };
+                }""")
+                page.locator("#locPanel rect.hband").last.hover(); page.wait_for_timeout(300)
+                ana_tip = page.evaluate("() => [...document.querySelectorAll('.tip')].map(t => t.textContent).join(' ')")
+                ana_cards = page.evaluate("() => [...document.querySelectorAll('#locPanel .anacard')].map(c => [c.dataset.var, c.querySelectorAll('.ae')[0].textContent])")
+                page.click('button[data-product="rtma"]'); page.wait_for_timeout(900)
+                r_run = page.evaluate(ana_rule)
+                chk.add(f"{scheme} analysis: the chart rule says resolved only when final, running while provisional with the count",
+                        r_final.startswith("resolved ") and "(URMA, final)" in r_final
+                        and r_part.startswith("running ") and "provisional, 17 of 24 hours" in r_part
+                        and r_run.startswith("running ") and "(RTMA, provisional, 24 of 24 hours)" in r_run,
+                        str([r_final, r_part, r_run]))
+                chk.add(f"{scheme} analysis: the complete URMA precipitation curve ends on the resolved rule and the tooltip names the running sum",
+                        abs(ana_end["y"] - ana_end["rule"]) < 0.6 and "Running sum of the hourly analyses" in ana_tip,
+                        str([ana_end, ana_tip[:120]]))
+                ana_dec = {k: (re.search(r"exact -?\d+\.(\d+)", v) or [None, ""])[1] for k, v in ana_cards}
+                chk.add(f"{scheme} analysis: the exact figure keeps the file's decimals per variable",
+                        [len(ana_dec.get(k, "")) for k in ("high", "low", "gust", "wind", "precip")] == [1, 1, 1, 2, 4], str(ana_cards))
+                # a closed day in the fixtures, if one is there: the RTMA day is
+                # closed too, not provisional
+                ana_closed = next((d_ for d_ in ana_days if ((ana_entries.get(d_) or {}).get("rtma") or {}).get("closed")), None)
+                if ana_closed:
+                    page.goto(f"{srv.url}/{ANA}?var=high&product=rtma&day={ana_closed}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                    r_closed = page.evaluate(ana_rule)
+                    pills_c = page.eval_on_selector_all("#locPanel .anapill", "e => e.map(x => x.textContent)")
+                    chk.add(f"{scheme} analysis: a closed RTMA day says closed, with its count",
+                            r_closed.startswith("closed ") and all(p_.startswith("closed, ") and "of" in p_ for p_ in pills_c), str([r_closed, pills_c[:2]]))
+                # the freshness pill judges the job by the index's written time,
+                # not by the analysis valid hour NOAA's lag keeps behind the clock;
+                # the valid hours stand beside it
+                def ana_fresh(route):
+                    resp = route.fetch(); d = json.loads(resp.text())
+                    d["written"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 120))
+                    d["asof"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 3 * 3600))
+                    return route.fulfill(response=resp, body=json.dumps(d))
+
+                page.route("**/analysis/index.json", ana_fresh)
+                page.goto(f"{srv.url}/{ANA}"); page.wait_for_timeout(2200)
+                fr = page.evaluate("""() => ({ cls: document.querySelector('.status').className, text: document.querySelector('.status').textContent,
+                                              newest: (document.querySelector('#anaNewest') || {}).textContent || '' })""")
+                page.unroute("**/analysis/index.json")
+                ana_latest = {k: (v.get("latest") or "").replace("T", " ").replace(":00Z", " UTC") for k, v in (ana_index.get("sources") or {}).items()}
+                chk.add(f"{scheme} analysis: the freshness pill reads the index's written time against the job cadence",
+                        "live" in fr["cls"] and "behind" not in fr["text"] and "every 10 minutes" in fr["text"], str(fr)[:160])
+                chk.add(f"{scheme} analysis: the newest analysis valid hours stay visible per product",
+                        fr["newest"].startswith("newest analysis RTMA ") and ana_latest.get("rtma", "x") in fr["newest"]
+                        and "URMA " + ana_latest.get("urma", "x") in fr["newest"], fr["newest"])
+                # the place select and the keyboard both open the panel; the
+                # picked dot is drawn last so it is on top where dots overlap
+                page.goto(f"{srv.url}/{ANA}?var=high&product=urma&day={ana_fday}&hour={ana_hours[0]}"); page.wait_for_timeout(2200)
+                page.select_option("#anaLoc", "chicago-il"); page.wait_for_timeout(1400)
+                sel = page.evaluate("""() => [document.querySelector('#locPanel').hidden, (document.querySelector('#locPanel h2') || {}).textContent || '',
+                                            location.search, document.querySelector('#vdots g.dot:last-child').dataset.loc,
+                                            [...document.querySelectorAll('#anaLoc option')].length]""")
+                chk.add(f"{scheme} analysis: the place select opens the panel and raises the dot",
+                        sel[0] is False and sel[1].startswith("Chicago") and "loc=chicago-il" in sel[2] and sel[3] == "chicago-il" and sel[4] == 51, str(sel))
+                page.focus('#vmap g.dot[data-loc="denver-co"]'); page.keyboard.press("Enter"); page.wait_for_timeout(1400)
+                kb = page.evaluate("""() => { const g = document.querySelector('#vmap g.dot[data-loc="denver-co"]');
+                  return [(document.querySelector('#locPanel h2') || {}).textContent || '', location.search, g.getAttribute('role'), g.getAttribute('tabindex'),
+                          (g.querySelector('title') || {}).textContent || '', document.querySelector('#anaLoc').value] }""")
+                chk.add(f"{scheme} analysis: Enter on a focused dot opens its place, and the dot is a named button",
+                        kb[0].startswith("Denver") and "loc=denver-co" in kb[1] and kb[2] == "button" and kb[3] == "0"
+                        and kb[4].startswith("Denver") and kb[5] == "denver-co", str(kb))
+                page.focus("#anaStep button[title='next hour']"); page.keyboard.press("ArrowRight"); page.wait_for_timeout(700)
+                chk.add(f"{scheme} analysis: ArrowRight on the focused stepper steps the hour",
+                        f"hour={ana_hours[1]}" in page.evaluate("location.search"), page.evaluate("location.search"))
+                # frames are never written to this browser's storage
+                for _ in range(4):
+                    page.locator("#anaStep button[title='next hour']").click(); page.wait_for_timeout(300)
+                ls_keys = page.evaluate("() => Object.keys(localStorage).filter(k => /^wx:analysis\\/grid\\/(rtma|urma)\\//.test(k))")
+                chk.add(f"{scheme} analysis: no grid frame is written to localStorage after stepping", ls_keys == [], str(ls_keys)[:120])
+                # a day with no frames listed carries no hour in the address
+                ana_noframes = next((d_ for d_ in ana_days if not ana_ut.get(d_)), None)
+                if ana_noframes:
+                    page.select_option("#anaDay", ana_noframes); page.wait_for_timeout(900)
+                    nf = page.evaluate("() => [location.search, document.querySelector('#anaCap').textContent]")
+                    chk.add(f"{scheme} analysis: a day with no frames clears hour= and names the variable in words",
+                            "hour=" not in nf[0] and "no URMA temperature frames" in nf[1], str(nf))
+                # a day or place file that could not be read is said to be
+                # unreadable, not a day with no hours; a fresh context so no
+                # cached copy stands in
+                ana_ctx2 = browser.new_context(color_scheme=scheme, viewport={"width": 1200, "height": 900})
+                ana_p2 = ana_ctx2.new_page()
+                ana_p2.route("**/analysis/days/**", lambda route: route.fulfill(status=404, body="gone"))
+                ana_p2.route("**/analysis/loc/**", lambda route: route.fulfill(status=404, body="gone"))
+                ana_p2.goto(f"{srv.url}/{ANA}?var=high&product=urma&day={ana_day}&loc=new-york-ny"); ana_p2.wait_for_timeout(2200)
+                ur = ana_p2.evaluate("""() => [[...document.querySelectorAll('#locPanel .anacard .ae')].map(x => x.textContent),
+                                              [...document.querySelectorAll('#locPanel p.cap')].map(x => x.textContent).join(' ')]""")
+                chk.add(f"{scheme} analysis: an unreadable day file is reported as unreadable, not as no hours",
+                        len(ur[0]) == 5 and all("could not be read" in t for t in ur[0]) and "could not be read" in ur[1]
+                        and "No hours read yet" not in ur[1], str(ur)[:160])
+                ana_ctx2.close()
+                # the built head of an unlisted page: no canonical link and no
+                # structured data for a crawler it turned away, the Open Graph
+                # tags kept for a shared link's preview
+                for unlisted in (ANA, "lessons.html"):
+                    with open(os.path.join(ROOT, "dist", "standalone", unlisted)) as fh:
+                        head_ = fh.read().split("</head>")[0]
+                    chk.add(f"{scheme} analysis: {unlisted} is built without canonical or JSON-LD and with its og tags",
+                            'content="noindex"' in head_ and "canonical" not in head_ and "ld+json" not in head_ and "og:title" in head_,
+                            str([("canonical" in head_), ("ld+json" in head_), ("og:title" in head_)]))
+                # the feed down with nothing cached: the frame, the statement, no data
+                ana_ctx = browser.new_context(color_scheme=scheme, viewport={"width": 1200, "height": 900})
+                ana_page = ana_ctx.new_page()
+                ana_errs = errors_of(ana_page)
+                ana_page.route("**/data/**", lambda route: route.fulfill(status=503, body="outage"))
+                ana_page.goto(f"{srv.url}/{ANA}"); ana_page.wait_for_timeout(1200)
+                ana_status = ana_page.locator(".status").first.inner_text() if ana_page.locator(".status").count() else ""
+                chk.add(f"{scheme} analysis: the 503 degradation shows no data and keeps the statement",
+                        "No data" in ana_status and "No contract settles on it" in ana_page.locator("#anaMap").inner_text()
+                        and not ana_errs, ana_status[:60] + " " + "; ".join(ana_errs)[:100])
+                ana_ctx.close()
+
+                # ---- the temperature map carries temperature stations only
+                def _wo_hourly(route):
+                    u = route.request.url
+                    if u.endswith("/summary.json") and "/market/" not in u:
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        for c in d.get("cities") or []:
+                            if c.get("station") == "KBOS":
+                                c["windOnly"] = True
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", _wo_hourly)
+                page.goto(f"{srv.url}/hourly-temperature-markets.html"); page.wait_for_timeout(2200)
+                hm = page.eval_on_selector_all("#vmap g.dot", "e=>e.map(x=>x.getAttribute('data-station'))")
+                chk.add(f"{scheme} hourly map: a station carried for its wind is not on it",
+                        bool(hm) and "KBOS" not in hm, str(len(hm)) + " dots")
+                page.unroute("**/data/snapshots/**")
+
+                # ---- the city page stacks its other contracts, wind then hourly
+                #
+                # samples/ carries no wind readings and no hourly board, so both
+                # sections would be absent and the checks would pass on nothing.
+                # The station is given one of each, the same synthesis the wind
+                # panel's own checks use.
+                def _city_routes(route):
+                    u = route.request.url
+                    if u.endswith("/obs/KLGA.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["rows"] = w_rows
+                        d["today"] = dict(d.get("today") or {}, date=DAY)
+                        d["wind"] = {"today": {"date": DAY, "n": len(w_rows), "unit": "kt",
+                                               "peak": {"v": 24, "kt": 24, "mph": 28, "from": "gust",
+                                                        "t": w_rows[3]["t"], "type": "METAR"}}}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/market/KLGA.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["markers"] = dict(d.get("markers") or {}, day=DAY, tomorrow=DAY2)
+                        d["symbols"] = dict(d.get("symbols") or {},
+                                            hourly={"symbol": "HRULGA", "conid": 90001, "productConid": 90000})
+                        d["hours"] = {DAY: {"14": [
+                            {"strike": 68.0, "bid": 0.55, "mid": 0.55, "conidYes": 90011, "conid": 90011},
+                            {"strike": 70.0, "bid": 0.30, "mid": 0.30, "conidYes": 90012, "conid": 90012}]}}
+                        # two wind days, so the day selector has something to select
+                        wr = [{"strike": 20.0, "bid": 0.80, "mid": 0.80, "conidYes": 90021, "conid": 90021},
+                              {"strike": 34.0, "bid": 0.40, "mid": 0.40, "conidYes": 90022, "conid": 90022}]
+                        d["days"] = dict(d.get("days") or {}, **{DAY: dict((d.get("days") or {}).get(DAY) or {}, wind=wr),
+                                                                 DAY2: {"wind": wr}})
+                        d["symbols"] = dict(d["symbols"],
+                                            wind={"symbol": "MGLGA", "conid": 90002, "productConid": 90003})
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/summary.json") and "/market/" not in u:
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        for c in d.get("cities") or []:
+                            if c.get("station") == "KLGA":
+                                c["markers"] = dict(c.get("markers") or {}, day=DAY, tomorrow=DAY2)
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", _city_routes)
+                page.goto(f"{srv.url}/city.html?station=KLGA&market=on"); page.wait_for_timeout(2800)
+                cc = page.evaluate("""() => {
+                  const host = document.querySelector('#cityContracts');
+                  if (!host) return null;
+                  const w = document.querySelector('#cityWind'), h2 = document.querySelector('#cityHourly');
+                  const svg = h2 && h2.querySelector('.card svg');
+                  return { tabs: host.querySelectorAll('button[data-tab]').length,
+                           wind: !!w, hourly: !!h2,
+                           windFirst: !!(w && h2) &&
+                             (w.compareDocumentPosition(h2) & Node.DOCUMENT_POSITION_FOLLOWING) > 0,
+                           rungLinks: svg ? svg.querySelectorAll('[data-contract-url]').length : 0,
+                           rungXs: svg ? [...new Set([...svg.querySelectorAll('rect[fill="var(--yes)"]')]
+                             .map(r => Math.round(+r.getAttribute('x'))))].length : 0,
+                           windDays: document.querySelectorAll('#cityWindDays button[data-day]').length,
+                           windCards: w ? w.querySelectorAll('.card').length : 0,
+                           columnPrices: svg ? svg.querySelectorAll('.ladtxt').length : 0 };
+                }""")
+                chk.add(f"{scheme} city page: the other contracts stack rather than hide behind tabs",
+                        bool(cc) and cc["tabs"] == 0 and cc["wind"], str(cc))
+                chk.add(f"{scheme} city page: the wind days are buttons, not stacked panels",
+                        bool(cc) and cc["windDays"] >= 1 and cc["windCards"] == 1, str(cc))
+                if cc and cc["hourly"]:
+                    chk.add(f"{scheme} city page: the hourly board sits under the wind series",
+                            cc["windFirst"], str(cc))
+                    chk.add(f"{scheme} city page: hourly rungs carry a link to the contract",
+                            cc["rungLinks"] > 0, str(cc["rungLinks"]))
+                    # A LINK IS NOT A CLICK. The first version of this checked
+                    # that the rung carried a contract url, which it did while the
+                    # plot's own hover band sat on top of it and took every click.
+                    # What matters is what the pointer reaches, so that is what is
+                    # asked: the rung has to be the element at its own centre.
+                    hit = page.evaluate("""() => {
+                      const svg = document.querySelector('#cityHourly .card svg');
+                      const bar = svg && svg.querySelector('[data-contract-url]');
+                      if (!bar) return null;
+                      bar.scrollIntoView({ block: 'center' });
+                      const r = bar.getBoundingClientRect();
+                      const e = document.elementFromPoint(Math.round(r.left + r.width / 2),
+                                                          Math.round(r.top + r.height / 2));
+                      return { isRung: e === bar, onTop: e ? e.tagName + '.' + (e.getAttribute('class') || '') : null };
+                    }""")
+                    chk.add(f"{scheme} city page: an hourly rung is what the pointer actually reaches",
+                            bool(hit and hit["isRung"]), str(hit))
+                    chk.add(f"{scheme} city page: hourly rungs are drawn in the plot, not in a side column",
+                            cc["columnPrices"] == 0, str(cc))
+                page.unroute("**/data/snapshots/**")
+
+                # ---- the cyclone area: one map per ocean, each opening its own view
+                page.goto(f"{srv.url}/tropical-cyclone-markets.html"); page.wait_for_timeout(1200)
+                bas = page.evaluate("""() => [...document.querySelectorAll('.basincard')].map(c => ({
+                  title: (c.querySelector('.lt') || {}).textContent || '',
+                  href: c.getAttribute('href') || '',
+                  land: c.querySelectorAll('svg.minimap path[fill]:not([fill="none"])').length,
+                }))""")
+                chk.add(f"{scheme} cyclone area: the Pacific is on the left and the Atlantic on the right",
+                        [b["title"] for b in bas] == ["East and Central Pacific", "Atlantic"], str([b["title"] for b in bas]))
+                chk.add(f"{scheme} cyclone area: each map opens its own basin",
+                        [b["href"] for b in bas] == ["hurricane.html?basin=EP", "hurricane.html?basin=AL"],
+                        str([b["href"] for b in bas]))
+                chk.add(f"{scheme} cyclone area: both maps draw their coastline",
+                        all(b["land"] > 10 for b in bas), str([b["land"] for b in bas]))
+                # the link has to land on the ocean it showed, which is the whole
+                # point of the page: a parameter the basin view honours
+                for want_basin, want_on in (("EP", "b2"), ("AL", "b1")):
+                    page.goto(f"{srv.url}/hurricane.html?basin={want_basin}"); page.wait_for_timeout(1400)
+                    onb = page.evaluate("""() => ['b1', 'b2'].filter(i => {
+                      const e = document.getElementById(i); return e && e.classList.contains('on'); })""")
+                    chk.add(f"{scheme} cyclone area: ?basin={want_basin} opens that view", onb == [want_on], str(onb))
+
                 # ---- the full view: both contract days at once
                 page.goto(f"{srv.url}/city.html?station=KPHX&market=on"); page.wait_for_timeout(1800)
                 heads0 = page.eval_on_selector_all("#chart text.axl",
@@ -423,6 +1243,139 @@ def run(no_build: bool) -> int:
                 chk.add(f"{scheme} landing page: heading first, then the map",
                         body[0] == "mapTitle" and body.index("card") < body.index("dotKey"),
                         str(body[:5]))
+
+                # ---- the stations carried for their wind alone
+                #
+                # Nine stations carry no daily temperature contract: six shore
+                # stations with no ForecastEx product at all, and three whose only
+                # contract is MG wind. They belong on the wind map and nowhere that
+                # implies a temperature market, and their own page is the wind panel
+                # rather than the city page built around a board they have not got.
+                #
+                # The filter is checked against a ROUTED roster rather than the
+                # bundled samples. samples/ is a checked-in fixture that lags the
+                # live roster (37 stations while the site carries 46), so reading
+                # windOnly from it made every one of these checks vacuous: nothing
+                # was flagged, so nothing was excluded, so they all passed. The
+                # route flags a station the fixture does carry, which tests the
+                # front end's rule instead of the fixture's contents.
+                with open(os.path.join(ROOT, "config", "cities.json")) as _fh:
+                    _roster = json.load(_fh)
+                _wind_only = [c for c in _roster if c.get("windOnly")]
+                chk.add(f"{scheme} wind-only stations: the roster names some, so the rest of this means something",
+                        len(_wind_only) > 0, str([c["station"] for c in _wind_only]))
+
+                MARK = "KBOS"          # in the sample fixture and on the CONUS map
+
+                def _wo_routes(route):
+                    u = route.request.url
+                    if u.endswith("/summary.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        for c in d.get("cities") or []:
+                            if c.get("station") == MARK:
+                                c["windOnly"] = True
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", _wo_routes)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1700)
+                base = page.evaluate("""async () => {
+                  const s = await fetch('data/snapshots/summary.json').then(r => r.json());
+                  const cs = s.cities || [];
+                  return { onConus: cs.filter(c => c.onConus).length,
+                           flagged: cs.filter(c => c.windOnly).length,
+                           name: (cs.find(c => c.windOnly) || {}).city };
+                }""")
+                mlabs = page.eval_on_selector_all("#map text.lbl", "e=>e.map(x=>x.textContent)")
+                mdots = len(page.eval_on_selector_all("#map g.dot", "e=>e.map(x=>1)"))
+                chk.add(f"{scheme} wind-only stations: the flag reaches the front map's roster",
+                        base["flagged"] == 1 and bool(base["name"]), str(base))
+                chk.add(f"{scheme} wind-only stations: the flagged one is not named on the temperature map",
+                        not any(l.startswith(base["name"]) for l in mlabs), str(base["name"]))
+                chk.add(f"{scheme} wind-only stations: the map draws every other station and no more",
+                        mdots == base["onConus"] - 1, f"{mdots} drawn of {base['onConus']} on the map")
+                # the city page's two pickers follow the same rule
+                page.goto(f"{srv.url}/city.html"); page.wait_for_timeout(1900)
+                pdots = len(page.eval_on_selector_all("#pick g, #pick circle", "e=>e.map(x=>1)"))
+                pnames = page.eval_on_selector_all("#pick title, #pick text", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} wind-only stations: the city page's picker leaves it out too",
+                        not any(base["name"] in (t or "") for t in pnames), str(base["name"]))
+                # and the wind map keeps it, which is the whole reason it is carried
+                page.goto(f"{srv.url}/wind-markets.html"); page.wait_for_timeout(1900)
+                vdots = len(page.eval_on_selector_all("#vmap g.dot", "e=>e.map(x=>1)"))
+                chk.add(f"{scheme} wind-only stations: they stay on the wind map, which is why they are carried",
+                        vdots == base["onConus"], f"{vdots} of {base['onConus']}")
+                page.unroute("**/data/snapshots/**")
+
+                # The built page itself, for a station the real roster flags.
+                #
+                # The samples fixture does not carry these stations, so its own
+                # snapshots are routed under the flagged station's name: the
+                # roster row, the observations and the forecast all come from a
+                # station the fixture does have, which leaves the page's own
+                # rendering as the only thing under test.
+                if _wind_only:
+                    _c = _wind_only[0]
+                    # the build's own rule, imported rather than restated, so a
+                    # change to it cannot leave this check pointing at nothing
+                    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+                    import build as _build
+                    _href = _build.slug(_c["city"], _c["station"]) + ".html"
+                    WO, WOCITY = _c["station"], _c["city"]
+
+                    def _wo_page_routes(route):
+                        u = route.request.url
+                        if u.endswith("/summary.json"):
+                            resp = route.fetch(); d = json.loads(resp.text())
+                            cs = d.get("cities") or []
+                            srcrow = next((c for c in cs if c.get("station") == MARK), None)
+                            if srcrow and not any(c.get("station") == WO for c in cs):
+                                # the panel takes its day from the roster, so the row and
+                                # the routed observations below have to name the same one
+                                cs.append(dict(srcrow, station=WO, city=WOCITY, windOnly=True,
+                                               markers=dict(srcrow.get("markers") or {}, day=DAY)))
+                                d["cities"] = cs
+                            return route.fulfill(response=resp, body=json.dumps(d))
+                        for _kind in ("obs", "forecast"):
+                            if u.endswith(f"/{_kind}/{WO}.json"):
+                                resp = route.fetch(url=u.replace(f"/{_kind}/{WO}.json",
+                                                                 f"/{_kind}/{MARK}.json"))
+                                d = json.loads(resp.text())
+                                d["station"], d["city"] = WO, WOCITY
+                                if _kind == "obs":
+                                    # samples/ is a month old and predates the wind work
+                                    # entirely: no wind block and no wspd on any row. The
+                                    # same synthesis the wind panel's own checks use gives
+                                    # this one something to draw.
+                                    d["rows"] = w_rows
+                                    d["today"] = dict(d.get("today") or {}, date=DAY)
+                                    d["wind"] = {"today": {
+                                        "date": DAY, "n": len(w_rows), "unit": "kt",
+                                        "peak": {"v": 24, "kt": 24, "mph": 28, "mphExact": 27.6,
+                                                 "from": "gust", "t": w_rows[3]["t"], "type": "METAR"}}}
+                                return route.fulfill(response=resp, body=json.dumps(d))
+                        return route.continue_()
+
+                    page.route("**/data/snapshots/**", _wo_page_routes)
+                    errs_wo = len(errs)
+                    page.goto(f"{srv.url}/{_href}"); page.wait_for_timeout(1900)
+                    h1 = page.locator("#cityTitle").inner_text()
+                    chk.add(f"{scheme} wind-only page: the heading names the wind, not a temperature market",
+                            " wind (" in h1, h1)
+                    chk.add(f"{scheme} wind-only page: no temperature chart and no city picker",
+                            page.locator("#chart").count() == 0 and page.locator("#pick").count() == 0
+                            and page.locator("#cityDays").count() == 0, "")
+                    chk.add(f"{scheme} wind-only page: the wind panel is drawn",
+                            page.locator("#windPanel .card").count() >= 1, "")
+                    ptxt = page.locator("#windPanel").inner_text()
+                    chk.add(f"{scheme} wind-only page: the two-stage gust note is under it",
+                            "at least 9 knots" in ptxt, ptxt[-80:])
+                    chk.add(f"{scheme} wind-only page: it leads back to the board",
+                            page.locator("#windLinks a[href='wind-markets.html']").count() == 1, "")
+                    chk.add(f"{scheme} wind-only page: it renders without a script error",
+                            len(errs) == errs_wo, str(errs[errs_wo:][:1]))
+                    page.unroute("**/data/snapshots/**")
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1600)
 
                 # abroad there is no government forecast to compare against, so the
                 # observation and the market's own number are the whole picture.
@@ -822,7 +1775,7 @@ def run(no_build: bool) -> int:
                         page.locator("a[href^='mailto:']").count() == 1
                         and page.locator("a[href*='interactivebrokers.com/campus/author']").count() == 1
                         and page.locator("a[href*='x.com/']").count() == 1,
-                        f"mailto={page.locator('a[href^=\"mailto:\"]').count()}")
+                        "mailto=%d" % page.locator("a[href^='mailto:']").count())
                 chk.add(f"{scheme} about: the affiliation disclosure still renders",
                         "Interactive Brokers" in page.locator("#disclosureTop").inner_text()
                         and len(page.locator("#marketNote").inner_text()) > 40,
@@ -1233,7 +2186,10 @@ def run(no_build: bool) -> int:
                                          "lastModified": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                                          "sites": {"BR": {"name": "Brownsville", "p": [60, 30, 10, 3, 1, 0]},
                                                    "GA": {"name": "Galveston", "p": [30, 10, 2, 0, 0, 0]}},
-                                         "pwin": {"BR": 55.0, "GA": 45.0}}}
+                                         "pwin": {"BR": 55.0, "GA": 45.0, "SV": 0.0},
+                                         "pwinMethod": "desk",
+                                         "pwinMeta": {"cycle": "2026090100", "method": "vendor-ladder argmax",
+                                                      "asof": "2026-09-01T00:00:00Z"}}}
                     if interim:
                         # stamped off the clock: the interim's stamp keeps a storm on the
                         # page for a day and a half, and a fixed date here would fold the
@@ -1262,7 +2218,8 @@ def run(no_build: bool) -> int:
                                              for i, k in enumerate(FILLERS)})}
                     return ix
 
-                def _storm_routes(interim, final, index_final=False, drop_hlf=False):
+                def _storm_routes(interim, final, index_final=False, drop_hlf=False, drop_pool=False,
+                                  placeholder_pool=False):
                     def handler(route):
                         u = route.request.url
                         if u.endswith("/reask.json"):
@@ -1295,6 +2252,15 @@ def run(no_build: bool) -> int:
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": "Brownsville",
                                      "label": "Brownsville", "numeric": False, "bid": 0.4, "ask": 0.46, "mid": 0.43,
                                      "conid": 999200001, "conidYes": 999200001}]}]
+                            if drop_pool:
+                                m["markets"] = [x for x in m["markets"] if x.get("symbol") != "LHLERG"]
+                            if placeholder_pool:
+                                # the exchange's placeholder for nothing resting, which
+                                # this site has called an empty book since 3 September
+                                for x in m["markets"]:
+                                    if x.get("symbol") == "LHLERG":
+                                        for c in x["contracts"]:
+                                            c.update({"bid": 0.01, "ask": 0.99, "mid": 0.5})
                             return route.fulfill(response=resp, body=json.dumps(m))
                         return route.continue_()
                     return handler
@@ -1341,9 +2307,42 @@ def run(no_build: bool) -> int:
                                no: svg.querySelectorAll("rect[fill='var(--no)']").length,
                                calcTicks: svg.querySelectorAll('line.calcmk').length };
                     }""")
+                    # the pool's own terms: every registry location at listing can win,
+                    # the strikes are a subset of them, and the exchange may add more
+                    # while the storm runs. The card used to say the candidates WERE
+                    # the strikes and that the pool was fixed at opening, both wrong,
+                    # and the first live board listed two of four Hawaii locations
+                    # with prices summing to 72c, which that sentence could not explain
+                    poolsay = page.evaluate("""() => {
+                      // the pool is drawn two ways, as its own panel with a price
+                      // series once one exists and as a plain ladder card otherwise;
+                      // the sentence belongs on whichever one the reader is given
+                      const d = [...document.querySelectorAll('#liveStorms .cwrap, #liveStorms .ladder')]
+                        .find(x => /highest wind/i.test(x.textContent));
+                      return d ? [...d.querySelectorAll('.cap')].map(c => c.textContent).join(' ') : '';
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): the pool card says the candidates outnumber the strikes",
+                            "need not add to one hundred" in poolsay
+                            and "registry when the pool was listed" in poolsay
+                            and "may list further locations" in poolsay, poolsay[:150])
                     chk.add(f"{scheme} storm ({tag}): the pool ladder draws the site's Yes/No bars and no tick of the site's own",
                             bool(plad and plad["rows"] >= 1 and plad["yes"] >= 1 and plad["no"] >= 1
                                  and plad["calcTicks"] == 0), str(plad))
+                    # Both of a storm's contracts read their price off the exchange and
+                    # open that contract on the exchange when clicked, the same as every
+                    # other board on this site. The two are listed only while a storm
+                    # runs, so this is the only place it can be held to.
+                    prices = page.evaluate("""() => {
+                      const cents = [...document.querySelectorAll('#liveStorms .plad text')]
+                        .map(t => t.textContent).filter(t => /^\\d+¢$/.test(t));
+                      const rowUrl = [...document.querySelectorAll('#liveStorms .plad g.prow rect[data-contract-url]')]
+                        .map(r => r.getAttribute('data-contract-url'))[0] || '';
+                      return { cents, rowUrl };
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): the pool ladder prints the exchange's price in cents",
+                            bool(prices and "43¢" in prices["cents"] and "57¢" in prices["cents"]), str(prices["cents"])[:80])
+                    chk.add(f"{scheme} storm ({tag}): a pool ladder row opens that contract on the exchange",
+                            "conid_yes=999200001" in prices["rowUrl"], prices["rowUrl"][:110])
                     # the pool chart: the exchange's price solid on the delivery
                     # axis, and nothing of the site's own behind it, since the pool's
                     # calculation is the desk's and reaches the exchange through
@@ -1379,8 +2378,19 @@ def run(no_build: bool) -> int:
                             bool(lhl and lhl["ladderRows"] >= 1 and lhl["ladderTitle"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the pool's axis names the NHC cycle and the file's arrival in ET",
                             bool(lhl and lhl["cycleTicks"] >= 2 and lhl["etTicks"] >= 2 and lhl["axisNote"]), str(lhl))
-                    chk.add(f"{scheme} storm ({tag}): no prose under the chart and no formula, there being no figure of the site's own",
-                            bool(lhl and not lhl["stated"] and lhl["capCount"] == 0), str(lhl))
+                    # The one caption this panel may carry is the contract's own
+                    # this panel may carry is the contract's own candidate rule. What it
+                    # must never carry is an explanation of a figure of the site's own,
+                    # which is what this check was written for and what `stated` tests.
+                    caps_here = page.evaluate("""() => {
+                      const d = [...document.querySelectorAll('#liveStorms .cwrap')]
+                        .find(x => x.querySelector('svg.lhlserie'));
+                      return d ? [...d.querySelectorAll('.cap')].map(c => c.textContent) : [];
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): no formula under the chart, there being no figure of the site's own",
+                            bool(lhl and not lhl["stated"]
+                                 and all("need not add to one hundred" in c for c in caps_here)),
+                            str([lhl and lhl["stated"], caps_here])[:170])
                     # ---- the key, the switch between the two series, and the note beside it
                     # the section's own key and switch, as against the copies each
                     # card keeps out of sight for when it fills the window
@@ -1479,21 +2489,55 @@ def run(no_build: bool) -> int:
                         # interim's numbers alone, because a later cycle looks forward from
                         # its own start and would print zeros over a landfall already measured.
                         vt = page.evaluate("""() => {
-                          const rows = [...document.querySelectorAll('#liveStorms table tr')];
-                          const ga = rows.find(r => /Galveston/.test(r.textContent));
-                          const br = rows.find(r => /Brownsville/.test(r.textContent));
-                          const cells = r => r ? [...r.querySelectorAll('td.num')].map(td => td.textContent).join(' ') : '';
-                          return { stacked: rows.some(r => /Metryc interim/.test(r.textContent) && r.querySelector('td.num')),
-                                   ga: cells(ga), br: cells(br), rows: rows.length,
+                          const cards = [...document.querySelectorAll('#liveStorms .vloc')];
+                          const rungs = nm => {
+                            const c = cards.find(x => new RegExp(nm).test(x.textContent));
+                            return c ? [...c.querySelectorAll('.vrung')].map(r => ({
+                              t: +(r.querySelector('.vlab').textContent.match(/\\d+/) || [0])[0],
+                              sym: (r.querySelector('.vlab').textContent.match(/[><\\u2265\\u2264]/) || [''])[0],
+                              // the bar is the exchange's price where there is one and the
+                              // vendor's figure where there is not; the tick is always the
+                              // vendor's, so that is where the published probability is read
+                              mark: (r.querySelector('.vmark') || {}).style
+                                    ? r.querySelector('.vmark').style.left : '',
+                              soft: (r.querySelector('.vtrack') || {}).className
+                                    ? r.querySelector('.vtrack').className.indexOf('vsoft') >= 0 : null,
+                              p: r.querySelector('.vpct').textContent })) : [];
+                          };
+                          const files = new Set(cards.map(c => (c.querySelector('.cap') || {}).textContent || ''));
+                          const br = rungs('Brownsville'), ga = rungs('Galveston');
+                          const falls = rr => rr.every((r, i) => i === 0 || r.t < rr[i - 1].t);
+                          return { stacked: files.size > 1, syms: br.concat(ga).map(r => r.sym),
+                                   brMark: br.map(r => r.t + ':' + r.mark).join(' '),
+                                   brSoft: br.map(r => r.soft), gaSoft: ga.map(r => r.soft),
+                                   br: br.map(r => r.t + ':' + r.p).join(' '), ga: ga.map(r => r.t + ':' + r.p).join(' '),
+                                   brFalls: falls(br), gaFalls: falls(ga), rows: cards.length,
                                    source: (document.querySelector('#liveStorms .filesrc') || {}).textContent || '',
                                    state: (document.querySelector('#liveStorms') || {}).textContent || '' };
                         }""")
-                        chk.add(f"{scheme} storm ({tag}): the vendor table shows one file, not a stack",
+                        chk.add(f"{scheme} storm ({tag}): the vendor cards show one file, not a stack",
                                 bool(vt and not vt["stacked"]), str(vt and vt["stacked"]))
                         chk.add(f"{scheme} storm ({tag}): once the interim has landed it is the file shown",
                                 bool(vt and "Metryc interim" in vt["source"] and "file received" in vt["source"]
-                                     and vt["br"].startswith("95% 75%") and vt["ga"].startswith("0% 0%")),
-                                str(vt and [vt["source"][:60], vt["br"][:20], vt["ga"][:20]]))
+                                     and vt["brMark"].endswith("80:75% 70:95%") and vt["ga"] == "70:0%"),
+                                str(vt and [vt["source"][:60], vt["brMark"][:40], vt["ga"][:20]]))
+                        # Brownsville has a listed ladder and Galveston has none, so one
+                        # card carries the exchange's prices and the other the vendor's
+                        # figures, drawn hatched so the two cannot be confused
+                        chk.add(f"{scheme} storm ({tag}): a listed rung shows the price and an unlisted one the vendor's figure",
+                                bool(vt and all("\u00a2" in x for x in vt["br"].split() if ":" in x)
+                                     and vt["brSoft"] and not any(vt["brSoft"])
+                                     and vt["gaSoft"] and all(vt["gaSoft"])),
+                                str(vt and [vt["br"][:40], vt["brSoft"], vt["gaSoft"]]))
+                        # the rungs run from the strongest wind down, which is the
+                        # order the owner asked for and the reason for the cards
+                        chk.add(f"{scheme} storm ({tag}): each card's rungs fall from the strongest wind",
+                                bool(vt and vt["brFalls"] and vt["gaFalls"]), str(vt and [vt["br"][:40], vt["ga"][:20]]))
+                        # the contract asks for gusts "of [##] mph or greater" and
+                        # resolves Yes at greater than OR EQUAL to the threshold, so
+                        # a strict symbol here would state the settlement rule wrongly
+                        chk.add(f"{scheme} storm ({tag}): the rungs read at or above, not above",
+                                bool(vt and vt["syms"] and set(vt["syms"]) == {"\u2265"}), str(vt and vt["syms"]))
                         chk.add(f"{scheme} storm ({tag}): it says why the later cycle is not the one shown",
                                 "reads near zero where the peak has already passed" in vt["state"], vt["state"][-160:])
                     if _final:
@@ -1647,12 +2691,19 @@ def run(no_build: bool) -> int:
                     chk.add(f"{scheme} storm ({tag}): the vendor's mark sits inside its plots",
                             marks_n >= 1, f"marks={marks_n}")
                     vrow = page.evaluate("""() => {
-                      const tr = [...document.querySelectorAll('#liveStorms table tr')]
-                        .find(r => /Brownsville/.test(r.textContent));
-                      return tr ? (tr.getAttribute('data-contract-url') || '') : null;
+                      const c = [...document.querySelectorAll('#liveStorms .vloc')]
+                        .find(x => /Brownsville/.test(x.textContent));
+                      return c ? (c.getAttribute('data-contract-url') || '') : null;
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): a probability row opens its wind contract",
+                    chk.add(f"{scheme} storm ({tag}): a location card opens its wind contract",
                             bool(vrow and "conid_yes=" in vrow), str(vrow)[:90])
+                    # both documents the storm trades under, linked where the
+                    # contracts they govern are drawn
+                    docs = page.evaluate("""() => [...document.querySelectorAll('#liveStorms a')]
+                      .map(a => a.getAttribute('href') || '').filter(u => /TermsandConditions/.test(u))""")
+                    chk.add(f"{scheme} storm ({tag}): the wind and pool documents are linked",
+                            any(u.endswith("/LTermsandConditions.pdf") for u in docs)
+                            and any(u.endswith("/LHLTermsandConditions.pdf") for u in docs), str(docs)[:140])
                     chk.add(f"{scheme} storm ({tag}): a rising ladder fires no settlement-pending note",
                             page.locator("#liveStorms .note.warn").count() == 0, "")
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
@@ -1969,6 +3020,80 @@ def run(no_build: bool) -> int:
                 page.locator("#basin circle").nth(40).hover(force=True); page.wait_for_timeout(120)
                 t_dot = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: reference location names itself and the lane state", "Country" in t_dot and ("probabilities" in t_dot), t_dot[:80])
+                # the Pacific view carries the vendor's Hawaii reference locations, which is
+                # where a Central Pacific storm's wind contracts sit; they were missing from
+                # the vendored registry until the 2026 season listed them
+                page.locator("#b2").click(); page.wait_for_timeout(700)
+                haw = page.evaluate("""() => {
+                  const svg = document.querySelector('#basin');
+                  const W = 980, Hh = 600, b0 = -180, b1 = -85, la0 = 0, la1 = 40;
+                  const pts = [...svg.querySelectorAll('circle')].map((c, i) => ({ i,
+                      lon: b0 + (+c.getAttribute('cx')) * (b1 - b0) / W,
+                      lat: la1 - (+c.getAttribute('cy')) * (la1 - la0) / Hh }))
+                    .filter(p => p.lon > -161 && p.lon < -154 && p.lat > 18 && p.lat < 23);
+                  const hilo = pts.find(p => Math.abs(p.lon + 155.08) < 0.1 && Math.abs(p.lat - 19.72) < 0.1);
+                  return { n: pts.length, hilo: hilo ? hilo.i : -1 };
+                }""")
+                chk.add(f"{scheme} hurricane: the Pacific view draws the Hawaii reference locations",
+                        bool(haw and haw["n"] == 4 and haw["hilo"] >= 0), str(haw))
+                if haw and haw["hilo"] >= 0:
+                    page.locator("#basin circle").nth(haw["hilo"]).hover(force=True); page.wait_for_timeout(120)
+                    t_haw = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} hover: a Hawaii reference location names itself",
+                            "Hilo" in t_haw and "HL" in t_haw and "Country" in t_haw, t_haw[:80])
+                page.locator("#b1").click(); page.wait_for_timeout(700)
+                # ---- the pool with no book: the desk's figure stands in, and it goes
+                #      the moment the exchange opens one. The owner's decision of
+                #      24 September; the site still computes no figure of its own.
+                page.route("**/data/snapshots/**", _storm_routes(False, False, drop_pool=True))
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(1500)
+                dk = page.evaluate("""() => {
+                  const card = [...document.querySelectorAll('#liveStorms .ladder')]
+                    .find(x => /records the highest wind/.test(x.textContent));
+                  if (!card) return null;
+                  return { rows: [...card.querySelectorAll('.vrung')].map(r =>
+                             (r.querySelector('.dlab') || {}).textContent + ' ' + (r.querySelector('.vpct') || {}).textContent),
+                           bars: [...card.querySelectorAll('.dfill')].length,
+                           yes: card.querySelectorAll("[fill='var(--yes)']").length,
+                           text: card.textContent };
+                }""")
+                chk.add(f"{scheme} pool with no book: the estimate stands in, ranked",
+                        bool(dk and dk["rows"][:2] == ["Brownsville 55%", "Galveston 45%"]), str(dk and dk["rows"])[:110])
+                chk.add(f"{scheme} pool with no book: it is labelled an estimate, with its as-of time",
+                        bool(dk and "Estimated, contract not yet listed" in dk["text"]
+                             and "as of 2026-09-01" in dk["text"]), str(dk and dk["text"][-150:]))
+                chk.add(f"{scheme} pool with no book: it never says where the estimate came from",
+                        bool(dk and not re.search(r"\bdesk\b|DWM|internal|pricer|argmax|cycle \d",
+                                                  dk["text"], re.I)), str(dk and dk["text"][-150:]))
+                chk.add(f"{scheme} pool with no book: the figure wears no price colour",
+                        bool(dk and dk["bars"] >= 2 and dk["yes"] == 0), str(dk and [dk["bars"], dk["yes"]]))
+                # and with a book, the price is the only answer on the page
+                page.route("**/data/snapshots/**", _storm_routes(False, False))
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(1500)
+                gone = page.evaluate("""() => ({
+                  desk: document.querySelectorAll('#liveStorms .dfill').length,
+                  ladder: document.querySelectorAll('#liveStorms .plad g.prow').length })""")
+                chk.add(f"{scheme} pool with a book: the desk's figure gives way to the price",
+                        gone["desk"] == 0 and gone["ladder"] >= 1, str(gone))
+                # a listed pool with nothing resting on it is not a price. One bid
+                # against ninety-nine is this exchange's placeholder, and dropping
+                # the desk's figure for it would trade a figure for a blank ladder.
+                page.route("**/data/snapshots/**", _storm_routes(False, False, placeholder_pool=True))
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(1500)
+                ph = page.evaluate("""() => ({
+                  desk: document.querySelectorAll('#liveStorms .dfill').length,
+                  ladder: document.querySelectorAll('#liveStorms .plad g.prow').length,
+                  noprice: [...document.querySelectorAll('#liveStorms .plad text')]
+                    .filter(t => /no price/.test(t.textContent)).length,
+                  said: [...document.querySelectorAll('#liveStorms .ladder .cap')]
+                    .some(c => /no price is resting on it yet/.test(c.textContent)) })""")
+                chk.add(f"{scheme} pool with a placeholder book: the desk's figure stands and the page says why",
+                        ph["desk"] >= 2 and ph["noprice"] >= 1 and ph["said"], str(ph))
+                page.unroute("**/data/snapshots/**")
+
                 # ---- hurricane contract links, on every surface that shows a price
                 RE = (r"^https://www\.interactivebrokers\.com/predictionmarkets/app/#/(\d+)/product-details/"
                       r"contracts\?exchange=FORECASTX&conid_yes=(\d+)$")
@@ -3262,7 +4387,8 @@ def run(no_build: bool) -> int:
             page = ctx.new_page()
             PAGES_PROSE = ["index.html", "city.html?station=KLAX", "hurricane.html", "allocator.html",
                            "climate.html", "weather.html", "agriculture.html", "scorecard.html",
-                           "accuracy.html", "about.html", "fossil-fuels.html", "electricity-renewables.html"]
+                           "accuracy.html", "about.html", "fossil-fuels.html", "electricity-renewables.html",
+                           "analysis-resolution.html"]
             # the owner's own copy, which the style rules do not touch
             OWNER = ("faq.html", "daily-temperature-markets.html")
             bad_title, bad_colon, bad_not = [], [], []
@@ -3385,15 +4511,31 @@ def run(no_build: bool) -> int:
     finally:
         srv.stop(); emb.stop(); bad.stop()
 
-    report = {"passed": len(chk.results) - len(chk.failed), "failed": len(chk.failed), "results": chk.results}
+    report = {"passed": len(chk.results) - len(chk.failed), "failed": len(chk.failed),
+              "filtered": chk.filtered, "only": chk.only, "schemes": list(chk.schemes),
+              "results": chk.results}
     with open(os.path.join(OUT, "report.json"), "w") as fh:
         json.dump(report, fh, indent=1)
-    print(f"verify: {report['passed']} passed, {report['failed']} failed -> verify-out/report.json")
+    tail = " -> verify-out/report.json"
+    if chk.filtered:
+        # never let a narrowed run read like a clean one
+        how = ", ".join(filter(None, [f"only={chk.only!r}" if chk.only else "",
+                                      "schemes=" + "+".join(chk.schemes)]))
+        print(f"verify: {report['passed']} passed, {report['failed']} failed "
+              f"-- PARTIAL RUN ({how}), not a full pass{tail}")
+    else:
+        print(f"verify: {report['passed']} passed, {report['failed']} failed{tail}")
     return 1 if chk.failed else 0
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--scheme", choices=("light", "dark", "both"), default="both",
+                    help="run one colour scheme instead of both; halves a pass while iterating")
+    ap.add_argument("--only", default="",
+                    help="regex: narrow the page sweep to matching pages. A narrowed run "
+                         "reports itself as partial and must not be used as the gate.")
     a = ap.parse_args()
-    sys.exit(run(a.no_build))
+    schemes = ("light", "dark") if a.scheme == "both" else (a.scheme,)
+    sys.exit(run(a.no_build, only=a.only, schemes=schemes))

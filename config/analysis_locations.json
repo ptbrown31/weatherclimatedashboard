@@ -1,0 +1,1502 @@
+[
+ {
+  "id": "new-york-ny",
+  "name": "New York",
+  "state": "NY",
+  "geoid": "3651000",
+  "pop2024": 8478072,
+  "lat": 40.662712,
+  "lon": -73.938677,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 852.0,
+  "py": 209.6,
+  "cell": {
+   "wexp": [
+    2013,
+    855,
+    2006988
+   ],
+   "g184": [
+    1813,
+    855,
+    1835788
+   ],
+   "centre": [
+    40.6606,
+    -73.936
+   ],
+   "distanceKm": 0.32
+  }
+ },
+ {
+  "id": "los-angeles-ca",
+  "name": "Los Angeles",
+  "state": "CA",
+  "geoid": "0644000",
+  "pop2024": 3878704,
+  "lat": 34.019394,
+  "lon": -118.410825,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 87.8,
+  "py": 351.8,
+  "cell": {
+   "wexp": [
+    432,
+    575,
+    1348807
+   ],
+   "g184": [
+    232,
+    575,
+    1233607
+   ],
+   "centre": [
+    34.0301,
+    -118.4068
+   ],
+   "distanceKm": 1.24
+  }
+ },
+ {
+  "id": "chicago-il",
+  "name": "Chicago",
+  "state": "IL",
+  "geoid": "1714000",
+  "pop2024": 2721308,
+  "lat": 41.837045,
+  "lon": -87.684939,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 625.2,
+  "py": 219.8,
+  "cell": {
+   "wexp": [
+    1538,
+    859,
+    2015893
+   ],
+   "g184": [
+    1338,
+    859,
+    1843893
+   ],
+   "centre": [
+    41.8352,
+    -87.6784
+   ],
+   "distanceKm": 0.58
+  }
+ },
+ {
+  "id": "houston-tx",
+  "name": "Houston",
+  "state": "TX",
+  "geoid": "4835000",
+  "pop2024": 2390125,
+  "lat": 29.785743,
+  "lon": -95.388806,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 501.6,
+  "py": 493.0,
+  "cell": {
+   "wexp": [
+    1273,
+    314,
+    737603
+   ],
+   "g184": [
+    1073,
+    314,
+    674603
+   ],
+   "centre": [
+    29.7931,
+    -95.3935
+   ],
+   "distanceKm": 0.93
+  }
+ },
+ {
+  "id": "phoenix-az",
+  "name": "Phoenix",
+  "state": "AZ",
+  "geoid": "0455000",
+  "pop2024": 1673164,
+  "lat": 33.572154,
+  "lon": -112.090132,
+  "tz": "America/Phoenix",
+  "note": "",
+  "px": 198.3,
+  "py": 384.6,
+  "cell": {
+   "wexp": [
+    659,
+    520,
+    1220059
+   ],
+   "g184": [
+    459,
+    520,
+    1115859
+   ],
+   "centre": [
+    33.5649,
+    -112.089
+   ],
+   "distanceKm": 0.82
+  }
+ },
+ {
+  "id": "philadelphia-pa",
+  "name": "Philadelphia",
+  "state": "PA",
+  "geoid": "4260000",
+  "pop2024": 1573916,
+  "lat": 40.009376,
+  "lon": -75.133346,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 835.8,
+  "py": 228.2,
+  "cell": {
+   "wexp": [
+    1976,
+    819,
+    1922531
+   ],
+   "g184": [
+    1776,
+    819,
+    1758531
+   ],
+   "centre": [
+    40.0003,
+    -75.1473
+   ],
+   "distanceKm": 1.56
+  }
+ },
+ {
+  "id": "san-antonio-tx",
+  "name": "San Antonio",
+  "state": "TX",
+  "geoid": "4865000",
+  "pop2024": 1526656,
+  "lat": 29.462809,
+  "lon": -98.524635,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 441.6,
+  "py": 499.5,
+  "cell": {
+   "wexp": [
+    1153,
+    301,
+    706998
+   ],
+   "g184": [
+    953,
+    301,
+    646598
+   ],
+   "centre": [
+    29.4576,
+    -98.5308
+   ],
+   "distanceKm": 0.83
+  }
+ },
+ {
+  "id": "san-diego-ca",
+  "name": "San Diego",
+  "state": "CA",
+  "geoid": "0666000",
+  "pop2024": 1404452,
+  "lat": 32.814977,
+  "lon": -117.135562,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 104.4,
+  "py": 383.1,
+  "cell": {
+   "wexp": [
+    469,
+    514,
+    1205799
+   ],
+   "g184": [
+    269,
+    514,
+    1102799
+   ],
+   "centre": [
+    32.8114,
+    -117.1435
+   ],
+   "distanceKm": 0.85
+  }
+ },
+ {
+  "id": "dallas-tx",
+  "name": "Dallas",
+  "state": "TX",
+  "geoid": "4819000",
+  "pop2024": 1326087,
+  "lat": 32.793333,
+  "lon": -96.766513,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 475.8,
+  "py": 426.5,
+  "cell": {
+   "wexp": [
+    1222,
+    447,
+    1049437
+   ],
+   "g184": [
+    1022,
+    447,
+    959837
+   ],
+   "centre": [
+    32.8024,
+    -96.7765
+   ],
+   "distanceKm": 1.38
+  }
+ },
+ {
+  "id": "jacksonville-fl",
+  "name": "Jacksonville",
+  "state": "FL",
+  "geoid": "1235000",
+  "pop2024": 1009833,
+  "lat": 30.336864,
+  "lon": -81.661603,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 760.9,
+  "py": 460.4,
+  "cell": {
+   "wexp": [
+    1793,
+    363,
+    853028
+   ],
+   "g184": [
+    1593,
+    363,
+    780228
+   ],
+   "centre": [
+    30.3432,
+    -81.673
+   ],
+   "distanceKm": 1.3
+  }
+ },
+ {
+  "id": "fort-worth-tx",
+  "name": "Fort Worth",
+  "state": "TX",
+  "geoid": "4827000",
+  "pop2024": 1008106,
+  "lat": 32.781954,
+  "lon": -97.348573,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 465.1,
+  "py": 426.7,
+  "cell": {
+   "wexp": [
+    1201,
+    446,
+    1047071
+   ],
+   "g184": [
+    1001,
+    446,
+    957671
+   ],
+   "centre": [
+    32.7725,
+    -97.3412
+   ],
+   "distanceKm": 1.25
+  }
+ },
+ {
+  "id": "san-jose-ca",
+  "name": "San Jose",
+  "state": "CA",
+  "geoid": "0668000",
+  "pop2024": 997368,
+  "lat": 37.296011,
+  "lon": -121.814552,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 47.7,
+  "py": 266.2,
+  "cell": {
+   "wexp": [
+    338,
+    741,
+    1737983
+   ],
+   "g184": [
+    138,
+    741,
+    1589583
+   ],
+   "centre": [
+    37.3017,
+    -121.802
+   ],
+   "distanceKm": 1.28
+  }
+ },
+ {
+  "id": "austin-tx",
+  "name": "Austin",
+  "state": "TX",
+  "geoid": "4805000",
+  "pop2024": 993588,
+  "lat": 30.298622,
+  "lon": -97.754134,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 456.7,
+  "py": 481.4,
+  "cell": {
+   "wexp": [
+    1183,
+    337,
+    791448
+   ],
+   "g184": [
+    983,
+    337,
+    723848
+   ],
+   "centre": [
+    30.2925,
+    -97.7656
+   ],
+   "distanceKm": 1.3
+  }
+ },
+ {
+  "id": "charlotte-nc",
+  "name": "Charlotte",
+  "state": "NC",
+  "geoid": "3712000",
+  "pop2024": 943476,
+  "lat": 35.209045,
+  "lon": -80.83099,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 759.3,
+  "py": 351.5,
+  "cell": {
+   "wexp": [
+    1802,
+    580,
+    1361902
+   ],
+   "g184": [
+    1602,
+    580,
+    1245702
+   ],
+   "centre": [
+    35.2054,
+    -80.8411
+   ],
+   "distanceKm": 1.0
+  }
+ },
+ {
+  "id": "columbus-oh",
+  "name": "Columbus",
+  "state": "OH",
+  "geoid": "3918000",
+  "pop2024": 933263,
+  "lat": 39.983938,
+  "lon": -82.984882,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 706.8,
+  "py": 252.0,
+  "cell": {
+   "wexp": [
+    1705,
+    786,
+    1844875
+   ],
+   "g184": [
+    1505,
+    786,
+    1687475
+   ],
+   "centre": [
+    39.9781,
+    -82.9971
+   ],
+   "distanceKm": 1.22
+  }
+ },
+ {
+  "id": "indianapolis-in",
+  "name": "Indianapolis",
+  "state": "IN",
+  "geoid": "1836003",
+  "pop2024": 891484,
+  "lat": 39.776664,
+  "lon": -86.145935,
+  "tz": "America/Indiana/Indianapolis",
+  "note": "",
+  "px": 654.9,
+  "py": 262.9,
+  "cell": {
+   "wexp": [
+    1596,
+    768,
+    1802556
+   ],
+   "g184": [
+    1396,
+    768,
+    1648756
+   ],
+   "centre": [
+    39.767,
+    -86.1578
+   ],
+   "distanceKm": 1.47
+  }
+ },
+ {
+  "id": "san-francisco-ca",
+  "name": "San Francisco",
+  "state": "CA",
+  "geoid": "0667000",
+  "pop2024": 827526,
+  "lat": 37.7793,
+  "lon": -122.4193,
+  "tz": "America/Los_Angeles",
+  "note": "Census internal point lies in the Pacific because the Farallon Islands belong to the city; represented by City Hall",
+  "px": 40.5,
+  "py": 253.0,
+  "cell": {
+   "wexp": [
+    321,
+    766,
+    1796591
+   ],
+   "g184": [
+    121,
+    766,
+    1643191
+   ],
+   "centre": [
+    37.7723,
+    -122.4095
+   ],
+   "distanceKm": 1.16
+  }
+ },
+ {
+  "id": "seattle-wa",
+  "name": "Seattle",
+  "state": "WA",
+  "geoid": "5363000",
+  "pop2024": 780995,
+  "lat": 47.619335,
+  "lon": -122.351538,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 101.2,
+  "py": 44.0,
+  "cell": {
+   "wexp": [
+    414,
+    1211,
+    2840209
+   ],
+   "g184": [
+    214,
+    1211,
+    2597809
+   ],
+   "centre": [
+    47.6196,
+    -122.3551
+   ],
+   "distanceKm": 0.27
+  }
+ },
+ {
+  "id": "denver-co",
+  "name": "Denver",
+  "state": "CO",
+  "geoid": "0820000",
+  "pop2024": 729019,
+  "lat": 39.76185,
+  "lon": -104.881105,
+  "tz": "America/Denver",
+  "note": "",
+  "px": 341.2,
+  "py": 264.8,
+  "cell": {
+   "wexp": [
+    944,
+    770,
+    1806594
+   ],
+   "g184": [
+    744,
+    770,
+    1652394
+   ],
+   "centre": [
+    39.7563,
+    -104.8767
+   ],
+   "distanceKm": 0.73
+  }
+ },
+ {
+  "id": "oklahoma-city-ok",
+  "name": "Oklahoma City",
+  "state": "OK",
+  "geoid": "4055000",
+  "pop2024": 712919,
+  "lat": 35.467079,
+  "lon": -97.513657,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 463.0,
+  "py": 367.0,
+  "cell": {
+   "wexp": [
+    1197,
+    566,
+    1328467
+   ],
+   "g184": [
+    997,
+    566,
+    1215067
+   ],
+   "centre": [
+    35.4754,
+    -97.5086
+   ],
+   "distanceKm": 1.03
+  }
+ },
+ {
+  "id": "nashville-tn",
+  "name": "Nashville",
+  "state": "TN",
+  "geoid": "4752006",
+  "pop2024": 704963,
+  "lat": 36.1718,
+  "lon": -86.785002,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 652.0,
+  "py": 343.7,
+  "cell": {
+   "wexp": [
+    1584,
+    605,
+    1420309
+   ],
+   "g184": [
+    1384,
+    605,
+    1299109
+   ],
+   "centre": [
+    36.1675,
+    -86.7846
+   ],
+   "distanceKm": 0.48
+  }
+ },
+ {
+  "id": "washington-dc",
+  "name": "Washington",
+  "state": "DC",
+  "geoid": "1150000",
+  "pop2024": 702250,
+  "lat": 38.904247,
+  "lon": -77.016517,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 809.9,
+  "py": 258.8,
+  "cell": {
+   "wexp": [
+    1918,
+    761,
+    1786463
+   ],
+   "g184": [
+    1718,
+    761,
+    1634063
+   ],
+   "centre": [
+    38.9099,
+    -77.0209
+   ],
+   "distanceKm": 0.74
+  }
+ },
+ {
+  "id": "el-paso-tx",
+  "name": "El Paso",
+  "state": "TX",
+  "geoid": "4824000",
+  "pop2024": 681723,
+  "lat": 31.84778,
+  "lon": -106.431106,
+  "tz": "America/Denver",
+  "note": "",
+  "px": 296.1,
+  "py": 436.9,
+  "cell": {
+   "wexp": [
+    860,
+    422,
+    990450
+   ],
+   "g184": [
+    660,
+    422,
+    905850
+   ],
+   "centre": [
+    31.8368,
+    -106.4366
+   ],
+   "distanceKm": 1.32
+  }
+ },
+ {
+  "id": "las-vegas-nv",
+  "name": "Las Vegas",
+  "state": "NV",
+  "geoid": "3240000",
+  "pop2024": 678922,
+  "lat": 36.233499,
+  "lon": -115.264037,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 153.3,
+  "py": 316.0,
+  "cell": {
+   "wexp": [
+    561,
+    653,
+    1531846
+   ],
+   "g184": [
+    361,
+    653,
+    1401046
+   ],
+   "centre": [
+    36.2251,
+    -115.2515
+   ],
+   "distanceKm": 1.47
+  }
+ },
+ {
+  "id": "boston-ma",
+  "name": "Boston",
+  "state": "MA",
+  "geoid": "2507000",
+  "pop2024": 673458,
+  "lat": 42.338551,
+  "lon": -71.018253,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 889.2,
+  "py": 161.8,
+  "cell": {
+   "wexp": [
+    2099,
+    947,
+    2222814
+   ],
+   "g184": [
+    1899,
+    947,
+    2033214
+   ],
+   "centre": [
+    42.3325,
+    -71.0176
+   ],
+   "distanceKm": 0.67
+  }
+ },
+ {
+  "id": "detroit-mi",
+  "name": "Detroit",
+  "state": "MI",
+  "geoid": "2622000",
+  "pop2024": 645705,
+  "lat": 42.383037,
+  "lon": -83.102237,
+  "tz": "America/Detroit",
+  "note": "",
+  "px": 697.7,
+  "py": 199.5,
+  "cell": {
+   "wexp": [
+    1692,
+    895,
+    2100467
+   ],
+   "g184": [
+    1492,
+    895,
+    1921267
+   ],
+   "centre": [
+    42.3797,
+    -83.0945
+   ],
+   "distanceKm": 0.74
+  }
+ },
+ {
+  "id": "louisville-ky",
+  "name": "Louisville",
+  "state": "KY",
+  "geoid": "2148006",
+  "pop2024": 640796,
+  "lat": 38.165376,
+  "lon": -85.647377,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 667.1,
+  "py": 297.6,
+  "cell": {
+   "wexp": [
+    1619,
+    697,
+    1636084
+   ],
+   "g184": [
+    1419,
+    697,
+    1496484
+   ],
+   "centre": [
+    38.1648,
+    -85.6401
+   ],
+   "distanceKm": 0.64
+  }
+ },
+ {
+  "id": "portland-or",
+  "name": "Portland",
+  "state": "OR",
+  "geoid": "4159000",
+  "pop2024": 635749,
+  "lat": 45.536951,
+  "lon": -122.649971,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 84.3,
+  "py": 86.7,
+  "cell": {
+   "wexp": [
+    385,
+    1116,
+    2617405
+   ],
+   "g184": [
+    185,
+    1116,
+    2394005
+   ],
+   "centre": [
+    45.5303,
+    -122.64
+   ],
+   "distanceKm": 1.07
+  }
+ },
+ {
+  "id": "memphis-tn",
+  "name": "Memphis",
+  "state": "TN",
+  "geoid": "4748000",
+  "pop2024": 610919,
+  "lat": 35.109164,
+  "lon": -89.968511,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 597.6,
+  "py": 371.8,
+  "cell": {
+   "wexp": [
+    1471,
+    552,
+    1295911
+   ],
+   "g184": [
+    1271,
+    552,
+    1185311
+   ],
+   "centre": [
+    35.1036,
+    -89.9717
+   ],
+   "distanceKm": 0.68
+  }
+ },
+ {
+  "id": "baltimore-md",
+  "name": "Baltimore",
+  "state": "MD",
+  "geoid": "2404000",
+  "pop2024": 568271,
+  "lat": 39.300032,
+  "lon": -76.610476,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 814.9,
+  "py": 248.8,
+  "cell": {
+   "wexp": [
+    1930,
+    780,
+    1831030
+   ],
+   "g184": [
+    1730,
+    780,
+    1674830
+   ],
+   "centre": [
+    39.291,
+    -76.6094
+   ],
+   "distanceKm": 1.01
+  }
+ },
+ {
+  "id": "milwaukee-wi",
+  "name": "Milwaukee",
+  "state": "WI",
+  "geoid": "5553000",
+  "pop2024": 563531,
+  "lat": 43.063348,
+  "lon": -87.966695,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 618.3,
+  "py": 193.1,
+  "cell": {
+   "wexp": [
+    1525,
+    915,
+    2147200
+   ],
+   "g184": [
+    1325,
+    915,
+    1964000
+   ],
+   "centre": [
+    43.0654,
+    -87.9735
+   ],
+   "distanceKm": 0.6
+  }
+ },
+ {
+  "id": "albuquerque-nm",
+  "name": "Albuquerque",
+  "state": "NM",
+  "geoid": "3502000",
+  "pop2024": 560326,
+  "lat": 35.10478,
+  "lon": -106.646809,
+  "tz": "America/Denver",
+  "note": "",
+  "px": 300.2,
+  "py": 364.7,
+  "cell": {
+   "wexp": [
+    865,
+    567,
+    1330480
+   ],
+   "g184": [
+    665,
+    567,
+    1216880
+   ],
+   "centre": [
+    35.1088,
+    -106.6354
+   ],
+   "distanceKm": 1.13
+  }
+ },
+ {
+  "id": "tucson-az",
+  "name": "Tucson",
+  "state": "AZ",
+  "geoid": "0477000",
+  "pop2024": 554013,
+  "lat": 32.153036,
+  "lon": -110.870773,
+  "tz": "America/Phoenix",
+  "note": "",
+  "px": 215.3,
+  "py": 419.2,
+  "cell": {
+   "wexp": [
+    696,
+    453,
+    1062981
+   ],
+   "g184": [
+    496,
+    453,
+    972181
+   ],
+   "centre": [
+    32.1621,
+    -110.8811
+   ],
+   "distanceKm": 1.4
+  }
+ },
+ {
+  "id": "fresno-ca",
+  "name": "Fresno",
+  "state": "CA",
+  "geoid": "0627000",
+  "pop2024": 550105,
+  "lat": 36.782684,
+  "lon": -119.793359,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 78.7,
+  "py": 286.3,
+  "cell": {
+   "wexp": [
+    404,
+    705,
+    1653629
+   ],
+   "g184": [
+    204,
+    705,
+    1512429
+   ],
+   "centre": [
+    36.7914,
+    -119.7993
+   ],
+   "distanceKm": 1.1
+  }
+ },
+ {
+  "id": "sacramento-ca",
+  "name": "Sacramento",
+  "state": "CA",
+  "geoid": "0664000",
+  "pop2024": 535798,
+  "lat": 38.567694,
+  "lon": -121.468161,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 61.0,
+  "py": 240.5,
+  "cell": {
+   "wexp": [
+    361,
+    795,
+    1864636
+   ],
+   "g184": [
+    161,
+    795,
+    1705436
+   ],
+   "centre": [
+    38.5792,
+    -121.4631
+   ],
+   "distanceKm": 1.35
+  }
+ },
+ {
+  "id": "atlanta-ga",
+  "name": "Atlanta",
+  "state": "GA",
+  "geoid": "1304000",
+  "pop2024": 520070,
+  "lat": 33.762909,
+  "lon": -84.422675,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 699.8,
+  "py": 392.3,
+  "cell": {
+   "wexp": [
+    1677,
+    504,
+    1183557
+   ],
+   "g184": [
+    1477,
+    504,
+    1082557
+   ],
+   "centre": [
+    33.7573,
+    -84.4309
+   ],
+   "distanceKm": 0.98
+  }
+ },
+ {
+  "id": "mesa-az",
+  "name": "Mesa",
+  "state": "AZ",
+  "geoid": "0446000",
+  "pop2024": 517151,
+  "lat": 33.400626,
+  "lon": -111.716487,
+  "tz": "America/Phoenix",
+  "note": "",
+  "px": 204.3,
+  "py": 389.5,
+  "cell": {
+   "wexp": [
+    672,
+    511,
+    1198967
+   ],
+   "g184": [
+    472,
+    511,
+    1096567
+   ],
+   "centre": [
+    33.3997,
+    -111.7094
+   ],
+   "distanceKm": 0.66
+  }
+ },
+ {
+  "id": "kansas-city-mo",
+  "name": "Kansas City",
+  "state": "MO",
+  "geoid": "2938000",
+  "pop2024": 516032,
+  "lat": 39.125155,
+  "lon": -94.550313,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 514.5,
+  "py": 285.8,
+  "cell": {
+   "wexp": [
+    1304,
+    729,
+    1710809
+   ],
+   "g184": [
+    1104,
+    729,
+    1564809
+   ],
+   "centre": [
+    39.127,
+    -94.5439
+   ],
+   "distanceKm": 0.59
+  }
+ },
+ {
+  "id": "raleigh-nc",
+  "name": "Raleigh",
+  "state": "NC",
+  "geoid": "3755000",
+  "pop2024": 499825,
+  "lat": 35.831868,
+  "lon": -78.641042,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 795.3,
+  "py": 331.2,
+  "cell": {
+   "wexp": [
+    1878,
+    617,
+    1448743
+   ],
+   "g184": [
+    1678,
+    617,
+    1325143
+   ],
+   "centre": [
+    35.839,
+    -78.644
+   ],
+   "distanceKm": 0.83
+  }
+ },
+ {
+  "id": "colorado-springs-co",
+  "name": "Colorado Springs",
+  "state": "CO",
+  "geoid": "0816000",
+  "pop2024": 493554,
+  "lat": 38.867255,
+  "lon": -104.760749,
+  "tz": "America/Denver",
+  "note": "",
+  "px": 341.4,
+  "py": 284.8,
+  "cell": {
+   "wexp": [
+    945,
+    730,
+    1712795
+   ],
+   "g184": [
+    745,
+    730,
+    1566595
+   ],
+   "centre": [
+    38.8762,
+    -104.7655
+   ],
+   "distanceKm": 1.08
+  }
+ },
+ {
+  "id": "omaha-ne",
+  "name": "Omaha",
+  "state": "NE",
+  "geoid": "3137000",
+  "pop2024": 489265,
+  "lat": 41.262705,
+  "lon": -96.053475,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 489.1,
+  "py": 238.5,
+  "cell": {
+   "wexp": [
+    1252,
+    826,
+    1938222
+   ],
+   "g184": [
+    1052,
+    826,
+    1772822
+   ],
+   "centre": [
+    41.2588,
+    -96.048
+   ],
+   "distanceKm": 0.63
+  }
+ },
+ {
+  "id": "miami-fl",
+  "name": "Miami",
+  "state": "FL",
+  "geoid": "1245000",
+  "pop2024": 487014,
+  "lat": 25.775163,
+  "lon": -80.208615,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 804.7,
+  "py": 554.7,
+  "cell": {
+   "wexp": [
+    1870,
+    170,
+    400520
+   ],
+   "g184": [
+    1670,
+    170,
+    366320
+   ],
+   "centre": [
+    25.7846,
+    -80.2098
+   ],
+   "distanceKm": 1.05
+  }
+ },
+ {
+  "id": "virginia-beach-va",
+  "name": "Virginia Beach",
+  "state": "VA",
+  "geoid": "5182000",
+  "pop2024": 454808,
+  "lat": 36.779525,
+  "lon": -76.029142,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 836.2,
+  "py": 301.6,
+  "cell": {
+   "wexp": [
+    1966,
+    671,
+    1575461
+   ],
+   "g184": [
+    1766,
+    671,
+    1441061
+   ],
+   "centre": [
+    36.7814,
+    -76.0256
+   ],
+   "distanceKm": 0.38
+  }
+ },
+ {
+  "id": "long-beach-ca",
+  "name": "Long Beach",
+  "state": "CA",
+  "geoid": "0643000",
+  "pop2024": 450901,
+  "lat": 33.780791,
+  "lon": -118.16818,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 90.9,
+  "py": 357.9,
+  "cell": {
+   "wexp": [
+    439,
+    563,
+    1320674
+   ],
+   "g184": [
+    239,
+    563,
+    1207874
+   ],
+   "centre": [
+    33.7904,
+    -118.1636
+   ],
+   "distanceKm": 1.15
+  }
+ },
+ {
+  "id": "oakland-ca",
+  "name": "Oakland",
+  "state": "CA",
+  "geoid": "0653000",
+  "pop2024": 443554,
+  "lat": 37.769846,
+  "lon": -122.22569,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 43.7,
+  "py": 254.1,
+  "cell": {
+   "wexp": [
+    327,
+    765,
+    1794252
+   ],
+   "g184": [
+    127,
+    765,
+    1641052
+   ],
+   "centre": [
+    37.7772,
+    -122.2384
+   ],
+   "distanceKm": 1.38
+  }
+ },
+ {
+  "id": "minneapolis-mn",
+  "name": "Minneapolis",
+  "state": "MN",
+  "geoid": "2743000",
+  "pop2024": 428579,
+  "lat": 44.963324,
+  "lon": -93.26832,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 532.4,
+  "py": 156.0,
+  "cell": {
+   "wexp": [
+    1345,
+    997,
+    2339310
+   ],
+   "g184": [
+    1145,
+    997,
+    2139710
+   ],
+   "centre": [
+    44.9543,
+    -93.2778
+   ],
+   "distanceKm": 1.25
+  }
+ },
+ {
+  "id": "bakersfield-ca",
+  "name": "Bakersfield",
+  "state": "CA",
+  "geoid": "0603526",
+  "pop2024": 417468,
+  "lat": 35.353171,
+  "lon": -119.037919,
+  "tz": "America/Los_Angeles",
+  "note": "",
+  "px": 83.9,
+  "py": 320.3,
+  "cell": {
+   "wexp": [
+    420,
+    637,
+    1494185
+   ],
+   "g184": [
+    220,
+    637,
+    1366585
+   ],
+   "centre": [
+    35.357,
+    -119.0255
+   ],
+   "distanceKm": 1.2
+  }
+ },
+ {
+  "id": "tulsa-ok",
+  "name": "Tulsa",
+  "state": "OK",
+  "geoid": "4075000",
+  "pop2024": 415154,
+  "lat": 36.127949,
+  "lon": -95.902316,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 491.7,
+  "py": 352.6,
+  "cell": {
+   "wexp": [
+    1255,
+    594,
+    1394185
+   ],
+   "g184": [
+    1055,
+    594,
+    1275185
+   ],
+   "centre": [
+    36.1196,
+    -95.9151
+   ],
+   "distanceKm": 1.48
+  }
+ },
+ {
+  "id": "tampa-fl",
+  "name": "Tampa",
+  "state": "FL",
+  "geoid": "1271000",
+  "pop2024": 414547,
+  "lat": 27.970086,
+  "lon": -82.479673,
+  "tz": "America/New_York",
+  "note": "",
+  "px": 752.9,
+  "py": 514.2,
+  "cell": {
+   "wexp": [
+    1772,
+    256,
+    602092
+   ],
+   "g184": [
+    1572,
+    256,
+    550692
+   ],
+   "centre": [
+    27.9626,
+    -82.4838
+   ],
+   "distanceKm": 0.92
+  }
+ },
+ {
+  "id": "arlington-tx",
+  "name": "Arlington",
+  "state": "TX",
+  "geoid": "4804000",
+  "pop2024": 403672,
+  "lat": 32.700708,
+  "lon": -97.124691,
+  "tz": "America/Chicago",
+  "note": "",
+  "px": 469.2,
+  "py": 428.5,
+  "cell": {
+   "wexp": [
+    1209,
+    443,
+    1040044
+   ],
+   "g184": [
+    1009,
+    443,
+    951244
+   ],
+   "centre": [
+    32.7077,
+    -97.1247
+   ],
+   "distanceKm": 0.77
+  }
+ }
+]

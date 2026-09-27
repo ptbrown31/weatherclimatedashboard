@@ -8,6 +8,8 @@
       the page renders its frame and an explicit no-data state.
 
    Every result is {data, source: 'live'|'cache'|'none', asof, ageMin, stale}.
+   `get(key, cadenceMin, {store: false})` fetches without saving the copy: for
+   a file too large to be worth a slot in the browser's storage.
    The browser never calls a government endpoint; it reads only these files. */
 window.WXD = (() => {
   const base = () => ((window.WX && window.WX.dataBaseUrl) || 'data').replace(/\/$/, '');
@@ -19,8 +21,9 @@ window.WXD = (() => {
     return { data, source, asof, ageMin, stale: ageMin == null || ageMin > 2 * cadenceMin, error: err ? String(err) : null };
   }
 
-  async function get(key, cadenceMin) {
+  async function get(key, cadenceMin, opts) {
     cadenceMin = cadenceMin || cadences()[key.split('/')[0]] || 10;
+    const store = !(opts && opts.store === false);
     const url = `${base()}/snapshots/${key}`;
     const ck = 'wx:' + key;
     try {
@@ -32,7 +35,7 @@ window.WXD = (() => {
       const r = await fetch(url);
       if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + key);
       const data = await r.json();
-      try { localStorage.setItem(ck, JSON.stringify({ at: Date.now(), data })); } catch (e) { /* quota: fine */ }
+      if (store) { try { localStorage.setItem(ck, JSON.stringify({ at: Date.now(), data })); } catch (e) { /* quota: fine */ } }
       return wrap(data, 'live', cadenceMin);
     } catch (e) {
       try {

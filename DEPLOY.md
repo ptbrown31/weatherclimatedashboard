@@ -76,8 +76,13 @@ DNS host and wait for status ISSUED. Keep the certificate ARN.
 
 Omit `DomainName` and `CertificateArn` to run on the CloudFront hostname only. The stack also
 creates the `market` schedule (every 10 minutes, offset from the observation job) that quotes
-the exchange's listed contracts; no credential is involved. `ReaskApiKey` is an optional
-parameter for the vendor lane (section 10). Outputs:
+the exchange's listed contracts; no credential is involved. The stack also creates the `analysis`
+schedule (`cron(8/10 * * * ? *)`, every ten minutes at :08, no retry) for the gridded-analysis
+lane, which runs on its own rather than in a chain because a pass may spend its whole budget on
+the thirty-day backfill (`docs/analysis.md`). It reads RTMA and URMA from NOAA Open Data
+(`noaa-rtma-pds`, `noaa-urma-pds`; public, no credential) and writes `data/snapshots/analysis/`
+and `data/archive/analysis/`. The page it feeds, `analysis-resolution.html`, is unlisted and
+`noindex`. `ReaskApiKey` is an optional parameter for the vendor lane (section 10). Outputs:
 
     aws cloudformation describe-stacks --stack-name weather-tools-site \
         --query "Stacks[0].Outputs" --output table
@@ -99,6 +104,20 @@ Smoke test it before the schedules fire (each schedule is already created and ac
 
 A successful response is `{"job": "archive", "status": 0, "storage": "s3"}`. If it raises on
 `ZoneInfo`, the package was built without `--with-tzdata`.
+
+Then the analysis lane, which fills in newest first (about 150 product-hours a pass on the Mac inside the seven-day frame window, so the thirty days take a couple of hours of passes):
+
+    aws lambda invoke --function-name weather-tools-site-pipeline \
+        --cli-binary-format raw-in-base64-out --cli-read-timeout 900 \
+        --payload '{"job":"analysis"}' /dev/stdout
+
+returns `{"job": "analysis", "status": 0, "storage": "s3"}` and writes
+`data/snapshots/analysis/index.json`, whose `backfill.done` turns true when the thirty days are
+in. Its memory: one product-hour with map frames peaks at about 200 to 240 MB on the Mac (both
+interpreters), and a whole 100 s pass of the local job with the hour cache alive at 314 MB
+(`pipeline/handler.py` has the figures), so the 512 MB function holds it. Read the
+first landing pass's CloudWatch REPORT line for `Max Memory Used` and `Duration` before trusting
+the estimate on Linux.
 
 ## 5. Seed the archive and backfill observations
 
@@ -159,6 +178,9 @@ takes minutes to an hour.
 - CloudWatch → Log groups → `/aws/lambda/weather-tools-site-pipeline` shows one JSON line per
   request; `archive/_runs/latest.json` in the bucket is the newest pass.
 - The `weather-tools-site-pipeline-errors` alarm is OK; `pipeline-silent` is OK.
+- `https://<domain>/data/snapshots/analysis/index.json` shows `sources.rtma.latest` within two
+  hours of now and `sources.urma.latest` within eight (each is the newest hour actually read);
+  `data/archive/_meta/health_analysis.json` is the lane's own streak file.
 
 ## 9. Operations
 
@@ -170,9 +192,10 @@ takes minutes to an hour.
 | Change the roster or decode constants | Edit `pipeline/cities.py` / `pipeline/gov_weather.py`, run `scripts/build_assets.py`, repackage (step 4) and rebuild the site (step 6). |
 | Rotate the User-Agent contact | `aws cloudformation deploy ... --parameter-overrides UserAgent=...` |
 | Exchange endpoints unreachable from AWS (a CDN in front of them can block an address range) | The quote pass fails whole, snapshots stay as they were and the pages show their age; the `exchange` source reaches the streak alarm after six passes. Nothing to do but wait or move the quote job off AWS; there is no proxy in this stack. |
+| Analysis lane stale (`sources.*.latest` old) | Read the last `analysis` invocation's log: a missing NOAA object is reported as `absent`, never an error; an unreadable one is recorded under `errors` against its product and skipped; `data/archive/_meta/health_analysis.json` holds the streaks, and the alarm fires after six passes with a product two hours or more overdue or failing to read. |
 | Market overlay needs to go dark | `market_overlay.standalone` to `off` in `config/site.json`, rebuild and sync the site (step 6); the pipeline can keep quoting. |
 | Traffic cost check | CloudFront's free tier is 1 TB out, 10M requests and 2M function invocations a month. A cold page view measures about 82 KB, 12 requests and 8.5 function invocations, so the function allowance binds first, at roughly 235k views a month; past that the cost is a few dollars per million views. Nothing in the request path can be overloaded: the pipeline runs on a schedule, not on visits. |
-| Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs plus about 200k for the quote job (45 objects a pass, 144 passes a day), roughly $2 a month in total; Lambda stays inside the always-free allowance (the quote pass is about 90 s at 512 MB). `aws ce` or the billing console. |
+| Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs, about 200k for the quote job (45 objects a pass, 144 passes a day) and about 110k for the analysis lane (an archive hour, a precipitation key, four frames, a day file and fifty place files per product-hour, 48 product-hours a day, plus five bookkeeping writes a pass and the precipitation retries; a one-time 15k for its backfill), roughly $2.60 a month in total; the lane's frames hold about 1.3 GB. Lambda stays inside the always-free allowance (the quote pass about 90 s and an analysis landing pass well under a minute, both at 512 MB). `aws ce` or the billing console. |
 
 ## 10. The vendor lane (live-storm wind probabilities)
 

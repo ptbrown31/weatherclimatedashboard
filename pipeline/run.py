@@ -31,6 +31,8 @@ Jobs:
     catquotes    prices for the catalogue's monthly and annual contracts   (every 30 min)
     accuracy     the record builder's accuracy figures, copied from the
                  archive prefix it writes to when its manifest changes  (every 30 min, after catquotes)
+    analysis     gridded-analysis resolution at fifty population centres,
+                 RTMA and URMA from NOAA Open Data; its own schedule     (every 10 min, alone)
     daily        scorecard, normals, climate, season, catalogue, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
 """
@@ -46,7 +48,7 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report, severe, accuracy
+    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report, severe, accuracy, analysis
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
@@ -68,6 +70,10 @@ def _register():
     JOBS["catquotes"] = catquotes.catquotes_pass
     JOBS["severe"] = severe.severe_pass
     JOBS["accuracy"] = accuracy.accuracy_pass
+    # analysis is in no chain: it runs on its own schedule because RTMA lands
+    # at H+47 and URMA at H+7 h, and a pass may spend its whole budget on
+    # the backfill, which no chained lane could afford to wait behind
+    JOBS["analysis"] = analysis.analysis_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -107,7 +113,7 @@ def _register():
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.run", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | accuracy | market | half-hourly | daily | all")
+    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | accuracy | analysis | market | half-hourly | daily | all")
     ap.add_argument("--config", help="path to site.json (default config/site.json)")
     ap.add_argument("--backend", choices=["local", "s3"], help="override storage backend")
     ap.add_argument("--root", help="local backend: data directory")

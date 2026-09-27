@@ -3,7 +3,7 @@ Description: >
   Weather tools site: one private S3 bucket (site files at the root, snapshots and the
   archive under data/), a CloudFront distribution with Origin Access Control, one Lambda
   function that runs every pipeline job (archive, snapshots, hurricane, exchange quotes, the
-  gated vendor lane, the daily jobs), four EventBridge schedules, and an error alarm.
+  gated vendor lane, the daily jobs, the analysis lane), five EventBridge schedules, and an error alarm.
   Deployment-agnostic application code; this template is the only AWS-specific artefact
   besides pipeline/handler.py. See DEPLOY.md for the steps around it.
 
@@ -409,7 +409,7 @@ Resources:
     DependsOn: PipelineLogs
     Properties:
       FunctionName: !Sub "${SiteName}-pipeline"
-      Description: Weather tools site pipeline (archive, snapshots, hurricane, daily jobs)
+      Description: Weather tools site pipeline (archive, snapshots, hurricane, daily jobs, the analysis lane)
       Runtime: python3.13
       Architectures: [arm64]
       Handler: pipeline.handler.lambda_handler
@@ -513,6 +513,25 @@ Resources:
         RoleArn: !GetAtt SchedulerRole.Arn
         Input: '{"job": "daily"}'
         RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 }
+  # The analysis lane has its own schedule rather than a place in a chain:
+  # RTMA lands about 47 minutes after each hour and URMA about seven hours
+  # after, so :08 catches each RTMA hour on the pass after it lands, and a
+  # pass may spend its whole budget walking the thirty-day backfill, which
+  # no chained lane could wait behind. Its minute is between the observation
+  # lane (:00) and the quote lane (:03), and the pass caps itself well under
+  # ten minutes (pipeline/analysis.py PASS_CAP_SECONDS) so two never overlap.
+  ScheduleAnalysis:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-analysis"
+      ScheduleExpression: cron(8/10 * * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "analysis"}'
+        RetryPolicy: { MaximumRetryAttempts: 0, MaximumEventAgeInSeconds: 300 }
 
   # ------------------------------------------------------------------ alarms
   AlarmTopic:
