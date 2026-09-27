@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wind by station</title>
+<meta name="description" content="One station's wind: the strongest reading so far today, the gust still forecast, and the exchange's ladder when it opens one.">
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+<h1 id="cityTitle" style="margin-top:18px">&nbsp;</h1>
+<p class="cap" id="cityLede" style="margin:0 0 6px"></p>
+<div class="bar"><span id="windExpand"></span><span id="pageStatus"></span></div>
+
+<div id="windPanel" class="ctr"></div>
+
+<p class="cap" id="windLinks" style="margin-top:14px"></p>
+<p class="cap" id="foot"></p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/market.js"></script>
+<script src="js/contracts.js"></script>
+<script src="js/wind-station.js"></script>
+<script>WXWindStation.init();</script>
+</body>
+</html>

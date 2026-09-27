@@ -18,6 +18,11 @@ Environment overrides (highest precedence):
     WX_DOMAIN              the site's domain
     WX_REASK_API_KEY       the vendor lane's credential; never in site.json, never in the repo
     WX_REASK_BASE_URL      the vendor lane's API base (https); set with the key, never in the repo
+    WX_DESK_LHL_URL        where the desk publishes its pool figures (https); the lane is off without it
+    WX_DESK_MG_URL         where the desk publishes its wind ladders (https); the lane is off without it
+    WX_DESK_MG_KEY         instead of a URL, a storage key this site reads the same file from (it is public)
+    WX_DESK_MG_PUBLISH     the owner's ruling that the anticipated ladders may be published; off unless set
+    WX_DESK_API_KEY        optional, sent as x-api-key with that request; never in the repo
     WX_EIA_API_KEY         EIA's free API key for the energy series; never in site.json, never in the repo
     WX_TRAFFIC_LOG_BUCKET  bucket the CDN writes access logs to; empty turns the traffic job off
     WX_TRAFFIC_LOG_PREFIX  key prefix inside that bucket
@@ -43,6 +48,11 @@ _ENV = {
     ("traffic", "log_bucket"): "WX_TRAFFIC_LOG_BUCKET",
     ("traffic", "log_prefix"): "WX_TRAFFIC_LOG_PREFIX",
     ("reask", "base_url"): "WX_REASK_BASE_URL",
+    ("desk", "lhl_url"): "WX_DESK_LHL_URL",
+    ("desk", "mg_url"): "WX_DESK_MG_URL",
+    ("desk", "mg_key"): "WX_DESK_MG_KEY",
+    ("desk", "mg_publish"): "WX_DESK_MG_PUBLISH",
+    ("desk", "api_key"): "WX_DESK_API_KEY",
 }
 
 

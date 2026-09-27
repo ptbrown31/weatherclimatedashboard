@@ -34,13 +34,17 @@ from typing import Any, Callable, Dict, List, Optional
 
 from . import archive as arch
 from . import basemap
+from . import desk
 from . import exchange as ex
 from . import gov_weather as gw
+from zoneinfo import ZoneInfo
+
 from .snapshots import SNAP_CACHE, _iso, day_markers
 from .storage import Storage
 
 SCHEMA = 1
 SOURCE = "ForecastEx public market data"
+RULES_KEY = "archive/_meta/contract_rules.json"   # conid -> the hour its contract measures
 HISTORY_HOURS = 48          # per-strike quote history carried in a station snapshot
 QUOTE_WORKERS = 4           # measured 2026-08-23: no throttling at four concurrent requests
 PREFIX = "snapshots/market/"
@@ -131,16 +135,134 @@ def _carry_history(prev: Optional[dict], days: dict, now: dt.datetime, keep_days
     return out
 
 
-def _station_snapshot(c: dict, now: dt.datetime, markets: dict, days: dict, prev: Optional[dict], listed: dict) -> dict:
+def _load_rules(store: Storage) -> dict:
+    raw = store.get(RULES_KEY)
+    try:
+        return json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+
+
+def _save_rules(store: Storage, cache: dict, keep_from: str) -> None:
+    """The cache, with the hours older than the window dropped. A contract's
+    measured hour never changes, so an entry is fetched once and kept until its
+    day falls out of the window; the file is a record of what was learned, not
+    a queue."""
+    kept = {k: v for k, v in cache.items() if str(v.get("day") or "") >= keep_from}
+    store.put(RULES_KEY, json.dumps(kept, separators=(",", ":")).encode(), "application/json", "no-store")
+
+
+def _hourly_rows(mkt: dict, c: dict, mk: dict, cache: dict, fetch: Callable,
+                 deadline: arch.Deadline, log: Callable) -> tuple:
+    """One station's hourly ladders, {day: {hour: rows}}, and how many contracts
+    the exchange listed whose hour could not be placed.
+
+    An hourly market lists every hour of a day under one date-only specifier,
+    with the strikes repeating, so the hour is not in the listing at all. It is
+    in each contract's own rules, one request per contract, which is why they
+    are cached by contract id and never asked for twice."""
+    tz = ZoneInfo(c["tz"])
+    asked = [0]
+
+    def place_hour(conid):
+        hit = cache.get(str(conid))
+        if hit is not None:
+            return hit.get("day"), hit.get("hour"), hit.get("how")
+        if deadline.over(0):
+            return (None, None, None)
+        asked[0] += 1
+        try:
+            day, hour, how = ex.hour_of(ex.fetch_contract_rules(conid), tz)
+        except Exception as e:  # noqa: BLE001
+            log(kind="market", step="rules", conid=conid, error=f"{type(e).__name__}: {e}")
+            return (None, None, None)
+        if day is not None and hour is not None:
+            cache[str(conid)] = {"day": day, "hour": hour, "how": how}
+        return day, hour, how
+
+    grouped, unplaced = ex.group_hourly_contracts(mkt, place_hour, {mk["day"], mk["tomorrow"]})
+    out: Dict[str, Dict[int, list]] = {}
+    for day, hours in sorted(grouped.items()):
+        for hour, slots in sorted(hours.items()):
+            rows = _quote_rows({str(hour): slots}, fetch, deadline).get(str(hour)) or []
+            if rows:
+                out.setdefault(day, {})[hour] = rows
+    if asked[0] or unplaced:
+        log(kind="market", step="hourly", station=c["station"], rules_fetched=asked[0], unplaced=unplaced,
+            hours=sum(len(v) for v in out.values()))
+    return out, unplaced
+
+
+def _publishing(dcfg: dict) -> bool:
+    """Whether the owner's ruling to publish the anticipated ladders is in force.
+
+    Anything but an explicit affirmative is off, including the flag being
+    absent, so a config that predates the ruling or loses the key fails closed.
+    Environment values arrive as strings, hence the spelling-out.
+    """
+    v = (dcfg or {}).get("mg_publish")
+    if isinstance(v, bool):
+        return v
+    return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _anticipated(sid: str, mk: dict, desk_mg: dict, days: Optional[dict] = None) -> dict:
+    """The desk's wind ladder for each contract day the exchange has not quoted.
+
+    A day the exchange IS quoting is left out entirely, which is what "usurped
+    as soon as live exchange prices are readable" means at this layer: the page
+    never has to choose, because only one of the two is ever present. A day is
+    counted as quoted when at least one of its strikes has a price, so a listed
+    but empty board still shows the desk's shape rather than nothing.
+
+    The block is deliberately not merged into `days`. A desk probability and an
+    exchange price are different things and must not share a field.
+    """
+    out = {}
+    for day in (mk.get("day"), mk.get("tomorrow"), mk.get("dayAfter")):
+        if not day:
+            continue
+        quoted = sum(1 for r in ((days or {}).get(day) or {}).get("wind") or []
+                     if r.get("mid") is not None)
+        if quoted:
+            continue
+        d = desk_mg.get((sid, day))
+        if not d:
+            continue
+        # `method` is parsed but deliberately NOT stored. These snapshots are
+        # served publicly, and the desk's label for its own system is an
+        # internal name that has no business on a public endpoint. The page
+        # says what the figure is without it.
+        out[day] = {"source": "desk", "asof": d.get("asof"),
+                    "rows": d["rows"],
+                    "implied": ex.implied_median([{"strike": r["strike"], "mid": r["p"]} for r in d["rows"]],
+                                                 "wind")}
+    return out
+
+
+def _station_snapshot(c: dict, now: dt.datetime, markets: dict, days: dict, prev: Optional[dict], listed: dict,
+                      hours: Optional[dict] = None, anticipated: Optional[dict] = None) -> dict:
     mk = day_markers(c, now)
-    keep = {mk["yesterday"], mk["day"], mk["tomorrow"]}
+    keep = {mk["yesterday"], mk["day"], mk["tomorrow"], mk["dayAfter"]}
     implied = {}
     for day, sides in days.items():
         implied[day] = {side: ex.implied_median(rows, side) for side, rows in sides.items()}
+    hours = hours or {}
     return {"schema": SCHEMA, "station": c["station"], "city": c.get("city"), "unit": c.get("unit"), "tz": c.get("tz"),
             "source": SOURCE, "asof": _iso(now), "written": _iso(now),
-            "symbols": markets, "listed": listed, "markers": {"day": mk["day"], "tomorrow": mk["tomorrow"], "yesterday": mk["yesterday"]},
+            "symbols": markets, "listed": listed,
+            "markers": {"day": mk["day"], "tomorrow": mk["tomorrow"],
+                        "dayAfter": mk["dayAfter"], "yesterday": mk["yesterday"]},
             "days": days, "implied": implied,
+            # the desk's figures for days the exchange has not quoted, kept in
+            # their own block so they can never be read as exchange prices
+            "anticipated": anticipated or {},
+            # the hourly ladders keep their own block: a day holds one ladder per
+            # hour, which is a different shape from the day ladders and is not
+            # carried in the strike history the daily pages draw
+            "hours": hours,
+            "impliedHours": {day: {str(h): ex.implied_median(rows, "high") for h, rows in hh.items()}
+                             for day, hh in hours.items()},
             "history": _carry_history(prev, days, now, keep)}
 
 
@@ -267,23 +389,66 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
     global QUOTE_WORKERS
     QUOTE_WORKERS = int(xcfg.get("quote_workers") or QUOTE_WORKERS)
     roster = basemap.load_roster()
+    products = (cfg.get("contracts") or {}).get("products") or []
+    registry = {p["id"] for p in products}
+
+    # ---- the desk's anticipated wind ladders, for days the exchange has not
+    # opened. Fetched once per pass, never derived here, and kept out of `days`
+    # so nothing downstream can read a desk figure as an exchange price. The
+    # lane is off when no URL is set, which is its state until the desk serves
+    # one; a feed that fails is an absence and never fails the pass.
+    dcfg = cfg.get("desk") or {}
+    desk_mg: Dict[tuple, dict] = {}
+    # ---- publishing these is a decision, not a side effect of a file existing
+    #
+    # The lane used to arm itself the moment an object appeared at the key. That
+    # meant a stray file, a test fixture or a later session's good intentions
+    # could put the desk's pricing on a public page with nobody having decided
+    # anything, and what this lane publishes is a fair value on contracts the
+    # desk holds strikes in and has not yet quoted. The owner ruled on 25
+    # September that it may be published; this flag is what carries that ruling,
+    # so reversing it is one value rather than an archaeology of key names.
+    if _publishing(dcfg) and (dcfg.get("mg_url") or dcfg.get("mg_key")):
+        try:
+            if dcfg.get("mg_url"):
+                raw = desk.fetch(dcfg["mg_url"], dcfg.get("api_key") or "")
+                via = "https"
+            else:
+                # the alternative transport: the desk writes the file into this
+                # site's own storage and the pass reads it from there, so nobody
+                # has to stand up a public endpoint. ⚠️ Objects in this bucket are
+                # served by the CDN, so a file placed here is PUBLIC as written.
+                # It must carry the ladders and nothing else; anything naming a
+                # system would be readable by anyone who guessed the key.
+                raw = store.get(dcfg["mg_key"])
+                via = "storage"
+            desk_mg = desk.wind_ladders(raw)
+            log(kind="market", step="desk", via=via, ladders=len(desk_mg),
+                stations=len({k[0] for k in desk_mg}))
+        except Exception as e:  # noqa: BLE001 - the desk being down is not this pass failing
+            log(kind="market", step="desk", error="%s: %s" % (type(e).__name__, e))
+            desk_mg = {}
     t0 = time.time()
 
     tree = ex.fetch_tree()                      # raises: the pass fails as a whole, snapshots untouched
     bysym = ex.markets_by_symbol(tree)
-    log(kind="market", step="tree", markets=len(bysym))
+    # a symbol node with no name is the thing that would wake the nameless
+    # branch of the storm matcher, which is dead against the API as it stands.
+    # Counted every pass so the day it stops being dead is a day in the log
+    unnamed = sorted(s for s, v in bysym.items() if not str(v.get("name") or "").strip())
+    log(kind="market", step="tree", markets=len(bysym), unnamed=len(unnamed), unnamedSample=unnamed[:5])
 
     # ---- contract lists: one request per listed market, concurrently
     wanted = {}                                  # sid -> {side: symbol} for symbols the tree lists
     unmatched = {}                               # sid -> the symbols derived but absent from the tree
     for c in roster:
-        syms = ex.symbols_for(c)
+        syms = ex.symbols_for(c, registry, products, set(bysym))
         wanted[c["station"]] = {side: sym for side, sym in syms.items() if sym in bysym}
         if not wanted[c["station"]]:
             unmatched[c["station"]] = sorted(syms.values())
     if unmatched:
-        # a station whose derived symbol is not in the tree is either not listed or listed under a
-        # code this mapping does not know (exchange.CODE_OVERRIDES); the summary names them so the
+        # a station with no symbol in the tree is either not listed or listed under a code neither
+        # the registry nor the derivation knows; the summary names what was looked for so the
         # difference can be checked against the tree by hand
         log(kind="market", step="unmatched", stations=unmatched)
     hur_markets = ex.category_markets(tree, ex.HURRICANE_CATEGORY)
@@ -302,7 +467,8 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         except ValueError:
             pass
     have = {m["symbol"] for m in hur_markets}
-    wind = [m for m in ex.storm_wind_markets(tree, sorted(names)) if m["symbol"] not in have]
+    wind = [m for m in ex.storm_wind_markets(tree, sorted(names), basemap.location_ids())
+            if m["symbol"] not in have]
     if wind:
         log(kind="market", step="storm-wind", storms=sorted(names), markets=[m["symbol"] for m in wind])
     hur_markets = hur_markets + wind
@@ -324,6 +490,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
     log(kind="market", step="contracts", markets=len(listed), errors=len(list_errors))
 
     # ---- the quotes
+    rules_cache = _load_rules(store)
     quoted = 0
     failed = 0
     archive_rows: List[dict] = []
@@ -333,9 +500,24 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             continue
         c = next(x for x in roster if x["station"] == key)
         mk = day_markers(c, now)
+        if side == "hourly":
+            st = by_station.setdefault(key, {"markets": {}, "days": {}, "hours": {}, "listed": {}, "partial": False})
+            st["markets"][side] = {"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"),
+                                   "conid": m["conid"], "productConid": m.get("productConid")}
+            hours, unplaced = _hourly_rows(mkt, c, mk, rules_cache, fetch, deadline, log)
+            st["hours"] = hours
+            st["listed"][side] = sorted(hours.keys())
+            for day, hh in hours.items():
+                for hour, rs in hh.items():
+                    for r in rs:
+                        quoted += r.get("error") is None
+                        failed += r.get("error") is not None
+                        archive_rows.append({"station": key, "day": day, "hour": hour, "side": side,
+                                             **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
+            continue
         grouped = ex.group_contracts(mkt, {mk["day"], mk["tomorrow"]})
         rows = _quote_rows(grouped, fetch, deadline)
-        st = by_station.setdefault(key, {"markets": {}, "days": {}, "listed": {}, "partial": False})
+        st = by_station.setdefault(key, {"markets": {}, "days": {}, "hours": {}, "listed": {}, "partial": False})
         st["markets"][side] = {"symbol": m["symbol"], "name": mkt.get("market_name") or m.get("name"),
                                "conid": m["conid"], "productConid": m.get("productConid")}
         st["listed"][side] = sorted(grouped.keys())
@@ -347,6 +529,9 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
                 if _cut_short(r):
                     st["partial"] = True
                 archive_rows.append({"station": key, "day": day, "side": side, **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
+
+    if rules_cache:
+        _save_rules(store, rules_cache, min(day_markers(c, now)["yesterday"] for c in roster))
 
     groups: Dict[str, List[dict]] = {"hurricane": [], "climate": []}
     for kind, key, side, m, mkt, err in listed:
@@ -403,7 +588,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             mk = day_markers(c, now)
             summary_rows.append({"station": sid, "listed": True, "symbols": {s: m["symbol"] for s, m in st["markets"].items()},
                                  "asof": prev.get("asof") if prev else None, "partial": True,
-                                 "day": mk["day"], "tomorrow": mk["tomorrow"]})
+                                 "day": mk["day"], "tomorrow": mk["tomorrow"], "dayAfter": mk["dayAfter"]})
             continue
         if st is None:
             # not listed today (or its contract lists failed): keep the previous
@@ -411,19 +596,40 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             if prev and any(k for k in wanted.get(sid, {})):
                 summary_rows.append({"station": sid, "listed": False, "symbols": wanted.get(sid, {}), "asof": prev.get("asof")})
                 continue
+            _mk = day_markers(c, now)
             snap = {"schema": SCHEMA, "station": sid, "city": c.get("city"), "unit": c.get("unit"), "tz": c.get("tz"), "source": SOURCE,
-                    "asof": _iso(now), "written": _iso(now), "symbols": {}, "listed": {}, "days": {}, "implied": {}, "history": {},
-                    "markers": {k: day_markers(c, now)[k] for k in ("day", "tomorrow", "yesterday")}}
+                    "asof": _iso(now), "written": _iso(now), "symbols": {}, "listed": {}, "days": {}, "implied": {},
+                    "hours": {}, "impliedHours": {}, "history": {},
+                    # a station the exchange lists nothing for is the case the
+                    # desk lane exists for, so it carries the anticipated block too
+                    "anticipated": _anticipated(sid, _mk, desk_mg),
+                    "markers": {k: _mk[k] for k in ("day", "tomorrow", "yesterday")}}
             store.put(f"{PREFIX}{sid}.json", json.dumps(snap, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
-            summary_rows.append({"station": sid, "listed": False, "symbols": {}, "asof": snap["asof"]})
+            urow = {"station": sid, "listed": False, "symbols": {}, "asof": snap["asof"],
+                    "day": _mk["day"], "tomorrow": _mk["tomorrow"], "dayAfter": _mk["dayAfter"]}
+            for when, day in (("Today", _mk["day"]), ("Tomorrow", _mk["tomorrow"]),
+                              ("DayAfter", _mk["dayAfter"])):
+                an = (snap["anticipated"] or {}).get(day) or {}
+                urow["anticipatedWind" + when] = (an.get("implied") or {}).get("value")
+            summary_rows.append(urow)
             continue
-        snap = _station_snapshot(c, now, st["markets"], st["days"], prev, st["listed"])
+        snap = _station_snapshot(c, now, st["markets"], st["days"], prev, st["listed"], st.get("hours"),
+                                 anticipated=_anticipated(sid, day_markers(c, now), desk_mg, st["days"]))
         store.put(f"{PREFIX}{sid}.json", json.dumps(snap, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
         mk = snap["markers"]
         row = {"station": sid, "listed": True, "symbols": {s: m["symbol"] for s, m in st["markets"].items()}, "asof": snap["asof"],
-               "day": mk["day"], "tomorrow": mk["tomorrow"]}
-        for when, day in (("Today", mk["day"]), ("Tomorrow", mk["tomorrow"])):
-            for side in ("high", "low"):
+               "day": mk["day"], "tomorrow": mk["tomorrow"], "dayAfter": mk["dayAfter"]}
+        for when, day in (("Today", mk["day"]), ("Tomorrow", mk["tomorrow"]),
+                          ("DayAfter", mk["dayAfter"])):
+            # the desk's centre for a day the exchange has not quoted, so the
+            # map has a value everywhere rather than only where a board is open
+            an = (snap.get("anticipated") or {}).get(day) or {}
+            row["anticipatedWind" + when] = (an.get("implied") or {}).get("value")
+            # wind rides the same loop as the temperature sides: its ladder is
+            # "the day's strongest wind above K", so P(Yes) falls with the
+            # strike exactly as a high market's does and implied_median reads it
+            # without a special case. The map draws the value this produces.
+            for side in ("high", "low", "wind"):
                 im = (snap["implied"].get(day) or {}).get(side) or {}
                 row[f"implied{side.capitalize()}{when}"] = im.get("value")
                 row[f"implied{side.capitalize()}{when}Edge"] = im.get("edge")

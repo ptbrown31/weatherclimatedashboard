@@ -182,19 +182,32 @@ ULSEA,TRUE,Seattle Daily Temperature Low,Climate & Weather,Daily Temperatures,En
 ULSFO,TRUE,San Francisco Daily Temperature Low,Climate & Weather,Daily Temperatures,Environmental,Temperatures,San Francisco
 UST,TRUE,US Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,United States
 USTM,TRUE,Monthly Average United States Temperature,Climate & Weather,Climate Change,Environmental,Temperatures,United States
-AWBOS,FALSE,Boston Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,Boston
-AWDFW,FALSE,Dallas Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,Dallas
-AWMDW,FALSE,Chicago Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,Chicago
-AWSFO,FALSE,San Francisco Average Wind Speed,Climate & Weather,Weather,Environmental,Weather,San Francisco
+AWBOS,FALSE,Boston Average Wind Speed,Climate & Weather,Wind,Environmental,Weather,Boston
+AWDFW,FALSE,Dallas Average Wind Speed,Climate & Weather,Wind,Environmental,Weather,Dallas
+AWMDW,FALSE,Chicago Average Wind Speed,Climate & Weather,Wind,Environmental,Weather,Chicago
+AWSFO,FALSE,San Francisco Average Wind Speed,Climate & Weather,Wind,Environmental,Weather,San Francisco
 HOAUS,FALSE,Hail in Austin,Climate & Weather,Weather,Environmental,Weather,Austin
 HODFW,FALSE,Hail in Dallas,Climate & Weather,Weather,Environmental,Weather,Dallas
 HOOKC,FALSE,Hail in Oklahoma City,Climate & Weather,Weather,Environmental,Weather,Oklahoma City
 HOSAT,FALSE,Hail in San Antonio,Climate & Weather,Weather,Environmental,Weather,San Antonio
-MGBOS,FALSE,Boston Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Boston
-MGDFW,FALSE,Dallas Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Dallas
-MGMDW,FALSE,Chicago Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Chicago
-MGMIA,FALSE,Miami Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,Miami
-MGSFO,FALSE,San Francisco Max Wind Speed,Climate & Weather,Weather,Environmental,Weather,San Francisco
+MGACK,TRUE,Nantucket Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Nantucket
+MGACY,TRUE,Atlantic City Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Atlantic City
+MGBLM,TRUE,Belmar Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Belmar
+MGBOS,TRUE,Boston Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Boston
+MGDFW,FALSE,Dallas Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Dallas
+MGDOV,TRUE,Dover Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Dover
+MGGED,TRUE,Georgetown Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Georgetown
+MGGON,TRUE,New London Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,New London
+MGHVN,TRUE,New Haven Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,New Haven
+MGISP,TRUE,Long Island Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Long Island
+MGLGA,TRUE,NYC Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,New York City
+MGMDW,FALSE,Chicago Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Chicago
+MGMIA,FALSE,Miami Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Miami
+MGMJX,TRUE,Toms River Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Toms River
+MGMVY,TRUE,Martha's Vineyard Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Martha's Vineyard
+MGPVD,TRUE,Providence Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Providence
+MGSFO,FALSE,San Francisco Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,San Francisco
+MGWWD,TRUE,Wildwood Max Wind Speed,Climate & Weather,Wind,Environmental,Weather,Wildwood
 TAAUS,FALSE,Austin Thunderstorm Activity,Climate & Weather,Weather,Environmental,Weather,Austin
 TADFW,FALSE,Dallas Thunderstorm Activity,Climate & Weather,Weather,Environmental,Weather,Dallas
 TAOKC,FALSE,Oklahoma City Thunderstorm Activity,Climate & Weather,Weather,Environmental,Weather,Oklahoma City
@@ -212,3 +225,24 @@ FUSHE,TRUE,Helion Energy Infuse Awards,Energy,Electricity & Renewables,Financial
 GFBKE,FALSE,General Fusion Breakeven,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,Global
 HELPP,TRUE,Helion Energy Plant Operation,Energy,Electricity & Renewables,Financial Markets,Corporate Activity,United States
 HELIO,FALSE,Helion Energy Capture,Energy,Electricity & Renewables,Financial Markets,Corporate Performance,Global
+HRUATL,FALSE,Atlanta Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Atlanta
+HRUAUS,FALSE,Austin Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Austin
+HRUMDW,FALSE,Chicago Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Chicago
+HRUDFW,FALSE,Dallas Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Dallas
+HRUDTW,FALSE,Detroit Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Detroit
+HRUHOU,FALSE,Houston Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Houston
+HRUJAX,FALSE,Jacksonville Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Jacksonville
+HRULAS,FALSE,Las Vegas Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Las Vegas
+HRULAX,FALSE,Los Angeles Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Los Angeles
+HRUMIA,FALSE,Miami Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Miami
+HRUMSP,FALSE,Minneapolis-Saint Paul Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Minneapolis-Saint Paul
+HRUBNA,FALSE,Nashville Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Nashville
+HRUMSY,FALSE,New Orleans Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,New Orleans
+HRULGA,TRUE,New York City Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,New York City
+HRUOKC,FALSE,Oklahoma City Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Oklahoma City
+HRUPHL,FALSE,Philadelphia Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Philadelphia
+HRUPHX,FALSE,Phoenix Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Phoenix
+HRUSAT,FALSE,San Antonio Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,San Antonio
+HRUSFO,FALSE,San Francisco Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,San Francisco
+HRUSEA,FALSE,Seattle Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Seattle
+HRUDCA,FALSE,Washington DC Hourly Temperature,Climate & Weather,Hourly Temperatures,Environmental,Weather,Washington DC

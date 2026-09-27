@@ -169,6 +169,68 @@ def price_override(name: str, year) -> Optional[dict]:
     return ov if isinstance(ov, dict) else None
 
 
+def fetch_desk_lhl(url: str, api_key: str = "", timeout: int = 15) -> Optional[bytes]:
+    """The desk's pool-figure file, fetched from where the desk publishes it.
+
+    Over https only and with redirects refused, the same handling the vendor
+    lane gets, because this is another party's endpoint and a redirect is the
+    cheap way to send a fetcher somewhere it did not mean to go. The desk
+    serves the file rather than writing into this site's bucket: that keeps a
+    credential off the desk box, and it keeps a file covering every storm the
+    desk prices out of a bucket that CloudFront serves whole.
+    """
+    if not url:
+        return None
+    if not url.lower().startswith("https://"):
+        raise ValueError("the desk feed URL must be https")
+    headers = {"User-Agent": gw.USER_AGENT, "Accept": "application/json"}
+    if api_key:
+        headers["x-api-key"] = api_key
+    req = urllib.request.Request(url, headers=headers)
+    with _OPENER.open(req, timeout=timeout) as r:
+        return r.read()
+
+
+def desk_pool_figures(raw: Optional[bytes]) -> dict:
+    """The desk's pool figure per storm, keyed by (lowercased name, year).
+
+    The site computes no pool figure of its own and never will. This is the
+    desk's own calculation, delivered rather than derived, and the owner's
+    decision of 24 September is that it stands in on the page while the
+    exchange is not carrying a pool for that storm. The moment a pool lists,
+    the page drops it for the exchange's price, which is the front end's
+    business and not this job's.
+
+    A missing or malformed file is an absence, not a failure: the page has a
+    state for a storm with no figure, and it had nothing but that state until
+    today.
+    """
+    try:
+        doc = json.loads(raw or b"null")
+    except Exception:  # noqa: BLE001 - an unreadable feed is an absence, not a failed pass
+        return {}
+    out = {}
+    for s in ((doc or {}).get("storms") or []):
+        nm, yr = str(s.get("name") or "").strip(), s.get("year")
+        pw = s.get("pwin")
+        if not nm or not isinstance(pw, dict) or not pw:
+            continue
+        # location id -> percent, dropping anything that is not a number, since
+        # one bad row should not take the storm's whole figure with it
+        vals = {str(k).upper(): float(v) for k, v in pw.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        if not vals:
+            continue
+        # `note` is the desk's own sentence about what the figure is. It is
+        # carried rather than written here because the site does not own the
+        # model and should not be describing it from memory: the desk changes
+        # the method, the desk changes the sentence, and the page prints
+        # whatever it is handed.
+        out[(nm.lower(), yr)] = {"pwin": vals, "cycle": s.get("cycle"), "method": s.get("method"),
+                                 "note": s.get("note"), "asof": s.get("asof") or (doc or {}).get("asof")}
+    return out
+
+
 def apply_price_override(doc: dict, ov: Optional[dict]) -> bool:
     """Replace the recorded prices, and where the ruling carries one the pool
     figure, of every step the ruling names. Returns whether the document
@@ -515,19 +577,36 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
         keep.append(s)
     # the pool's figure is not the site's to compute: it is the desk's, and it
     # reaches the exchange through the market maker. A storm the owner has
-    # ruled on carries the ruling's figure in the index; every other storm
-    # carries none, and the page shows the exchange's price alone
+    # ruled on carries the ruling's figure; a storm the desk is pricing carries
+    # the desk's, which the page shows only while no pool is listed; every
+    # other storm carries none
+    dcfg = cfg.get("desk") or {}
+    try:
+        desk = desk_pool_figures(fetch_desk_lhl((dcfg.get("lhl_url") or "").strip(),
+                                                (dcfg.get("api_key") or "").strip()))
+    except Exception as e:  # noqa: BLE001 - the desk's endpoint is not this pass's business
+        errors.append(f"desk lhl: {type(e).__name__}: {e}")
+        desk = {}
     for s2 in keep:
         lc = s2.get("livecyc")
         if not lc:
             continue
         ruled_pw = latest_override_pwin(price_override(s2.get("name"), s2.get("year")))
+        d = desk.get((str(s2.get("name") or "").lower(), s2.get("year")))
         if ruled_pw is not None:
+            # the owner's ruling outranks the feed: it is the figure he has said
+            # stands for that storm, and the feed is whatever the desk holds now
             lc["pwin"] = ruled_pw
             lc["pwinMethod"] = "override"
+            lc.pop("pwinMeta", None)
+        elif d:
+            lc["pwin"] = d["pwin"]
+            lc["pwinMethod"] = "desk"
+            lc["pwinMeta"] = {k: d[k] for k in ("cycle", "method", "note", "asof") if d.get(k)}
         else:
             lc.pop("pwin", None)
             lc.pop("pwinMethod", None)
+            lc.pop("pwinMeta", None)
     asof = max([(s.get("livecyc") or {}).get("forecastTime") or "" for s in keep] + [prev.get("asof") or ""]) or None
     ok = live is not None
     snap = {"schema": SCHEMA, "enabled": True, "attribution": ATTRIBUTION, "asof": asof, "written": _iso(now),

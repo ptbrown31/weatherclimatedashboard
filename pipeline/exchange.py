@@ -39,11 +39,13 @@ is quoted and No is used only when Yes has no book at all.
 from __future__ import annotations
 import datetime as dt
 import json
+import re
 import threading
 import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 from . import gov_weather as gw
 
@@ -51,6 +53,7 @@ BASE_URL = "https://forecasttrader.interactivebrokers.com"
 TREE_PATH = "/tws.proxy/public/forecasttrader/category/tree"
 MARKET_PATH = "/tws.proxy/public/forecasttrader/contract/market?underlyingConid={conid}"
 QUOTE_PATH = "/tws.proxy/public/mdfarm/event-contract/bid-ask?conid={conid}&exchange=FORECASTX"
+RULES_PATH = "/tws.proxy/public/forecasttrader/contract/rules?conid={conid}"
 
 # The exchange's three-letter city code is the settlement station's ICAO
 # without its first letter, except for these two, whose codes predate the
@@ -229,42 +232,172 @@ def storm_code(name: str) -> str:
     return letters[:2].upper()
 
 
-def storm_wind_markets(tree: dict, names: list) -> List[dict]:
+def storm_wind_markets(tree: dict, names: list, locations: Optional[set] = None) -> List[dict]:
     """Every live-wind market belonging to one of the named storms.
 
     Two products appear once a storm is active: L<storm><location>, a gust
     threshold ladder for one reference location, and LHL<storm><pool letter>,
     "which location in this pool records the highest wind", whose strikes are
-    place names rather than numbers. They are matched by storm code rather than
-    by category, because the category they are listed under is not known until
-    the exchange lists them, and a bare symbol pattern would also catch
-    unrelated products that happen to start with an L.
+    place names rather than numbers. They are matched by shape rather than by
+    category, because the category they are listed under is not known until the
+    exchange lists them.
+
+    The shape alone is not enough in either direction, which two live symbols
+    show. The tree carries LEGCA, "California Legalization Decision", and
+    LOFUS, "US Total Layoffs"; both fit the ladder's shape exactly, and a storm
+    named Egon or Ofelia would have claimed one as its own board. In the other
+    direction the storm's two letters are NOT reliably the first two of its
+    name: Nolo's instruments were uploaded as LNL and LHLNL, so a rule built on
+    the first two letters would look for LNO and find nothing on the day the
+    board opened.
+
+    So the test is the exchange's own product name, which carries the storm's
+    name: the one real pool this site has recorded, LHLED, is "Hurricane
+    Edouard Peak Wind Location". That reads through whatever two letters the
+    exchange chose. It costs us a market the exchange lists without naming the
+    storm in it, which is a miss we would notice, rather than a wrong market
+    attached to a storm, which we would not.
+
+    `locations` is the reference-location registry, used only on the nameless
+    path, where a ladder must also end in a real place. Left out, that check is
+    skipped rather than failing everything. Nothing reaches that path today.
     """
     if not names:
         return []
-    codes = {storm_code(n) for n in names if storm_code(n)}
-    out = []
+    out, seen = [], set()
     for sym, m in markets_by_symbol(tree).items():
+        nm = str(m.get("name") or "").lower()
+        storm = next((n for n in names if n and str(n).lower() in nm), None)
+        if storm is None and not nm:
+            # Nothing to read. A market the tree gave no name for cannot be a
+            # decoy by name either, so the derived code is what is left, and on
+            # the ladder form the last two letters must also be a real
+            # reference location.
+            #
+            # This branch is dead against the API as it stands: all 880 symbol
+            # nodes carried a name on 24 September, counted rather than assumed,
+            # and the quote job logs any node that ever arrives without one so
+            # the day that changes is a day someone hears about. It is kept
+            # because a matcher whose only guard is a field the exchange
+            # happens to populate is one bad deployment away from wrong.
+            storm = next((n for n in names if storm_code(n) and sym[3:5] == storm_code(n)
+                          and sym.startswith("LHL")), None) \
+                or next((n for n in names if storm_code(n) and sym[1:3] == storm_code(n)
+                         and (locations is None or sym[3:5] in locations)), None)
+        if not storm or sym in seen:
+            continue
         # the pool is LHL<storm> with an optional pool letter: Edouard's
         # listed as bare LHLED, Erin's fixture as LHLERG, and both are pools
-        if any(sym.startswith("LHL" + c) and len(sym) in (len("LHL" + c), len("LHL" + c) + 1) for c in codes):
-            out.append({**m, "product": "LHL", "storm": sym[3:5]})
-        elif any(sym.startswith("L" + c) and len(sym) == len("L" + c) + 2 for c in codes):
-            out.append({**m, "product": "L", "storm": sym[1:3], "location": sym[3:5]})
+        if re.match(r"^LHL[A-Z]{2}[A-Z]?$", sym):
+            out.append({**m, "product": "LHL", "storm": sym[3:5], "stormName": storm})
+            seen.add(sym)
+        elif re.match(r"^L[A-Z]{2}[A-Z]{2}$", sym):
+            out.append({**m, "product": "L", "storm": sym[1:3], "location": sym[3:5], "stormName": storm})
+            seen.add(sym)
     return out
 
 
-def symbols_for(city: dict) -> Dict[str, str]:
-    """The daily temperature symbols a station can have: high and low for the
-    Fahrenheit (US) listings, high only for the Celsius ones."""
+# Which side of a station's board a product id belongs to, by its family
+# prefix. The letter pairs are the exchange's own: U and S are the Fahrenheit
+# and Celsius daily series, D is a parallel daily series the exchange carries
+# but has never opened, H and L are high and low.
+SIDE_FAMILIES = {"high": ("SH", "UH", "DH"), "low": ("SL", "UL", "DL"),
+                 "hourly": ("HRS", "HRU"), "wind": ("MG",)}
+
+
+def _family_order(side: str, celsius: bool) -> tuple:
+    """The families to try for a side, best first.
+
+    A Celsius station's listing is the S series and a Fahrenheit one's is the U
+    series, so that family leads; the other follows because a station can carry
+    both (Abu Dhabi has SHMAA and UHMAA) and only one of them is ever open. The
+    D series comes last: it names the same product at the same place and the
+    exchange has never listed it.
+    """
+    fams = SIDE_FAMILIES[side]
+    if side in ("high", "low"):
+        return (fams[0], fams[1], fams[2]) if celsius else (fams[1], fams[0], fams[2])
+    if side == "hourly":
+        return fams if celsius else (fams[1], fams[0])
+    return fams
+
+
+def symbols_for(city: dict, registry: Optional[set] = None, products: Optional[list] = None,
+                listed: Optional[set] = None) -> Dict[str, str]:
+    """The symbols a station can have: the daily temperature high and low, the
+    hourly temperature, and the peak wind.
+
+    With `products`, the registry rows from config/contracts.json, the symbol
+    comes from the registry's own city column. That is what a product is
+    written against, and it removes the derivation from the answer: the
+    exchange's three-letter code is the station's ICAO minus its first letter
+    at most places and is not at Vancouver (YHC for CYVR) or Paris (FPO for
+    LFPG), and nobody outside the exchange knows which of MBD and MDB it uses
+    for Dubai, which is why the registry carries Dubai twice. A city with more
+    than one candidate for a side is decided by `listed`, the symbols the tree
+    is carrying, and where the tree carries neither the first candidate stands
+    so the pass still names something it looked for.
+
+    Without `products` the symbol is derived from the ICAO as it was before,
+    with CODE_OVERRIDES for the two known exceptions. That path still serves
+    the stations the registry does not cover.
+
+    High and low are the Fahrenheit (US) listings, high only for the Celsius
+    ones. The hourly temperature and the wind are listed at a subset of
+    stations, so `registry` (the product ids in config/contracts.json) keeps a
+    symbol out of the derivation entirely rather than deriving one the exchange
+    has never had and reporting it unmatched every pass. Without a registry the
+    daily pair is returned alone, which is what this did before the two extra
+    families existed."""
     sid = city["station"]
+    celsius = city.get("unit") == "C"
+    # A product belongs to this station when the registry names the same place
+    # OR when its three-letter code is the station's ICAO without its first
+    # letter. Neither signal is sufficient alone. The code is wrong at
+    # Vancouver and Paris, where only the city agrees; the city is wrong at
+    # Minneapolis, which the roster calls Minneapolis and the registry calls
+    # Minneapolis-Saint Paul, and where only the code agrees. Together they
+    # cover the whole roster the registry carries.
+    nm, tail = (city.get("city") or "\0"), sid[1:]
+    rows = [p for p in (products or [])
+            if (p.get("city") or "") == nm or p["id"].endswith(tail)]
+    if rows:
+        out = {}
+        for side in ("high", "low", "hourly", "wind"):
+            if side == "low" and celsius:
+                continue
+            cands = []
+            for fam in _family_order(side, celsius):
+                cands += sorted(p["id"] for p in rows
+                                if p["id"].startswith(fam) and len(p["id"]) == len(fam) + 3)
+            # the derived symbol stays on the end as a safety net for the daily
+            # pair, which every station has: the registry is missing Honolulu's
+            # low, and a gap in it should not drop a board the exchange opens.
+            # Hourly and wind stay registry-only, because deriving those where
+            # the exchange has never had them is what the registry gate is for.
+            if side in ("high", "low"):
+                der = ("SH" if celsius else ("UL" if side == "low" else "UH")) + CODE_OVERRIDES.get(sid, tail)
+                if der not in cands:
+                    cands.append(der)
+            if not cands:
+                continue
+            out[side] = next((c for c in cands if c in (listed or ())), cands[0])
+        if out:
+            return out
     code = CODE_OVERRIDES.get(sid, sid[1:])
-    if city.get("unit") == "C":
-        return {"high": "SH" + code}
-    return {"high": "UH" + code, "low": "UL" + code}
+    out = {"high": "SH" + code} if celsius else {"high": "UH" + code, "low": "UL" + code}
+    if registry:
+        for side, sym in (("hourly", ("HRS" if celsius else "HRU") + code), ("wind", "MG" + code)):
+            if sym in registry:
+                out[side] = sym
+    return out
 
 
-# ---------------------------------------------------------------- contracts
+# the sides whose ladder is a strike ladder for a whole weather day, which is
+# every side except the hourly one, where a day holds a ladder per hour
+DAY_SIDES = ("high", "low", "wind")
+
+
 def day_of(spec: str) -> Optional[str]:
     """'2026.8.22' -> '2026-08-22'. Monthly and yearly products carry shorter
     specifiers ('2026.8', '2026.12'); those return None here."""
@@ -308,6 +441,82 @@ def group_contracts(market: dict, days: Optional[set] = None) -> Dict[str, Dict[
         if side in ("Y", "N") and c.get("conid"):
             slot[side] = c["conid"]
     return out
+
+
+def fetch_contract_rules(conid: int) -> dict:
+    """One contract's rules: the period it measures, its threshold, and the
+    times it trades to and pays at. The market listing does not carry the
+    measured period, so for an hourly product this is the only published place
+    the contract's hour appears."""
+    return _get_json(RULES_PATH.format(conid=conid))
+
+
+_MEASURED = re.compile(r"([A-Z][a-z]{2})\s*(\d{1,2})'(\d{2})\s+(\d{1,2}):(\d{2})\s*([AP])M", re.I)
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+
+
+def hour_of(rules: dict, tz) -> tuple:
+    """(day, hour, how) for one hourly contract, from its rules, in the
+    station's own local time, or (None, None, None).
+
+    The hour is the end of the period the contract measures, which is the time
+    it stops trading and the time its question names. `last_trade_time` is a
+    unix epoch and is used first, because it needs no time zone of its own;
+    `measured_period` ("Sep23'26 2:00 PM ET") is the written form of the same
+    instant and is parsed only if the epoch is missing, in the exchange's own
+    zone. `how` records which answered, so an hour read from text is never
+    mistaken for one read from an epoch."""
+    for field in ("last_trade_time", "release_time"):
+        ep = rules.get(field)
+        if isinstance(ep, (int, float)) and ep > 0:
+            local = dt.datetime.fromtimestamp(float(ep), dt.timezone.utc).astimezone(tz)
+            return local.date().isoformat(), local.hour, field
+    m = _MEASURED.search(str(rules.get("measured_period") or ""))
+    if m:
+        mon, day, yy, hh, mi, ap = m.groups()
+        hour = int(hh) % 12 + (12 if ap.upper() == "P" else 0)
+        try:
+            zone = ZoneInfo(rules.get("exchange_timezone") or "America/New_York")
+        except Exception:  # noqa: BLE001
+            zone = ZoneInfo("America/New_York")
+        t = dt.datetime(2000 + int(yy), _MONTHS[mon.lower()], int(day), hour, int(mi), tzinfo=zone)
+        local = t.astimezone(tz)
+        return local.date().isoformat(), local.hour, "measured_period"
+    return (None, None, None)
+
+
+def group_hourly_contracts(market: dict, place_hour: Callable, days: Optional[set] = None) -> tuple:
+    """{day: {hour: {strike: {"label", "expiration", "how", "Y", "N"}}}} and the
+    number of contracts whose hour could not be placed.
+
+    An hourly market lists every hour of a day under one date-only time
+    specifier, with the strikes repeating, so the hour is not in the listing at
+    all: it is in each contract's own rules. `place_hour(conid)` returns
+    (day, hour, how) for one contract and is the caller's to cache, since a
+    contract's hour never changes and the rules cost a request each. A contract
+    it cannot place is left out and counted rather than filed under a guess."""
+    out: Dict[str, Dict[int, Dict[float, dict]]] = {}
+    unplaced = 0
+    for c in (market or {}).get("contracts") or []:
+        try:
+            strike = float(c.get("strike"))
+        except (TypeError, ValueError):
+            continue
+        if not c.get("conid"):
+            continue
+        if days is not None and day_of(c.get("time_specifier")) not in days:
+            continue
+        day, hour, how = place_hour(c["conid"])
+        if day is None or hour is None or (days is not None and day not in days):
+            unplaced += 1
+            continue
+        slot = out.setdefault(day, {}).setdefault(hour, {}).setdefault(
+            strike, {"label": c.get("strike_label"), "expiration": c.get("expiration"), "how": how})
+        side = str(c.get("side") or "").upper()
+        if side in ("Y", "N"):
+            slot[side] = c["conid"]
+    return out, unplaced
 
 
 def yes_quote(qy: Optional[dict], qn: Optional[dict]) -> dict:

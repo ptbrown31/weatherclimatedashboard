@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import time
 from typing import Callable, Dict, List, Optional
 
@@ -35,7 +36,13 @@ SCHEMA = 1
 INDEX_KEY = "snapshots/catalogue/index.json"
 CAT_KEY = "snapshots/catalogue/{slug}.json"
 PRODUCT_KEY = "snapshots/catalogue/product/{pid}.json"
-CACHE = "public, max-age=1800, stale-while-revalidate=86400, stale-if-error=2592000"
+# Half an hour was fine while this described a listing that changed overnight.
+# It does not: on 25 September the exchange listed nine wind products mid-morning
+# and the board page kept showing the previous five, because the edge held the
+# old object for max-age and then served it stale for a further day under
+# stale-while-revalidate. The window a reader can see a superseded listing in
+# should be minutes, not a day; these files are small and the job is cheap.
+CACHE = "public, max-age=300, stale-while-revalidate=1800, stale-if-error=2592000"
 # same reasoning as the series index: this one decides what a category lists
 INDEX_CACHE = "public, max-age=120, stale-while-revalidate=86400, stale-if-error=2592000"
 MAX_CONTRACTS = 400          # a ladder longer than this is a listing error, not a ladder
@@ -67,6 +74,27 @@ def _contracts(market: dict) -> List[dict]:
     rows = list(out.values())
     rows.sort(key=lambda r: (str(r.get("spec") or ""), r["strike"] if r["numeric"] else 0, str(r["strike"])))
     return rows[:MAX_CONTRACTS]
+
+
+# A weather contract the exchange is carrying that this site's registry does
+# not know. The registry is hand-kept, so the exchange can open a product the
+# site has no row for and the pass would otherwise say nothing about it: a new
+# station, or a family opening at a place the registry never named.
+#
+# The test is the exchange's own product name, not the ticker. Ticker shape
+# alone is a trap that fires: the daily-temperature pattern [USD][HLA][A-Z]{3}
+# also matches DASHO ("DoorDash Orders"), and an SH prefix also matches SHNOR
+# ("Hormuz Return to Normal"). A rename by the exchange would cost an alarm,
+# which is the state before this existed, while a false alarm would cost trust
+# in the one signal the site has.
+WEATHER_NAME = re.compile(r"(Daily Temperature|Hourly Temperature|Max Wind Speed|Average Wind Speed)", re.I)
+
+
+def unregistered_weather(listed: dict, known: set) -> List[str]:
+    """Symbols the tree carries, this registry does not, and whose exchange name
+    says they are one of the station weather families the site draws."""
+    return sorted(sym for sym, m in listed.items()
+                  if sym not in known and WEATHER_NAME.search(m.get("name") or ""))
 
 
 def catalogue_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> int:
@@ -147,8 +175,12 @@ def catalogue_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) 
                             for c in cats]}
     store.put(INDEX_KEY, json.dumps(index, separators=(",", ":")).encode(), "application/json", INDEX_CACHE)
 
-    arch.LAST_STATUS = {"job": "catalogue", "errors": len(errors), "alarms": []}
+    fresh = unregistered_weather(listed, {p["id"] for p in products})
+    arch.LAST_STATUS = {"job": "catalogue", "errors": len(errors),
+                        "alarms": (["catalogue: weather contracts listed and not in the registry: "
+                                    + ", ".join(fresh[:10])] if fresh else [])}
     print(json.dumps({"kind": "catalogue", "products": len(products), "listed": found, "unlisted": unlisted,
-                      "failed": failed, "categories": written, "errors": errors[:5],
+                      "failed": failed, "categories": written, "unregistered": len(fresh),
+                      "newWeather": fresh[:10], "errors": errors[:5],
                       "seconds": round(time.time() - t0, 1)}))
     return 1 if failed and not found else 0

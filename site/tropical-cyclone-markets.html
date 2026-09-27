@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tropical cyclone prediction markets at ForecastEx</title>
+<meta name="description" content="Tropical cyclone contracts at ForecastEx, by ocean: the Atlantic and the East and Central Pacific.">
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+<h1>Tropical cyclone markets</h1>
+<p class="sub">Pick an ocean. Each map opens its own view, with the storms the National Hurricane Center has active, the contracts the exchange lists over that ocean, and their prices.</p>
+<div class="bar"><span id="pageStatus"></span></div>
+<div id="basins" class="basins"></div>
+
+<div class="prose" style="margin-top:22px">
+<h2>Contract Details</h2>
+<ul>
+<li>Season count contracts settle on how many named storms, hurricanes and major hurricanes the Atlantic
+basin records.</li>
+<li>Landfall contracts settle on a major hurricane, Category 3 or above, making landfall in a named region
+or on land within 50 miles of its border.</li>
+<li>During a live storm the exchange lists a wind gust contract at each reference location in the storm&rsquo;s
+path, and one pool contract on which location records the storm&rsquo;s highest gust.</li>
+<li>Storm positions, tracks, cones and formation odds come from the National Hurricane Center. The Central
+Pacific outlook is issued by the Central Pacific Hurricane Center and is not in that feed.</li>
+</ul>
+</div>
+
+<p class="cap" id="foot"></p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/cyclones.js"></script>
+<script>WXCyclones.init();</script>
+</body>
+</html>

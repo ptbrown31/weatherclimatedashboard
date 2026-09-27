@@ -157,6 +157,10 @@ def day_markers(city: dict, now: dt.datetime) -> dict:
     yday_start = dt.datetime.combine(D - dt.timedelta(days=1), dt.time(0), tzinfo=tz)
     sr, ss = sun_times(city["lat"], city["lon"], D)
     out = {"day": D.isoformat(), "tomorrow": (D + dt.timedelta(days=1)).isoformat(),
+           # the first day the exchange has normally NOT opened. It carries no
+           # board and usually no readings, which is exactly the day an estimate
+           # is worth showing, so it is named here rather than derived per caller
+           "dayAfter": (D + dt.timedelta(days=2)).isoformat(),
            "yesterday": (D - dt.timedelta(days=1)).isoformat(),
            "tzOffset": tz.utcoffset(local_now).total_seconds() / 3600.0,
            "winStart": _iso(win_start), "dayStart": _iso(day_start), "dayEnd": _iso(day_end),
@@ -217,6 +221,8 @@ def decode_rows(raw_rows: list, tz) -> list:
             row["wdir"] = ob["wdir"]
         if ob.get("wspd") is not None:
             row["wspd"] = ob["wspd"]
+        if ob.get("wgst") is not None:
+            row["wgst"] = ob["wgst"]
         if ob.get("cover"):
             row["cover"] = ob["cover"]
         out.append(row)
@@ -237,6 +243,105 @@ def day_extremes(rows: list, tz, day: str, unit: str) -> Optional[dict]:
     return {"date": day, "n": len(day_rows),
             "high": {"v": hi[key], "t": hi["t"], "type": hi["type"], "src": hi["src"]},
             "low": {"v": lo[key], "t": lo["t"], "type": lo["type"], "src": lo["src"]}}
+
+
+def day_peak_wind(rows: list, tz, day: str) -> Optional[dict]:
+    """The day's peak wind in knots, the largest value across both the sustained
+    and the gust column, with which column it came from and when.
+
+    The wind contract asks whether the maximum wind speed *or* gust exceeds its
+    threshold, so the single largest number across both columns is the value
+    that decides it, and a day whose gust column is empty is decided by the
+    sustained one. Knots here, as every wind on this site is; the contract is
+    written in miles per hour and the conversion belongs at the display, where
+    the rounding it implies can be seen.
+
+    The contract resolves on Weather Underground's table for the station, which
+    is that station's METAR record read through another publisher. This is the
+    record itself, so a value here can differ from the table in the ways any
+    two renderings of one feed differ, most of all in rounding and in whether a
+    special report is shown."""
+    day_rows = [r for r in rows if local_day_key(_parse_iso(r["t"]), tz) == day]
+    have = [(r, v, k) for r in day_rows for k, v in (("speed", r.get("wspd")), ("gust", r.get("wgst")))
+            if v is not None]
+    if not have:
+        return None
+    out = {"date": day, "n": len(day_rows), "unit": "kt"}
+    for name, pick in (("peak", have),
+                       ("speed", [h for h in have if h[2] == "speed"]),
+                       ("gust", [h for h in have if h[2] == "gust"])):
+        if not pick:
+            out[name] = None
+            continue
+        r, v, k = max(pick, key=lambda h: (h[1], h[0]["t"]))
+        out[name] = dict({"v": v, "t": r["t"], "type": r["type"], "from": k}, **wind_units(v))
+    return out
+
+
+# ---- the two unit conventions the wind and hourly temperature contracts
+# resolve under. Both are rulings rather than readings of the terms, because
+# the terms name a table this site may not fetch and each leaves a rounding
+# question the table answers silently.
+#
+# Wind. The station reports whole knots and the resolving table publishes whole
+# miles per hour, so the number the contract compares is a converted, rounded
+# one. Knots become miles per hour at 1.15078 and are rounded half up, which is
+# what the table shows, and both the rounded and the exact value are carried so
+# a case the rounding decides can be seen rather than assumed.
+#
+# Temperature. An hourly contract compares a whole-degree threshold, so the
+# reading is rounded to a whole degree Fahrenheit, half up, and then compared
+# strictly. That is the convention this desk already settles ForecastEx
+# temperature contracts under, and using a second one here would mean two
+# answers for one station-hour.
+KT_TO_MPH = 1.15078
+KT_TO_KMH = 1.852
+
+
+def _half_up(x: float) -> int:
+    """Round half away from zero, which is what a published table shows and is
+    not what round() does."""
+    return int(math.floor(x + 0.5)) if x >= 0 else -int(math.floor(-x + 0.5))
+
+
+def wind_units(kt) -> dict:
+    """One wind reading in the units the contracts are written in."""
+    mph, kmh = kt * KT_TO_MPH, kt * KT_TO_KMH
+    return {"kt": kt, "mph": _half_up(mph), "mphExact": round(mph, 1),
+            "kmh": _half_up(kmh), "kmhExact": round(kmh, 1)}
+
+
+def whole_f(v) -> Optional[int]:
+    """A reading as the whole degree Fahrenheit a threshold is compared with."""
+    return None if v is None else _half_up(float(v))
+
+
+def hour_value(rows: list, tz, listed_local: dt.datetime, unit: str = "F") -> Optional[dict]:
+    """The observation an hourly temperature contract resolves on: the last
+    report in the hour that ends at the listed time.
+
+    The window is half open, (listed - 1 h, listed]. A report exactly an hour
+    before the listed time belongs to the hour before and is excluded; a report
+    exactly at the listed time is included. Times are the station's own local
+    time. Special reports count, as they do everywhere else on this site, and
+    the report type travels with the value so an hour a special report decides
+    is visible as such.
+
+    Returns the reading, the whole degree it rounds to for the comparison, and
+    how many reports the hour held, or None for an hour with no report at all,
+    which is the case the contract sends to its backup source."""
+    if listed_local.tzinfo is None:
+        listed_local = listed_local.replace(tzinfo=tz)
+    end = listed_local.astimezone(dt.timezone.utc)
+    start = end - dt.timedelta(hours=1)
+    key = "tempF" if unit == "F" else "tempC"
+    inside = [r for r in rows if start < _parse_iso(r["t"]) <= end and r.get(key) is not None]
+    if not inside:
+        return None
+    last = max(inside, key=lambda r: r["t"])
+    return {"listed": _iso(end), "tz": str(tz), "n": len(inside),
+            "v": last[key], "whole": whole_f(last["tempF"]), "t": last["t"],
+            "type": last["type"], "src": last.get("src")}
 
 
 def load_obs_record(store: Storage, days: list) -> dict:
@@ -318,8 +423,14 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
             "rows": rows,
             "today": day_extremes(rows, tz, mk["day"], c["unit"]),
             "yesterday": day_extremes(rows, tz, mk["yesterday"], c["unit"]),
+            "wind": {"today": day_peak_wind(rows, tz, mk["day"]),
+                     "yesterday": day_peak_wind(rows, tz, mk["yesterday"])},
+            # the reading travels with the report, because a map of the latest
+            # temperature should not have to re-decode the raw METAR to find it
             "latest": ({"t": record_end, "raw": latest.get("rawOb", ""), "type": latest.get("metarType"),
-                        "src": latest.get("temp_source")} if latest else None),
+                        "src": latest.get("temp_source"),
+                        "tempF": (rows[-1]["tempF"] if rows else None),
+                        "tempC": (rows[-1]["tempC"] if rows else None)} if latest else None),
         }
         near = []
         for n in (nearby_cfg.get("stations") or {}).get(sid, []):
@@ -342,7 +453,7 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
         store.put(f"snapshots/obs/{sid}.json", json.dumps(snap, separators=(",", ":")).encode(),
                   "application/json", SNAP_CACHE)
         summary_obs[sid] = {"today": snap["today"], "yesterday": snap["yesterday"], "latest": snap["latest"],
-                            "n72h": len(rows), "asof": data_asof, "recordEnd": record_end}
+                            "wind": snap["wind"], "n72h": len(rows), "asof": data_asof, "recordEnd": record_end}
     log(kind="obs-snapshots", stations=len(summary_obs), dataAsof=data_asof, fetchOk=errors == 0,
         unhealed=fetch.get("unhealed"))
     alarms = [s for s, h in health.items() if not s.startswith("_") and h.get("fail_streak", 0) >= arch.FAIL_STREAK_ALARM]
@@ -366,12 +477,25 @@ def _cutoff(iso_utc: str) -> str:
 
 
 def _nws_hourly_rows(body: dict, unit: str = "F") -> list:
+    """The forecast office's own hourly trace.
+
+    The wind rides with it for the same reason the bulletin families' does: the
+    wind contracts settle on the larger of the sustained wind and the gust, and
+    a page that draws only the gust forward is drawing the wrong quantity on a
+    calm day. The gridpoint product publishes both as "8 mph"; they are stored
+    in knots, as every wind on this site is.
+    """
     rows = []
     for p in body["properties"]["periods"]:
         f = gw.period_temp_f(p)          # both schema shapes; a null temperature skips the period
         if f is None:
             continue
-        rows.append({"t": _iso(_parse_iso(p["startTime"])), "tempF": f, "tempC": round((f - 32) * 5 / 9, 1)})
+        row = {"t": _iso(_parse_iso(p["startTime"])), "tempF": f, "tempC": round((f - 32) * 5 / 9, 1)}
+        for key, dst in (("windSpeed", "wspd"), ("windGust", "gust")):
+            v = gw.mph_to_kt(p.get(key))
+            if v is not None:
+                row[dst] = v
+        rows.append(row)
     return rows
 
 
@@ -400,9 +524,49 @@ def _official_hi_lo(daily_rows: list, tz) -> tuple:
     return hi, lo
 
 
+def _with_wind(rows: list, text: str, family: str) -> list:
+    """The hourly trace keeps its temperatures and gains the wind columns.
+
+    Two parsers read the same bulletin. `parse_hourly_block` reads the UTC and
+    TMP rows only and is what the temperature trace has always been built from,
+    including its rule for skipping a gap hour so the two rows stay aligned.
+    `parse_wx_block` reads the element rows, gust included, which is where the
+    wind contracts' forecast has to come from. Rather than move the trace onto
+    the second parser and change every temperature on the page, the wind is
+    merged onto the rows the first one produced, matched on the hour.
+
+    Knots, as every wind on this site is, and miles per hour at display.
+    """
+    try:
+        wx = gw.parse_wx_block(text, family)
+    except (ValueError, AttributeError, KeyError):
+        return rows
+    by = {_iso(r["time"]): r for r in wx["rows"] if r.get("time")}
+    for row in rows:
+        w = by.get(row.get("t"))
+        if not w:
+            continue
+        for src, dst in (("gust", "gust"), ("gust_sd", "gustSd"), ("wspd", "wspd"), ("wdir", "wdir")):
+            if w.get(src) is not None:
+                row[dst] = w[src]
+    return rows
+
+
 def _hourly_rows(parsed: dict, unit: str) -> list:
-    return [{"t": _iso(r["time"]), "tempF": r["temp_f"], "tempC": round((r["temp_f"] - 32) * 5 / 9, 1)}
-            for r in parsed["rows"]]
+    """The hourly trace a forecast snapshot carries. The gust rides with it where
+    the family publishes one, because the wind contracts are read against the
+    same file every station has, and a station's advanced panel is a second
+    file that not every build carries."""
+    out = []
+    for r in parsed["rows"]:
+        row = {"t": _iso(r["time"]), "tempF": r["temp_f"],
+               "tempC": None if r["temp_f"] is None else round((r["temp_f"] - 32) * 5 / 9, 1)}
+        if r.get("gust") is not None:
+            row["gust"] = r["gust"]
+        if r.get("wspd") is not None:
+            row["wspd"] = r["wspd"]
+        out.append(row)
+    return out
 
 
 def _extremes_by_day(parsed: dict, tz) -> dict:
@@ -581,8 +745,9 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
                        "highRest": _u(rest_h, unit), "lowRest": _u(rest_l, unit)}
     # ---- NBM: hourly from NBH, the blend's own daily max/min from NBS
     if by_kind["nbh"]:
-        parsed = gw.parse_hourly_block(_read_gz(store, by_kind["nbh"][-1]).decode("ascii", "replace"))
-        rows = _hourly_rows(parsed, unit)
+        nbh_text = _read_gz(store, by_kind["nbh"][-1]).decode("ascii", "replace")
+        parsed = gw.parse_hourly_block(nbh_text)
+        rows = _with_wind(_hourly_rows(parsed, unit), nbh_text, "nbh")
         nbm = {"cycle": _iso(parsed["cycle"]), "hourly": rows, "txn": {}, "nbsCycle": None}
         if by_kind["nbs"]:
             nbs = gw.parse_nbs_block(_read_gz(store, by_kind["nbs"][-1]).decode("ascii", "replace"))
@@ -600,8 +765,9 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
         snap["nbm"] = nbm
     # ---- LAMP: the same-day hourly trace; its "today" extremes cover only the hours it has left
     if by_kind["lamp"]:
-        parsed = gw.parse_hourly_block(_read_gz(store, by_kind["lamp"][-1]).decode("ascii", "replace"))
-        rows = _hourly_rows(parsed, unit)
+        lamp_text = _read_gz(store, by_kind["lamp"][-1]).decode("ascii", "replace")
+        parsed = gw.parse_hourly_block(lamp_text)
+        rows = _with_wind(_hourly_rows(parsed, unit), lamp_text, "lamp")
         h, l = _max_min_in_day(rows, tz, day)
         rest_h, rest_l = _max_min_ahead(rows, tz, day, now)
         snap["lamp"] = {"cycle": _iso(parsed["cycle"]), "hourly": rows, "hourlyFrom": rows[0]["t"] if rows else None,
@@ -680,7 +846,8 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
                          "sky": gw.short_forecast_sky(p.get("shortForecast")),
                          "cover": None,
                          "wdir": gw.compass_deg(p.get("windDirection")),
-                         "wspd": gw.mph_to_kt(p.get("windSpeed"))})
+                         "wspd": gw.mph_to_kt(p.get("windSpeed")),
+                         "gust": gw.mph_to_kt(p.get("windGust"))})
         return {"cycle": _stamp_of(key), "rows": rows} if rows else None
 
     def wx(kind: str, key: str) -> Optional[dict]:
@@ -689,7 +856,8 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
         except (ValueError, AttributeError, OSError):
             return None
         rows = [{"t": _iso(r["time"]), "tempF": r["temp_f"], "dewF": r["dew_f"], "sky": r["sky_pct"],
-                 "cover": r["cover"], "wdir": r["wdir"], "wspd": r["wspd"]} for r in parsed["rows"]
+                 "cover": r["cover"], "wdir": r["wdir"], "wspd": r["wspd"],
+                 "gust": r.get("gust"), "gustSd": r.get("gust_sd")} for r in parsed["rows"]
                 if r["temp_f"] is not None or r["dew_f"] is not None
                 or r["sky_pct"] is not None or r["wspd"] is not None]
         return {"cycle": _stamp_of(key), "rows": rows} if rows else None
@@ -857,6 +1025,9 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
                "obsHighSrc": (today.get("high") or {}).get("src") if same_day else None,
                "obsLowSrc": (today.get("low") or {}).get("src") if same_day else None,
                "obsLatest": (o or {}).get("latest"),
+               # the day's strongest wind across both columns, which is what a
+               # wind contract settles on and what its map shades by
+               "windPeak": ((((o or {}).get("wind") or {}).get("today") or {}) if same_day else {}).get("peak"),
                "forecastDay": (f.get("markers") or {}).get("day"), "forecastAsof": f.get("asof")}
         fmk = f.get("markers") or {}
         fc_same = fmk.get("day") == mk["day"]

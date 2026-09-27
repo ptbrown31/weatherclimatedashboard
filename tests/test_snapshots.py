@@ -240,6 +240,78 @@ class DayBucketing(unittest.TestCase):
             gw.INCLUDE_SPECI = old
 
 
+    def test_peak_wind_takes_the_larger_of_both_columns(self):
+        """A wind contract settles on the largest value across the sustained and
+        the gust column, so the peak comes from whichever is higher, and a day
+        with no gust reported is decided by the sustained wind alone."""
+        raw = [
+            {"icaoId": "KLAX", "obsTime": 1787320380, "temp": 18.9, "metarType": "METAR",   # 13:53Z
+             "temp_source": "tgroup", "wspd": 12, "wgst": None},
+            {"icaoId": "KLAX", "obsTime": 1787349180, "temp": 26.1, "metarType": "METAR",   # 21:53Z
+             "temp_source": "tgroup", "wspd": 19, "wgst": 27},
+            {"icaoId": "KLAX", "obsTime": 1787352780, "temp": 25.0, "metarType": "SPECI",   # 22:53Z
+             "temp_source": "body", "wspd": 22, "wgst": None},
+        ]
+        rows = snapshots.decode_rows(raw, LA)
+        self.assertEqual([r.get("wgst") for r in rows], [None, 27, None])
+        w = snapshots.day_peak_wind(rows, LA, "2026-08-21")
+        self.assertEqual((w["peak"]["v"], w["peak"]["from"]), (27, "gust"))
+        self.assertEqual((w["speed"]["v"], w["speed"]["from"]), (22, "speed"))
+        self.assertEqual(w["gust"]["v"], 27)
+        self.assertEqual((w["unit"], w["n"]), ("kt", 3))
+        # the same day without any gust: the sustained wind decides it
+        nogust = [dict(r, wgst=None) for r in raw]
+        w2 = snapshots.day_peak_wind(snapshots.decode_rows(nogust, LA), LA, "2026-08-21")
+        self.assertEqual((w2["peak"]["v"], w2["peak"]["from"]), (22, "speed"))
+        self.assertIsNone(w2["gust"])
+        # a day the station reported no wind at all has no peak rather than a zero
+        calm = [{k: v for k, v in r.items() if k not in ("wspd", "wgst")} for r in raw]
+        self.assertIsNone(snapshots.day_peak_wind(snapshots.decode_rows(calm, LA), LA, "2026-08-21"))
+        self.assertIsNone(snapshots.day_peak_wind(rows, LA, "2026-08-20"))
+
+
+    def test_wind_units_round_half_up(self):
+        """Knots become the whole miles per hour the resolving table shows."""
+        self.assertEqual(snapshots.wind_units(19)["mph"], 22)        # 21.86
+        self.assertEqual(snapshots.wind_units(19)["mphExact"], 21.9)
+        self.assertEqual(snapshots.wind_units(27)["mph"], 31)        # 31.07
+        self.assertEqual(snapshots.wind_units(13)["mph"], 15)        # 14.96, half up
+        self.assertEqual(snapshots.wind_units(30)["kmh"], 56)        # 55.56
+        w = snapshots.day_peak_wind(snapshots.decode_rows([
+            {"icaoId": "KLAX", "obsTime": 1787349180, "temp": 26.1, "metarType": "METAR",
+             "temp_source": "tgroup", "wspd": 19, "wgst": 27}], LA), LA, "2026-08-21")
+        self.assertEqual((w["peak"]["kt"], w["peak"]["mph"]), (27, 31))
+
+    def test_hour_value_window_is_half_open(self):
+        """The hour ending at the listed time: the report exactly an hour before
+        belongs to the hour before, the report exactly at the time counts, and
+        the last report in the window is the one that resolves it."""
+        raw = [
+            {"icaoId": "KLAX", "obsTime": 1787346000, "temp": 20.0, "metarType": "METAR",    # 21:00Z exactly
+             "temp_source": "tgroup"},
+            {"icaoId": "KLAX", "obsTime": 1787347980, "temp": 21.4, "metarType": "METAR",    # 21:33Z
+             "temp_source": "tgroup"},
+            {"icaoId": "KLAX", "obsTime": 1787349180, "temp": 22.6, "metarType": "SPECI",    # 21:53Z
+             "temp_source": "body"},
+            {"icaoId": "KLAX", "obsTime": 1787349600, "temp": 30.0, "metarType": "METAR",    # 22:00Z exactly
+             "temp_source": "tgroup"},
+        ]
+        rows = snapshots.decode_rows(raw, LA)
+        listed = dt.datetime(2026, 8, 21, 15, 0, tzinfo=LA)          # 22:00Z
+        h = snapshots.hour_value(rows, LA, listed)
+        self.assertEqual((h["n"], h["type"]), (3, "METAR"))          # 21:00Z excluded, 22:00Z included
+        self.assertEqual((h["v"], h["whole"]), (86.0, 86))
+        earlier = snapshots.hour_value(rows, LA, listed - dt.timedelta(hours=1))
+        self.assertEqual((earlier["n"], earlier["v"]), (1, 68.0))    # only the 21:00Z report
+        self.assertIsNone(snapshots.hour_value(rows, LA, listed + dt.timedelta(hours=3)))
+
+    def test_whole_f_rounds_half_away_from_zero(self):
+        self.assertEqual(snapshots.whole_f(86.5), 87)
+        self.assertEqual(snapshots.whole_f(86.4), 86)
+        self.assertEqual(snapshots.whole_f(-3.5), -4)
+        self.assertIsNone(snapshots.whole_f(None))
+
+
 class AsIssued(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -273,7 +345,13 @@ class FieldAndRoster(unittest.TestCase):
     def test_assets_exist_and_field_is_deterministic(self):
         from pipeline import basemap
         roster = basemap.load_roster()
-        self.assertEqual(len(roster), 37)      # the 37 contract stations; Colorado Springs left the board
+        # the roster, which is no longer only the contract stations. Colorado
+        # Springs left the board; Nantucket, Martha's Vineyard and Providence
+        # joined on 24 September when the exchange listed a wind contract at
+        # each, with no temperature one; the six New Jersey and Delaware shore
+        # stations joined on 25 September carrying no contract at all, for
+        # their observations ahead of the nor'easter
+        self.assertEqual(len(roster), 49)
         klax = next(c for c in roster if c["station"] == "KLAX")
         self.assertTrue(0 < klax["px"] < 200 and 300 < klax["py"] < 600)   # left, lower half of the canvas
         grid = basemap.load_field_grid()
@@ -345,3 +423,52 @@ class WxElements(unittest.TestCase):
         self.assertEqual(gw.short_forecast_sky("Partly Cloudy then Patchy Fog"), 44)
         self.assertEqual(gw.short_forecast_sky("Mostly Cloudy"), 75)
         self.assertIsNone(gw.short_forecast_sky("Slight Chance Rain Showers"))
+
+
+class ForecastWind(unittest.TestCase):
+    """The wind contracts settle on the larger of the sustained wind and the
+    gust, so the forecast trace has to carry both. The bulletin families' gusts
+    were parsed but never reached the snapshot, because the hourly trace is
+    built by a temperature-only parser."""
+
+    BULLETIN = "\n".join([
+        " KBOS   NBM V5.0 NBH GUIDANCE    8/18/2026  1800 UTC",
+        " UTC  19 20 21 22 23 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 ",
+        " TMP  74 74 73 73 72 71 70 70 70 70 70 69 69 69 69 68 68 71 73 76 77 79 80 81 82",
+        " DPT  67 67 67 66 65 65 66 66 67 67 67 67 67 67 67 67 67 67 67 67 66 64 64 63 62",
+        " SKY  27 30 30 21 19 15  9 21 27 33 35 42 50 47 55 62 67 47 27 19 20 20 30 24 13",
+        " WDR   9  9  9  9 10 11 13 14 15 15 15 17 19 21 24 24 25 25 22 20 18 19 19 21 21",
+        " WSP   9  9  9  8  7  7  6  5  5  4  3  3  2  2  3  3  4  4  3  4  4  6  7  8  9",
+        " GST  20 19 18 17 16 15 14 13 12 11 10  9  8  7  8  9 10 11 12 13 14 15 16 17 18",
+        " GSD   3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3  3",
+    ])
+
+    def test_the_wind_columns_reach_the_hourly_trace(self):
+        from pipeline import snapshots as sn, gov_weather as gw
+        rows = sn._with_wind(sn._hourly_rows(gw.parse_hourly_block(self.BULLETIN), "F"),
+                             self.BULLETIN, "nbh")
+        self.assertEqual(len(rows), 25)
+        self.assertTrue(all("gust" in r for r in rows))
+        self.assertEqual(rows[0]["gust"], 20.0)
+        self.assertEqual(rows[0]["wspd"], 9.0)
+        self.assertEqual(rows[0]["gustSd"], 3.0)
+        self.assertEqual(rows[0]["tempF"], 74.0)      # the temperature is untouched
+
+    def test_a_bulletin_the_element_parser_cannot_read_leaves_the_trace_alone(self):
+        from pipeline import snapshots as sn, gov_weather as gw
+        rows = sn._with_wind(sn._hourly_rows(gw.parse_hourly_block(self.BULLETIN), "F"), "not a bulletin", "nbh")
+        self.assertEqual(len(rows), 25)
+        self.assertTrue(all("gust" not in r for r in rows))
+        self.assertEqual(rows[0]["tempF"], 74.0)
+
+    def test_the_forecast_offices_hourly_carries_wind_in_knots(self):
+        from pipeline import snapshots as sn
+        body = {"properties": {"periods": [
+            {"startTime": "2026-09-24T12:00:00+00:00", "temperature": 70, "temperatureUnit": "F",
+             "windSpeed": "23 mph", "windGust": "41 mph"},
+            {"startTime": "2026-09-24T13:00:00+00:00", "temperature": 71, "temperatureUnit": "F",
+             "windSpeed": "8 mph"}]}}
+        rows = sn._nws_hourly_rows(body)
+        self.assertEqual(rows[0]["gust"], 35.6)       # 41 mph is 35.6 kt
+        self.assertEqual(rows[0]["wspd"], 20.0)
+        self.assertNotIn("gust", rows[1])             # no gust forecast is not a zero

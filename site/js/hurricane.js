@@ -7,8 +7,10 @@
    season), market/hurricane.json through WXM (the quote job's hurricane
    group), reask.json (the vendor live-storm lane, usually off), and
    assets/hurricane-geo.json (countries, the coastal states and Hawaii, the
-   counties the landfall contracts name, the nation coastline, the 163 wind
-   reference locations, and which view each region is drawn on). The drawn storm position is labeled from the
+   counties the landfall contracts name, the nation coastline, the exchange's
+   wind reference locations as the vendor's registry stands (the Atlantic and
+   Gulf list plus the four Hawaii locations added for the 2026 Pacific season),
+   and which view each region is drawn on). The drawn storm position is labeled from the
    geometry's own point and advisory, because the GIS service can trail
    NHC's roster. Equirectangular fitted to the basin box with independent
    x/y scales so the panel fills its frame (a deliberate stretch).
@@ -349,15 +351,15 @@ window.WXHur = (() => {
         rows.push(['Storm', esc(v2.storm) + ' · ' + esc(v2.file || 'LiveCyc')
           + (v2.forecastTime ? ' cycle ' + utc(v2.forecastTime) : '')
           + (v2.received ? ', received ' + utc(v2.received) : '')]);
-        v2.thresholds.map((t, i) => (v2.p[i] ? ['&gt; ' + t + ' mph', v2.p[i] + '%'] : null))
+        v2.thresholds.map((t, i) => (v2.p[i] ? ['&ge; ' + t + ' mph', v2.p[i] + '%'] : null))
           .filter(Boolean).slice(0, cap).forEach(r => rows.push(r));
         if (v2.interim) {
           // the interim's rungs under their own heading; a published zero at
           // every rung is printed at the lowest one, since it is a figure
           rows.push(['Metryc interim', 'received ' + utc(v2.interim.received)]);
-          const im = v2.thresholds.map((t, i) => (v2.interim.p[i] ? ['interim &gt; ' + t + ' mph', v2.interim.p[i] + '%'] : null))
+          const im = v2.thresholds.map((t, i) => (v2.interim.p[i] ? ['interim &ge; ' + t + ' mph', v2.interim.p[i] + '%'] : null))
             .filter(Boolean);
-          (im.length ? im.slice(0, cap) : [['interim &gt; ' + v2.thresholds[0] + ' mph', '0%']]).forEach(r => rows.push(r));
+          (im.length ? im.slice(0, cap) : [['interim &ge; ' + v2.thresholds[0] + ' mph', '0%']]).forEach(r => rows.push(r));
         }
       });
       foot = esc((RK && RK.attribution) || 'Powered by Reask') + '; probabilities as published'
@@ -1270,10 +1272,20 @@ window.WXHur = (() => {
   // listed, so a row or a dot opens its market the way every other priced
   // surface on the site does
   function windUrl(storm, id) {
-    const code2 = String(storm.name || '').replace(/[^A-Za-z]/g, '').slice(0, 2).toUpperCase();
-    const lm = MK && (MK.markets || []).find(m2 => m2.symbol === 'L' + code2 + String(id).toUpperCase());
+    // matched on the exchange's product name rather than on two letters taken
+    // off the storm's: the exchange's code for a storm is not reliably the
+    // first two letters of its name, and two unrelated products fit the
+    // ladder's shape. The storm module matches the same way.
+    const lm = lMarketOf(storm, id);
     const c0 = lm && (lm.contracts || [])[0];
     return lm && c0 ? WXM.contractUrl(lm.productConid, c0.conidYes || c0.conid) : null;
+  }
+  // the exchange's wind ladder for one location of one storm, matched on the
+  // product name rather than on two letters taken off the storm's
+  function lMarketOf(storm, id) {
+    const nm = String((storm || {}).name || '').toLowerCase(), loc = String(id).toUpperCase();
+    return (nm && MK && (MK.markets || []).find(m2 => /^L[A-Z]{2}[A-Z]{2}$/.test(m2.symbol)
+      && m2.symbol.slice(3) === loc && String(m2.name || '').toLowerCase().indexOf(nm) >= 0)) || null;
   }
   const mph1 = v => (v == null ? null : v.toFixed(1) + ' mph');
 
@@ -1479,7 +1491,7 @@ window.WXHur = (() => {
       });
       into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
     } else {
-      /* The vendor's lowest rung is on the table.
+      /* The vendor's lowest rung is kept.
 
          On a tropical storm it is the only rung carrying anything: Dolly's
          ladder was non-zero at 60 mph everywhere and at 70 almost nowhere. */
@@ -1501,19 +1513,78 @@ window.WXHur = (() => {
         return String(a[1].name || '').localeCompare(String(b[1].name || ''));
       };
       rows = all.slice().sort(rank).slice(0, VENDOR_ROWS);
-      const tb = h('table');
-      tb.appendChild(h('tr', {}, [h('th', { text: 'Reference location' })].concat(cols.map(t => h('th', { class: 'num', text: '> ' + t + ' mph' })))));
+      /* A card per location rather than one wide table.
+
+         The table put nine thresholds across the page and made a reader scan a
+         row of small numbers to see the shape of one location's ladder, which
+         is the thing worth seeing: how fast the chance falls away as the wind
+         gets stronger. A card per location draws that fall as a bar per rung.
+         The rungs run down from the strongest wind the location carries to the
+         weakest, so the row a reader reaches for first is at the top.
+
+         Only the rungs the vendor published a figure above zero on are drawn,
+         with the lowest rung kept when there are none, because a published
+         zero is still the vendor's answer and an empty card is not.
+
+         The rungs read "at or above", not "above". The contract's own question
+         is "wind gusts of [##] mph or greater" and it resolves Yes when the
+         settlement value is greater than OR EQUAL TO the threshold, so a
+         strict symbol here would have stated the settlement rule wrongly. The
+         wind contract at a station is the other way round, strictly greater,
+         and says so on its own page. */
+      const grid = h('div', { class: 'ladders vgrid' });
       rows.forEach(([id, r]) => {
-        const tr = h('tr', {}, [h('td', { text: r.name + ' (' + id + ')' })].concat(idx.map(i => h('td', { class: 'num', text: (r.p[i] != null ? r.p[i] : 0) + '%' }))));
         const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
-        attach(tr, locationTip(L, { storm: storm.name, file: shown.label, thresholds: thr, p: r.p,
-                                    forecastTime: shown.kind === 'livecyc' ? shown.file.forecastTime : null,
-                                    received: shown.file.lastModified }));
+        const card = h('div', { class: 'ladder vloc' }, [
+          h('div', { class: 'lt', text: (r.name || L.name || id) + ' (' + id + ')' }),
+          h('div', { class: 'cap', style: 'margin:0 0 6px', text: storm.name + ' · ' + shown.label })]);
+        /* Each rung is the exchange's board for that threshold, in the Yes
+           green and No red every other ladder on this site uses, with a tick
+           where the vendor's published probability sits.
+
+           Before the exchange lists a storm the bar is built from the vendor's
+           probability instead, because that is the only number there is and a
+           reader wants the shape of the ladder either way. It is drawn hatched
+           and says so, and it is replaced by the price the moment a real one
+           exists. The tick and the bar then sit on the same scale, which is
+           the comparison worth having: the vendor's figure against what the
+           exchange is charging for it. */
+        const lm = lMarketOf(storm, id);
+        const priceAt = t => {
+          const c = lm && (lm.contracts || []).find(x => Number(x.strike) === Number(t));
+          return c && WXM.realMid(c) ? { pc: Math.round(c.mid * 100), c } : null;
+        };
+        const carried = thr.map((t, i) => [t, r.p[i] || 0]).filter(x => x[1] > 0 || priceAt(x[0]));
+        (carried.length ? carried : [[thr[0], 0]]).slice().reverse().forEach(([t, v]) => {
+          const pr = priceAt(t);
+          const pc = pr ? pr.pc : Math.max(0, Math.min(100, v));
+          const bar = h('span', { class: 'vtrack' + (pr ? '' : ' vsoft') }, [
+            h('span', { class: 'vyes', style: 'width:' + pc + '%' }),
+            h('span', { class: 'vno', style: 'width:' + (100 - pc) + '%' }),
+            h('span', { class: 'vmark', style: 'left:' + Math.max(0, Math.min(100, v)) + '%' })]);
+          const row = h('div', { class: 'vrung' }, [
+            h('span', { class: 'vlab', text: '\u2265 ' + t + ' mph' }), bar,
+            h('span', { class: 'vpct', text: pr ? pr.pc + '\u00a2' : v + '%' })]);
+          attach(row, tip.rows(esc(r.name || L.name || id) + ' \u00b7 gusts of ' + t + ' mph or greater',
+            [['Yes price', pr ? pr.pc + '\u00a2' : null],
+             ['No price', pr ? (100 - pr.pc) + '\u00a2' : null],
+             ['Yes bid', pr && pr.c.bid != null ? Math.round(pr.c.bid * 100) + '\u00a2' : null],
+             ['No bid', pr && pr.c.ask != null ? Math.round((1 - pr.c.ask) * 100) + '\u00a2' : null],
+             [(RK && RK.attribution ? 'Vendor' : 'Vendor') + ' probability', v + '%'],
+             ['Bar', pr ? 'the exchange\u2019s price' : 'the vendor\u2019s probability, no price yet']],
+            pr ? 'the tick marks the vendor\u2019s figure on the same scale'
+               : 'the exchange has not opened this threshold; the bar is the vendor\u2019s figure and the '
+                 + 'tick sits on it'));
+          card.appendChild(row);
+        });
+        attach(card, locationTip(L, { storm: storm.name, file: shown.label, thresholds: thr, p: r.p,
+                                      forecastTime: shown.kind === 'livecyc' ? shown.file.forecastTime : null,
+                                      received: shown.file.lastModified }));
         const url = windUrl(storm, id);
-        if (url) WXM.linkTo(tr, url, 'Open the ' + r.name + ' wind contract on IBKR');
-        tb.appendChild(tr);
+        if (url) WXM.linkTo(card, url, 'Open the ' + (r.name || id) + ' wind contract on IBKR');
+        grid.appendChild(card);
       });
-      into.appendChild(h('div', { class: 'card', style: 'padding:0' }, [tb]));
+      into.appendChild(grid);
     }
     /* Why a later cycle is not the one shown, where that applies, and what was
        left off. LiveCyc is forward-looking from its own start, so a location
@@ -1576,12 +1647,25 @@ window.WXHur = (() => {
         }
       };
     });
+    /* A link can name the ocean it wants. The cyclone area page shows the two
+       basins as maps and opens this page on whichever one was clicked, which
+       only works if the choice survives the hop. */
+    const want = (WXC.param('basin') || '').toUpperCase();
+    if (want === 'EP' || want === 'PACIFIC') {
+      basin = 'EP';
+      $('#b1').classList.remove('on');
+      $('#b2').classList.add('on');
+      resetView();
+    }
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendorNote(); basinSections();
     drawDiscussion();
     if (window.WXStorm) {
       WXStorm.init(tip);
       // the vendor's latest file belongs to the storm, not to a section of its own
       if (WXStorm.setFilePanel) WXStorm.setFilePanel(stormFile);
+      // this page holds the registry, so it is the one that can name a
+      // reference location the vendor's file never mentioned
+      if (WXStorm.setLocationName) WXStorm.setLocationName(id => (locationById(id) || {}).name || null);
       if (WXStorm.setBasin) WXStorm.setBasin(basin);
       // the map's dots ask this module for a location's series, so the map is
       // drawn again once the ledgers have landed and the dots can answer

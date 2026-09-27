@@ -216,12 +216,12 @@ window.WXCity = (() => {
     svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)' }));
     svg.appendChild(el('path', { d: base.statePaths, class: 'state' }));
     svg.appendChild(el('path', { d: base.statePaths, class: 'state2' }));
-    summary.cities.filter(c => c.onConus).forEach(c => pickDot(svg, c, c.px, c.py, 1));
+    WXC.tempCities(summary.cities).filter(c => c.onConus).forEach(c => pickDot(svg, c, c.px, c.py, 1));
     const w = $('#pickW'); if (!w) return;
     w.innerHTML = '';
     w.appendChild(el('rect', { x: 0, y: 0, width: 960, height: 480, fill: 'var(--map-sea)' }));
     w.appendChild(el('path', { d: base.worldPaths, fill: 'var(--map-land)', stroke: 'var(--map-line)', 'stroke-width': .8 }));
-    summary.cities.filter(c => !c.onConus).forEach(c => pickDot(w, c, c.wx, c.wy, 1.2));
+    WXC.tempCities(summary.cities).filter(c => !c.onConus).forEach(c => pickDot(w, c, c.wx, c.wy, 1.2));
   }
 
   /* The page's own heading: which station, and which contract day it is showing.
@@ -933,15 +933,14 @@ window.WXCity = (() => {
       marks.push(['tomorrow’s sunset', ss + DAYMS, '#e0a020', '3 3']);
     }
     if (market && M.listed) marks.unshift(['listed', P(M.listed), 'var(--muted)', null]);
-    /* The stretch to the left of midnight is the day before, when the board is
-       open and quoted but nothing the station reports counts. Saying so where
-       it sits is worth more than a line in a caption under the chart. */
-    if (d0 > w0) {
-      const midX = (x(w0) + x(d0)) / 2;
-      g.appendChild(txt('trading active, but observations do not count toward resolution',
-        { x: midX, y: S.T + 13, 'text-anchor': 'middle', class: 'ax', 'font-style': 'italic',
-          fill: 'var(--muted)', 'pointer-events': 'none' }));
-    }
+    /* The stretch to the left of midnight used to carry an italic note reading
+       "trading active, but observations do not count toward resolution".
+
+       It was gated on the chart window alone and never on a listed board, so it
+       asserted trading on every station whose window began before midnight,
+       including the twelve that carry no contract of any kind. Removed on the
+       owner's instruction, 25 September, rather than gated: the day boundary is
+       already marked and the line under the panel says what settles. */
     const MARK_NOTE = { midnight: 'the contract day begins (station local time)', sunrise: 'NOAA solar approximation for the station', sunset: 'NOAA solar approximation for the station',
       'tomorrow’s midnight': 'the day-ahead contract day begins (station local time)',
       'tomorrow’s sunrise': 'the same solar approximation carried forward one day',
@@ -1435,8 +1434,12 @@ window.WXCity = (() => {
         draw(); drawTitle(city());
       };
     });
-    if (!summary.cities.length) { svg.innerHTML = ''; svg.appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
-    await select(summary.cities.some(c => c.station === want) ? want : summary.cities[0].station, false);
+    // a wind-only station has no temperature chart to select, and its own
+    // page is built from wind-station.html; reaching city.html?station= for
+    // one falls back rather than drawing an empty board
+    const pickable = WXC.tempCities(summary.cities);
+    if (!pickable.length) { svg.innerHTML = ''; svg.appendChild(txt('No data available.', { x: 60, y: 50, class: 'axl' })); return; }
+    await select(pickable.some(c => c.station === want) ? want : pickable[0].station, false);
   }
 
   return { init, select };

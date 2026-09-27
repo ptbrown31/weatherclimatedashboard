@@ -234,6 +234,100 @@ class StationPage(unittest.TestCase):
         self.assertLess(out.index("window.WX_STATION"), out.index("js/chart-city.js"))
 
 
+class WindOnlyStationPage(unittest.TestCase):
+    """A station carried for its wind alone is built from wind-station.html.
+
+    The city page is built around a daily high and low market these stations
+    do not have, so it would offer a chart, two pickers, a scorecard and an
+    'every scored day' section for a market that is not there.
+    """
+
+    def page(self):
+        tpl = read("site", "wind-station.html")
+        return build.station_page(tpl, {"station": "KGED", "city": "Georgetown DE",
+                                        "unit": "F", "windOnly": True}, CFG)
+
+    def test_it_names_the_wind_rather_than_a_temperature_market(self):
+        out = self.page()
+        self.assertIn("<title>Georgetown DE wind (KGED)</title>", out)
+        self.assertTrue(re.search(r'<h1 id="cityTitle"[^>]*>Georgetown DE wind \(KGED\)</h1>', out))
+        self.assertIn('window.WX_STATION = "KGED"', out)
+        d = build.meta_of(out, "description")
+        self.assertIn("wind", d.lower())
+        self.assertNotIn("temperature", d.lower())
+
+    def test_it_carries_the_wind_renderer_and_not_the_city_chart(self):
+        out = self.page()
+        self.assertIn("js/wind-station.js", out)
+        self.assertIn("js/contracts.js", out)          # WXK.wind lives here
+        for gone in ("js/chart-city.js", "js/city-score.js", "js/city-days.js",
+                     "js/advanced.js", "js/city-contracts.js"):
+            self.assertNotIn(gone, out)
+        self.assertLess(out.index("window.WX_STATION"), out.index("js/wind-station.js"))
+
+    def test_the_lede_never_asserts_that_nothing_is_listed(self):
+        """The panel says that from the snapshot. A static claim would be wrong
+        for as long as it took a listing to reach the next build."""
+        out = self.page()
+        lede = re.search(r'<p class="cap" id="cityLede"[^>]*>(.*?)</p>', out, re.S).group(1)
+        self.assertIn("Georgetown DE", lede)
+        for claim in ("not listed", "no contract", "none listed", "has not opened"):
+            self.assertNotIn(claim, lede.lower())
+
+    def test_the_flag_decides_the_template_not_the_station_code(self):
+        """Same station, no flag: the ordinary city page, so nothing is
+        hard-coded to these six and clearing the set is enough to promote one."""
+        tpl = read("site", "city.html")
+        out = build.station_page(tpl, {"station": "KGED", "city": "Georgetown DE", "unit": "F"}, CFG)
+        self.assertIn("<title>Georgetown DE weather and temperature prediction market (KGED)</title>", out)
+        self.assertIn("js/chart-city.js", out)
+
+
+class WindOnlyRoster(unittest.TestCase):
+    """The nine stations with no temperature contract: six shore stations with
+    no ForecastEx product at all, and three whose only contract is MG wind."""
+
+    EXPECTED = {"KACY", "KBLM", "KMJX", "KWWD", "KGED", "KDOV",
+                "KISP", "KHVN", "KGON",
+                "KACK", "KMVY", "KPVD"}
+
+    def test_the_roster_marks_every_station_with_no_temperature_contract(self):
+        from pipeline.cities import CITIES, WIND_ONLY
+        self.assertEqual(WIND_ONLY, self.EXPECTED)
+        ids = {c[0] for c in CITIES}
+        self.assertTrue(WIND_ONLY <= ids, "a wind-only station left the roster")
+
+    def test_no_wind_only_station_carries_a_temperature_product(self):
+        """The flag has to follow the registry, not a memory of which stations
+        were added when. A daily temperature product on one of these would mean
+        the page is hiding a board that exists."""
+        import csv as _csv
+        rows = list(_csv.DictReader(read("config", "contracts.csv").splitlines()))
+        from pipeline.cities import CITIES, WIND_ONLY
+        by_station = {c[0]: c[1] for c in CITIES}
+        temp = {(r.get("category_l3") or "").strip() for r in rows
+                if (r.get("new_l2") or "").strip() == "Daily Temperatures"}
+        temp.discard("")
+        # the set has to be real, or this test passes by finding nothing at all
+        self.assertIn("Philadelphia", temp)
+        self.assertGreater(len(temp), 20, sorted(temp))
+        for sid in sorted(WIND_ONLY):
+            self.assertNotIn(by_station[sid], temp,
+                             "%s carries a daily temperature product" % sid)
+
+    def test_cities_json_carries_the_flag_and_keeps_them_on_the_conus_map(self):
+        """onConus stays true: the wind map is exactly where they belong, and
+        the temperature surfaces filter on windOnly instead."""
+        rows = json.loads(read("config", "cities.json"))
+        flagged = {c["station"] for c in rows if c.get("windOnly")}
+        self.assertEqual(flagged, self.EXPECTED)
+        for c in rows:
+            if c.get("windOnly"):
+                self.assertTrue(c["onConus"], c["station"])
+            else:
+                self.assertNotIn("windOnly", c, c["station"])
+
+
 
 class ExpectedListings(unittest.TestCase):
     """Listings the owner has said are coming travel in config.js, so the

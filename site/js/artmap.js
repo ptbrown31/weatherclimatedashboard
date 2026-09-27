@@ -19,7 +19,7 @@ window.WXArtMap = (() => {
     svg.innerHTML = '';
     svg.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)',
                                  stroke: 'var(--map-line)', 'stroke-width': 1 }));
-    const us = sum.cities.filter(c => c.onConus && c.px != null);
+    const us = WXC.tempCities(sum.cities).filter(c => c.onConus && c.px != null);
     const placed = [];
     us.forEach(c => {
       const a = el('a', { href: WXC.cityHref(c) });
@@ -43,7 +43,7 @@ window.WXArtMap = (() => {
     });
     const cap = $('#artMapCap');
     if (cap) cap.textContent = us.length + ' United States stations carry daily high and low contracts, with '
-      + sum.cities.filter(c => !c.onConus).length + ' more abroad and in Hawaii quoted in Celsius. '
+      + WXC.tempCities(sum.cities).filter(c => !c.onConus).length + ' more abroad and in Hawaii quoted in Celsius. '
       + 'Click a station for its chart.';
   }
   return { init };

@@ -271,7 +271,7 @@ window.WXMap = (() => {
     if (hEl) { hEl.textContent = pageTitle(mode); document.title = pageTitle(mode); }
 
     computeBase(M);
-    plot(svg, summary.cities.filter(c => c.onConus), M, c => c.px, c => c.py, [2, 2, 958, 598], false);
+    plot(svg, WXC.tempCities(summary.cities).filter(c => c.onConus), M, c => c.px, c => c.py, [2, 2, 958, 598], false);
     const legend = $('#legend');
     legend.innerHTML = '';
     if (WXM.on()) {

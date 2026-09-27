@@ -54,6 +54,8 @@ calculator &rarr;</a></p>
 <p class="cap" id="advCap"></p>
 </div>
 
+<div id="cityContracts"></div>
+
 <div class="secttl" style="margin-top:22px">STATION LOCATION</div>
 <div id="locator"></div>
 
@@ -80,6 +82,8 @@ temperature scale, so a height means the same thing in each.</p>
 <script src="js/chart-city.js"></script>
 <script src="js/city-score.js"></script>
 <script src="js/city-days.js"></script>
+<script src="js/contracts.js"></script>
+<script src="js/city-contracts.js"></script>
 <script src="js/discussion.js"></script>
 <script src="js/advanced.js"></script>
 <script>
@@ -88,7 +92,7 @@ WXC.chrome('city.html'); WXCityScore.init(); WXCityDays.init();
 (function () { const st = new URLSearchParams(location.search).get('station') || window.WX_STATION;
   const a = document.getElementById('allocLink');
   if (a && st) a.href = 'allocator.html?m=city:' + encodeURIComponent(st); })();
-WXAdv.init();
+WXAdv.init(); WXCityContracts.init();
 Promise.all([fetch(WXC.asset('basemap.json')).then(r => r.json()).catch(() => null),
              fetch(WXC.asset('world.json')).then(r => r.json()).catch(() => null)])
   .then(([bm, w]) => WXCity.init({ basemap: bm ? Object.assign({}, bm, w || {}) : null,

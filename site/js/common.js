@@ -77,6 +77,8 @@ window.WXC = (() => {
                  ['allocator.html', 'Position calculator'],
                  ['accuracy.html', 'Accuracy'], ['faq.html', 'FAQ'], ['about.html', 'About']];
     const nav = cfg.nav || { l1: [], categories: [] };
+    const ADOPT = { 'city.html': 'index.html', 'scorecard.html': 'index.html',
+                    'hurricane.html': 'tropical-cyclone-markets.html' };
     const cats = nav.categories || [];
     const pageOf = c => (c.page || '').split('?')[0];
     const paramOf = c => { const q = (c.page || '').split('?')[1]; return q ? new URLSearchParams(q).get('c') : null; };
@@ -89,8 +91,10 @@ window.WXC = (() => {
     const mine = cats.find(c => c.slug === here)
       || (byProduct ? cats.find(c => c.slug === byProduct) : null)
       || cats.find(c => !paramOf(c) && pageOf(c) === active)
-      || (['city.html', 'scorecard.html'].indexOf(active) >= 0
-          ? cats.find(c => pageOf(c) === 'index.html') : null);
+      // a page that belongs to a category without being the page that category
+      // opens: the city chart and the scorecard are the map's, and the basin
+      // view is the cyclone area's, which opens on the two-ocean page instead
+      || (ADOPT[active] ? cats.find(c => pageOf(c) === ADOPT[active]) : null);
     // a branch page names its branch directly and belongs to no one category
     const bySection = q.get('s');
     const branch = mine ? mine.l1
@@ -309,6 +313,28 @@ window.WXC = (() => {
   const asset = name => 'assets/' + name
     + (window.WX && WX.assetV && WX.assetV[name] ? '?v=' + WX.assetV[name] : '');
 
+  /* The roster minus the stations that carry no temperature contract.
+
+     Nine of them: six shore stations that hold no ForecastEx product at all,
+     and three whose only contract is MG wind. They belong on the wind map,
+     which is why they are carried, and nowhere that implies a temperature
+     market: the front map, the city page's two pickers, the article map. One
+     definition of that rule lives here so a surface added later cannot
+     quietly include them; the roster row carries `windOnly` and
+     pipeline/cities.py names the set. */
+  const tempCities = list => (list || []).filter(c => !c.windOnly);
+
+  /* A contract day's weekday name, from its own date string.
+
+     Read at noon UTC so the name cannot slip a day either side of a timezone,
+     and empty when there is no date, so a caller can fall back to its own
+     wording rather than print "Invalid Date". */
+  function weekdayOf(iso) {
+    if (!iso) return '';
+    const d = new Date(iso + 'T12:00:00Z');
+    return isFinite(d) ? d.toLocaleDateString(undefined, { weekday: 'long', timeZone: 'UTC' }) : '';
+  }
+
   return {
-    asset, compass, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref };
+    asset, compass, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref, tempCities, weekdayOf };
 })();

@@ -24,6 +24,8 @@ import json
 import math
 import os
 
+from .cities import WIND_ONLY
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEO = os.path.join(ROOT, "geo")                  # vendored TopoJSON inputs; not published
 ASSETS = os.path.join(ROOT, "site", "assets")   # the small projected outputs pages load
@@ -314,9 +316,14 @@ def build_assets(cities: list) -> dict:
     for sid, name, lat, lon, tzname, unit in cities:
         px, py = tr.project(lon, lat)
         wx, wy = world_xy(lon, lat)
-        roster.append({"station": sid, "city": name, "lat": lat, "lon": lon, "tz": tzname, "unit": unit,
-                       "px": round(px, 1), "py": round(py, 1), "wx": wx, "wy": wy,
-                       "onConus": unit == "F" and sid != "PHNL"})
+        row = {"station": sid, "city": name, "lat": lat, "lon": lon, "tz": tzname, "unit": unit,
+               "px": round(px, 1), "py": round(py, 1), "wx": wx, "wy": wy,
+               "onConus": unit == "F" and sid != "PHNL"}
+        # carried for its wind alone. onConus stays true, because the wind map
+        # is exactly where it belongs; the temperature surfaces filter on this
+        if sid in WIND_ONLY:
+            row["windOnly"] = True
+        roster.append(row)
 
     os.makedirs(ASSETS, exist_ok=True)
     os.makedirs(CONFIG, exist_ok=True)
@@ -340,6 +347,26 @@ def build_assets(cities: list) -> dict:
             "nationRings": len(nation), "worldKB": round(len(" ".join(wpaths)) / 1024),
             "countries": len(countries), "coastalStates": len(states_ll), "counties": len(counties),
             "pacificRegions": len(basins), "locations": len(locations)}
+
+
+def location_ids() -> set:
+    """The exchange's wind reference-location codes, from the vendored registry.
+
+    Two letters each, and the only list that says whether the last two letters
+    of a five-letter L symbol name a real place or are part of something else
+    entirely. Empty when the file is not on the path, which callers treat as no
+    opinion rather than as an empty registry.
+    """
+    out = set()
+    try:
+        with open(os.path.join(GEO, "reask_locations.csv"), newline="", encoding="utf-8") as fh:
+            for row in csv.DictReader(fh):
+                code = (row.get("ID") or "").strip().upper()
+                if code:
+                    out.add(code)
+    except OSError:
+        return set()
+    return out
 
 
 def load_roster() -> list:

@@ -1,9 +1,44 @@
 """
 Station registry shared by every job: the archive, the snapshots and the asset build.
 
-The full ForecastEx daily-temperature roster, 38 stations. Fields: ICAO
-settlement station, display name, latitude, longitude, IANA timezone, and
-the contract's native unit (F for US listings, C for international).
+46 stations. Forty carry a ForecastEx contract. Three of those, Nantucket,
+Martha's Vineyard and Providence, carry a wind contract and no daily
+temperature one; they joined on 24 September when the exchange listed MGACK,
+MGMVY and MGPVD.
+
+The other six carry no contract at all: Atlantic City, Belmar, Toms River and
+Wildwood on the New Jersey shore, Georgetown and Dover in Delaware. They
+joined on 25 September, ahead of the nor'easter, because a station's archive
+begins the day it is added and waiting for a product code would have cost the
+storm. A rostered station draws its own wind panel from its METARs and its
+NWS gridpoint gust with no market in it, so these read as observation
+stations until a code lists; the catalogue pass alarms when one does. Do not
+assume a roster entry implies a contract, and do not drop one for lacking a
+product.
+
+Three more joined on 25 September for the stretch between New York and
+Providence, which the wind map showed as roughly 150 miles of empty coast:
+Long Island, New Haven and New London. All nine of those codes listed on 25
+September. KISP is named "Long Island" rather than Islip because that is what
+the exchange called the contract, and a dot a reader cannot tie to the board it
+names is worse than a slightly loose place name. Nothing depends on the match:
+symbols_for joins on the ICAO suffix, so the name is for the reader alone.
+
+WIND_ONLY names the twelve stations that carry no temperature contract: those
+nine, plus Nantucket, Martha's Vineyard and Providence, whose MG wind contract
+is the only one written on them. The rule is the contract, not the date they
+joined. They are kept off every temperature surface (the front map, the city
+page's two pickers, the article map) and their own page is built from
+wind-station.html rather than city.html, because the city page is built
+around a daily high and low board none of them has. They stay on the wind
+map, which for all nine is the point of carrying them. A station here is
+still a full member of the archive, the forecast passes and the scorecard:
+the flag is about what the site offers a reader, not about what is captured.
+
+Fields: ICAO settlement station, display name, latitude, longitude, IANA
+timezone, and the contract's native unit (F for US listings, C for
+international). The six shore coordinates came from api.weather.gov station
+metadata.
 
 Settlement stations are not always the city's best-known airport: New York
 settles at LaGuardia (KLGA), Dallas at DFW (KDFW), Houston at Hobby (KHOU),
@@ -20,29 +55,41 @@ so their displays use the Celsius values directly rather than converting.
 CITIES = [
     # US, Fahrenheit
     ("KATL", "Atlanta",          33.6403,  -84.4269, "America/New_York",    "F"),
+    ("KACK", "Nantucket",        41.2541,  -70.0589, "America/New_York",    "F"),
+    ("KACY", "Atlantic City",    39.4520,  -74.5670, "America/New_York",    "F"),
     ("KAUS", "Austin",           30.1830,  -97.6799, "America/Chicago",     "F"),
     ("KBKF", "Denver",           39.8466, -104.6562, "America/Denver",      "F"),
+    ("KBLM", "Belmar",           40.1833,  -74.1333, "America/New_York",    "F"),
     ("KBNA", "Nashville",        36.1189,  -86.6892, "America/Chicago",     "F"),
     ("KBOS", "Boston",           42.3606,  -71.0106, "America/New_York",    "F"),
     ("KCLT", "Charlotte",        35.2083,  -80.9614, "America/New_York",    "F"),
     ("KDCA", "Washington DC",    38.8483,  -77.0342, "America/New_York",    "F"),
     ("KDFW", "Dallas",           32.8974,  -97.0220, "America/Chicago",     "F"),
+    ("KDOV", "Dover DE",         39.1333,  -75.4667, "America/New_York",    "F"),
     ("KDTW", "Detroit",          42.2314,  -83.3308, "America/New_York",    "F"),
+    ("KGED", "Georgetown DE",    38.6897,  -75.3625, "America/New_York",    "F"),
+    ("KGON", "New London",       41.3275,  -72.0494, "America/New_York",    "F"),
     ("KHOU", "Houston",          29.6375,  -95.2825, "America/Chicago",     "F"),
+    ("KHVN", "New Haven",        41.2639,  -72.8872, "America/New_York",    "F"),
+    ("KISP", "Long Island",      40.7939,  -73.1017, "America/New_York",    "F"),
     ("KJAX", "Jacksonville",     30.4953,  -81.6937, "America/New_York",    "F"),
     ("KLAS", "Las Vegas",        36.0719, -115.1634, "America/Los_Angeles", "F"),
     ("KLAX", "Los Angeles",      33.9381, -118.3889, "America/Los_Angeles", "F"),
     ("KLGA", "New York City",    40.7792,  -73.8800, "America/New_York",    "F"),
     ("KMDW", "Chicago",          41.7842,  -87.7553, "America/Chicago",     "F"),
     ("KMIA", "Miami",            25.7906,  -80.3164, "America/New_York",    "F"),
+    ("KMJX", "Toms River",       39.9270,  -74.2920, "America/New_York",    "F"),
+    ("KMVY", "Martha's Vineyard", 41.3930, -70.6159, "America/New_York",    "F"),
     ("KMSP", "Minneapolis",      44.8831,  -93.2289, "America/Chicago",     "F"),
     ("KMSY", "New Orleans",      29.9934,  -90.2581, "America/Chicago",     "F"),
     ("KOKC", "Oklahoma City",    35.3886,  -97.6003, "America/Chicago",     "F"),
     ("KPHL", "Philadelphia",     39.8733,  -75.2268, "America/New_York",    "F"),
+    ("KPVD", "Providence",       41.7225,  -71.4325, "America/New_York",    "F"),
     ("KPHX", "Phoenix",          33.4278, -112.0035, "America/Phoenix",     "F"),
     ("KSAT", "San Antonio",      29.5328,  -98.4636, "America/Chicago",     "F"),
     ("KSEA", "Seattle",          47.4447, -122.3136, "America/Los_Angeles", "F"),
     ("KSFO", "San Francisco",    37.6196, -122.3656, "America/Los_Angeles", "F"),
+    ("KWWD", "Wildwood",         39.0167,  -74.9167, "America/New_York",    "F"),
     ("PHNL", "Honolulu",         21.3178, -157.9203, "Pacific/Honolulu",    "F"),
     # International, Celsius
     ("CYUL", "Montreal",         45.4678,  -73.7423, "America/Montreal",    "C"),
@@ -60,3 +107,13 @@ CITIES = [
 ]
 
 US_CITIES = [c for c in CITIES if c[5] == "F"]
+
+
+# The stations with no temperature contract, and so nothing to put on a
+# temperature map. Six shore stations carry no ForecastEx product at all; the
+# other three carry an MG wind contract and nothing else. Removing a station
+# from this set is all it takes to give it the full city page, should a daily
+# temperature board ever be written on it.
+WIND_ONLY = {"KACY", "KBLM", "KMJX", "KWWD", "KGED", "KDOV",   # no contract at all
+             "KISP", "KHVN", "KGON",                            # the same, Long Island and Connecticut
+             "KACK", "KMVY", "KPVD"}                            # MG wind contract only

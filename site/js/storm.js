@@ -26,7 +26,23 @@ window.WXStorm = (() => {
   const cents = v => (v == null ? null : Math.round(v * 100));
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const MAX_CARDS = 12;
+  /* The pool's own terms, in a sentence. Every reference location on the
+     registry when the contract was listed can win it; the strikes are the
+     subset the exchange chose to list, it may list more while the storm runs,
+     and once listed a location stays listed. That is why the prices on a pool
+     ladder need not add to a dollar. */
+  const POOL_NOTE = 'Every reference location on the registry when the pool was listed can win it, which is '
+    + 'more than the strikes listed here, so their prices need not add to one hundred. The exchange may list '
+    + 'further locations while the storm runs, and one it has listed stays listed.';
+  // an instant in UTC, the clock the vendor's cycles and the desk's runs keep
+  const zulu = t => { const d = new Date(t); return isFinite(d) ? d.toISOString().replace('T', ' ').slice(0, 16) + 'Z' : String(t); };
   let tip = null, ledgers = {}, RK = null, MK = null, open = null;
+  /* A reference location's name, from the page that holds the registry. The
+     vendor's file names only the locations it gave mass to, so a candidate the
+     desk prices and the vendor left at zero would otherwise read as its
+     two-letter id. */
+  let NAMEOF = null;
+  function setLocationName(fn) { NAMEOF = fn; }
 
   /* When a storm stops updating. The vendor never announces an end; the
      final settlement file is definitive, and short of one, a storm whose
@@ -128,16 +144,51 @@ window.WXStorm = (() => {
     return out;
   }
 
-  // the exchange's market for one location of one storm, if it is listed
+  /* The desk's pool figure for one storm, when the desk is publishing one.
+
+     Separate from calcByName on purpose. calcByName answers the LISTED pool's
+     ladder, where the only figure ever drawn is a ruling of the owner's. This
+     one answers the card shown while no pool is listed, where the owner's
+     decision of 24 September is that the desk's own calculation stands in
+     until the exchange opens a book. It is the desk's number, delivered by the
+     desk, and the page says so; the site still computes none of its own. */
+  function deskPool(stormName) {
+    const s = ((RK && RK.storms) || []).find(x => x.name === stormName);
+    const lc = s && s.livecyc;
+    if (!lc || !lc.pwin || lc.pwinMethod !== 'desk') return null;
+    const im = (s.interim && s.interim.sites) || {};
+    const rows = Object.keys(lc.pwin).map(sid => ({
+      id: sid,
+      name: (lc.sites && lc.sites[sid] && lc.sites[sid].name) || (im[sid] && im[sid].name)
+            || (NAMEOF && NAMEOF(sid)) || sid,
+      p: lc.pwin[sid],
+    })).filter(r => r.p != null).sort((a, b) => b.p - a.p || a.name.localeCompare(b.name));
+    return rows.length ? { rows, meta: lc.pwinMeta || {} } : null;
+  }
+
+  /* Which of the exchange's markets belong to a storm.
+
+     Not by the two letters in the symbol. They are not reliably the first two
+     of the storm's name, since Nolo's instruments went up as LNL and LHLNL, so
+     a rule built on the name's first letters would have found nothing on the
+     day that board opened. And two unrelated products on this exchange fit the
+     ladder's shape exactly, LEGCA and LOFUS, so shape alone would hand one of
+     them to a storm named Egon or Ofelia.
+
+     The test is the exchange's own product name, which carries the storm's:
+     the one real pool recorded here, LHLED, is "Hurricane Edouard Peak Wind
+     Location". Same test the quote job uses, so the two agree by construction. */
+  const belongsTo = (m, stormName) => !!stormName
+    && String(m.name || '').toLowerCase().indexOf(String(stormName).toLowerCase()) >= 0;
   function lMarket(storm, sid) {
     if (!MK) return null;
-    const want = 'L' + stormCode(storm) + String(sid).toUpperCase();
-    return MK.markets.find(m => m.symbol === want) || null;
+    const loc = String(sid).toUpperCase();
+    return MK.markets.find(m => /^L[A-Z]{2}[A-Z]{2}$/.test(m.symbol) && m.symbol.slice(3) === loc
+                                && belongsTo(m, storm)) || null;
   }
   function poolMarkets(storm) {
     if (!MK) return [];
-    const pre = 'LHL' + stormCode(storm);
-    return MK.markets.filter(m => m.symbol.indexOf(pre) === 0);
+    return MK.markets.filter(m => /^LHL[A-Z]{2}[A-Z]?$/.test(m.symbol) && belongsTo(m, storm));
   }
   const priceAt = (m, threshold) => {
     if (!m) return null;
@@ -651,9 +702,67 @@ window.WXStorm = (() => {
   // whoever stands highest. The dashed tick on a row is the raw calculation.
   function pools(storm, skip) {
     const out = [];
-    poolMarkets(storm.name).filter(m => !(skip || []).includes(m.symbol)).forEach(m => {
+    const mine = poolMarkets(storm.name);
+    /* The pool has a card whether or not the exchange has opened one.
+       A storm carries two contracts, the wind ladder at each location and this
+       one pool over all of them, and drawing the pool only when it is listed
+       left the page silent about half of what the storm trades. The card says
+       what the board is doing and states the candidate rule, which is the part
+       a reader needs before a ladder exists. No ranking of this site's own is
+       drawn there; where a figure appears it is the desk's, delivered.
+
+       The test is whether a PRICE exists, not whether a contract is listed.
+       This exchange opens a book at one bid against ninety-nine, which is its
+       placeholder for nothing resting rather than a fifty-fifty market, and
+       this site has said since 3 September that such a book has no price. A
+       listing test would therefore drop the desk's figure at the moment it is
+       most useful, in favour of a ladder with nothing in it. */
+    const priced = mine.some(m => (m.contracts || []).some(c => WXM.realMid(c)));
+    if (!priced) {
+      const div = h('div', { class: 'ladder' }, [
+        h('div', { class: 'lt', text: 'Which reference location records the highest wind' }),
+        h('div', { class: 'cap', style: 'margin:0 0 6px',
+                   text: mine.length
+                     ? 'The exchange has opened a pool for ' + storm.name + ' and no price is resting on it '
+                       + 'yet. Its candidates are the strikes on the ladder below.'
+                     : 'The exchange is not carrying a pool for ' + storm.name + ' at the moment, either '
+                       + 'because it has not opened one or because the storm’s has closed. Every reference '
+                       + 'location on the registry when a pool is listed is a candidate.' })]);
+      /* With no book there is no price, so an estimate stands in until the
+         exchange opens one. It is drawn in its own colour, never the Yes green
+         a price wears, and it is labelled as an estimate. Where it comes from
+         is not the page's business: a reader needs that it is an estimate and
+         that a price replaces it, and naming the source adds nothing to
+         either. It disappears the moment a pool lists, because from then on
+         the price is the answer. */
+      const dp = deskPool(storm.name);
+      if (dp) {
+        div.appendChild(h('div', { class: 'cap dhead', style: 'margin:0 0 4px',
+                                   text: 'Estimated, contract not yet listed' }));
+        dp.rows.forEach(r => {
+          div.appendChild(h('div', { class: 'vrung' }, [
+            h('span', { class: 'vlab dlab', text: r.name }),
+            h('span', { class: 'vtrack' }, [h('span', { class: 'vfill dfill',
+              style: 'width:' + Math.max(0, Math.min(100, r.p)) + '%' })]),
+            h('span', { class: 'vpct', text: (Math.round(r.p * 10) / 10) + '%' })]));
+        });
+        /* Only the as-of time survives from the feed's own metadata.
+           `method`, `cycle` and `note` are strings the source writes about
+           itself, and a public page is the wrong place for them: they name a
+           system and describe a model, neither of which a reader needs to know
+           that this is an estimate and that a price will replace it. The
+           timestamp is kept because staleness is the reader's business. */
+        const bits = [dp.meta.asof ? 'as of ' + zulu(dp.meta.asof) : null].filter(Boolean);
+        div.appendChild(h('p', { class: 'cap', style: 'margin:4px 0 0',
+          text: 'Estimated over every candidate on the registry, so the rows shown need not '
+              + 'add to one hundred.' + (bits.length ? ' ' + bits.join(' · ') + '.' : '') }));
+      }
+      out.push(div);
+    }
+    mine.filter(m => !(skip || []).includes(m.symbol)).forEach(m => {
       const div = h('div', { class: 'ladder' }, [h('div', { class: 'lt', text: (m.name || m.symbol) + ' (' + m.symbol + ')' }),
-        h('div', { class: 'cap', style: 'margin:0 0 6px', text: 'Which of these locations records the highest wind. The candidates are the strikes and the pool is fixed when it is opened.' })]);
+        h('div', { class: 'cap', style: 'margin:0 0 6px',
+                   text: 'Which location records the storm\u2019s highest wind gust. ' + POOL_NOTE })]);
       const calc = calcByName(storm.name);
       const cw = c => (calc && calc[c.label || String(c.strike)]) != null ? calc[c.label || String(c.strike)] : null;
       // an empty book sorts as no price, not as the fifty cents its midpoint reads
@@ -987,6 +1096,15 @@ window.WXStorm = (() => {
     const title = h('div', { class: 'lth' }, [h('div', { class: 'lt', text: (m.name || m.symbol) + ' (' + m.symbol + ')' })]);
     title.appendChild(WXC.expander(wrap, 'Expand'));
     wrap.appendChild(title);
+    /* What the ladder does not show, and cannot.
+
+       The pool resolves over every reference location on the registry at the
+       time it was listed, and the exchange lists only some of them as strikes,
+       "based on the potential impact of the named storm", adding more while the
+       storm runs and never removing one. So a reader meeting Nolo's board sees
+       two rows at 47 and 25 cents and a location on the map above with no
+       contract at all, and nothing on the panel explains either. This does. */
+    wrap.appendChild(h('div', { class: 'cap', style: 'margin:0 0 4px', text: POOL_NOTE }));
     wrap.appendChild(svg);
     return wrap;
   }
@@ -1067,6 +1185,23 @@ window.WXStorm = (() => {
   function setFilePanel(fn) { FILEPANEL = fn; }
   const filePanel = (storm, host) => { if (FILEPANEL) { try { FILEPANEL(storm, host); } catch (e) { /* the charts stand on their own */ } } };
 
+  /* The two contracts a storm carries, under whatever else its panel drew:
+     the document governing the per-location wind ladder, and the pool card,
+     which stands whether or not the exchange has opened a pool. Both paths
+     through drawStorm end here, including the one for a storm the vendor has
+     published no ladder for, which is the storm whose panel was silent about
+     the pool before. */
+  function contractsFoot(storm, host, skip) {
+    /* Both documents, once each, whatever the board is doing. Putting the
+       pool's link on the pool card lost it exactly when the pool was listed
+       and its own series had already claimed the card. */
+    const lt = [WXM.termsLink('L', 'Wind contract terms and conditions'),
+                WXM.termsLink('LHL', 'Pool terms and conditions')].filter(Boolean).join(' · ');
+    if (lt) { const lp = h('p', { class: 'cap', style: 'margin:2px 0 0' }); lp.innerHTML = lt; host.appendChild(lp); }
+    const p = pools(storm, skip);
+    if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
+  }
+
   // ---- one storm
   async function drawStorm(storm, host) {
     const key = storm.name + '_' + storm.year;
@@ -1093,6 +1228,8 @@ window.WXStorm = (() => {
     if (!doc || !cyc.length) {
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
       filePanel(storm, host);
+      contractsFoot(storm, host, []);
+      host.appendChild(h('p', { class: 'cap attrib', text: (RK && RK.attribution) || 'Powered by Reask' }));
       return;
     }
     // the locations worth showing: the strongest so far, which can only look backwards
@@ -1127,8 +1264,7 @@ window.WXStorm = (() => {
       const ser = await poolSeries(m, doc);
       if (ser) { host.appendChild(ser); shown.push(m.symbol); }
     }
-    const p = pools(storm, shown);
-    if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
+    contractsFoot(storm, host, shown);
     filePanel(storm, host);
     host.appendChild(h('p', { class: 'cap attrib', text: (RK && RK.attribution) || 'Powered by Reask' }));
     setEmph(EMPH);
@@ -1265,5 +1401,5 @@ window.WXStorm = (() => {
     return out;
   }
 
-  return { init, draw, showSite, sites, dormant, stampOf, setRoster, setBasin, supersededBy, doneLabel, setFilePanel };
+  return { init, draw, showSite, sites, dormant, stampOf, setRoster, setBasin, supersededBy, doneLabel, setFilePanel, setLocationName };
 })();

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hourly temperature prediction markets at ForecastEx</title>
+<meta name="description" content="Hourly temperature contracts at ForecastEx, the hour each measures and the observation that settles it.">
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+<style>.prod{margin:0 0 20px}</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Hourly temperature markets</h1>
+<p class="sub">Each contract pays one dollar if the temperature at the station is above its strike as of the listed time. The map carries the latest temperature each station has reported.</p>
+<div class="bar"><span id="pageStatus"></span></div>
+<div id="varmap" class="card"></div>
+<div class="secttl" style="margin-top:22px">EVERY LISTED STATION</div>
+<div id="board"></div>
+
+<div class="prose" style="margin-top:22px">
+<h2>Contract Details</h2>
+<ul>
+<li>The hour runs from just after one hour before the listed time to the listed time. A report exactly one
+hour before is excluded, a report exactly at the listed time is included.</li>
+<li>The last report inside that hour settles the contract.</li>
+<li>Trading stops at the listed time. The contract is not subject to early resolution.</li>
+<li>Settlement reads Weather Underground&rsquo;s Daily Observations table for the station, with the National
+Weather Service time series viewer as the backup source.</li>
+<li>Readings here come from the aviation weather feed, the same station reports read through a different
+publisher, rounded to a whole degree half up before they are compared with a strike.</li>
+<li>Prices are the exchange&rsquo;s own. Every resting order is a bid to buy Yes or a bid to buy No, so the
+columns are the Yes bid and the No bid.</li>
+</ul>
+<p><a href="daily-temperature-markets.html">Daily high and low contracts &rarr;</a></p>
+</div>
+
+<p class="cap" id="foot"></p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/market.js"></script>
+<script src="js/varmap.js"></script>
+<script src="js/contracts.js"></script>
+<script src="js/hourly.js"></script>
+<script>WXHourly.init();</script>
+</body>
+</html>

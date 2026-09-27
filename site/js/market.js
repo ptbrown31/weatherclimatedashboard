@@ -31,6 +31,19 @@ window.WXM = (() => {
   }
   const on = () => mode() !== 'off';
   const live = () => mode() === 'live';
+  /* The three contract days a wind board can show, in one place.
+
+     `day` is the one trading now, `tomorrow` the board the exchange opens
+     during it, and `dayAfter` the first day it has normally NOT opened, which
+     is where an estimate is worth drawing. Snapshot fields are spelled
+     implied/anticipated/quotedWind + the suffix, so the suffix and the marker
+     key are resolved together rather than by each caller. */
+  const WHENS = { today: { sfx: 'Today', key: 'day' },
+                  tomorrow: { sfx: 'Tomorrow', key: 'tomorrow' },
+                  dayafter: { sfx: 'DayAfter', key: 'dayAfter' } };
+  const whenOf = w => (WHENS[w] ? w : 'today');
+  const sfxOf = w => WHENS[whenOf(w)].sfx;
+  const dayOf = (mk, w) => (mk || {})[WHENS[whenOf(w)].key];
   const PLACEHOLDER = 'placeholder value';
   const S = { station: null, snap: null, summary: null, groups: {} };
 
@@ -41,6 +54,11 @@ window.WXM = (() => {
     S.station = sid; S.snap = r;
     return r;
   }
+  // the quote summary's own load result, so a page whose map is drawn from it
+  // can put its freshness in the status strip rather than implying the map is
+  // as fresh as the observations beside it
+  const summaryLoad = () => S.summary;
+
   async function loadSummary() {
     if (!live()) return null;
     S.summary = await WXD.get('market/summary.json', 10);
@@ -160,7 +178,13 @@ window.WXM = (() => {
   // with bids on one side only it is that side's implied Yes price and
   // `side` says which ('bid' = Yes bids only, 'ask' = No bids only).
   // `noBid` is the No bid in cents (one dollar less the feed's Yes ask).
-  const row = r => ({ strike: r.strike, yes: cents(r.mid), bid: cents(r.bid), ask: cents(r.ask), bidSize: r.bidSize, askSize: r.askSize, from: r.from, label: r.label,
+  /* `real` rides with the row because the empty-book test has to be taken on
+     the RAW quote, where the two sides are in dollars. Every field below is in
+     cents, so a consumer re-running that test on this row compares 94 against
+     0.011 and calls a resting 94c bid an empty book, which is what the wind and
+     hourly ladders were doing. */
+  const row = r => ({ strike: r.strike, yes: cents(r.mid), real: realMid(r),
+                      bid: cents(r.bid), ask: cents(r.ask), bidSize: r.bidSize, askSize: r.askSize, from: r.from, label: r.label,
                       noBid: r.ask == null ? null : 100 - cents(r.ask), noBidSize: r.askSize,
                       conid: r.conid, conidYes: r.conidYes, conidNo: r.conidNo, expiration: r.expiration, error: r.error || null,
                       side: r.bid != null && r.ask != null ? 'mid' : (r.bid != null ? 'bid' : (r.ask != null ? 'ask' : null)) });
@@ -257,6 +281,52 @@ window.WXM = (() => {
     return out;
   }
 
+  /* The wind the exchange's own ladder is centred on, for one station and day.
+
+     The MG contract pays on the day's strongest wind being above a strike, so
+     the Yes price falls as the strike rises and the crossing at fifty cents is
+     the ladder's central value. The pipeline runs the same interpolation it
+     runs for the temperature sides (`implied_median`), so this reads a number
+     the exchange's prices produced rather than one this page worked out: the
+     site computes no forecast of its own.
+
+     `edge` says which way the ladder sits when the crossing is outside it, so
+     a caller can say "above the top strike" instead of inventing a value. A
+     station with no MG board returns state 'unlisted' and no number. */
+  function impliedWind(city, when) {
+    const sfx = sfxOf(when);
+    if (!on() || !live()) return null;
+    const sm = S.summary && S.summary.data;
+    if (!sm) return { state: 'unavailable', value: null, edge: null };
+    const r = (sm.cities || []).find(c => c.station === city.station);
+    if (!r || !r.listed) return { state: 'unlisted', value: null, edge: null };
+    const wantDay = city.markers && dayOf(city.markers, when);
+    const gotDay = dayOf(r, when);
+    if (!city.markers || !gotDay || gotDay !== wantDay) return { state: 'day', value: null, edge: null };
+    const v = r['impliedWind' + sfx], edge = r['impliedWind' + sfx + 'Edge'];
+    const quoted = r['quotedWind' + sfx] || 0;
+    if (!quoted && v == null && !edge) return { state: 'unlisted', value: null, edge: null, day: gotDay };
+    return { state: v == null && !edge ? 'no-bids' : 'ok', value: v, edge, quoted, day: gotDay,
+             asof: r.asof, when: whenOf(when),
+             label: 'ForecastEx implied central wind, ' + asofText(S.summary) };
+  }
+
+  /* The desk's own centre for a station-day the exchange has not quoted.
+
+     Deliberately a separate call from `impliedWind`, not a fallback inside it.
+     One is the exchange's prices read back and the other is the desk's model;
+     a caller that wants to show either has to say so and say which, which is
+     the same separation the pipeline keeps between `days` and `anticipated`. */
+  function anticipatedWind(city, when) {
+    if (!on() || !live()) return null;
+    const sm = S.summary && S.summary.data;
+    if (!sm) return null;
+    const r = (sm.cities || []).find(c => c.station === city.station);
+    if (!r) return null;
+    const v = r['anticipatedWind' + sfxOf(when)];
+    return v == null ? null : { value: v, soft: true, asof: r.asof };
+  }
+
   // the day's ladders for the city page: high side P(high > K), low side
   // P(low < K), on one shared temperature axis; yes is the Yes price in cents
   // (null where the contract has no bids), bid and noBid the best bids
@@ -277,6 +347,75 @@ window.WXM = (() => {
              listed: !!(L.high || L.low), symbols: d.symbols,
              high: (L.high || []).map(row), low: (L.low || []).map(row),
              impliedHigh: im.high || null, impliedLow: im.low || null };
+  }
+
+  /* The hourly temperature board for one station: a ladder per listed hour.
+
+     An hourly market lists every hour of a day under one date-only specifier
+     with its strikes repeating, so the pipeline places each contract's hour
+     from its own rules and writes them under their own block. A day here is a
+     list of hours, each with the same Yes-side rows a daily ladder carries, and
+     `how` records whether the hour came from the exchange's epoch or from the
+     written period it publishes beside it.
+
+     There is no placeholder shape for this one. The daily ladders have a
+     synthetic stand-in so a reference build has something to lay out; inventing
+     an hourly board would mean inventing which hours an exchange had opened,
+     which is a fact about the market rather than a shape on a page. */
+  function hourly(city) {
+    if (!live()) return null;
+    const d = snapOf(city.station); if (!d) return null;
+    const mk = city.markers || (d.markers || {});
+    const out = [];
+    Object.keys(d.hours || {}).sort().forEach(day => {
+      const hh = d.hours[day] || {};
+      Object.keys(hh).map(Number).sort((a, b) => a - b).forEach(hour => {
+        const rows = (hh[hour] || []).map(row);
+        if (!rows.length) return;
+        const im = ((d.impliedHours || {})[day] || {})[String(hour)];
+        out.push({ day, hour, rows, implied: im == null ? null : im,
+                   how: (hh[hour][0] || {}).how || null,
+                   today: day === mk.day, tomorrow: day === mk.tomorrow });
+      });
+    });
+    const m = (d.symbols || {}).hourly || null;
+    return { live: true, asof: d.asof, stale: d.stale, source: d.source,
+             symbol: m && m.symbol ? m.symbol : null, market: m,
+             label: 'ForecastEx quotes, ' + asofText(d), listed: out.length > 0, hours: out };
+  }
+
+  /* The wind board for one station: a day ladder like the temperature ones.
+
+     Two things differ and the pages must honour both. A wind contract trades
+     until 11:59 PM local on its own date and is not subject to early
+     resolution, so a strike the day's peak has already cleared is still open
+     and still tradeable; nothing here may be dimmed for being decided. And it
+     resolves when the next day's first gust observation is published for the
+     station, which is not midnight and is not a fixed hour, so `resolves` is
+     words rather than a timestamp. */
+  function windLadder(city, when) {
+    if (!live()) return null;
+    const d = snapOf(city.station); if (!d) return null;
+    const mk = city.markers || (d.markers || {});
+    const day = dayOf(mk, when);
+    if (!day) return null;
+    const rows = (((d.days || {})[day] || {}).wind || []).map(row);
+    /* The desk's ladder for a day the exchange has not quoted.
+
+       The pipeline only ever writes this block for a day with no exchange
+       price, so there is nothing to choose between here: a real ladder and an
+       anticipated one are never both present, which is what "usurped as soon
+       as live exchange prices are readable" means in practice. It is carried
+       under its own name so a caller cannot draw it as a price by accident,
+       and `p` is a probability from the desk, not cents from the exchange. */
+    const an = ((d.anticipated || {})[day]) || null;
+    return { live: true, asof: d.asof, stale: d.stale, source: d.source, day,
+             symbol: ((d.symbols || {}).wind || {}).symbol || null, market: (d.symbols || {}).wind || null,
+             listed: rows.length > 0, rows,
+             anticipated: rows.length ? null : (an && an.rows && an.rows.length ? an : null),
+             decidesOnlyAtTheEnd: true,
+             lastTrade: '11:59 PM local on ' + day,
+             resolves: "when the station's first wind gust observation for the next day is published" };
   }
 
   // the quote history of one strike through the day: live from the
@@ -339,6 +478,6 @@ window.WXM = (() => {
   // contract nobody has bid on at all
   const emptyBook = r => !!(r && r.mid != null && !realMid(r));
 
-  return { realMid, emptyBook, mode, on, live, load, loadSummary, loadGroup, implied, ladder, pricePath, climateProducts, hurricaneMarkets, label,
+  return { realMid, emptyBook, mode, on, live, load, loadSummary, loadGroup, summaryLoad, implied, impliedWind, anticipatedWind, ladder, hourly, windLadder, pricePath, climateProducts, hurricaneMarkets, label,
            payout, payoutText, feeCents, contractUrl, linkTo, termsUrl, termsLink, get LABEL() { return label(); }, PLACEHOLDER };
 })();

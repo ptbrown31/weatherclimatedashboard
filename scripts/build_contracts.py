@@ -52,6 +52,7 @@ TERMS_RULES = [
     (r"^GS[A-Z]{3}$", "GS"),
     (r"^AW[A-Z]{3}$", "AW"),
     (r"^MG[A-Z]{3}$", "MG"),
+    (r"^HR[US][A-Z]{3}$", "HR"),
     (r"^HO[A-Z]{3}$", "HO"),
     (r"^TA[A-Z]{3}$", "TA"),
     (r"^A\d[A-Z]{3}$", "A"),
@@ -76,7 +77,12 @@ def terms_url(pid):
 
 CATEGORY_PAGE = {
     "daily-temperatures": "index.html",
-    "tropical-cyclones": "hurricane.html",
+    "hourly-temperatures": "hourly-temperature-markets.html",
+    "wind": "wind-markets.html",
+    # the cyclone area opens on the two basin maps, and the full basin view is
+    # one click further in, because the contracts divide by ocean before
+    # anything else about them matters
+    "tropical-cyclones": "tropical-cyclone-markets.html",
     "climate-change": "climate.html",
     "agriculture": "agriculture.html",
     "weather": "weather.html",
@@ -85,7 +91,8 @@ CATEGORY_PAGE = {
 }
 ORDER_L1 = ["Climate & Weather", "Energy"]
 ORDER_L2 = {
-    "Climate & Weather": ["Daily Temperatures", "Tropical Cyclones", "Climate Change", "Weather", "Agriculture"],
+    "Climate & Weather": ["Daily Temperatures", "Hourly Temperatures", "Tropical Cyclones", "Climate Change",
+                          "Weather", "Wind", "Agriculture"],
     "Energy": ["Fossil Fuels", "Electricity & Renewables"],
 }
 
@@ -112,6 +119,12 @@ def main() -> int:
             # its site as well as this one
             "was": " / ".join(x for x in ((r.get("category_l2") or "").strip(),
                                           (r.get("category_l3") or "").strip()) if x),
+            # the place the contract is written against, carried as its own
+            # field because it is the join key between a product and a station.
+            # The alternative, deriving the exchange's three-letter code from
+            # the station's ICAO, is wrong at Vancouver and Paris and unknown
+            # at Dubai, and this column already records what the code is.
+            "city": (r.get("category_l3") or "").strip(),
             "terms": terms_url(pid),
         })
     products.sort(key=lambda p: (ORDER_L1.index(p["l1"]) if p["l1"] in ORDER_L1 else 9,

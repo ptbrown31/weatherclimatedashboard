@@ -78,9 +78,17 @@ class BulletinCycles(unittest.TestCase):
         # hardcoded on purpose: these are the counts a healthy pass must reach,
         # so a roster change has to be a deliberate edit here rather than a
         # silent drop in coverage
-        self.assertEqual(archive.expected_coverage("nbh"), 28)
-        self.assertEqual(archive.expected_coverage("lamp"), 25)
-        self.assertEqual(archive.expected_coverage("mav"), 25)
+        # the US stations plus the three Canadian ones the blend also covers;
+        # 28 before the three New England wind stations joined on 24 September,
+        # 31 before the six New Jersey and Delaware shore stations joined on
+        # 25 September. Those six carry no contract, so they move the forecast
+        # coverage counts and none of the market ones
+        self.assertEqual(archive.expected_coverage("nbh"), 40)
+        # LAMP and MAV are the US stations only. All six shore stations were
+        # confirmed present in a live NBH, LAMP and MAV bulletin on 25
+        # September before they were added, so these counts stay reachable
+        self.assertEqual(archive.expected_coverage("lamp"), 37)
+        self.assertEqual(archive.expected_coverage("mav"), 37)
 
     def test_block_ok(self):
         good = (" KLAX   NBM V5.0 NBH GUIDANCE    8/21/2026  2200 UTC\n"

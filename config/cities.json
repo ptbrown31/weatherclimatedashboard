@@ -13,6 +13,34 @@
   "onConus": true
  },
  {
+  "station": "KACK",
+  "city": "Nantucket",
+  "lat": 41.2541,
+  "lon": -70.0589,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 910.6,
+  "py": 180.9,
+  "wx": 293.2,
+  "wy": 130.0,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
+  "station": "KACY",
+  "city": "Atlantic City",
+  "lat": 39.452,
+  "lon": -74.567,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 847.8,
+  "py": 238.2,
+  "wx": 281.2,
+  "wy": 134.8,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
   "station": "KAUS",
   "city": "Austin",
   "lat": 30.183,
@@ -37,6 +65,20 @@
   "wx": 200.9,
   "wy": 133.7,
   "onConus": true
+ },
+ {
+  "station": "KBLM",
+  "city": "Belmar",
+  "lat": 40.1833,
+  "lon": -74.1333,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 851.3,
+  "py": 220.7,
+  "wx": 282.3,
+  "wy": 132.8,
+  "onConus": true,
+  "windOnly": true
  },
  {
   "station": "KBNA",
@@ -104,6 +146,20 @@
   "onConus": true
  },
  {
+  "station": "KDOV",
+  "city": "Dover DE",
+  "lat": 39.1333,
+  "lon": -75.4667,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 834.6,
+  "py": 248.4,
+  "wx": 278.8,
+  "wy": 135.6,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
   "station": "KDTW",
   "city": "Detroit",
   "lat": 42.2314,
@@ -117,6 +173,34 @@
   "onConus": true
  },
  {
+  "station": "KGED",
+  "city": "Georgetown DE",
+  "lat": 38.6897,
+  "lon": -75.3625,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 838.4,
+  "py": 257.6,
+  "wx": 279.0,
+  "wy": 136.8,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
+  "station": "KGON",
+  "city": "New London",
+  "lat": 41.3275,
+  "lon": -72.0494,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 878.7,
+  "py": 187.8,
+  "wx": 287.9,
+  "wy": 129.8,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
   "station": "KHOU",
   "city": "Houston",
   "lat": 29.6375,
@@ -128,6 +212,34 @@
   "wx": 225.9,
   "wy": 161.0,
   "onConus": true
+ },
+ {
+  "station": "KHVN",
+  "city": "New Haven",
+  "lat": 41.2639,
+  "lon": -72.8872,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 865.7,
+  "py": 192.5,
+  "wx": 285.6,
+  "wy": 130.0,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
+  "station": "KISP",
+  "city": "Long Island",
+  "lat": 40.7939,
+  "lon": -73.1017,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 864.7,
+  "py": 203.5,
+  "wx": 285.1,
+  "wy": 131.2,
+  "onConus": true,
+  "windOnly": true
  },
  {
   "station": "KJAX",
@@ -208,6 +320,34 @@
   "onConus": true
  },
  {
+  "station": "KMJX",
+  "city": "Toms River",
+  "lat": 39.927,
+  "lon": -74.292,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 850.0,
+  "py": 226.8,
+  "wx": 281.9,
+  "wy": 133.5,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
+  "station": "KMVY",
+  "city": "Martha's Vineyard",
+  "lat": 41.393,
+  "lon": -70.6159,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 901.0,
+  "py": 180.4,
+  "wx": 291.7,
+  "wy": 129.6,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
   "station": "KMSP",
   "city": "Minneapolis",
   "lat": 44.8831,
@@ -260,6 +400,20 @@
   "onConus": true
  },
  {
+  "station": "KPVD",
+  "city": "Providence",
+  "lat": 41.7225,
+  "lon": -71.4325,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 886.2,
+  "py": 176.8,
+  "wx": 289.5,
+  "wy": 128.7,
+  "onConus": true,
+  "windOnly": true
+ },
+ {
   "station": "KPHX",
   "city": "Phoenix",
   "lat": 33.4278,
@@ -310,6 +464,20 @@
   "wx": 153.7,
   "wy": 139.7,
   "onConus": true
+ },
+ {
+  "station": "KWWD",
+  "city": "Wildwood",
+  "lat": 39.0167,
+  "lon": -74.9167,
+  "tz": "America/New_York",
+  "unit": "F",
+  "px": 844.2,
+  "py": 248.9,
+  "wx": 280.2,
+  "wy": 136.0,
+  "onConus": true,
+  "windOnly": true
  },
  {
   "station": "PHNL",

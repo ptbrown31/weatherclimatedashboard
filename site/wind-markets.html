@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wind prediction markets at ForecastEx</title>
+<meta name="description" content="Peak wind contracts at ForecastEx, settling on the larger of the sustained wind and the gust.">
+<link rel="stylesheet" href="css/site.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+<style>.prod{margin:0 0 20px}</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Wind markets</h1>
+<p class="sub">Each contract pays one dollar if the station&rsquo;s strongest wind for the day is above its threshold. The map carries the wind each station’s ladder is centred on for the day selected: the strike where the exchange’s Yes price crosses fifty cents. A station with no board open yet carries an estimate instead, drawn as an outlined dot, which gives way to the exchange’s prices the moment the contract lists.</p>
+<div class="bar"><span id="pageStatus"></span></div>
+<div id="varmap" class="card"></div>
+<div class="secttl" style="margin-top:22px">EVERY LISTED STATION</div>
+<div id="board"></div>
+
+<div class="prose" style="margin-top:22px">
+<h2>Contract Details</h2>
+<ul>
+<li>The contract settles on the single largest value across the sustained wind and gust columns for the
+station and date, in whole miles per hour, strictly above the threshold.</li>
+<li>The peak wind remark a report can carry is not in the settlement table and does not settle the
+contract.</li>
+<li>Trading runs to 11:59 PM local on the contract date. The contract is not subject to early resolution, so
+a threshold the day has already cleared stays open until then.</li>
+<li>Resolution comes when the station&rsquo;s first gust observation for the next day is published.</li>
+<li>Settlement reads Weather Underground&rsquo;s Daily Observations table for the station and date.</li>
+<li>Readings here come from the aviation weather feed, the same station reports read through a different
+publisher. Stations report whole knots, so the page converts at 1.15078 miles per hour to the knot, rounds
+half up, and shows the knots beside it.</li>
+<li>Average wind speed contracts settle on the day&rsquo;s average and are listed separately.</li>
+</ul>
+</div>
+
+<p class="cap" id="foot"></p>
+</div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/market.js"></script>
+<script src="js/varmap.js"></script>
+<script src="js/contracts.js"></script>
+<script src="js/wind.js"></script>
+<script>WXWind.init();</script>
+</body>
+</html>

@@ -9,9 +9,10 @@ import os
 import sys
 import tempfile
 import unittest
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from pipeline import exchange as ex, market, reask, storage, gov_weather as gw   # noqa: E402
+from pipeline import desk, exchange as ex, market, reask, storage, gov_weather as gw   # noqa: E402
 
 U = dt.timezone.utc
 NOW = dt.datetime(2026, 8, 23, 10, 40, tzinfo=U)
@@ -51,6 +52,118 @@ class Symbols(unittest.TestCase):
         hur = ex.category_markets(TREE, "major weather events")
         self.assertEqual(sorted(m["symbol"] for m in hur), ["HCAT4", "HLF"])
         self.assertEqual(ex.category_markets(TREE, "nothing"), [])
+
+
+    def test_extra_families_come_from_the_registry(self):
+        """The hourly and wind symbols exist only where the registry has them,
+        so a station never derives one the exchange has never listed."""
+        self.assertEqual(ex.symbols_for(SFO), {"high": "UHSFO", "low": "ULSFO"})
+        reg = {"UHSFO", "ULSFO", "HRUSFO", "MGSFO"}
+        self.assertEqual(ex.symbols_for(SFO, reg),
+                         {"high": "UHSFO", "low": "ULSFO", "hourly": "HRUSFO", "wind": "MGSFO"})
+        self.assertEqual(ex.symbols_for(SFO, {"UHSFO", "MGSFO"}), {"high": "UHSFO", "low": "ULSFO", "wind": "MGSFO"})
+        cel = dict(SFO, unit="C", station="CYYZ")
+        self.assertEqual(ex.symbols_for(cel, {"SHYYZ", "HRSYYZ"}), {"high": "SHYYZ", "hourly": "HRSYYZ"})
+
+
+class RegistrySymbols(unittest.TestCase):
+    """With the registry rows in hand the symbol is looked up rather than
+    derived, which is what takes the exchange's three-letter exceptions out of
+    the answer. The derivation stays behind it for the stations the registry
+    does not cover."""
+
+    ROWS = [{"id": "UHLGA", "city": "New York City"}, {"id": "ULLGA", "city": "New York City"},
+            {"id": "DHNYC", "city": "New York City"}, {"id": "HRULGA", "city": "New York City"},
+            {"id": "SHYHC", "city": "Vancouver"}, {"id": "DHYVR", "city": "Vancouver"},
+            {"id": "SHMBD", "city": "Dubai"}, {"id": "SHMDB", "city": "Dubai"},
+            {"id": "UHMSP", "city": "Minneapolis-Saint Paul"}, {"id": "ULMSP", "city": "Minneapolis-Saint Paul"}]
+    NYC = {"station": "KLGA", "city": "New York City", "unit": "F"}
+    VAN = {"station": "CYVR", "city": "Vancouver", "unit": "C"}
+    DXB = {"station": "OMDB", "city": "Dubai", "unit": "C"}
+    MSP = {"station": "KMSP", "city": "Minneapolis", "unit": "F"}
+
+    def test_the_registry_answers_before_the_icao_does(self):
+        reg = {r["id"] for r in self.ROWS}
+        self.assertEqual(ex.symbols_for(self.NYC, reg, self.ROWS),
+                         {"high": "UHLGA", "low": "ULLGA", "hourly": "HRULGA"})
+
+    def test_a_city_whose_code_is_not_its_icao(self):
+        # Vancouver lists as YHC, not YVR: the city column knows and the ICAO does not
+        self.assertEqual(ex.symbols_for(self.VAN, set(), self.ROWS), {"high": "SHYHC"})
+
+    def test_a_city_the_registry_names_differently_joins_on_the_code(self):
+        # the roster says Minneapolis and the registry says Minneapolis-Saint Paul,
+        # so only the three-letter code connects them
+        self.assertEqual(ex.symbols_for(self.MSP, set(), self.ROWS),
+                         {"high": "UHMSP", "low": "ULMSP"})
+
+    def test_two_candidates_are_settled_by_what_the_tree_lists(self):
+        # Dubai is in the registry twice because nobody knows which code the
+        # exchange will use; whichever it opens is the one asked for
+        self.assertEqual(ex.symbols_for(self.DXB, set(), self.ROWS)["high"], "SHMBD")
+        self.assertEqual(ex.symbols_for(self.DXB, set(), self.ROWS, {"SHMDB"})["high"], "SHMDB")
+        self.assertEqual(ex.symbols_for(self.DXB, set(), self.ROWS, {"SHMBD"})["high"], "SHMBD")
+
+    def test_the_dormant_series_never_wins_over_the_listed_one(self):
+        # DHNYC names the same product at the same place and has never opened
+        self.assertEqual(ex.symbols_for(self.NYC, set(), self.ROWS, {"UHLGA", "DHNYC"})["high"], "UHLGA")
+
+    def test_a_registry_gap_falls_back_on_the_derivation(self):
+        # Honolulu's low is missing from the registry; the daily pair is not
+        # dropped over it, while hourly and wind stay registry-only
+        rows = [{"id": "UHHNL", "city": "Honolulu"}]
+        got = ex.symbols_for({"station": "PHNL", "city": "Honolulu", "unit": "F"}, set(), rows)
+        self.assertEqual(got, {"high": "UHHNL", "low": "ULHNL"})
+
+    def test_a_station_the_registry_does_not_cover_still_resolves(self):
+        got = ex.symbols_for({"station": "VHHH", "city": "Hong Kong", "unit": "C"}, set(), self.ROWS)
+        self.assertEqual(got, {"high": "SHHHH"})
+
+
+class HourlyContracts(unittest.TestCase):
+    """An hourly market lists every hour of a day under one date-only specifier
+    with the strikes repeating, so the hour comes from each contract's rules."""
+    NY = ZoneInfo("America/New_York")
+
+    def test_hour_from_the_epoch_then_the_written_period(self):
+        # 1790186400 is 2026-09-23 18:00Z, which is 2 PM in New York
+        self.assertEqual(ex.hour_of({"last_trade_time": 1790186400}, self.NY),
+                         ("2026-09-23", 14, "last_trade_time"))
+        self.assertEqual(ex.hour_of({"release_time": 1790186400}, self.NY),
+                         ("2026-09-23", 14, "release_time"))
+        self.assertEqual(ex.hour_of({"measured_period": "Sep23'26 2:00 PM ET",
+                                     "exchange_timezone": "America/New_York"}, self.NY),
+                         ("2026-09-23", 14, "measured_period"))
+        # the same instant seen from another station's zone
+        self.assertEqual(ex.hour_of({"last_trade_time": 1790186400}, ZoneInfo("America/Los_Angeles")),
+                         ("2026-09-23", 11, "last_trade_time"))
+        self.assertEqual(ex.hour_of({}, self.NY), (None, None, None))
+        self.assertEqual(ex.hour_of({"measured_period": "who knows"}, self.NY), (None, None, None))
+
+    def test_grouping_splits_repeated_strikes_across_hours(self):
+        mkt = {"contracts": [
+            {"conid": 1, "side": "Y", "strike": 63.0, "strike_label": "Above 63", "time_specifier": "2026.9.23"},
+            {"conid": 2, "side": "N", "strike": 63.0, "strike_label": "Above 63", "time_specifier": "2026.9.23"},
+            {"conid": 3, "side": "Y", "strike": 63.0, "strike_label": "Above 63", "time_specifier": "2026.9.23"},
+            {"conid": 4, "side": "Y", "strike": 64.0, "strike_label": "Above 64", "time_specifier": "2026.9.23"},
+            {"conid": 5, "side": "Y", "strike": 56.0, "strike_label": "Above 56", "time_specifier": "2026.9.24"},
+            {"conid": 6, "side": "Y", "strike": 57.0, "strike_label": "Above 57", "time_specifier": "2026.9.23"},
+        ]}
+        placed = {1: ("2026-09-23", 14, "last_trade_time"), 2: ("2026-09-23", 14, "last_trade_time"),
+                  3: ("2026-09-23", 15, "last_trade_time"), 4: ("2026-09-23", 14, "last_trade_time"),
+                  5: ("2026-09-24", 10, "last_trade_time")}
+        g, unplaced = ex.group_hourly_contracts(mkt, lambda c: placed.get(c, (None, None, None)),
+                                                {"2026-09-23", "2026-09-24"})
+        self.assertEqual(sorted(g), ["2026-09-23", "2026-09-24"])
+        self.assertEqual(sorted(g["2026-09-23"]), [14, 15])
+        self.assertEqual(sorted(g["2026-09-23"][14]), [63.0, 64.0])
+        self.assertEqual(g["2026-09-23"][14][63.0]["Y"], 1)
+        self.assertEqual(g["2026-09-23"][14][63.0]["N"], 2)          # both sides on the same strike
+        self.assertEqual(g["2026-09-23"][15][63.0]["Y"], 3)          # the repeat is another hour
+        self.assertEqual(g["2026-09-23"][14][63.0]["how"], "last_trade_time")
+        self.assertEqual(unplaced, 1)                                # conid 6 had no rules
+        g2, _ = ex.group_hourly_contracts(mkt, lambda c: placed.get(c, (None, None, None)), {"2026-09-24"})
+        self.assertEqual(sorted(g2), ["2026-09-24"])
 
 
 class Contracts(unittest.TestCase):
@@ -519,6 +632,44 @@ class StormWindContracts(unittest.TestCase):
         self.assertEqual(got["LHLERG"]["product"], "LHL")
         self.assertEqual(ex.storm_wind_markets(self.TREE, []), [])
 
+    def test_the_storms_own_letters_are_not_the_first_two_of_its_name(self):
+        """Nolo's instruments went up as LNL and LHLNL, so a rule built on the
+        first two letters of the name looks for LNO and finds nothing on the
+        day the board opens. The product name carries the storm's name, which
+        reads through whatever two letters the exchange chose."""
+        tree = {"categories": {"g": {"name": "Live Storm", "parent_id": None, "markets": [
+            {"symbol": "LNLHL", "name": "Hurricane Nolo Peak Wind at Hilo", "conid": 1},
+            {"symbol": "LHLNL", "name": "Hurricane Nolo Peak Wind Location", "conid": 2}]}}}
+        got = {m["symbol"]: m for m in ex.storm_wind_markets(tree, ["Nolo"])}
+        self.assertEqual(sorted(got), ["LHLNL", "LNLHL"])
+        self.assertEqual(got["LNLHL"]["product"], "L")
+        self.assertEqual(got["LNLHL"]["location"], "HL")
+        self.assertEqual(got["LHLNL"]["product"], "LHL")
+        self.assertEqual(got["LNLHL"]["stormName"], "Nolo")
+
+    def test_an_unrelated_product_of_the_same_shape_is_not_a_storm_board(self):
+        """Both of these are live on the exchange today and both fit the
+        ladder's shape exactly. A storm named Egon or Ofelia would have taken
+        one as its own board and the page would have shown a legalization
+        market as a wind contract."""
+        tree = {"categories": {"g": {"name": "Other", "parent_id": None, "markets": [
+            {"symbol": "LEGCA", "name": "California Legalization Decision", "conid": 1},
+            {"symbol": "LOFUS", "name": "US Total Layoffs", "conid": 2}]}}}
+        self.assertEqual(ex.storm_wind_markets(tree, ["Egon", "Ofelia"]), [])
+
+    def test_a_nameless_ladder_must_still_end_in_a_real_place(self):
+        """The nameless path is the one with nothing to read, so it carries the
+        strictest shape test. The desk reads a product without a name where this
+        site reads one with, so the field is not one to depend on."""
+        tree = {"categories": {"g": {"name": "Other", "parent_id": None, "markets": [
+            {"symbol": "LOFUS", "conid": 1},
+            {"symbol": "LOFBR", "conid": 2}]}}}
+        got = [m["symbol"] for m in ex.storm_wind_markets(tree, ["Ofelia"], {"BR", "CA"})]
+        self.assertEqual(got, ["LOFBR"])          # US is not a reference location; BR is
+        # with no registry to consult the check is skipped rather than failing everything
+        self.assertEqual(sorted(m["symbol"] for m in ex.storm_wind_markets(tree, ["Ofelia"])),
+                         ["LOFBR", "LOFUS"])
+
     def test_storm_code_is_the_first_two_letters(self):
         self.assertEqual(ex.storm_code("Erin"), "ER")
         self.assertEqual(ex.storm_code("van der Meer"), "VA")
@@ -954,3 +1105,130 @@ class LhlSeries(unittest.TestCase):
         market._lhl_series(st, t0 + dt.timedelta(days=90), self.ITEMS)
         pts = json.loads(st.d["snapshots/lhl/LHLERG.json"])["points"]
         self.assertEqual([q["t"][:10] for q in pts], ["2026-11-30"])
+
+
+class NamelessNodes(unittest.TestCase):
+    """A symbol node with no name is what would wake the storm matcher's
+    nameless branch, which is dead against the API as it stands. The quote job
+    counts them every pass so the day that changes is a day in the log."""
+
+    def test_the_pass_counts_nodes_with_no_name(self):
+        tree = {"categories": {"g": {"name": "Anything", "parent_id": None, "markets": [
+            {"symbol": "AAA", "name": "A Thing", "conid": 1},
+            {"symbol": "BBB", "name": "  ", "conid": 2},
+            {"symbol": "CCC", "conid": 3}]}}}
+        by = ex.markets_by_symbol(tree)
+        unnamed = sorted(s for s, v in by.items() if not str(v.get("name") or "").strip())
+        self.assertEqual(unnamed, ["BBB", "CCC"])
+
+
+class DeskWindFeed(unittest.TestCase):
+    """The desk's anticipated wind ladders: fetched, never derived here.
+
+    The owner's decision of 25 September is that where the exchange has not
+    opened a wind contract, the desk's own figure may stand in, drawn so it
+    cannot be read as a price and dropped the moment a real price exists.
+    """
+
+    FEED = {"asof": "2026-09-25T09:00:00Z", "method": "the desk", "stations": {
+        "kacy": {"2026-09-27": [{"strike": 49, "p": 0.18}, {"strike": 35, "p": 0.62}]}}}
+
+    def test_it_reads_a_ladder_and_sorts_it(self):
+        out = desk.wind_ladders(json.dumps(self.FEED).encode())
+        self.assertEqual(list(out), [("KACY", "2026-09-27")])          # station upper-cased
+        self.assertEqual([r["strike"] for r in out[("KACY", "2026-09-27")]["rows"]], [35.0, 49.0])
+        self.assertEqual(out[("KACY", "2026-09-27")]["method"], "the desk")
+
+    def test_the_desks_own_label_never_reaches_a_published_snapshot(self):
+        """`method` is the desk's name for its own system. The snapshots are
+        served publicly, so it is parsed and then left behind."""
+        out = market._anticipated("KACY", {"day": "D"}, {
+            ("KACY", "D"): {"rows": [{"strike": 30.0, "p": 0.5}], "asof": "A", "method": "internal-name"}})
+        self.assertNotIn("method", out["D"])
+        self.assertNotIn("internal-name", json.dumps(out))
+
+    def test_a_row_that_is_not_a_number_or_not_a_probability_is_dropped(self):
+        feed = {"stations": {"KACY": {"D": [{"strike": "x", "p": 0.5}, {"strike": 40, "p": 1.7},
+                                            {"strike": 30, "p": -0.1}, {"strike": 20, "p": 0.4}]}}}
+        rows = desk.wind_ladders(json.dumps(feed).encode())[("KACY", "D")]["rows"]
+        self.assertEqual([r["strike"] for r in rows], [20.0])
+
+    def test_a_station_left_with_no_rows_is_dropped_entirely(self):
+        """Half a ladder drawn as if it were whole is worse than no ladder."""
+        feed = {"stations": {"KACY": {"D": [{"strike": "x", "p": 2}]}, "KBLM": {"D": []}}}
+        self.assertEqual(desk.wind_ladders(json.dumps(feed).encode()), {})
+
+    def test_an_unreadable_feed_is_an_absence_not_a_failure(self):
+        for raw in (None, b"", b"not json", b"[]", b'{"stations": 7}'):
+            self.assertEqual(desk.wind_ladders(raw), {})
+
+    def test_publishing_is_a_ruling_and_fails_closed(self):
+        """A file appearing at the key must not be enough. What this lane puts
+        on a public page is a fair value on contracts the desk holds strikes in
+        and has not quoted, so it publishes only while the owner's ruling is
+        explicitly in force."""
+        for v in (True, "true", "on", "1"):
+            self.assertTrue(market._publishing({"mg_publish": v}), repr(v))
+        for v in (False, "false", "", None, "maybe", 0):
+            self.assertFalse(market._publishing({"mg_publish": v}), repr(v))
+        # a config predating the ruling, or one that loses the key, stays off
+        self.assertFalse(market._publishing({}))
+        self.assertFalse(market._publishing({"mg_key": "desk/mg.json"}))
+        self.assertFalse(market._publishing(None))
+
+    def test_the_feed_must_be_https_and_is_off_without_a_url(self):
+        self.assertIsNone(desk.fetch(""))
+        with self.assertRaises(ValueError):
+            desk.fetch("http://example.invalid/mg.json")
+
+
+class AnticipatedLadders(unittest.TestCase):
+    MK = {"day": "2026-09-25", "tomorrow": "2026-09-26"}
+    DESK = {("KACY", "2026-09-25"): {"rows": [{"strike": 25.0, "p": 0.8}, {"strike": 35.0, "p": 0.62},
+                                              {"strike": 49.0, "p": 0.18}], "asof": "A", "method": "the desk"},
+            ("KACY", "2026-09-26"): {"rows": [{"strike": 30.0, "p": 0.55}, {"strike": 45.0, "p": 0.2}],
+                                     "asof": "A", "method": "the desk"}}
+
+    def test_a_station_with_no_board_carries_the_desk_ladder_for_both_days(self):
+        out = market._anticipated("KACY", self.MK, self.DESK)
+        self.assertEqual(sorted(out), ["2026-09-25", "2026-09-26"])
+        self.assertEqual(out["2026-09-25"]["source"], "desk")
+        # the centre is read off the desk's own curve the same way the exchange's is
+        self.assertAlmostEqual(out["2026-09-25"]["implied"]["value"], 38.82, places=2)
+
+    def test_a_quoted_day_drops_the_desk_ladder_and_leaves_the_other(self):
+        """This is what 'usurped as soon as live exchange prices are readable'
+        means at this layer: only one of the two is ever present, so nothing
+        downstream has to choose."""
+        days = {"2026-09-25": {"wind": [{"strike": 30, "mid": 0.5}]}}
+        self.assertEqual(sorted(market._anticipated("KACY", self.MK, self.DESK, days)), ["2026-09-26"])
+
+    def test_a_listed_board_with_no_bids_still_shows_the_desk_ladder(self):
+        """A board with no bids is not a price. An empty book is the state the
+        stand-in exists for, so it must not suppress it."""
+        days = {"2026-09-25": {"wind": [{"strike": 30, "mid": None}]}}
+        self.assertIn("2026-09-25", market._anticipated("KACY", self.MK, self.DESK, days))
+
+    def test_the_first_unopened_day_is_covered_too(self):
+        """The exchange normally opens today and tomorrow, so the day after is
+        where an estimate is worth drawing and it has to be in the markers."""
+        import datetime as _dt
+        from pipeline.snapshots import day_markers
+        mk = day_markers({"station": "KACK", "tz": "America/New_York", "lat": 41.25, "lon": -70.06},
+                         _dt.datetime(2026, 9, 25, 18, 0, tzinfo=_dt.timezone.utc))
+        self.assertEqual((mk["day"], mk["tomorrow"], mk["dayAfter"]),
+                         ("2026-09-25", "2026-09-26", "2026-09-27"))
+        out = market._anticipated("KACY", mk, {("KACY", "2026-09-27"): {
+            "rows": [{"strike": 30.0, "p": 0.5}], "asof": "A"}})
+        self.assertEqual(sorted(out), ["2026-09-27"])
+
+    def test_no_feed_means_no_block(self):
+        self.assertEqual(market._anticipated("KACY", self.MK, {}), {})
+
+    def test_the_wind_side_reads_like_a_high_market(self):
+        """MG pays on the day's strongest wind being ABOVE a strike, so P(Yes)
+        falls as the strike rises, exactly as a daily high market's does. The
+        summary's implied wind depends on that, so it is pinned here."""
+        rows = [{"strike": 16, "mid": 0.91}, {"strike": 52, "mid": 0.53}, {"strike": 63, "mid": 0.08}]
+        self.assertEqual(ex.implied_median(rows, "wind"), ex.implied_median(rows, "high"))
+        self.assertIsNotNone(ex.implied_median(rows, "wind")["value"])

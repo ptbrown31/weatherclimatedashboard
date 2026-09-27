@@ -40,6 +40,28 @@ LAMP_BULLETIN = """\
  TMP 108107105103101 99 97 95 93 92 91 90 89 88 87 90 95 99102105107108109109108
 """
 
+# the gust rows, as each family labels them: the blend prints GST with its
+# spread GSD beside it, LAMP prints WGS and writes NG for no gust. Cut from the
+# live 23 September 2026 cycles.
+GUST_NBH = """\
+ KBOS   NBM V5.0 NBH GUIDANCE    9/23/2026  1200 UTC
+ UTC  13 14 15 16
+ TMP  60 61 62 63
+ WDR   5  5  5  5
+ WSP  18 18 17 17
+ GST  27 27 26 25
+ GSD   4  4  4  3
+"""
+
+GUST_LAMP = """\
+ KATL   GFS LAMP GUIDANCE   9/23/2026  2030 UTC
+ UTC  21 22 23 00
+ TMP  81 78 75 73
+ WDR  09 09 08 08
+ WSP  10 11 12 13
+ WGS  NG NG 18 NG
+"""
+
 WINTER_BLOCK = """\
  KMSP   NBM V5.0 NBH GUIDANCE    1/15/2026  2200 UTC
  UTC  23 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23
@@ -98,6 +120,24 @@ class Parsers(unittest.TestCase):
         self.assertEqual(set(blocks), {"KLAX", "KSFO"})
         self.assertIn(" N/X", blocks["KLAX"])
         self.assertNotIn("KSFO", blocks["KLAX"])
+
+    def test_gust_rows_by_family(self):
+        """The blend's GST and its spread, and LAMP's WGS with NG for no gust."""
+        blk = gw.station_blocks(GUST_NBH, ["KBOS"], "NBH GUIDANCE")["KBOS"]
+        rows = gw.parse_wx_block(blk, "nbh")["rows"]
+        self.assertEqual([r["wspd"] for r in rows], [18.0, 18.0, 17.0, 17.0])
+        self.assertEqual([r["gust"] for r in rows], [27.0, 27.0, 26.0, 25.0])
+        self.assertEqual([r["gust_sd"] for r in rows], [4.0, 4.0, 4.0, 3.0])
+        blk = gw.station_blocks(GUST_LAMP, ["KATL"], "LAMP GUIDANCE")["KATL"]
+        rows = gw.parse_wx_block(blk, "lamp")["rows"]
+        self.assertEqual([r["gust"] for r in rows], [None, None, 18.0, None])
+        self.assertIsNone(rows[0]["gust_sd"])
+
+    def test_mav_has_no_gust_row(self):
+        blk = gw.station_blocks(MAV_BULLETIN, ["KLAX"], "GFS MOS GUIDANCE")["KLAX"]
+        rows = gw.parse_wx_block(blk, "mav")["rows"]
+        self.assertTrue(rows)
+        self.assertTrue(all(r["gust"] is None for r in rows))
 
     def test_body_temp_group_anchored(self):
         self.assertEqual(gw._body_temp_c("METAR KLAX 212153Z 25011KT 10SM FEW025 26/17 A2993 RMK AO2"), 26)
@@ -235,3 +275,90 @@ class GeometryFreshness(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnregisteredWeather(unittest.TestCase):
+    """The site's own listing alarm. The registry is hand-kept, so the exchange
+    can open a weather contract this site has no row for, and the catalogue pass
+    is the only place that sees both lists at once."""
+
+    def setUp(self):
+        from pipeline import catalogue
+        self.fn = catalogue.unregistered_weather
+
+    def test_it_names_a_weather_product_the_registry_lacks(self):
+        listed = {"MGACK": {"name": "Nantucket Max Wind Speed"},
+                  "UHATL": {"name": "Atlanta Daily Temperature High"}}
+        self.assertEqual(self.fn(listed, {"UHATL"}), ["MGACK"])
+
+    def test_the_ticker_shape_is_not_the_test(self):
+        # both of these match a weather family's pattern and neither is weather:
+        # DASHO matches [USD][HLA][A-Z]{3} and SHNOR matches the SH series
+        listed = {"DASHO": {"name": "DoorDash Orders"},
+                  "SHNOR": {"name": "Hormuz Return to Normal"}}
+        self.assertEqual(self.fn(listed, set()), [])
+
+    def test_nothing_to_say_when_the_registry_covers_the_board(self):
+        listed = {"UHATL": {"name": "Atlanta Daily Temperature High"},
+                  "HRULGA": {"name": "New York City Hourly Temperature"}}
+        self.assertEqual(self.fn(listed, {"UHATL", "HRULGA"}), [])
+
+    def test_every_family_the_site_draws_is_covered(self):
+        listed = {"UHXXX": {"name": "Nowhere Daily Temperature High"},
+                  "HRUXXX": {"name": "Nowhere Hourly Temperature"},
+                  "MGXXX": {"name": "Nowhere Max Wind Speed"},
+                  "AWXXX": {"name": "Nowhere Average Wind Speed"}}
+        self.assertEqual(self.fn(listed, set()), ["AWXXX", "HRUXXX", "MGXXX", "UHXXX"])
+
+
+class DeskPoolFigures(unittest.TestCase):
+    """The desk's pool figure, delivered rather than derived. The site computes
+    none of its own; this reads what the desk publishes and hands it to the
+    page, which shows it only while the exchange has no book."""
+
+    def fn(self, body):
+        from pipeline import reask
+        return reask.desk_pool_figures(body)
+
+    def test_the_feed_is_https_only_and_off_without_a_url(self):
+        from pipeline import reask
+        self.assertIsNone(reask.fetch_desk_lhl(""))
+        with self.assertRaises(ValueError):
+            reask.fetch_desk_lhl("http://example.invalid/lhl.json")
+
+    def test_a_storm_is_keyed_by_name_and_year(self):
+        body = json.dumps({"schema": 1, "asof": "2026-09-24T10:15:37Z", "storms": [
+            {"name": "Nolo", "year": 2026, "cycle": "2026092400", "method": "argmax",
+             "pwin": {"HL": 45.5, "KH": 27.7}}]}).encode()
+        got = self.fn(body)
+        self.assertEqual(sorted(got), [("nolo", 2026)])
+        self.assertEqual(got[("nolo", 2026)]["pwin"], {"HL": 45.5, "KH": 27.7})
+        self.assertEqual(got[("nolo", 2026)]["cycle"], "2026092400")
+        self.assertEqual(got[("nolo", 2026)]["asof"], "2026-09-24T10:15:37Z")
+
+    def test_location_ids_are_upper_cased_to_match_the_registry(self):
+        body = json.dumps({"storms": [{"name": "Nolo", "year": 2026, "pwin": {"hl": 45.5}}]}).encode()
+        self.assertEqual(self.fn(body)[("nolo", 2026)]["pwin"], {"HL": 45.5})
+
+    def test_one_bad_row_does_not_take_the_storm_with_it(self):
+        body = json.dumps({"storms": [{"name": "Nolo", "year": 2026,
+                                       "pwin": {"HL": 45.5, "KH": "n/a", "HN": True}}]}).encode()
+        self.assertEqual(self.fn(body)[("nolo", 2026)]["pwin"], {"HL": 45.5})
+
+    def test_a_storm_with_nothing_usable_is_absent(self):
+        body = json.dumps({"storms": [{"name": "Nolo", "year": 2026, "pwin": {}},
+                                      {"name": "", "year": 2026, "pwin": {"HL": 1.0}},
+                                      {"name": "Fay", "year": 2026, "pwin": {"BR": "x"}}]}).encode()
+        self.assertEqual(self.fn(body), {})
+
+    def test_the_desks_own_sentence_is_carried_not_written_here(self):
+        body = json.dumps({"storms": [{"name": "Nolo", "year": 2026, "pwin": {"HL": 52.6},
+                                       "method": "argmax, distance-weighted sub-60",
+                                       "note": "below 60 mph the vendor publishes nothing"}]}).encode()
+        got = self.fn(body)[("nolo", 2026)]
+        self.assertEqual(got["note"], "below 60 mph the vendor publishes nothing")
+        self.assertEqual(got["method"], "argmax, distance-weighted sub-60")
+
+    def test_no_file_and_a_broken_file_are_both_an_absence(self):
+        self.assertEqual(self.fn(None), {})
+        self.assertEqual(self.fn(b"{not json"), {})
