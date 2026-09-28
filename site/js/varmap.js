@@ -77,8 +77,15 @@ window.WXVarMap = (() => {
       title: () => 'Latest temperature reported',
       unit: '\u00b0',
       val: c => ((c.obsLatest || {}).tempF != null ? Math.round(c.obsLatest.tempF) : null),
-      note: c => ((c.obsLatest || {}).tempF == null ? 'no report'
-        : Math.round(c.obsLatest.tempF) + '\u00b0 at ' + WXC.clockFull(Date.parse(c.obsLatest.t), c.tz)),
+      // the reading is timed by the report it came from, which is older than
+      // the latest report whenever that report carried no temperature
+      note: c => {
+        const L = c.obsLatest || {};
+        if (L.tempF == null) return 'no temperature reported';
+        const ms = Date.parse(L.tempT || L.t), day = WXC.dateShort(ms, c.tz);
+        return Math.round(L.tempF) + '\u00b0 at '
+          + (day !== WXC.dateShort(Date.now(), c.tz) ? day + ' ' : '') + WXC.clockFull(ms, c.tz);
+      },
       lo: 40, hi: 95,
     },
   };

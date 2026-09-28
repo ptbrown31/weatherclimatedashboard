@@ -210,6 +210,30 @@ def day_markers(city: dict, now: dt.datetime) -> dict:
 
 
 # ================================================================ observations
+def _temp_c(ob: dict) -> Optional[float]:
+    """A report's temperature in C under TEMP_SOURCE, or None when it has none."""
+    if ob.get("temp") is None:
+        return None
+    return ob["temp"] if gw.TEMP_SOURCE == "remarks" else gw._body_temp_c(ob.get("rawOb", "") or "")
+
+
+def _elements(ob: dict, row: dict) -> dict:
+    """The upstream elements, as the report carries them, for the advanced
+    panels: dewpoint, wind, and the highest cloud-cover code of the report's
+    layers. wdir is None for calm and for VRB."""
+    if ob.get("dewp") is not None:
+        row["dewF"] = round(gw.c_to_f(ob["dewp"]), 1)
+    if isinstance(ob.get("wdir"), int):
+        row["wdir"] = ob["wdir"]
+    if ob.get("wspd") is not None:
+        row["wspd"] = ob["wspd"]
+    if ob.get("wgst") is not None:
+        row["wgst"] = ob["wgst"]
+    if ob.get("cover"):
+        row["cover"] = ob["cover"]
+    return row
+
+
 def decode_rows(raw_rows: list, tz) -> list:
     """Archive rows for one station -> chart rows, applying the two decode
     constants. `src` records whether tenths were available for the row."""
@@ -219,26 +243,33 @@ def decode_rows(raw_rows: list, tz) -> list:
             continue
         if not gw.INCLUDE_SPECI and ob.get("metarType") == "SPECI":
             continue
-        temp_c = ob["temp"] if gw.TEMP_SOURCE == "remarks" else gw._body_temp_c(ob.get("rawOb", "") or "")
+        temp_c = _temp_c(ob)
         if temp_c is None:
             continue
         t = dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc)
         row = {"t": _iso(t), "tempF": round(gw.c_to_f(temp_c), 1), "tempC": round(float(temp_c), 1),
                "type": ob.get("metarType"), "src": ob.get("temp_source")}
-        # the upstream elements, as the report carries them, for the advanced
-        # panels: dewpoint, wind, and the highest cloud-cover code of the
-        # report's layers. wdir is None for calm and for VRB
-        if ob.get("dewp") is not None:
-            row["dewF"] = round(gw.c_to_f(ob["dewp"]), 1)
-        if isinstance(ob.get("wdir"), int):
-            row["wdir"] = ob["wdir"]
-        if ob.get("wspd") is not None:
-            row["wspd"] = ob["wspd"]
-        if ob.get("wgst") is not None:
-            row["wgst"] = ob["wgst"]
-        if ob.get("cover"):
-            row["cover"] = ob["cover"]
-        out.append(row)
+        out.append(_elements(ob, row))
+    out.sort(key=lambda r: r["t"])
+    return out
+
+
+def decode_rows_no_temp(raw_rows: list) -> list:
+    """The reports decode_rows leaves out for want of a temperature, with the
+    elements they do carry. A station whose temperature sensor is out goes on
+    reporting its wind and sky, as KBLM did through most of 27 and 28 September
+    2026, and the panels for those elements read these rows beside the chart
+    rows. Between them the two lists hold every report once."""
+    out = []
+    for ob in raw_rows:
+        if ob.get("obsTime") is None:
+            continue
+        if not gw.INCLUDE_SPECI and ob.get("metarType") == "SPECI":
+            continue
+        if _temp_c(ob) is not None:
+            continue
+        t = dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc)
+        out.append(_elements(ob, {"t": _iso(t), "type": ob.get("metarType")}))
     out.sort(key=lambda r: r["t"])
     return out
 
@@ -487,15 +518,21 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
             "decode": {"TEMP_SOURCE": gw.TEMP_SOURCE, "INCLUDE_SPECI": gw.INCLUDE_SPECI},
             "source": "aviationweather.gov METAR (hourly reports; SPECI where counted)",
             "rows": rows,
+            "rowsNoTemp": decode_rows_no_temp(by_station.get(sid, [])),
             "today": day_extremes(rows, tz, mk["day"], c["unit"]),
             "yesterday": day_extremes(rows, tz, mk["yesterday"], c["unit"]),
             "wind": wind,
-            # the reading travels with the report, because a map of the latest
-            # temperature should not have to re-decode the raw METAR to find it
+            # the newest report, and the newest temperature with the time of the
+            # report it came from. A report can carry no temperature, so the two
+            # can be different reports, and a temperature shown against the
+            # newer report's time would read as current when it is not. The
+            # reading travels with the snapshot so a map of the latest
+            # temperature need not re-decode the raw METAR to find it
             "latest": ({"t": record_end, "raw": latest.get("rawOb", ""), "type": latest.get("metarType"),
-                        "src": latest.get("temp_source"),
+                        "src": (rows[-1]["src"] if rows else None),
                         "tempF": (rows[-1]["tempF"] if rows else None),
-                        "tempC": (rows[-1]["tempC"] if rows else None)} if latest else None),
+                        "tempC": (rows[-1]["tempC"] if rows else None),
+                        "tempT": (rows[-1]["t"] if rows else None)} if latest else None),
         }
         near = []
         for n in (nearby_cfg.get("stations") or {}).get(sid, []):

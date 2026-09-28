@@ -65,7 +65,7 @@ before the day began, and whether it is an official product value or an extreme 
 
 | Key | Cadence | Contents |
 | --- | --- | --- |
-| `snapshots/obs/{STATION}.json` | 10 min | last 72 h of reports, today's and yesterday's extremes (with report type and decode source), the latest raw report, `recordEnd`, `fetchOk`; `wind`, today's and yesterday's peak across the sustained and gust columns over every report of the local day (reports with no temperature included), and today's reports in `wind.today.rows` |
+| `snapshots/obs/{STATION}.json` | 10 min | last 72 h of reports, split into `rows` (those with a temperature) and `rowsNoTemp` (the rest, with their wind and sky), today's and yesterday's extremes (with report type and decode source), the latest raw report with the newest temperature and its report time (`latest.tempT`), `recordEnd`, `fetchOk`; `wind`, today's and yesterday's peak across the sustained and gust columns over every report of the local day (reports with no temperature included), and today's reports in `wind.today.rows` |
 | `snapshots/summary.json` | 10 min | every station: position, observed extremes so far (with `obsDay`), standing and as-issued forecast levels with flags (`nwsOfficialHighToday`, `{src}IssuedPreDay`, `{src}HighTodayFrom`), day markers, `alarms` |
 | `snapshots/manifest.json` | 10 min | as-of per data type (read from the files that hold the data), cadences, archive depth, alarms, unhealed observation gaps |
 | `snapshots/forecast/{STATION}.json` | 30 min | standing NWS (hourly + official day/night), NBM, LAMP, MAV; per source the as-issued pre-day trace and the level for the day picked per extreme (`levelCycleHigh`, `levelCycleLow`, `levelPreDay`); yesterday's as-issued |

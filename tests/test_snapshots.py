@@ -478,11 +478,9 @@ class ForecastWind(unittest.TestCase):
 NY = ZoneInfo("America/New_York")
 
 
-class WindPeakWholeDay(unittest.TestCase):
-    """The wind block is read from every report of the whole local day, taken
-    from the UTC-day files that hold it. The obs job runs end to end on a local
-    store, with the fresh pull and the neighbour overlay switched off so
-    nothing reaches the network."""
+class _ObsJob:
+    """The obs job run end to end on a local store, with the fresh pull and the
+    neighbour overlay switched off so nothing reaches the network."""
 
     NOW = dt.datetime(2026, 9, 28, 13, 10, 47, tzinfo=U)       # when the live KBLM snapshot was written
     FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "obs_kblm_20260927.json")
@@ -505,6 +503,11 @@ class WindPeakWholeDay(unittest.TestCase):
 
     def _snap(self, sid: str) -> dict:
         return json.loads(self.st.get(f"snapshots/obs/{sid}.json"))
+
+
+class WindPeakWholeDay(_ObsJob, unittest.TestCase):
+    """The wind block is read from every report of the whole local day, taken
+    from the UTC-day files that hold it."""
 
     def test_kblm_27_september_the_peak_is_a_report_with_no_temperature(self):
         """KBLM, 27 September 2026, a New York day from 04:00Z to 04:00Z. The
@@ -627,3 +630,56 @@ class WindPeakWholeDay(unittest.TestCase):
         # to 05:00Z, and Sydney's 4 October 23 hours, 14:00Z to 13:00Z
         self.assertEqual(f("2026-11-01", NY), ["20261101", "20261102"])
         self.assertEqual(f("2026-10-04", ZoneInfo("Australia/Sydney")), ["20261003", "20261004"])
+
+
+class ReportsWithoutTemperature(_ObsJob, unittest.TestCase):
+    """A report with no temperature still carries wind and sky, and the
+    snapshot's newest temperature can come from an older report than its newest
+    report. KBLM's archive rows for 27 and 28 September 2026 hold both cases."""
+
+    def test_the_two_row_lists_hold_every_report_once(self):
+        raw = [{"icaoId": "KBLM", "obsTime": 1790515500, "metarType": "SPECI", "wdir": 30,        # 13:25Z
+                "wspd": 29, "wgst": 39, "cover": "OVC", "temp_source": "body"},
+               {"icaoId": "KBLM", "obsTime": 1790520720, "metarType": "SPECI", "temp": 17,        # 14:52Z
+                "temp_source": "body", "wdir": 70, "wspd": 24, "wgst": 37, "cover": "OVC"},
+               {"icaoId": "KBLM", "obsTime": None, "wspd": 50}]
+        rows, rest = snapshots.decode_rows(raw, NY), snapshots.decode_rows_no_temp(raw)
+        self.assertEqual([r["t"] for r in rows], ["2026-09-27T14:52:00Z"])
+        self.assertEqual(rest, [{"t": "2026-09-27T13:25:00Z", "type": "SPECI", "wdir": 30, "wspd": 29,
+                                 "wgst": 39, "cover": "OVC"}])
+        old = gw.INCLUDE_SPECI
+        try:
+            gw.INCLUDE_SPECI = False
+            self.assertEqual(snapshots.decode_rows_no_temp(raw), [])
+        finally:
+            gw.INCLUDE_SPECI = old
+
+    def test_kblm_rows_without_temperature_and_the_latest_reading(self):
+        """The newest report at 13:10:47Z on the 28th is the 12:56Z METAR,
+        which has no temperature group. The newest temperature is the 19:06Z
+        special report of the 27th, 17 C. The snapshot used to print that 62.6 F
+        against 12:56Z."""
+        with open(self.FIXTURE) as fh:
+            self._day_files(json.load(fh)["files"])
+        out = snapshots.obs_job({}, self.st, lambda **kw: None, self.NOW)
+        snap = self._snap("KBLM")
+        rows, rest = snap["rows"], snap["rowsNoTemp"]
+        # every report in the window lands in exactly one list, and only the
+        # rows with a temperature go to the chart
+        both = [r["t"] for r in rows] + [r["t"] for r in rest]
+        self.assertEqual(len(both), len(set(both)))
+        self.assertEqual((len(rows), len(rest), len(both)), (14, 81, 95))
+        self.assertTrue(all("tempF" not in r for r in rest))
+        self.assertIn({"t": "2026-09-27T13:25:00Z", "type": "SPECI", "wdir": 30, "wspd": 29, "wgst": 39,
+                       "cover": "OVC"}, rest)
+        L = snap["latest"]
+        self.assertEqual((L["t"], L["type"]), ("2026-09-28T12:56:00Z", "METAR"))
+        self.assertEqual(L["raw"], "METAR KBLM 281256Z AUTO 36009KT 4SM UP OVC006 A2981 RMK AO2 "
+                                   "CIG 004V008 SLPNO FZRANO PNO $")          # no temperature group
+        self.assertEqual((L["tempF"], L["tempC"], L["tempT"], L["src"]),
+                         (62.6, 17.0, "2026-09-27T19:06:00Z", "body"))
+        # the summary passes the reading on with its time
+        snapshots.summary_job({}, self.st, lambda **kw: None, self.NOW, out["obs"])
+        row = next(c for c in json.loads(self.st.get("snapshots/summary.json"))["cities"] if c["station"] == "KBLM")
+        self.assertEqual((row["obsLatest"]["t"], row["obsLatest"]["tempT"]),
+                         ("2026-09-28T12:56:00Z", "2026-09-27T19:06:00Z"))

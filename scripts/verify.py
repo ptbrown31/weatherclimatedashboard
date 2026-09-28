@@ -1393,6 +1393,42 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(hm) and "KBOS" not in hm, str(len(hm)) + " dots")
                 page.unroute("**/data/snapshots/**")
 
+                # ---- the hourly map times a reading by the report it came from.
+                # The newest report here carries no temperature, so the newest
+                # reading is an hour older than it and the note has to say when
+                _lt = (_now - dt.timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:00Z")
+                _tt = (_now - dt.timedelta(minutes=70)).strftime("%Y-%m-%dT%H:%M:00Z")
+
+                def _latest_routes(route):
+                    u = route.request.url
+                    if u.endswith("/summary.json") and "/market/" not in u:
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        for c in d.get("cities") or []:
+                            if c.get("station") == "KLGA":
+                                c["obsLatest"] = {"t": _lt, "raw": "METAR KLGA 04012KT 10SM OVC020 A3001",
+                                                  "type": "METAR", "src": "tgroup", "tempF": 71.2,
+                                                  "tempC": 21.8, "tempT": _tt}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", _latest_routes)
+                page.goto(f"{srv.url}/hourly-temperature-markets.html"); page.wait_for_timeout(2200)
+                lt = page.evaluate("""async ([t, tt]) => {
+                  const g = document.querySelector('#vdots g.dot[data-station="KLGA"]');
+                  if (!g) return null;
+                  const r = g.getBoundingClientRect();
+                  g.dispatchEvent(new MouseEvent('mousemove',
+                    {clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, bubbles: true}));
+                  await new Promise(z => setTimeout(z, 150));
+                  const tz = 'America/New_York';
+                  return { tip: (document.querySelector('#tip') || {}).innerText || '',
+                           reading: WXC.clockFull(Date.parse(tt), tz), report: WXC.clockFull(Date.parse(t), tz) };
+                }""", [_lt, _tt])
+                chk.add(f"{scheme} hourly map: a reading is timed by the report it came from",
+                        bool(lt and "71° at" in lt["tip"] and lt["reading"] in lt["tip"]
+                             and lt["report"] not in lt["tip"]), str(lt)[:200])
+                page.unroute("**/data/snapshots/**")
+
                 # ---- the city page stacks its other contracts, wind then hourly
                 #
                 # samples/ carries no wind readings and no hourly board, so both
@@ -4168,6 +4204,40 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(av and av["discBeside"]
                              and (page.viewport_size["width"] <= 900 or 0.60 < av["share"] < 0.67)),
                         str(av and round(av["share"], 3)))
+                # a report with no temperature still carries its wind and sky, and
+                # the panels read those reports beside the chart rows. Here the
+                # wind is taken off every chart row and carried only by reports
+                # with no temperature, seven minutes later, so the observed wind
+                # line and barbs exist only if the panels read rowsNoTemp
+                _wk = ("wdir", "wspd", "wgst")
+
+                def _adv_notemp(route):
+                    u = route.request.url
+                    if u.endswith("/obs/KSFO.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        rows = d.get("rows") or []
+                        later = lambda s: (dt.datetime.fromisoformat(s.replace("Z", "+00:00"))  # noqa: E731
+                                           + dt.timedelta(minutes=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                        d["rowsNoTemp"] = [dict({k: r[k] for k in _wk if k in r}, t=later(r["t"]), type="SPECI")
+                                           for r in rows if r.get("wspd") is not None]
+                        d["rows"] = [{k: v for k, v in r.items() if k not in _wk} for r in rows]
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                _ksfo = page.url
+                page.route("**/data/snapshots/**", _adv_notemp)
+                page.goto(_ksfo); page.wait_for_timeout(1600)
+                nb = page.evaluate("""() => {
+                  const svg = document.querySelector('#advPanels svg');
+                  if (!svg) return null;
+                  return { barbs: svg.querySelectorAll("g[stroke='var(--obs)']").length
+                                  + svg.querySelectorAll("circle[stroke='var(--obs)'][fill='none']").length,
+                           lines: svg.querySelectorAll("path[stroke='var(--obs)']").length };
+                }""")
+                chk.add(f"{scheme} advanced: a report with no temperature still draws its wind",
+                        bool(nb and nb["barbs"] >= 4 and nb["lines"] == 4), str(nb))
+                page.unroute("**/data/snapshots/**")
+                page.goto(_ksfo); page.wait_for_timeout(1600)
                 # the main chart's lead-in hours keep the forecast that stood
                 # for them, and its level labels say when each was issued
                 mc = page.evaluate("""() => {

@@ -39,7 +39,7 @@ window.WXAdv = (function () {
   // of each code's okta range. VV is an obscured sky, which is total cover.
   const OBS_PCT = { CAVOK: 0, CLR: 0, SKC: 0, FEW: 19, SCT: 44, BKN: 75, OVC: 100, VV: 100 };
 
-  let adv = null, ob = null, sid = null, tz = null, unit = 'F';
+  let adv = null, ob = null, obRows = null, sid = null, tz = null, unit = 'F';
   let day = 'today', host = null, tip = null;
 
   /* Geometry. One column whose viewBox is 610 wide with the plot from 52 to
@@ -86,7 +86,7 @@ window.WXAdv = (function () {
   /* An axis range from the values actually drawn, snug: a small pad, whole
      degrees, a floor on the spread so a flat day is not a magnified wiggle. */
   function range(get, obsGet, s, minSpan, floor) {
-    let vals = rowsIn(ob.rows, s, obsGet).map(q => q.v);
+    let vals = rowsIn(obRows, s, obsGet).map(q => q.v);
     [reading(), context()].forEach(rd => rd && TOOLS.forEach(t => {
       if (rd[t.k]) vals = vals.concat(rowsIn(rd[t.k].rows, s, get).map(q => q.v));
     }));
@@ -153,7 +153,7 @@ window.WXAdv = (function () {
       pts.forEach(q => svg.appendChild(el('circle', { cx: X(q.t), cy: Y(q.v), r: 1.6,
                                                       fill: t.col, opacity: t.op })));
     });
-    const O = rowsIn(ob.rows, s, obsGet);
+    const O = rowsIn(obRows, s, obsGet);
     if (O.length > 1) {
       svg.appendChild(el('path', { d: path(O, false), fill: 'none', stroke: 'var(--obs)', 'stroke-width': 2 }));
     }
@@ -198,7 +198,7 @@ window.WXAdv = (function () {
   function barbPanel(svg, col, y0, s) {
     const wget = r => (r.wspd != null ? { wdir: r.wdir, wspd: r.wspd } : null);
     const ctx = context();
-    const rows = [{ name: 'OBS', col: 'var(--obs)', pts: rowsIn(ob.rows, s, wget), ctxPts: [] }]
+    const rows = [{ name: 'OBS', col: 'var(--obs)', pts: rowsIn(obRows, s, wget), ctxPts: [] }]
       .concat(TOOLS.map(t => {
         const src = reading()[t.k];
         return { name: { nws: 'NWS', nbm: 'NBM', lamp: 'LAMP', mav: 'MOS' }[t.k], col: t.col,
@@ -277,7 +277,7 @@ window.WXAdv = (function () {
           + (r.sky != null ? r.sky + '%' + (r.cover ? ' ' + r.cover : '') : '—') + ' · '
           + (r.wspd != null ? (r.wdir != null ? WXC.compass(r.wdir) + ' at ' : '') + Math.round(r.wspd * 1.15078) + ' mph' : '—'));
       const pack = rows => { const q = near(rows); return q && { temp: q.r.tempF, dew: q.r.dewF, sky: q.r.sky != null ? q.r.sky : OBS_PCT[q.r.cover], cover: q.r.cover, wdir: q.r.wdir, wspd: q.r.wspd }; };
-      const lines = [['Observed (METAR)', fmtRow(pack(ob.rows))]]
+      const lines = [['Observed (METAR)', fmtRow(pack(obRows))]]
         .concat(TOOLS.map(t => { const src = reading()[t.k]; return [t.name, fmtRow(src && pack(src.rows))]; }));
       const when = new Date(at).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
       tip.show(ev, tip.rows(when + ' · temp · dew · sky · wind', lines,
@@ -339,6 +339,10 @@ window.WXAdv = (function () {
       WXD.get('obs/' + sid + '.json').catch(() => null),
     ]);
     adv = a && a.data; ob = o && o.data;
+    // every report in the window: the chart rows, and the reports that carry
+    // no temperature, which still carry the sky and the wind these panels draw
+    obRows = ob && ob.rows ? ob.rows.concat(ob.rowsNoTemp || [])
+      .sort((p, q) => (p.t < q.t ? -1 : p.t > q.t ? 1 : 0)) : null;
     unit = (adv && adv.unit) || 'F'; tz = (adv && adv.tz) || tz;
     const sect = $('#advSection');
     if (!adv || !ob || !ob.rows) { if (sect) sect.hidden = true; return false; }
@@ -407,7 +411,7 @@ window.WXAdv = (function () {
      which is every station abroad. */
   function station(s, zone) {
     if (s === sid) return;
-    sid = s; tz = zone || tz; adv = ob = null;
+    sid = s; tz = zone || tz; adv = ob = obRows = null;
     const sect = $('#advSection');
     load().then(ok => {
       if (sect) sect.hidden = !ok;
