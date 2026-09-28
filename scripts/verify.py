@@ -642,6 +642,54 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         str(hov)[:180])
                 page.unroute("**/data/snapshots/**")
 
+                # ---- a report with no temperature carries the day's peak
+                #
+                # A station whose temperature sensor is out goes on reporting its
+                # wind, and the chart rows, which need a temperature, leave those
+                # reports out (KBLM on 27 September 2026, whose 13:25Z special
+                # report, 03029G39KT, was the day's maximum and carried none). The panel
+                # reads the wind block's own rows, so its running peak and the
+                # rungs it marks cleared come from every report, as the caption's
+                # peak does. The chart rows here top out at a 24 kt gust, 28 mph,
+                # and a special report with no temperature carries 40 kt, 46 mph,
+                # so the 43 mph rung is cleared only if the panel reads those rows.
+                _nt = max(_now - dt.timedelta(minutes=50),
+                          dt.datetime.combine(dt.date.fromisoformat(DAY), dt.time(0, 5),
+                                              tzinfo=_Z("America/New_York")).astimezone(dt.timezone.utc))
+                nt_row = {"t": _nt.strftime("%Y-%m-%dT%H:%M:00Z"), "type": "SPECI", "wspd": 28.0, "wgst": 40.0}
+
+                def notemp_routes(route):
+                    u = route.request.url
+                    if u.endswith("/obs/KBOS.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["rows"] = w_rows
+                        wr = sorted([{k: r[k] for k in ("t", "type", "wspd", "wgst") if r.get(k) is not None}
+                                     for r in w_rows] + [nt_row], key=lambda r: r["t"])
+                        d["wind"] = {"today": {"date": DAY, "n": len(wr), "unit": "kt", "rows": wr,
+                                               "peak": {"v": 40, "kt": 40, "mph": 46, "from": "gust",
+                                                        "t": nt_row["t"], "type": "SPECI"}}}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return wind_routes(route)
+
+                page.route("**/data/snapshots/**", notemp_routes)
+                page.goto(f"{srv.url}/wind-markets.html")
+                page.wait_for_timeout(1800)
+                nt = page.evaluate("""() => {
+                  const sec = document.querySelector('#wind-KBOS');
+                  const svg = sec && sec.querySelector('svg.ts');
+                  if (!svg) return null;
+                  return { labels: [...svg.querySelectorAll('text')].map(t => t.textContent)
+                                     .filter(t => / mph/.test(t)),
+                           caps: [...sec.querySelectorAll('p.cap')].map(p => p.textContent) };
+                }""")
+                chk.add(f"{scheme} wind panel: a report with no temperature clears the rungs below its gust",
+                        bool(nt and "43 mph, cleared" in nt["labels"] and "38 mph, cleared" in nt["labels"]),
+                        str(nt and nt["labels"])[:170])
+                chk.add(f"{scheme} wind panel: the caption names that report's gust as the peak so far",
+                        bool(nt and any("46 mph peak so far" in c for c in nt["caps"])),
+                        str(nt and nt["caps"])[:170])
+                page.unroute("**/data/snapshots/**")
+
                 # ---- the day control, and the desk's anticipated ladder
                 #
                 # The exchange opens tomorrow's wind board during today, so the

@@ -3,6 +3,7 @@ Tests for the daily-extreme parsers, day bucketing and the snapshot builders.
 Fixtures are cut from the 2026-08-21 bulletins. No network.
 """
 import datetime as dt
+import gzip
 import io
 import json
 import os
@@ -472,3 +473,157 @@ class ForecastWind(unittest.TestCase):
         self.assertEqual(rows[0]["gust"], 35.6)       # 41 mph is 35.6 kt
         self.assertEqual(rows[0]["wspd"], 20.0)
         self.assertNotIn("gust", rows[1])             # no gust forecast is not a zero
+
+
+NY = ZoneInfo("America/New_York")
+
+
+class WindPeakWholeDay(unittest.TestCase):
+    """The wind block is read from every report of the whole local day, taken
+    from the UTC-day files that hold it. The obs job runs end to end on a local
+    store, with the fresh pull and the neighbour overlay switched off so
+    nothing reaches the network."""
+
+    NOW = dt.datetime(2026, 9, 28, 13, 10, 47, tzinfo=U)       # when the live KBLM snapshot was written
+    FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "obs_kblm_20260927.json")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self._saved = (gw.fetch_observations_raw, snapshots._load_nearby, snapshots.OBS_HOURS)
+        gw.fetch_observations_raw = lambda *a, **k: []
+        snapshots._load_nearby = lambda: {}
+
+    def tearDown(self):
+        gw.fetch_observations_raw, snapshots._load_nearby, snapshots.OBS_HOURS = self._saved
+        self.tmp.cleanup()
+
+    def _day_files(self, files: dict):
+        for day, rows in files.items():
+            body = {"utc_day": day, "rows": rows}
+            self.st.put(f"archive/obs/{day}.json.gz", gzip.compress(json.dumps(body).encode()))
+
+    def _snap(self, sid: str) -> dict:
+        return json.loads(self.st.get(f"snapshots/obs/{sid}.json"))
+
+    def test_kblm_27_september_the_peak_is_a_report_with_no_temperature(self):
+        """KBLM, 27 September 2026, a New York day from 04:00Z to 04:00Z. The
+        station filed no temperature group from 01:13Z to 13:56Z, and its 13:25Z
+        special report, 03029G39KT, is the day's maximum in Weather Underground's
+        table, 39 kt or 45 mph. The chart rows keep only reports with a
+        temperature, so their 27 September began at 14:52Z, and the live
+        snapshot read the day's peak as that report's 37 kt gust, 43 mph. The
+        fixture is the station's rows in the site's own archive files for 27
+        and 28 September UTC, as stored."""
+        with open(self.FIXTURE) as fh:
+            self._day_files(json.load(fh)["files"])
+        out = snapshots.obs_job({}, self.st, lambda **kw: None, self.NOW)
+        snap = self._snap("KBLM")
+        y = snap["wind"]["yesterday"]
+        self.assertEqual(y["date"], "2026-09-27")
+        self.assertEqual({k: y["peak"][k] for k in ("kt", "mph", "from", "type", "t")},
+                         {"kt": 39, "mph": 45, "from": "gust", "type": "SPECI", "t": "2026-09-27T13:25:00Z"})
+        self.assertEqual((y["speed"]["kt"], y["speed"]["t"]), (29, "2026-09-27T13:25:00Z"))
+        self.assertEqual(y["n"], 64)                    # every report of the day, 51 of them with no temperature
+        # the chart rows are as they were: the report is not among them, the
+        # day's first one is 14:52Z, and a peak read off them is the old answer
+        self.assertNotIn("2026-09-27T13:25:00Z", [r["t"] for r in snap["rows"]])
+        self.assertEqual(min(r["t"] for r in snap["rows"] if r["t"] >= "2026-09-27T04:00:00Z"),
+                         "2026-09-27T14:52:00Z")
+        old = snapshots.day_peak_wind(snap["rows"], NY, "2026-09-27")
+        self.assertEqual((old["peak"]["kt"], old["peak"]["mph"], old["n"]), (37, 43, 13))
+        # 28 September so far has no temperature at all, which left today's peak
+        # empty; it has 23 reports, and today's rows are the ones the peak came from
+        t = snap["wind"]["today"]
+        self.assertIsNone(snap["today"])
+        self.assertEqual((t["date"], t["peak"]["kt"], t["peak"]["mph"], t["peak"]["t"]),
+                         ("2026-09-28", 18, 21, "2026-09-28T11:28:00Z"))
+        self.assertEqual((t["n"], len(t["rows"])), (23, 23))
+        self.assertIn({"t": "2026-09-28T11:28:00Z", "type": "SPECI", "wspd": 10, "wgst": 18}, t["rows"])
+        # the summary takes today's peak by the wind block's own day, on the obs
+        # pass and on the forecast pass, which rereads the snapshots
+        for obs in (out["obs"], None):
+            snapshots.summary_job({}, self.st, lambda **kw: None, self.NOW, obs)
+            row = next(c for c in json.loads(self.st.get("snapshots/summary.json"))["cities"]
+                       if c["station"] == "KBLM")
+            self.assertEqual(((row["windPeak"] or {}).get("kt"), (row["windPeak"] or {}).get("t")),
+                             (18, "2026-09-28T11:28:00Z"), "obs pass" if obs else "forecast pass")
+
+    def test_both_edges_of_the_local_day_and_both_of_its_files(self):
+        """A New York day runs 04:00Z to 04:00Z and a Tokyo day 15:00Z to 15:00Z,
+        so each lives in two UTC-day files. Every report here changes the answer
+        if it lands on the wrong side of an edge: a gust in the last minute of
+        the day before, the day's peak at its first instant, its sustained
+        maximum in its last minute, and a gust at the next midnight. The chart
+        window is cut to twelve hours, which starts it after both days' first
+        hours and leaves Tokyo's first file out of the files the chart reads,
+        so only the day's own files can supply them."""
+        snapshots.OBS_HOURS = 12
+        z = lambda *a: dt.datetime(*a, tzinfo=U)     # noqa: E731
+
+        def ob(sid, t, wspd, wgst=None):
+            o = {"icaoId": sid, "obsTime": int(t.timestamp()), "metarType": "METAR",
+                 "temp": 15.0, "temp_source": "tgroup", "wspd": wspd}
+            if wgst is not None:
+                o["wgst"] = wgst
+            return o
+
+        reports = [
+            ob("KBLM", z(2026, 9, 27, 3, 59), 40, 60),     # 23:59 on the 26th
+            ob("KBLM", z(2026, 9, 27, 4, 0), 12, 50),      # 00:00 on the 27th, the day's peak
+            ob("KBLM", z(2026, 9, 27, 16, 56), 14, 22),
+            ob("KBLM", z(2026, 9, 28, 3, 59), 33),         # 23:59, the sustained maximum, filed under the 28th
+            ob("KBLM", z(2026, 9, 28, 4, 0), 35, 70),      # 00:00 on the 28th
+            ob("KBLM", z(2026, 9, 28, 12, 56), 10),
+            ob("RJTT", z(2026, 9, 26, 14, 59), 40, 60),    # 23:59 on the 26th
+            ob("RJTT", z(2026, 9, 26, 15, 0), 12, 50),     # 00:00 on the 27th, the day's peak, filed under the 26th
+            ob("RJTT", z(2026, 9, 27, 14, 59), 33),        # 23:59, the sustained maximum
+            ob("RJTT", z(2026, 9, 27, 15, 0), 35, 70),     # 00:00 on the 28th
+        ]
+        files: dict = {}
+        for o in reports:
+            day = dt.datetime.fromtimestamp(o["obsTime"], U).strftime("%Y%m%d")
+            files.setdefault(day, {})[f"{o['icaoId']}|{o['obsTime']}"] = o
+        self._day_files(files)
+        snapshots.obs_job({}, self.st, lambda **kw: None, self.NOW)
+        for sid, first, last, nxt, n, old in (
+                ("KBLM", "2026-09-27T04:00:00Z", "2026-09-28T03:59:00Z", "2026-09-28T04:00:00Z", 3, 33),
+                ("RJTT", "2026-09-26T15:00:00Z", "2026-09-27T14:59:00Z", "2026-09-27T15:00:00Z", 2, None)):
+            snap = self._snap(sid)
+            y, t = snap["wind"]["yesterday"], snap["wind"]["today"]
+            self.assertEqual((y["date"], y["n"]), ("2026-09-27", n), sid)
+            self.assertEqual((y["peak"]["kt"], y["peak"]["t"]), (50, first), sid)
+            self.assertEqual((y["speed"]["kt"], y["speed"]["t"]), (33, last), sid)
+            self.assertEqual((t["date"], t["peak"]["kt"], t["peak"]["t"]), ("2026-09-28", 70, nxt), sid)
+            self.assertEqual(t["rows"][0]["t"], nxt, sid)
+            # the chart rows start twelve hours back, after the day's peak
+            self.assertTrue(all(r["t"] >= "2026-09-28T01:10:47Z" for r in snap["rows"]), sid)
+            was = snapshots.day_peak_wind(snap["rows"], ZoneInfo(snap["tz"]), "2026-09-27")
+            self.assertEqual(was and was["peak"]["kt"], old, sid)
+
+    def test_the_wind_decode_keeps_a_report_with_no_temperature(self):
+        raw = [{"icaoId": "KBLM", "obsTime": 1790515500, "metarType": "SPECI", "wspd": 29, "wgst": 39},  # 13:25Z
+               {"icaoId": "KBLM", "obsTime": 1790520720, "metarType": "SPECI", "temp": 17,              # 14:52Z
+                "temp_source": "body", "wspd": 24, "wgst": 37},
+               {"icaoId": "KBLM", "obsTime": None, "wspd": 50}]
+        self.assertEqual([r["t"] for r in snapshots.decode_rows(raw, NY)], ["2026-09-27T14:52:00Z"])
+        self.assertEqual(snapshots.decode_wind_rows(raw),
+                         [{"t": "2026-09-27T13:25:00Z", "type": "SPECI", "wspd": 29, "wgst": 39},
+                          {"t": "2026-09-27T14:52:00Z", "type": "SPECI", "wspd": 24, "wgst": 37}])
+        old = gw.INCLUDE_SPECI
+        try:
+            gw.INCLUDE_SPECI = False
+            self.assertEqual(snapshots.decode_wind_rows(raw), [])
+        finally:
+            gw.INCLUDE_SPECI = old
+
+    def test_a_local_day_is_at_most_two_utc_files(self):
+        f = snapshots.obs_day_files
+        self.assertEqual(f("2026-09-27", NY), ["20260927", "20260928"])
+        self.assertEqual(f("2026-09-27", ZoneInfo("Asia/Tokyo")), ["20260926", "20260927"])
+        self.assertEqual(f("2026-09-27", ZoneInfo("Pacific/Honolulu")), ["20260927", "20260928"])
+        self.assertEqual(f("2026-09-27", ZoneInfo("UTC")), ["20260927"])
+        # the days the clocks change: New York's 1 November runs 25 hours, 04:00Z
+        # to 05:00Z, and Sydney's 4 October 23 hours, 14:00Z to 13:00Z
+        self.assertEqual(f("2026-11-01", NY), ["20261101", "20261102"])
+        self.assertEqual(f("2026-10-04", ZoneInfo("Australia/Sydney")), ["20261003", "20261004"])

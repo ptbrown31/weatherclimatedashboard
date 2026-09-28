@@ -124,6 +124,19 @@ def local_day_key(t: dt.datetime, tz) -> str:
     return t.astimezone(tz).date().isoformat()
 
 
+def obs_day_files(day: str, tz) -> list:
+    """The UTC-day observation files holding one local day's reports. They are
+    the file its first instant falls in and the file its last instant falls
+    in. The day runs from local midnight to the next local midnight through the
+    IANA zone, so the day the clocks change is 23 or 25 hours long. Anywhere
+    off UTC that is two files, and a day read from one of them alone loses
+    either its first hours or its last."""
+    d = dt.date.fromisoformat(day)
+    start = dt.datetime.combine(d, dt.time(0), tzinfo=tz).astimezone(dt.timezone.utc)
+    end = dt.datetime.combine(d + dt.timedelta(days=1), dt.time(0), tzinfo=tz).astimezone(dt.timezone.utc)
+    return sorted({start.strftime("%Y%m%d"), (end - dt.timedelta(seconds=1)).strftime("%Y%m%d")})
+
+
 def sun_times(lat: float, lon: float, d: dt.date):
     """Sunrise and sunset (UTC) for local date d, NOAA's approximation, within
     a few minutes. Used only to shade the chart, never for settlement."""
@@ -230,6 +243,33 @@ def decode_rows(raw_rows: list, tz) -> list:
     return out
 
 
+def decode_wind_rows(raw_rows: list) -> list:
+    """Archive rows for one station -> the two wind columns of every report,
+    which is what the wind contract settles on.
+
+    Kept apart from decode_rows because a chart row needs a temperature and
+    decode_rows drops a report that has none, while a station whose temperature
+    sensor is out goes on reporting its wind. KBLM filed no temperature group
+    from 01:13Z to 13:56Z on 27 September 2026, and its 13:25Z special report,
+    03029G39KT, carried the day's peak. Read off the chart rows, the peak came
+    out at 43 mph against the 45 the settlement table shows. The
+    special-report constant applies here as it does there."""
+    out = []
+    for ob in raw_rows:
+        if ob.get("obsTime") is None:
+            continue
+        if not gw.INCLUDE_SPECI and ob.get("metarType") == "SPECI":
+            continue
+        row = {"t": _iso(dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc)), "type": ob.get("metarType")}
+        if ob.get("wspd") is not None:
+            row["wspd"] = ob["wspd"]
+        if ob.get("wgst") is not None:
+            row["wgst"] = ob["wgst"]
+        out.append(row)
+    out.sort(key=lambda r: r["t"])
+    return out
+
+
 def day_extremes(rows: list, tz, day: str, unit: str) -> Optional[dict]:
     """The day's high and low with the provenance of each (report type and
     whether tenths were available), so a whole-degree SPECI that sets the
@@ -260,7 +300,13 @@ def day_peak_wind(rows: list, tz, day: str) -> Optional[dict]:
     is that station's METAR record read through another publisher. This is the
     record itself, so a value here can differ from the table in the ways any
     two renderings of one feed differ, most of all in rounding and in whether a
-    special report is shown."""
+    special report is shown.
+
+    `rows` are decode_wind_rows output over the whole local day. The chart
+    rows leave out every report without a temperature and cannot stand in for
+    them. The day runs through the station's zone from local midnight up to
+    the next local midnight, so a report stamped at midnight belongs to the
+    day it opens."""
     day_rows = [r for r in rows if local_day_key(_parse_iso(r["t"]), tz) == day]
     have = [(r, v, k) for r in day_rows for k, v in (("speed", r.get("wspd")), ("gust", r.get("wgst")))
             if v is not None]
@@ -394,14 +440,25 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
     data_asof = fetch.get("fetchedAt")          # the last SUCCESSFUL pull: what the data is good to
     health = arch.update_health(store, {"obs": {"ok": errors == 0, "error": "observation fetch failed" if errors else None}}, now)
 
-    # 2. the last OBS_HOURS from the record, per station
-    days = [(now - dt.timedelta(hours=h)).strftime("%Y%m%d") for h in range(0, OBS_HOURS + 24, 24)]
-    record = load_obs_record(store, sorted(set(days)))
+    # 2. the record. The chart rows are the last OBS_HOURS, per station. The
+    #    wind block is each station's whole local yesterday and today, so the
+    #    UTC-day files holding both ends of those days are read whatever
+    #    OBS_HOURS is; a file dated after today in UTC cannot exist yet.
+    marks = {sid: day_markers(roster[sid], now) for sid in stations if sid in roster}
+    files = {(now - dt.timedelta(hours=h)).strftime("%Y%m%d") for h in range(0, OBS_HOURS + 24, 24)}
+    for sid, mk in marks.items():
+        tz = ZoneInfo(roster[sid]["tz"])
+        files.update(f for day in (mk["yesterday"], mk["day"]) for f in obs_day_files(day, tz))
+    record = load_obs_record(store, sorted(f for f in files if f <= now.strftime("%Y%m%d")))
     since = now - dt.timedelta(hours=OBS_HOURS)
     by_station: dict = {}
+    reports: dict = {}          # every report read, for the wind block
     for k, ob in record.items():
+        if ob.get("obsTime") is None:
+            continue
         sid = k.split("|", 1)[0]
-        if ob.get("obsTime") is not None and dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc) >= since:
+        reports.setdefault(sid, []).append(ob)
+        if dt.datetime.fromtimestamp(ob["obsTime"], dt.timezone.utc) >= since:
             by_station.setdefault(sid, []).append(ob)
 
     summary_obs = {}
@@ -411,7 +468,16 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
             continue
         tz = ZoneInfo(c["tz"])
         rows = decode_rows(by_station.get(sid, []), tz)
-        mk = day_markers(c, now)
+        mk = marks[sid]
+        # every report of the day with its two wind columns, including the
+        # ones the chart rows leave out for want of a temperature
+        wind_rows = decode_wind_rows(reports.get(sid, []))
+        wind = {"today": day_peak_wind(wind_rows, tz, mk["day"]),
+                "yesterday": day_peak_wind(wind_rows, tz, mk["yesterday"])}
+        if wind["today"]:
+            # the reports today's peak was read from, so the wind panel draws its
+            # running peak and marks thresholds cleared from the same ones
+            wind["today"]["rows"] = [r for r in wind_rows if local_day_key(_parse_iso(r["t"]), tz) == mk["day"]]
         latest = by_station.get(sid, [])
         latest = max(latest, key=lambda o: o["obsTime"]) if latest else None
         record_end = _iso(dt.datetime.fromtimestamp(latest["obsTime"], dt.timezone.utc)) if latest else None
@@ -423,8 +489,7 @@ def obs_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline
             "rows": rows,
             "today": day_extremes(rows, tz, mk["day"], c["unit"]),
             "yesterday": day_extremes(rows, tz, mk["yesterday"], c["unit"]),
-            "wind": {"today": day_peak_wind(rows, tz, mk["day"]),
-                     "yesterday": day_peak_wind(rows, tz, mk["yesterday"])},
+            "wind": wind,
             # the reading travels with the report, because a map of the latest
             # temperature should not have to re-decode the raw METAR to find it
             "latest": ({"t": record_end, "raw": latest.get("rawOb", ""), "type": latest.get("metarType"),
@@ -1008,7 +1073,7 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
             if raw:
                 s = json.loads(raw)
                 o = {"today": s.get("today"), "yesterday": s.get("yesterday"), "latest": s.get("latest"),
-                     "asof": s.get("asof"), "recordEnd": s.get("recordEnd")}
+                     "wind": s.get("wind"), "asof": s.get("asof"), "recordEnd": s.get("recordEnd")}
         if o and o.get("asof"):
             obs_asof = max(obs_asof or "", o["asof"])
         raw = store.get(f"snapshots/forecast/{sid}.json")
@@ -1019,6 +1084,9 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
         # observed extremes only when the obs snapshot's day is the day the markers name
         today = (o or {}).get("today") or {}
         same_day = today.get("date") == mk["day"]
+        # the wind block carries its own day, because a station can report wind
+        # through a day on which it reports no temperature at all
+        wind_today = ((o or {}).get("wind") or {}).get("today") or {}
         row = {**c, "markers": mk, "obsDay": today.get("date"), "obsAsof": (o or {}).get("asof"),
                "obsHighSoFar": (today.get("high") or {}).get("v") if same_day else None,
                "obsLowSoFar": (today.get("low") or {}).get("v") if same_day else None,
@@ -1027,7 +1095,7 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
                "obsLatest": (o or {}).get("latest"),
                # the day's strongest wind across both columns, which is what a
                # wind contract settles on and what its map shades by
-               "windPeak": ((((o or {}).get("wind") or {}).get("today") or {}) if same_day else {}).get("peak"),
+               "windPeak": wind_today.get("peak") if wind_today.get("date") == mk["day"] else None,
                "forecastDay": (f.get("markers") or {}).get("day"), "forecastAsof": f.get("asof")}
         fmk = f.get("markers") or {}
         fc_same = fmk.get("day") == mk["day"]

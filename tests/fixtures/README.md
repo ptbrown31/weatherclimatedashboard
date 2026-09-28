@@ -57,3 +57,24 @@ checked against eccodes on the real files that day, bit for bit, on the TMP,
 WIND and GUST messages of the 10 UTC RTMA analysis, the RTMA precipitation
 file above, and two URMA precipitation files; those numbers are in the
 session notes rather than here because the files are not checked in.
+
+## obs_kblm_20260927.json (24,052 bytes)
+
+KBLM's rows in this site's observation archive, the UTC-day files
+`archive/obs/20260927.json.gz` and `archive/obs/20260928.json.gz` as stored on
+2026-09-28 (the second file as updated at 13:20:47Z), keyed `KBLM|{obsTime}`
+under each UTC day. The rows are aviationweather.gov's METAR API output
+(`format=json`) with only the fields the observation job reads kept: icaoId,
+obsTime, metarType, rawOb, temp, dewp, wdir, wspd, wgst, cover and temp_source.
+
+The 27 September file holds 58 rows and the 28 September file 37, the last at
+12:56Z. KBLM's local day of 27 September (America/New_York, 04:00Z to 04:00Z)
+holds 64 reports, 51 of them with no temperature group. The largest value
+across the wind speed and gust columns is the 13:25Z special report,
+`SPECI KBLM 271325Z AUTO 03029G39KT`, 39 kt or 45 mph. Weather Underground's
+Daily Observations table for KBLM on 2026-09-27, read on 2026-09-28, shows the
+same maximum, 45 mph at 9:25 AM, in a row with no temperature. The largest
+value among the 13 reports that carry a temperature is the 14:52Z special
+report's 37 kt gust, 43 mph.
+
+SHA-256 `267849e595616217a48e0473b5250a77e4b529ad313d1d07012087a327834b3b`.

@@ -532,8 +532,11 @@ window.WXK = (() => {
       const noon = Date.parse(dayISO + 'T12:00:00Z'), off = (WXC.hourOf(noon, tz) - 12) * 36e5;
       const t0 = Date.parse(dayISO + 'T00:00:00Z') - off, t1 = t0 + 24 * 36e5;
       // the peak is the day's own running maximum, so the rows before the day
-      // began are left out rather than carried into it
-      const rows = (isToday ? ((obs || {}).rows || []) : [])
+      // began are left out rather than carried into it. The wind block's rows
+      // are every report of the day; the chart rows leave out any report with
+      // no temperature, and a station whose temperature sensor is out goes on
+      // reporting the wind that settles
+      const rows = (isToday ? (today.rows || (obs || {}).rows || []) : [])
         .map(r => ({ t: Date.parse(r.t), sp: r.wspd, gu: r.wgst }))
         .filter(p => isFinite(p.t) && p.t >= t0 && p.t <= t1);
       const sust = rows.map(p => ({ t: p.t, v: toMph(p.sp) }));
