@@ -1127,6 +1127,54 @@ class Job(unittest.TestCase):
         self.assertEqual((days[0], days[-1]), ("2026-07-29", "2026-09-26"))
         self.assertEqual(len(self.st.list(analysis.PREFIX + "days/")), 70)
 
+    def test_a_days_status_counts_every_place_and_only_resolved_ones_resolve_it(self):
+        final = {"urma": {"final": True, "precip": {"resolved": True}}}
+        waiting = {"urma": {"final": True, "precip": {"resolved": False}}}
+        closed = {"urma": {"final": False, "closed": True, "precip": {"resolved": False}}}
+        doc = {"locations": {"new-york-ny": final, "chicago-il": waiting}}
+        # Los Angeles has no URMA hours yet: it counts toward the places and nothing else
+        self.assertEqual(analysis.day_status(doc, LOCS), {"places": 3, "final": 2, "resolved": 1, "closed": 0})
+        doc["locations"]["los-angeles-ca"] = closed
+        self.assertEqual(analysis.day_status(doc, LOCS), {"places": 3, "final": 2, "resolved": 1, "closed": 1})
+        self.assertEqual(analysis.day_status({}, LOCS), {"places": 3, "final": 0, "resolved": 0, "closed": 0})
+
+    def test_the_index_names_the_newest_day_every_place_has_resolved(self):
+        final = {"urma": {"final": True, "precip": {"resolved": True}}}
+        waiting = {"urma": {"final": True, "precip": {"resolved": False}}}
+        docs = {"2026-09-23": {lid: final for lid in ("new-york-ny", "chicago-il", "los-angeles-ca")},
+                "2026-09-24": {lid: final for lid in ("new-york-ny", "chicago-il", "los-angeles-ca")},
+                # the West Coast's precipitation still waiting: not fully resolved
+                "2026-09-25": {"new-york-ny": final, "chicago-il": final, "los-angeles-ca": waiting},
+                "2026-09-26": {"new-york-ny": final}}
+        for d, locs in docs.items():
+            self.st.put(analysis.DAY_KEY.format(day=d), json.dumps({"locations": locs}).encode(), "application/json")
+        state = analysis.new_state()
+        state["dayStatus"]["2026-01-01"] = {"places": 3, "final": 3, "resolved": 3, "closed": 0}   # no longer listed
+        days = analysis.index_days(self.st)
+        self.assertEqual(analysis.refresh_day_status(self.st, state, LOCS, days), 4)
+        self.assertNotIn("2026-01-01", state["dayStatus"])
+        self.assertEqual(analysis.refresh_day_status(self.st, state, LOCS, days), 0)     # nothing read twice
+        analysis.write_index(self.st, state, LOCS, {}, NOW, days=days)
+        idx = self.read(analysis.INDEX_KEY)
+        self.assertEqual(idx["lastResolvedDay"], "2026-09-24")
+        self.assertEqual(idx["dayStatus"]["2026-09-25"], {"places": 3, "final": 3, "resolved": 2, "closed": 0})
+        self.assertEqual(idx["dayStatus"]["2026-09-26"], {"places": 3, "final": 1, "resolved": 1, "closed": 0})
+        self.assertEqual(sorted(idx["dayStatus"]), days)
+        # no day resolved at all: the page falls back to the newest day
+        self.assertIsNone(analysis.last_resolved_day(analysis.new_state(), days))
+
+    def test_a_pass_keeps_the_status_of_the_days_it_rebuilds(self):
+        t_r, t_u = hour(2026, 9, 26, 19), hour(2026, 9, 26, 13)
+        self.fx.add_hour("rtma", t_r)
+        self.fx.add_hour("urma", t_u)
+        self.assertEqual(self.run_pass(), 0)
+        st = self.state()["dayStatus"]
+        idx = self.read(analysis.INDEX_KEY)
+        self.assertEqual(idx["dayStatus"], {d: st[d] for d in idx["days"]})
+        self.assertEqual(idx["dayStatus"]["2026-09-26"]["places"], 3)
+        self.assertEqual(idx["dayStatus"]["2026-09-26"]["resolved"], 0)    # one URMA hour is not a day
+        self.assertIsNone(idx["lastResolvedDay"])
+
     def test_the_lane_alarms_only_when_a_product_is_overdue_or_unreadable(self):
         state = analysis.new_state()
         status = {"read": [], "errors": [], "backfilled": 0, "backfilledBy": {"rtma": 0, "urma": 0}}

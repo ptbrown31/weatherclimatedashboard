@@ -178,7 +178,12 @@ window.WXAnalysis = (() => {
       host.appendChild(h('p', { class: 'cap' }, 'No days have been read yet. ' + STATEMENT));
       return;
     }
-    if (days.indexOf(S.day) < 0) S.day = days[days.length - 1];
+    // the page opens on the newest day every place has resolved, so a first
+    // look shows how the contracts settled rather than a day still running;
+    // a day in the address wins, and an index without the field (older
+    // files, the first minutes after a deploy) opens on the newest day
+    const resolvedDay = S.index.lastResolvedDay;
+    if (days.indexOf(S.day) < 0) S.day = (resolvedDay && days.indexOf(resolvedDay) >= 0) ? resolvedDay : days[days.length - 1];
     const tip = WXC.tooltip();
     const foot = $('#foot');
     if (foot) foot.textContent = 'Analyses are NOAA’s Real-Time and Unrestricted Mesoscale Analyses, read from NOAA Open Data on AWS. '
@@ -198,8 +203,16 @@ window.WXAnalysis = (() => {
       b.onclick = () => { if (S.product !== k) { S.product = k; changed('product'); } };
       prodBtns.appendChild(b);
     });
-    const daySel = h('select', { id: 'anaDay', title: 'day' });
-    days.slice().reverse().forEach(d => daySel.appendChild(h('option', { value: d, text: dayLabel(d) })));
+    const daySel = h('select', { id: 'anaDay', title: 'day. The page opens on the newest day every place has resolved.' });
+    // a day short of every place resolving is marked, so the reader sees why
+    // the page opened where it did
+    const status = S.index.dayStatus || {};
+    const dayMark = d => {
+      const st = status[d];
+      if (!st || !st.places || st.resolved === st.places) return '';
+      return st.resolved + st.closed >= st.places ? ' · closed' : ' · provisional';
+    };
+    days.slice().reverse().forEach(d => daySel.appendChild(h('option', { value: d, text: dayLabel(d) + dayMark(d) })));
     daySel.onchange = () => { S.day = daySel.value; changed('day'); };
     // a place select beside the day: the reliable way to a panel where the
     // dots overlap or on a phone, and the keyboard's way in
@@ -1077,7 +1090,7 @@ window.WXAnalysis = (() => {
     // the keys pipeline/analysis.py CONVENTIONS writes; an unknown key is shown as itself
     const LABELS = { day: 'Day', high: 'High', low: 'Low', gust: 'Peak gust', wind: 'Mean wind', precip: 'Precipitation',
                      rounding: 'Rounding and the strike', provisional: 'Provisional, final and revised',
-                     closed: 'Closed incomplete days', hourly: 'Hourly values', cell: 'Cell', window: 'Window',
+                     closed: 'Closed incomplete days', hourly: 'Hourly values', cell: 'Cell', window: 'Window', resolvedDay: 'Fully resolved day',
                      lattice: 'Map lattice', units: 'Units' };
     host.appendChild(h('h2', { text: 'Method' }));
     host.appendChild(h('p', { text: STATEMENT + ' The conventions below are fixed in the pipeline and every file the page reads carries the times of the analyses it was built from.' }));

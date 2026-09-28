@@ -25,14 +25,23 @@ review found, which the code was corrected for.
 Analysis (URMA), NCEP's hourly 2.5 km analyses of the CONUS NDFD grid, read from NOAA
 Open Data on AWS (`noaa-rtma-pds`, `noaa-urma-pds`, no credentials, HTTP/1.1 range
 requests honoured). URMA is the same analysis run again about seven hours later with the
-late-arriving observations and is NOAA's analysis of record for verification. Measured on
-2026-09-27: the RTMA analysis lands at H+47 min, the URMA analysis at H+6 h 54 min, the RTMA
-precipitation at H+16 to 22 min. The URMA precipitation does not land at a fixed lag: the
-files appear in a batch hours ahead of their analysis (on 2026-09-27 the 13Z through 19Z
-files were all written at 19:58Z while the newest analysis was 13Z), with the western River
-Forecast Center region absent from the bitmap (eleven west-coast places had no value in the
-same-day files), and are rewritten later as the RFCs rerun their gauge analyses for up to
-eight days; the rerun files carry the whole grid. The hourly analysis files are never
+late-arriving observations and is NOAA's analysis of record for verification. Measured over the
+thirty days to 2026-09-27 from the objects' own write times (S3 LastModified on NOAA Open Data;
+NOMADS directory times for the fifteen days NOMADS keeps), as lag after the valid hour, median
+(90th percentile): the RTMA analysis 48 min (53) on Open Data and 46 min (47) on NOMADS; the
+URMA analysis 6 h 56 min (7 h 00) on Open Data and 6 h 54 min (6 h 55) on NOMADS; the RTMA
+precipitation 17 min (21) after the end of its hour; RTMA-RU 17 min (21). The Open Data copy
+trails NOMADS by a median of under two minutes and occasionally by hours (up to 2 h 37 min on
+the evening of 2026-09-23, when NOMADS was on time). A live poll of the bucket on 2026-09-28
+found each object listed within one 20-second poll of its LastModified. The URMA precipitation
+does not land at a fixed lag: a file is first written about an hour after its hour ends (the
+10Z file of 2026-09-28 at 10:59:28Z, by the run near hh:58 that also rewrote twenty-five of the
+trailing hours), rewritten by those hourly runs through the following day as the RFCs report,
+then rerun at 1, 2, 3, 5, 7 and 8 days (25, 49, 73, 121, 169 and 193 hours) after its hour,
+after which it no longer changes. The western River
+Forecast Center region is often absent from the bitmap until the 25-hour rerun (on 2026-09-28 at
+10Z the 13Z through 23Z files of the 27th still lacked it, while the 10Z through 12Z files had
+it), and the rerun files carry the whole grid. The hourly analysis files are never
 rewritten, so the lane treats the two kinds of file differently (section 5).
 
 **Products and where each variable comes from.**
@@ -231,6 +240,9 @@ else `public, max-age=60, stale-while-revalidate=300, stale-if-error=86400`.
                   "px": 833.1, "py": 231.4, "cell": {"wexp": [i, j, k], "g184": [i, j, k],
                   "centre": [lat, lon], "distanceKm": 0.9}, "note": ""} , ... 50 ],
   "days": ["2026-07-29", ..., "2026-09-27"],
+  "dayStatus": { "2026-09-26": {"places": 50, "final": 50, "resolved": 50, "closed": 0},
+                 "2026-09-27": {"places": 50, "final": 16, "resolved": 16, "closed": 0}, ... },
+  "lastResolvedDay": "2026-09-26",
   "lattice": {"pitch": 3, "cols": 320, "rows": 200, "viewBox": "0 0 960 600"},
   "variables": { "high": {"unit": "°F", "hourly": "temp", "rule": "..."}, ... },
   "backfill": {"pointsDays": 30, "frameDays": 7, "done": false, "cursor": {...}} }
@@ -424,8 +436,17 @@ the method prose, `p.cap#foot`. Scripts: common, data, then `js/analysis.js`; `W
 
 **Controls.** Variable buttons High · Low · Peak gust · Mean wind · Precipitation; product
 buttons RTMA · URMA; a day `<select>` over `index.days` (newest first, labelled with the
-weekday); an hour stepper under the map (◀ ▶ Play, the valid hour in UTC and in the selected
+weekday, and a day short of every place resolving marked `provisional`, or `closed` when its
+unresolved places have all stopped waiting); an hour stepper under the map (◀ ▶ Play, the valid hour in UTC and in the selected
 location's zone when one is picked). State lives in the URL: `?var=high&product=urma&day=2026-09-26&hour=16&loc=new-york-ny`.
+With no `day` in the address the page opens on `index.lastResolvedDay` (owner's request
+2026-09-28), the newest local date on which every one of the fifty places has its URMA day
+final and its precipitation total resolved (`dayStatus.resolved == dayStatus.places`); an index
+without the field opens on the newest day. The job keeps each day's status in its state as it
+rebuilds the day and fills a status it lacks from the day's file. Because URMA's precipitation
+for the western River Forecast Centers usually arrives with the 25-hour rerun, a day becomes
+fully resolved about a day and a half after it ends in the west, so the page typically opens
+two days back.
 
 **Map.** The 960 × 600 SVG with `assets/basemap.json` state paths, the hour's frame drawn
 onto a 320 × 200 canvas with the variable's fixed ramp and placed as an `<image>` filling the

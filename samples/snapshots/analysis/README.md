@@ -59,3 +59,8 @@ drives cell mode on by looking for `windows`, so a later re-run of the job can
 replace this tree without touching the checks, as long as some day has a
 complete New York URMA entry, some selectable day lists two URMA temperature
 frames, and one of those frames carries windows.
+
+`index.json` also carries `dayStatus` and `lastResolvedDay` (added 2026-09-28), computed from these
+fixture days files with the job's own `day_status` and `last_resolved_day`, the same way a live pass
+writes them; its `conventions` block was refreshed from `pipeline/analysis.py` for the new
+`resolvedDay` entry. Nothing else in the tree was touched.

@@ -855,7 +855,34 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 ana_fday = next((d_ for d_ in sorted(ana_ut, reverse=True) if d_ in ana_days and len(ana_ut[d_]) >= 2), None)
                 chk.add(f"{scheme} analysis fixtures: two URMA temperature frames on a selectable day", ana_fday is not None, str(ana_ut))
                 ana_hours = sorted(ana_ut.get(ana_fday) or ["15", "16"])[-2:]
+                # the page opens on the newest day every place has resolved, marks
+                # the days after it as provisional, and falls back to the newest
+                # day when the index does not name one
+                ana_rday = ana_index.get("lastResolvedDay")
+                chk.add(f"{scheme} analysis fixtures: the index names a fully resolved day before the newest",
+                        bool(ana_rday) and ana_rday in ana_days and ana_rday != ana_days[-1], str(ana_rday))
                 page.goto(f"{srv.url}/{ANA}"); page.wait_for_timeout(2200)
+                dflt = page.evaluate("""() => ({ day: document.querySelector('#anaDay').value, url: location.search,
+                  opts: Array.from(document.querySelectorAll('#anaDay option')).map(o => [o.value, o.textContent]) })""")
+                newer = [t for v, t in dflt["opts"] if v > (ana_rday or "")]
+                chk.add(f"{scheme} analysis: the page opens on the newest fully resolved day",
+                        dflt["day"] == ana_rday and f"day={ana_rday}" in dflt["url"], str([dflt["day"], ana_rday]))
+                chk.add(f"{scheme} analysis: the days after it are marked provisional and it is not",
+                        bool(newer) and all("provisional" in t for t in newer)
+                        and not any("provisional" in t for v, t in dflt["opts"] if v == ana_rday), str(dflt["opts"][:3]))
+
+                def ana_no_resolved(route):
+                    resp = route.fetch(); d = json.loads(resp.text())
+                    d.pop("lastResolvedDay", None); d.pop("dayStatus", None)
+                    return route.fulfill(response=resp, body=json.dumps(d))
+
+                page.route("**/analysis/index.json", ana_no_resolved)
+                page.goto(f"{srv.url}/{ANA}"); page.wait_for_timeout(2200)
+                chk.add(f"{scheme} analysis: an index without the field opens on the newest day",
+                        page.evaluate("document.querySelector('#anaDay').value") == ana_days[-1],
+                        page.evaluate("document.querySelector('#anaDay').value"))
+                page.unroute("**/analysis/index.json")
+                page.goto(f"{srv.url}/{ANA}?day={ana_fday}"); page.wait_for_timeout(2200)
                 ana_state = """() => ({
                   legend: document.querySelector('#anaLegend').textContent,
                   href: document.querySelector('#anaFrame').getAttribute('href') || '',

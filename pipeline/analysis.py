@@ -238,6 +238,9 @@ CONVENTIONS = {
               "resolving cell, ten cells either way on the 2.5 km grid, about 52 km across. The zoomed map draws "
               "those cells at their own resolution in place of the lattice and outlines the resolving cell; the "
               "place value is that cell's own.",
+    "resolvedDay": "A day is fully resolved when every one of the fifty places has its URMA day final and "
+                   "its precipitation total resolved. The page opens on the newest such day, and the day "
+                   "select marks the days after it as provisional.",
     "units": "Kelvin to Fahrenheit exactly, metres per second to miles per hour by 2.2369362921, "
              "millimetres to inches by 1/25.4.",
 }
@@ -945,6 +948,61 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
     return day_doc, loc_docs
 
 
+def day_status(day_doc: dict, locs: list) -> dict:
+    """How far one local date has resolved, counted over every place: `final`
+    places have all their URMA analysis hours read, `resolved` places are final
+    and have their precipitation total resolved too, `closed` places stopped
+    waiting short of a full day. A day is fully resolved when `resolved`
+    equals `places`; the page opens on the newest such day. A place with no
+    URMA hours yet counts toward `places` and nothing else, so a day is never
+    called resolved on the places that happen to have landed."""
+    entries = (day_doc or {}).get("locations") or {}
+    out = {"places": len(locs), "final": 0, "resolved": 0, "closed": 0}
+    for loc in locs:
+        u = (entries.get(loc["id"]) or {}).get("urma") or {}
+        if u.get("closed"):
+            out["closed"] += 1
+        if u.get("final"):
+            out["final"] += 1
+            if (u.get("precip") or {}).get("resolved"):
+                out["resolved"] += 1
+    return out
+
+
+def index_days(store: Storage) -> list:
+    """The newest INDEX_DAYS local dates that have a days/ file."""
+    days = sorted({k[len(PREFIX + "days/"):-len(".json")] for k in store.list(PREFIX + "days/") if k.endswith(".json")})
+    return days[-INDEX_DAYS:]
+
+
+def refresh_day_status(store: Storage, state: dict, locs: list, days: list) -> int:
+    """Fill the status of any listed day the state does not carry yet (the
+    first pass after this field was added, or a day file written by an older
+    pass) from its days/ file, and drop statuses of days no longer listed.
+    A day's status is otherwise kept current by rebuild_days, which writes it
+    from the document it has just built. Returns the number of files read."""
+    ds = state.setdefault("dayStatus", {})
+    read = 0
+    for day_iso in days:
+        if day_iso not in ds:
+            ds[day_iso] = day_status(_read_json(store, DAY_KEY.format(day=day_iso)) or {}, locs)
+            read += 1
+    for day_iso in list(ds):
+        if day_iso not in days:
+            del ds[day_iso]
+    return read
+
+
+def last_resolved_day(state: dict, days: list) -> Optional[str]:
+    """The newest listed day on which every place has resolved."""
+    ds = state.get("dayStatus") or {}
+    for day_iso in reversed(days):
+        st = ds.get(day_iso)
+        if st and st.get("places") and st.get("resolved") == st.get("places"):
+            return day_iso
+    return None
+
+
 def rebuild_days(store: Storage, touched: set, locs: list, cache: dict, now: dt.datetime, state: dict) -> int:
     """Rewrite every days/ file a touched (location, day) pair names and the
     loc/ files of the touched pairs. Returns the number of files written."""
@@ -957,6 +1015,7 @@ def rebuild_days(store: Storage, touched: set, locs: list, cache: dict, now: dt.
         if not day_doc["locations"]:
             continue
         store.put(DAY_KEY.format(day=day_iso), _dump(day_doc), "application/json", CACHE_LIVE)
+        state.setdefault("dayStatus", {})[day_iso] = day_status(day_doc, locs)
         written += 1
         for lid, doc in loc_docs.items():
             u = (doc["summary"].get("urma") or {})
@@ -1006,7 +1065,7 @@ def _product_state() -> dict:
 def new_state() -> dict:
     return {"schema": SCHEMA, "products": {p: _product_state() for p in PRODUCTS},
             "backfill": {p: {"cursor": None, "oldest": None, "done": False, "queue": []} for p in PRODUCTS},
-            "rereads": {}, "revisions": {}, "pruned": None}
+            "rereads": {}, "revisions": {}, "dayStatus": {}, "pruned": None}
 
 
 def load_state(store: Storage) -> dict:
@@ -1447,9 +1506,11 @@ def prune_frames(store: Storage, grid_index: dict, now: dt.datetime) -> int:
     return removed
 
 
-def write_index(store: Storage, state: dict, locs: list, grid_index: dict, now: dt.datetime) -> None:
-    days = sorted({k[len(PREFIX + "days/"):-len(".json")] for k in store.list(PREFIX + "days/") if k.endswith(".json")})
-    days = days[-INDEX_DAYS:]
+def write_index(store: Storage, state: dict, locs: list, grid_index: dict, now: dt.datetime,
+                days: Optional[list] = None) -> None:
+    if days is None:
+        days = index_days(store)
+    ds = state.get("dayStatus") or {}
     newest = [_parse_iso(state["products"][p]["newest"]) for p in PRODUCTS if state["products"][p].get("newest")]
     asof = _iso(max(newest)) if newest else None
     sources = {p: {"bucket": PRODUCTS[p]["bucket"], "lagMinutes": PRODUCTS[p]["lagMinutes"],
@@ -1457,6 +1518,8 @@ def write_index(store: Storage, state: dict, locs: list, grid_index: dict, now: 
     bf = state["backfill"]
     index = {"schema": SCHEMA, "asof": asof, "written": _iso(now), "statement": STATEMENT,
              "conventions": CONVENTIONS, "sources": sources, "locations": locs, "days": days,
+             "dayStatus": {d: ds[d] for d in days if d in ds},
+             "lastResolvedDay": last_resolved_day(state, days),
              "lattice": {"pitch": LATTICE_PITCH, "cols": LATTICE_COLS, "rows": LATTICE_ROWS, "viewBox": "0 0 960 600"},
              "variables": VARIABLES,
              "backfill": {"pointsDays": BACKFILL_POINT_DAYS, "frameDays": BACKFILL_FRAME_DAYS,
@@ -1591,10 +1654,15 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
         # written whatever happened above, the index last so a reader sees
         # a consistent set and every frame on the bucket is listed
         try:
+            days = index_days(store)
+            try:
+                refresh_day_status(store, state, locs, days)
+            except Exception as e:  # noqa: BLE001 - a status is a convenience; the index goes out without it
+                _fail(status, f"day status: {type(e).__name__}: {e}")
             write_grid_index(store, grid_index, now)
             save_state(store, state, now)
             alarms = _health(store, state, status, now)
-            write_index(store, state, locs, grid_index, now)
+            write_index(store, state, locs, grid_index, now, days=days)
         except Exception as e:  # noqa: BLE001
             _fail(status, f"index: {type(e).__name__}: {e}")
     reads = len(status["read"]) + status["backfilled"]
