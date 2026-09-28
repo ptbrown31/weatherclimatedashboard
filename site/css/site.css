@@ -10,7 +10,7 @@
   --night:#EEF1F6; --shade:#F4F7FB; --map-land:#EEF1F5; --map-sea:#F6F9FC; --map-line:#FFFFFF;
   --chip:#EEF2F7; --warn:#8A5A00; --warn-soft:#FFF4DC; --bad:#A6452B; --bad-soft:#F8E5DF; --ok:#2E6B3F; --ok-soft:#E3EFE6;
   --tip-bg:#12161C; --tip-ink:#FFFFFF;
-  --ana-rtma:#B8722C; --ana-urma:#1F6F8B;
+  --ana-rtma:#B8722C; --ana-urma:#1F6F8B; --cell-line:#111111;
   --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t12:#3F6B45; --t13:#8F5530; --t14:#57499A; --t15:#245A76; --t16:#6E5730; --t17:#8A3F58; --t18:#47657E; --t-extra:#9AA3AD;
 }
 @media (prefers-color-scheme: dark){
@@ -22,7 +22,7 @@
     --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
     --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
     --tip-bg:#E4E9F0; --tip-ink:#0F141A;
-    --ana-rtma:#E8A85C; --ana-urma:#6FB8D6;
+    --ana-rtma:#E8A85C; --ana-urma:#6FB8D6; --cell-line:#0B0F14;
     --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t12:#9FD4AA; --t13:#EDB98C; --t14:#BDB2EC; --t15:#8CC6E3; --t16:#DBC088; --t17:#E7A3BB; --t18:#AEC8E0; --t-extra:#8C97A3;
   }
 }
@@ -34,7 +34,7 @@
   --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
   --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
   --tip-bg:#E4E9F0; --tip-ink:#0F141A;
-  --ana-rtma:#E8A85C; --ana-urma:#6FB8D6;
+  --ana-rtma:#E8A85C; --ana-urma:#6FB8D6; --cell-line:#0B0F14;
   --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t12:#9FD4AA; --t13:#EDB98C; --t14:#BDB2EC; --t15:#8CC6E3; --t16:#DBC088; --t17:#E7A3BB; --t18:#AEC8E0; --t-extra:#8C97A3;
 }
 *{box-sizing:border-box}
@@ -686,6 +686,21 @@ table.lad th{font-weight:600;border-bottom:1px solid var(--line)}
 #vdots g.dot{cursor:pointer;outline:none}
 #vdots g.dot:focus-visible circle:last-of-type{stroke:var(--accent);stroke-width:2.2px;stroke-dasharray:none}
 #anaBar #anaNewest{margin:0;min-width:0}   /* wraps at phone width; nowrap pushed the page to 469 px at 390 */
+/* cell mode: the window cells and the resolving cell open the panel like a
+   dot; the value text on a dot is in the ink, the muted grey was faint on
+   the dark theme */
+#vcells path.wcell{cursor:pointer}
+#vdots text.anaval{fill:var(--ink)}
+#vdots g.cellmark text{fill:var(--ink);font-weight:600;pointer-events:none}
+/* the site's dot hover thickens the last circle in viewBox units, which at
+   sixty times in is a ring the size of the window; the Census dot keeps no
+   stroke and the hover goes to the outline, whose stroke does not scale */
+#vdots g.cellmark circle.census,#vdots g.cellmark:hover circle.census,#vdots g.dot.cellmark:focus-visible circle.census{stroke:none}
+#vdots g.cellmark:hover path.rcell{stroke-width:3}
+/* the focus ring of a cell mark is the outline itself in the accent, at a
+   width that does not scale; the generic dot focus rule above would have
+   stroked the Census dot in viewBox units, a ring wider than the window */
+#vdots g.dot.cellmark:focus-visible path.rcell{stroke:var(--accent);stroke-width:1.5px;vector-effect:non-scaling-stroke}
 .key .anaramp{display:inline-flex;gap:1px;vertical-align:middle;margin-right:4px}
 .key .anaramp i{display:inline-block;width:12px;height:12px;border:0;border-radius:1px}
 .key .kn{flex-basis:100%;color:var(--muted);font-style:italic;white-space:normal}

@@ -137,6 +137,26 @@ hundredths of an inch, rounded half up (the product is rounded to six places fir
 decimal half that binary floating point holds a hair under still rounds up); `null` where the
 lattice point is off the grid or the cell is missing in the bitmap.
 
+**Cell geometry and windows (owner's request 2026-09-27, evening).** A reader must be able to
+zoom to the very grid cell a place resolves on. For each location `scripts/build_analysis_grid.py`
+records, for the wexp grid and for G184, the resolving cell's centre in screen coordinates
+(`cell.wexpPx`, `cell.g184Px`, `[x, y]` in the 960 × 600 viewBox), its outline
+(`cell.wexpBox`, `cell.g184Box`: the four corners at `i ± 0.5, j ± 0.5` taken through
+`grib2.lcc_latlon` and the basemap transform, in order round the cell), and a local basis
+(`cell.wexpBasis`, `cell.g184Basis`: `{"di": [dx, dy], "dj": [dx, dy]}`, the screen vectors of one
+cell step in `i` and in `j` at that place, from the projected centres of the neighbouring cells),
+so that the cell `(i + a, j + b)` is centred at `centre + a·di + b·dj` and drawn as the
+parallelogram `± di/2 ± dj/2`. Over a window of ten cells either way the error of that linear
+frame against the exact projection is about 0.01 viewBox units at worst (measured 0.0092 at the
+outer corner of a corner cell, Seattle on G184), which is far below a screen pixel only up to
+about 20× zoom and about one screen pixel at the 96× maximum; the build script refuses to write a
+frame past 0.02. `px` and `py` are written to three decimals so the Census dot the page draws at
+them sits inside the outlined resolving cell (to a tenth it crossed the outline at three
+places). Around each place every frame
+also carries a **window**: the true 2.5 km values of the 21 × 21 cells centred on the resolving
+cell (`WINDOW_HALF = 10`, about 52 km across) on the grid that product and variable use, so the
+zoomed map shows the analysis at its own resolution rather than the 14 km lattice.
+
 ## 2. Naming
 
 - `analysis` is the lane, the job name in `pipeline/run.py`, and the snapshot directory.
@@ -285,6 +305,14 @@ are kept for 30 days and pruned once a day.
   "values": [ 612, 615, null, ... 64000 ints, row-major from the top-left lattice point ] }
 ```
 
+Each frame also carries `windows`, keyed by location id:
+`{"grid": "wexp", "half": 10, "values": [441 ints]}`, row-major with `dj` from −10 to +10 and
+`di` from −10 to +10 inside each row, on the same `scale`, `null` where the cell is off the
+grid or missing in the bitmap. For RTMA precipitation the window grid is `g184` and every other
+frame's is `wexp`. A window is 1 to 2 KB (three-digit tenths for temperature, fewer digits for
+the rest); the fifty add about 50 to 90 KB to a frame, measured on real files at 47 KB for
+precipitation and 91 KB for temperature, at a cost of about 0.1 s per product-hour.
+
 `scale` is what the int is divided by (10 for temperature, wind and gust; 100 for
 precipitation in inches). A precipitation frame is rewritten when a refetch of the hour's
 file adds coverage within the frame window.
@@ -409,6 +437,31 @@ location panel. Zoom and pan as in `varmap.js`. Ramps are pinned: temperature �
 on the site's nine-stop ramp, gust 0 to 60 mph, wind 0 to 30 mph, precipitation 0 to 2 in
 with zero transparent. A legend under the map states the ramp and the subsample.
 
+**Cell mode.** Once the zoom makes a resolving cell at least 12 screen pixels wide, the map
+changes what it draws: the lattice raster is hidden (a 3 px lattice block would be a flat
+patch far larger than a cell, and the caption says the field is hidden at this zoom), every
+place in view draws its 21 × 21 window as parallelograms from its basis, coloured on the same
+ramp, and its resolving cell with a dark border (`--ink`, 2 px, `vector-effect:
+non-scaling-stroke`); the Census point is a small dot; the place's value leaves the dot and
+floats in a label outside the cell at a fixed screen offset (up and to the right, flipped when it
+would leave the map), on a `--panel` background, with a leader line from the label to the centre
+of the cell. The label, the cell and the window cells all open the panel on click and answer
+hover with the cell's value and its `i, j`. A pan takes the pointer only once it has moved
+more than 4 screen pixels, so a plain click while zoomed reaches whatever is under it (taking
+pointer capture on pointerdown sent every click to the svg and nothing opened while zoomed; the
+wind and hourly maps share the fix in `site/js/varmap.js`). A window cell whose value is zero or
+`null` is drawn clear (no fill, no stroke) so hover still answers, with the value for a dry cell,
+"off the grid" when the cell index leaves the grid and "missing in this hour" for a bitmap gap,
+and the precipitation caption says dry cells are left clear. Keyboard focus on a mark outlines
+the resolving cell in the accent at a fixed 1.5 px and leaves the Census dot alone. A place
+whose index entry has no cell geometry keeps its plain dot and value in cell mode, with Zoom to
+the cell disabled. Below that zoom the dots draw as before, with the value text in `--ink` (it
+was `--muted`, faint on the dark theme). The zoom range is raised so
+the cell reaches about 40 px (`MAXZ = 96`), and a **Zoom to the cell** button in the panel and
+beside the place select sets the view so the picked cell is about 30 px wide and centred; the
+URL carries the view when zoomed (`?z=<factor>&cx=<x>&cy=<y>` in viewBox units) so a zoomed cell
+can be linked.
+
 **Location panel** (`#locPanel`, shown on pick or `?loc=`): the name, state, the day and
 zone, previous and next day buttons; a resolution row of five cards (rounded value, exact
 value, status pill final / provisional / revised / n of the day's hours, the time of the
@@ -450,4 +503,13 @@ report conventions have no analogue here.
   hatched and carry no `data-contract-url`, the provisional pill appears when `urma` is
   incomplete, `?loc=` opens the panel on load, and the 503 degradation shows "No data".
   Fixtures under `samples/snapshots/analysis/` come from a real local run of the job.
+- Cell mode: at the national extent no cell outline is drawn; after Zoom to the cell on a
+  fixture place the resolving cell's outline exists with the `--ink` stroke, the label carries the
+  dot's value and a leader line, the raster image is hidden and the caption says so, the window
+  draws 441 cells for the picked place, hover on a window cell reports its `i, j` and value, and
+  the URL carries `z`, `cx`, `cy`; a fixture without `windows` still draws the outline and the
+  label with no window cells; while zoomed a click on a window cell and on the label opens the
+  panel and a drag ending over a window cell opens nothing; a dry precipitation window draws its
+  cells clear and hover on one reads 0.00 in; a place stripped of its cell keys keeps its plain
+  dot; on the wind map a dot clicked while zoomed still scrolls to its section.
 - `scripts/scrub.py` before push; the page's `<meta name="description">` under 200 characters.

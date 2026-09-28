@@ -784,6 +784,41 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             land["y"] > 0 and abs(land["top"] - 12) <= 20, str(land))
                     chk.add(f"{scheme} wind map: picking a listed station does not leave the board",
                             "wind-markets" in land["path"], land["path"])
+                # The same while zoomed. The pan used to take pointer capture
+                # on pointerdown, and Chromium then delivered every click to
+                # the svg, so a dot clicked at any zoom never opened. After two
+                # zoom steps a dot whose section is on the board is found under
+                # the pointer (elementFromPoint proves it) and clicked.
+                if sid:
+                    page.goto(f"{srv.url}/wind-markets.html"); page.wait_for_timeout(2200)
+                    page.click("#vmapZoom button[title='zoom in']"); page.click("#vmapZoom button[title='zoom in']"); page.wait_for_timeout(600)
+                    page.evaluate("() => window.scrollTo(0, 0)"); page.wait_for_timeout(200)
+                    zt = page.evaluate("""() => {
+                      const svg = document.querySelector('#vmap'); const R = svg.getBoundingClientRect();
+                      for (const g of svg.querySelectorAll('g.dot[data-station]')) {
+                        const s = g.dataset.station;
+                        if (!document.getElementById('wind-' + s)) continue;
+                        const c = g.querySelector('circle:last-of-type'); const r = c.getBoundingClientRect();
+                        const x = r.left + r.width / 2, y = r.top + r.height / 2;
+                        if (x < R.left + 4 || x > R.right - 4 || y < R.top + 4 || y > R.bottom - 4 || y > innerHeight - 4) continue;
+                        const e = document.elementFromPoint(x, y);
+                        return { station: s, x, y, hit: !!(e && e.closest('g.dot') === g),
+                                 under: e ? e.tagName + '.' + (e.getAttribute('class') || '') : null,
+                                 zoom: document.querySelector('#vmapZoomLevel').textContent };
+                      }
+                      return null;
+                    }""")
+                    chk.add(f"{scheme} wind map: zoomed in, a dot with a section on the board is what the pointer reaches",
+                            bool(zt and zt["hit"] and zt["zoom"] != "whole country"), str(zt))
+                    if zt and zt["hit"]:
+                        page.mouse.click(zt["x"], zt["y"]); page.wait_for_timeout(1400)
+                        land = page.evaluate("""(s) => {
+                          const el = document.getElementById('wind-' + s);
+                          return { top: Math.round(el.getBoundingClientRect().top),
+                                   y: Math.round(window.scrollY), path: location.pathname };
+                        }""", zt["station"])
+                        chk.add(f"{scheme} wind map: a dot clicked while zoomed still scrolls to its station's panel",
+                                land["y"] > 0 and abs(land["top"] - 12) <= 20 and "wind-markets" in land["path"], str(land))
                 page.unroute("**/data/snapshots/**")
 
                 # ---- the analysis resolution page: a proposed settlement
@@ -1035,6 +1070,215 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         len(ur[0]) == 5 and all("could not be read" in t for t in ur[0]) and "could not be read" in ur[1]
                         and "No hours read yet" not in ur[1], str(ur)[:160])
                 ana_ctx2.close()
+                # ---- cell mode (docs/analysis.md section 6): at the national
+                #      extent no cell is outlined; Zoom to the cell on New York
+                #      outlines its resolving cell in the ink, floats the dot's
+                #      value in a label with a leader, hides the raster and says
+                #      so, draws the 441 window cells of the one fixture frame
+                #      that carries windows, answers hover with i, j and the
+                #      value, and writes the view into the address; a frame
+                #      routed without windows keeps the outline and the label.
+                #      The frame with windows is found in the fixtures, not named.
+                ana_wf = None
+                for fn_ in sorted(os.listdir(os.path.join(ANA_SNAP, "grid", "urma", "temp"))):
+                    with open(os.path.join(ANA_SNAP, "grid", "urma", "temp", fn_)) as fh:
+                        if "new-york-ny" in (json.load(fh).get("windows") or {}):
+                            ana_wf = fn_
+                chk.add(f"{scheme} analysis fixtures: a URMA temperature frame with windows", ana_wf is not None, str(ana_wf))
+                ana_wday = f"{ana_wf[:4]}-{ana_wf[4:6]}-{ana_wf[6:8]}" if ana_wf else ana_fday
+                ana_whh = ana_wf[9:11] if ana_wf else ana_hours[1]
+                ana_ny = next((L_ for L_ in ana_index["locations"] if L_["id"] == "new-york-ny"), {})
+                ana_ij = (ana_ny.get("cell") or {}).get("wexp") or [None, None]
+                ana_cell_state = """() => {
+                  const ny = document.querySelector('#vdots g.dot[data-loc="new-york-ny"]');
+                  const img = document.querySelector('#anaFrame');
+                  const out = ny && ny.querySelector('path.rcell');
+                  const lbl = ny && ny.querySelector('g.anacl text');
+                  return { outlines: document.querySelectorAll('#vdots path.rcell').length,
+                           stroke: out ? out.getAttribute('stroke') : '', sw: out ? out.getAttribute('stroke-width') : '',
+                           ve: out ? out.getAttribute('vector-effect') : '',
+                           label: lbl ? lbl.textContent : '', leaders: ny ? ny.querySelectorAll('line.analead').length : 0,
+                           census: ny ? ny.querySelectorAll('circle.census').length : 0,
+                           hidden: img.style.display === 'none', href: (img.getAttribute('href') || '').slice(0, 14),
+                           cap: document.querySelector('#anaCap').textContent,
+                           wcells: document.querySelectorAll('#vcells g.wwin[data-loc="new-york-ny"] path.wcell').length,
+                           dotval: (ny && ny.querySelector('text.anaval')) ? ny.querySelector('text.anaval').textContent : '',
+                           dotfill: (ny && ny.querySelector('text.anaval')) ? getComputedStyle(ny.querySelector('text.anaval')).fill : '',
+                           ink: getComputedStyle(document.documentElement).getPropertyValue('--ink').trim(),
+                           vb: document.querySelector('#vmap').getAttribute('viewBox'),
+                           readout: document.querySelector('#anaZoomLevel').textContent,
+                           zbtn: document.querySelector('#anaZoomCell').disabled, url: location.search };
+                }"""
+                page.goto(f"{srv.url}/{ANA}?var=high&product=urma&day={ana_wday}&hour={ana_whh}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                z0 = page.evaluate(ana_cell_state)
+                hex_ = lambda c: "rgb(%d, %d, %d)" % tuple(int(c.lstrip("#")[k:k + 2], 16) for k in (0, 2, 4)) if c.startswith("#") else c
+                chk.add(f"{scheme} analysis cell mode: at the national extent no cell is outlined and the dot value is in the ink",
+                        z0["outlines"] == 0 and not z0["hidden"] and z0["href"] == "data:image/png" and z0["dotval"] != ""
+                        and z0["dotfill"] == hex_(z0["ink"]) and z0["zbtn"] is False, str([z0["outlines"], z0["dotval"], z0["dotfill"], z0["ink"]]))
+                page.click("#anaZoomCell"); page.wait_for_timeout(600)
+                z1 = page.evaluate(ana_cell_state)
+                chk.add(f"{scheme} analysis cell mode: Zoom to the cell outlines the resolving cell with the dark cell line at a fixed 2 px",
+                        z1["outlines"] >= 1 and z1["stroke"] == "var(--cell-line)" and z1["sw"] == "2" and z1["ve"] == "non-scaling-stroke",
+                        str([z1["outlines"], z1["stroke"], z1["sw"], z1["ve"]]))
+                chk.add(f"{scheme} analysis cell mode: the label carries the dot's value with a leader and the Census point",
+                        z1["label"] == z0["dotval"] and z1["leaders"] == 1 and z1["census"] == 1, str([z1["label"], z0["dotval"], z1["leaders"]]))
+                chk.add(f"{scheme} analysis cell mode: the raster is hidden and the caption says so",
+                        z1["hidden"] and "hidden at this zoom" in z1["cap"], z1["cap"][-90:])
+                chk.add(f"{scheme} analysis cell mode: the picked place's window draws 441 cells",
+                        z1["wcells"] == 441, str(z1["wcells"]))
+                ana_zm = re.search(r"z=([\d.]+)&cx=([\d.]+)&cy=([\d.]+)", z1["url"])
+                ana_vbw = float(z1["vb"].split()[2]) if z1["vb"] else 0
+                chk.add(f"{scheme} analysis cell mode: the address carries z, cx and cy that match the view",
+                        ana_zm is not None and abs(960 / float(ana_zm.group(1)) - ana_vbw) < 0.6 and "loc=new-york-ny" in z1["url"],
+                        str([z1["url"], z1["vb"]]))
+                # the cell is about 30 screen px wide after the button
+                ana_cw = page.evaluate("""() => { const p = document.querySelector('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="0"][data-b="0"]');
+                  return p ? p.getBoundingClientRect().width : 0; }""")
+                chk.add(f"{scheme} analysis cell mode: the picked cell is about 30 px wide", 24 <= ana_cw <= 40, str(round(ana_cw, 1)))
+                page.hover('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="3"][data-b="-2"]'); page.wait_for_timeout(300)
+                ana_wtip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
+                chk.add(f"{scheme} analysis cell mode: hover on a window cell reports its i, j and the value with its unit",
+                        ana_ij[0] is not None and f"i {ana_ij[0] + 3}, j {ana_ij[1] - 2}" in ana_wtip and "New York" in ana_wtip
+                        and re.search(r"-?\d+\.\d°F", ana_wtip) is not None, ana_wtip[:120])
+                # hover on the mark reads the resolving cell, with no row about
+                # the hidden field (the cell is what is under the pointer)
+                page.hover('#vdots g.dot[data-loc="new-york-ny"] circle.census'); page.wait_for_timeout(300)
+                ana_mtip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
+                chk.add(f"{scheme} analysis cell mode: hover on the mark reports the resolving cell and drops the hidden-field row",
+                        ana_ij[0] is not None and f"i {ana_ij[0]}, j {ana_ij[1]}" in ana_mtip and "Lattice field" not in ana_mtip, ana_mtip[:120])
+                # A CLICK WHILE ZOOMED. The pan used to take pointer capture on
+                # pointerdown, and Chromium then delivered every click to the
+                # svg, so nothing under the pointer opened once the map was
+                # zoomed. The panel is closed, the pointer is put on a window
+                # cell (elementFromPoint proves the cell is what it reaches)
+                # and a plain click has to open the place. Then the label.
+                ana_hit = """(sel) => {
+                  const e = document.querySelector(sel); if (!e) return null;
+                  const r = e.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;
+                  const t = document.elementFromPoint(x, y);
+                  return { x, y, hit: !!(t && (t === e || e.contains(t))), under: t ? t.tagName + '.' + (t.getAttribute('class') || '') : null };
+                }"""
+                ana_open = "() => ({ hidden: document.querySelector('#locPanel').hidden, url: location.search, vb: document.querySelector('#vmap').getAttribute('viewBox') })"
+                for what, sel in (("a window cell", '#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="4"][data-b="3"]'),
+                                  ("the label", '#vdots g.dot[data-loc="new-york-ny"] g.anacl rect')):
+                    page.click("#locPanel button[title='close the panel']"); page.wait_for_timeout(200)
+                    page.evaluate("() => window.scrollTo(0, 0)"); page.wait_for_timeout(200)
+                    c0 = page.evaluate(ana_open)
+                    ht = page.evaluate(ana_hit, sel)
+                    if ht: page.mouse.click(ht["x"], ht["y"]); page.wait_for_timeout(500)
+                    c1 = page.evaluate(ana_open)
+                    chk.add(f"{scheme} analysis cell mode: while zoomed, a click on {what} opens the panel and puts loc= in the address",
+                            bool(ht and ht["hit"]) and c0["hidden"] and "loc=" not in c0["url"] and not c1["hidden"] and "loc=new-york-ny" in c1["url"],
+                            str([ht, c0["url"], c1["url"]]))
+                # and a drag that ends over a window cell pans and opens nothing
+                page.click("#locPanel button[title='close the panel']"); page.wait_for_timeout(200)
+                page.evaluate("() => window.scrollTo(0, 0)"); page.wait_for_timeout(200)
+                ht = page.evaluate(ana_hit, '#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="4"][data-b="3"]')
+                d0 = page.evaluate(ana_open)
+                if ht:
+                    page.mouse.move(ht["x"], ht["y"]); page.mouse.down()
+                    for k_ in range(1, 6): page.mouse.move(ht["x"] + 8 * k_, ht["y"] + 4 * k_)
+                    page.mouse.up(); page.wait_for_timeout(500)
+                d1 = page.evaluate(ana_open)
+                chk.add(f"{scheme} analysis cell mode: a drag that ends over a window cell pans the view and opens nothing",
+                        bool(ht) and d1["hidden"] and "loc=" not in d1["url"] and d1["vb"] != d0["vb"], str([d0["vb"], d1["vb"], d1["url"]]))
+                # the view comes back from the address on load
+                page.goto(f"{srv.url}/{ANA}{z1['url']}"); page.wait_for_timeout(2200)
+                z2 = page.evaluate(ana_cell_state)
+                # the address carries a tenth of a unit, so the restored view
+                # is the same to a tenth, not to the viewBox's third decimal
+                ana_vbs = [[float(t) for t in (v_ or "0 0 0 0").split()] for v_ in (z1["vb"], z2["vb"])]
+                chk.add(f"{scheme} analysis cell mode: a zoomed address restores the view and cell mode on load",
+                        all(abs(a_ - b_) <= 0.15 for a_, b_ in zip(*ana_vbs)) and z2["outlines"] >= 1 and z2["wcells"] == 441 and z2["hidden"],
+                        str([z2["vb"], z1["vb"], z2["wcells"]]))
+                chk.add(f"{scheme} analysis cell mode: the zoom readout names the restored zoom, not the whole country",
+                        z2["readout"].endswith("×") and z2["readout"] != "whole country" and z2["readout"] == z1["readout"], str([z2["readout"], z1["readout"]]))
+                # an index entry without the geometry keys keeps its plain dot
+                # in cell mode, with Zoom to the cell disabled for it
+                def ana_nokeys(route):
+                    resp = route.fetch(); d = json.loads(resp.text())
+                    for L_ in d.get("locations") or []:
+                        if L_["id"] == "new-york-ny":
+                            for k_ in list((L_.get("cell") or {}).keys()):
+                                if k_.endswith("Px") or k_.endswith("Box") or k_.endswith("Basis"): L_["cell"].pop(k_)
+                    return route.fulfill(response=resp, body=json.dumps(d))
+
+                page.route("**/analysis/index.json", ana_nokeys)
+                page.goto(f"{srv.url}/{ANA}{z1['url']}"); page.wait_for_timeout(2200)
+                zk = page.evaluate(ana_cell_state)
+                page.unroute("**/analysis/index.json")
+                chk.add(f"{scheme} analysis cell mode: a place without the geometry keys keeps its plain dot and value in cell mode",
+                        zk["hidden"] and zk["census"] == 0 and zk["label"] == "" and zk["dotval"] == z0["dotval"] and zk["wcells"] == 0
+                        and zk["outlines"] >= 1 and zk["zbtn"] is True, str([zk["dotval"], zk["census"], zk["outlines"], zk["zbtn"]]))
+                # a dry precipitation window: every zero cell is drawn clear
+                # and still answers hover with 0.00 in, a null cell inside the
+                # grid says it is missing, and the caption says dry cells are
+                # left clear. The fixture frame is routed to all zeros with
+                # one null at (3, -2).
+                ana_pf = None
+                ana_pdir = os.path.join(ANA_SNAP, "grid", "urma", "precip")
+                for fn_ in sorted(os.listdir(ana_pdir)) if os.path.isdir(ana_pdir) else []:
+                    with open(os.path.join(ana_pdir, fn_)) as fh:
+                        if "new-york-ny" in (json.load(fh).get("windows") or {}):
+                            ana_pf = fn_
+                chk.add(f"{scheme} analysis fixtures: a URMA precipitation frame with a New York window", ana_pf is not None, str(ana_pf))
+                if ana_pf:
+                    def ana_dry(route):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        w_ = d["windows"]["new-york-ny"]; half_ = w_.get("half", 10); n_ = 2 * half_ + 1
+                        w_["values"] = [0] * (n_ * n_)
+                        w_["values"][(-2 + half_) * n_ + (3 + half_)] = None
+                        return route.fulfill(response=resp, body=json.dumps(d))
+
+                    page.route(f"**/analysis/grid/urma/precip/{ana_pf}", ana_dry)
+                    page.goto(f"{srv.url}/{ANA}?var=precip&product=urma&day={ana_pf[:4]}-{ana_pf[4:6]}-{ana_pf[6:8]}&hour={ana_pf[9:11]}&loc=new-york-ny")
+                    page.wait_for_timeout(2200)
+                    page.click("#anaZoomCell"); page.wait_for_timeout(600)
+                    page.unroute(f"**/analysis/grid/urma/precip/{ana_pf}")
+                    zd = page.evaluate("""() => ({ cells: document.querySelectorAll('#vcells g.wwin[data-loc="new-york-ny"] path.wcell').length,
+                      clear: document.querySelectorAll('#vcells g.wwin[data-loc="new-york-ny"] path.wcell.clear').length,
+                      fill: (document.querySelector('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="0"][data-b="5"]') || {}).getAttribute('fill'),
+                      cap: document.querySelector('#anaCap').textContent })""")
+                    page.hover('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="0"][data-b="5"]'); page.wait_for_timeout(300)
+                    ana_dtip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
+                    page.hover('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="3"][data-b="-2"]'); page.wait_for_timeout(300)
+                    ana_ntip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
+                    chk.add(f"{scheme} analysis cell mode: a dry window draws its 441 cells clear and the caption says dry cells are left clear",
+                            zd["cells"] == 441 and zd["clear"] == 441 and zd["fill"] == "transparent" and "dry cells left clear" in zd["cap"], str(zd)[:160])
+                    chk.add(f"{scheme} analysis cell mode: hover on a dry cell says 0.00 in and on a null cell inside the grid says missing in this hour",
+                            "0.00 in" in ana_dtip and "missing in this hour" in ana_ntip and "off the grid" not in ana_ntip, str([ana_dtip[:80], ana_ntip[:80]]))
+                # the frame routed without windows: the outline and the label
+                # stay, no window cells
+                def ana_nowin(route):
+                    resp = route.fetch(); d = json.loads(resp.text())
+                    d.pop("windows", None)
+                    return route.fulfill(response=resp, body=json.dumps(d))
+
+                page.route(f"**/analysis/grid/urma/temp/{ana_wf}", ana_nowin)
+                page.goto(f"{srv.url}/{ANA}{z1['url']}"); page.wait_for_timeout(2200)
+                z3 = page.evaluate(ana_cell_state)
+                page.unroute(f"**/analysis/grid/urma/temp/{ana_wf}")
+                chk.add(f"{scheme} analysis cell mode: a frame without windows still draws the outline and the label, with no window cells",
+                        z3["outlines"] >= 1 and z3["label"] == z0["dotval"] and z3["wcells"] == 0 and z3["hidden"], str([z3["outlines"], z3["label"], z3["wcells"]]))
+                # Reset brings the raster and the dots back
+                page.click("#anaZoom button[title='back to the whole country']"); page.wait_for_timeout(600)
+                z4 = page.evaluate(ana_cell_state)
+                chk.add(f"{scheme} analysis cell mode: Reset returns the raster and the dots and clears the view from the address",
+                        z4["outlines"] == 0 and not z4["hidden"] and z4["dotval"] == z0["dotval"] and "z=" not in z4["url"], str([z4["outlines"], z4["url"]]))
+                # the tooltip is hidden when the wheel carries the map into cell
+                # mode, rather than keeping the lattice value from before the flip
+                page.evaluate("() => window.scrollTo(0, 0)"); page.wait_for_timeout(200)
+                ht = page.evaluate(ana_hit, '#vdots g.dot[data-loc="new-york-ny"] circle:last-of-type')
+                if ht:
+                    page.mouse.move(ht["x"], ht["y"]); page.wait_for_timeout(200)
+                    t_on = page.evaluate("() => getComputedStyle(document.querySelector('#tip')).opacity")
+                    for k_ in range(30):
+                        page.mouse.wheel(0, -100); page.wait_for_timeout(30)
+                        if page.evaluate("() => document.querySelector('#anaFrame').style.display === 'none'"): break
+                    page.wait_for_timeout(400)
+                    t_off = page.evaluate("() => [getComputedStyle(document.querySelector('#tip')).opacity, document.querySelector('#anaFrame').style.display === 'none']")
+                    chk.add(f"{scheme} analysis cell mode: the tooltip is hidden when the wheel flips the map into cell mode",
+                            t_on == "1" and t_off[0] == "0" and t_off[1], str([t_on, t_off]))
                 # the built head of an unlisted page: no canonical link and no
                 # structured data for a crawler it turned away, the Open Graph
                 # tags kept for a shared link's preview

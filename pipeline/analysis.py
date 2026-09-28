@@ -55,7 +55,8 @@ Writes  archive/analysis/hours/<product>/<stamp>.json.gz   the fifty exact hourl
         archive/analysis/precip/<product>/<stamp>.json.gz  the fifty exact hourly accumulations, rewritten as coverage fills in
         archive/analysis/_meta/state.json                  cursors, gaps, pending precipitation, re-read and prune stamps, revisions
         archive/_meta/health_analysis.json                 the lane's own failure streaks
-        snapshots/analysis/grid/<product>/<var>/<stamp>.json   one map frame on the 320 x 200 lattice
+        snapshots/analysis/grid/<product>/<var>/<stamp>.json   one map frame on the 320 x 200 lattice, with the
+                                                           21 x 21 cell window round each place at full resolution
         snapshots/analysis/grid/index.json                 which frames exist, rewritten after every hour's frames
         snapshots/analysis/days/YYYY-MM-DD.json            every place's product-days for that local date
         snapshots/analysis/loc/<id>/YYYY-MM-DD.json        one place-day at the hourly scale
@@ -159,6 +160,18 @@ MM_PER_INCH = 25.4
 
 LATTICE_PITCH = 3
 LATTICE_COLS, LATTICE_ROWS = 320, 200
+# each frame also carries, per place, the field on the WINDOW_HALF cells
+# either side of the resolving cell (21 x 21, about 52 km across at 2.5 km),
+# so the zoomed map shows the analysis at its own resolution where the 14 km
+# lattice would be a flat patch. Ten is where three things meet: the window
+# still fills the map at the zoom where a cell is 30 px across (that is a
+# 630 px square), the page's linear placement of the window cells from one
+# basis is still about 0.01 viewBox units out at the corners, under a
+# hundredth of a screen pixel at the national extent and about one pixel at
+# the 96x zoom the page allows (scripts/build_analysis_grid.py measures it,
+# worst 0.0092, and refuses past 0.02), and 441 ints are about 1 KB
+# a place, 50 KB a frame, a third of what the lattice already costs
+WINDOW_HALF = 10
 BACKFILL_POINT_DAYS = 30        # location values this far back, by random-access cell reads
 BACKFILL_FRAME_DAYS = 7         # map frames this far back
 FRAME_KEEP_DAYS = 30            # frames older than this are pruned
@@ -221,6 +234,10 @@ CONVENTIONS = {
     "lattice": "The map samples each hourly field onto a 320 by 200 lattice at 3 screen pixels, about 14 km "
                "between points nationally. It is a subsample for display; the place values come from the "
                "full grid.",
+    "window": "Each hourly frame also carries, for every place, the field on the 21 by 21 cells centred on its "
+              "resolving cell, ten cells either way on the 2.5 km grid, about 52 km across. The zoomed map draws "
+              "those cells at their own resolution in place of the lattice and outlines the resolving cell; the "
+              "place value is that cell's own.",
     "units": "Kelvin to Fahrenheit exactly, metres per second to miles per hour by 2.2369362921, "
              "millimetres to inches by 1/25.4.",
 }
@@ -497,6 +514,35 @@ def frame_from_field(values, lattice_indices: list, scale: int, convert: Optiona
     return _frame_ints([None if k < 0 else values[k] for k in lattice_indices], scale, convert)
 
 
+def window_indices(cell, grid: dict, half: int = WINDOW_HALF) -> list:
+    """The grid indices of the window round a resolving cell (i, j): row-major
+    with the j offset outer from -half to +half and the i offset inner, so
+    entry (b + half) * (2 half + 1) + (a + half) is cell (i + a, j + b) at
+    k = (j + b) * Ni + (i + a). A cell off the grid is -1 (a place near the
+    grid edge; the page draws nothing there), never clipped to the edge,
+    because a clipped index would be a real cell in the wrong place."""
+    i, j = cell[0], cell[1]
+    ni, nj = grid["Ni"], grid["Nj"]
+    out = []
+    for b in range(-half, half + 1):
+        jj = j + b
+        for a in range(-half, half + 1):
+            ii = i + a
+            out.append(jj * ni + ii if 0 <= ii < ni and 0 <= jj < nj else -1)
+    return out
+
+
+def window_from_field(values, window_ks: list, scale: int, convert: Optional[Callable] = None) -> list:
+    """The window of a decoded field as ints on the frame's scale: the same
+    rule as the lattice, None off the grid or missing in the bitmap."""
+    return frame_from_field(values, window_ks, scale, convert)
+
+
+def window_doc(grid_name: str, vals: list) -> dict:
+    """One place's window as the frame carries it (docs/analysis.md section 4)."""
+    return {"grid": grid_name, "half": WINDOW_HALF, "values": vals}
+
+
 # ------------------------------------------------------------------ NOAA objects
 def _bucket(product: str) -> str:
     # gov_weather owns the bucket constants; the default is the same string,
@@ -567,39 +613,50 @@ def _grid(name: str) -> dict:
     return grib2.WEXP if name == "wexp" else grib2.G184
 
 
-def _sample(msg: bytes, var: str, grid_name: str, ks: list, lattice: Optional[dict]) -> Tuple[list, Optional[list]]:
+def _sample(msg: bytes, var: str, grid_name: str, ks: list, lattice: Optional[dict],
+            windows: Optional[list] = None) -> Tuple[list, Optional[list], Optional[list]]:
     """The values at the location cells ks and, when a lattice is given, the
-    map frame. A simple-packed message without a bitmap (every analysis
-    field) is read cell by cell: the 64,000 lattice cells and the fifty
-    places, never the 3.7 million floats of the field, which is what keeps
-    an hour with frames inside the Lambda's memory. Anything else (the
+    map frame and (when `windows`, one index list per place from
+    window_indices, is given) each place's window on the frame's scale. A
+    simple-packed message without a bitmap (every analysis field) is read
+    cell by cell: the 64,000 lattice cells, the fifty places and the 22,050
+    window cells, never the 3.7 million floats of the field, which is what
+    keeps an hour with frames inside the Lambda's memory. Anything else (the
     complex-packed precipitation) is decoded whole and sampled."""
     if lattice is None:
-        return grib2.decode_cells(msg, ks), None
+        return grib2.decode_cells(msg, ks), None, None
     lat = lattice[grid_name]
+    windows = windows or []
     if grib2.random_access(msg):
         want = [k for k in lat if k >= 0]
-        vals = grib2.decode_cells(msg, want + ks)
+        wks = [k for w in windows for k in w if k >= 0]
+        vals = grib2.decode_cells(msg, want + ks + wks)
         it = iter(vals)
         sampled = [next(it) if k >= 0 else None for k in lat]
-        return vals[len(want):], _frame_ints(sampled, SCALE[var], CONVERT[var])
+        cells = vals[len(want):len(want) + len(ks)]
+        it = iter(vals[len(want) + len(ks):])
+        wins = [_frame_ints([next(it) if k >= 0 else None for k in w], SCALE[var], CONVERT[var]) for w in windows]
+        return cells, _frame_ints(sampled, SCALE[var], CONVERT[var]), wins
     field = grib2.decode(msg)
     frame = frame_from_field(field, lat, SCALE[var], CONVERT[var])
+    wins = [window_from_field(field, w, SCALE[var], CONVERT[var]) for w in windows]
     cells = [field[k] for k in ks]
     del field
-    return cells, frame
+    return cells, frame, wins
 
 
 class HourResult:
     """What reading one product-hour came to: `status` is ok, absent (the
     analysis file is not on the bucket) or error; `doc` is the write-once
     archive hour, `precip` the precipitation document (None when its file
-    was absent or refused, with `precip_error` saying why), and `frames` the
-    lattice samples when they were asked for."""
+    was absent or refused, with `precip_error` saying why), `frames` the
+    lattice samples when they were asked for, and `windows` beside them the
+    per-place windows by variable ({var: {place id: window_doc}})."""
     def __init__(self, status: str, doc: Optional[dict] = None, frames: Optional[dict] = None,
-                 error: Optional[str] = None, precip: Optional[dict] = None, precip_error: Optional[str] = None):
+                 error: Optional[str] = None, precip: Optional[dict] = None, precip_error: Optional[str] = None,
+                 windows: Optional[dict] = None):
         self.status, self.doc, self.frames, self.error = status, doc, frames, error
-        self.precip, self.precip_error = precip, precip_error
+        self.precip, self.precip_error, self.windows = precip, precip_error, windows
 
 
 def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict], now: dt.datetime) -> HourResult:
@@ -609,6 +666,8 @@ def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict
     Nothing raises out of here: a short body, a refused packing or a 5xx
     after the retries is an error the caller records."""
     p = PRODUCTS[product]
+    # the window is on the grid the file is on: G184 for the RTMA
+    # precipitation, wexp for everything else, the same choice as the cell
     grid_name = p["pcpGrid"]
     ks = [loc["cell"][grid_name][2] for loc in locs]
     try:
@@ -618,13 +677,17 @@ def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict
         why = check_message(raw, "precip", _grid(grid_name), t)
         if why:
             return HourResult("error", error=why)
-        cells, frame = _sample(raw, "precip", grid_name, ks, lattice)
+        wins = None if lattice is None else [window_indices(loc["cell"][grid_name], _grid(grid_name)) for loc in locs]
+        cells, frame, wvals = _sample(raw, "precip", grid_name, ks, lattice, wins)
     except Exception as e:  # noqa: BLE001
         return HourResult("error", error=f"{type(e).__name__}: {e}")
     values = {loc["id"]: (None if v is None else half_up(mm_to_inch(v), HOUR_UNIT["precip"]))
               for loc, v in zip(locs, cells)}
     doc = precip_doc(product, t, values, now, read=True)
-    return HourResult("ok", doc=doc, frames={"precip": frame} if lattice is not None else None)
+    if lattice is None:
+        return HourResult("ok", doc=doc)
+    return HourResult("ok", doc=doc, frames={"precip": frame},
+                      windows={"precip": {loc["id"]: window_doc(grid_name, w) for loc, w in zip(locs, wvals)}})
 
 
 def precip_doc(product: str, t: dt.datetime, values: dict, now: dt.datetime, read: bool) -> dict:
@@ -645,6 +708,10 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
     ks_wexp = [loc["cell"]["wexp"][2] for loc in locs]
     values: Dict[str, dict] = {loc["id"]: {} for loc in locs}
     out_frames: dict = {}
+    out_windows: dict = {}
+    # the analysis fields are all on wexp, so one set of window indices
+    # serves the three messages
+    wins = [window_indices(loc["cell"]["wexp"], _grid("wexp")) for loc in locs] if frames else None
     try:
         url = anl_url(product, t)
         idx_raw = gw.fetch_bytes(url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
@@ -667,10 +734,11 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
             why = check_message(msg, var, _grid("wexp"), t)
             if why:
                 return HourResult("error", error=f"{name}: {why}")
-            cells, frame = _sample(msg, var, "wexp", ks_wexp, lattice if frames else None)
+            cells, frame, wvals = _sample(msg, var, "wexp", ks_wexp, lattice if frames else None, wins)
             del msg
             if frames:
                 out_frames[var] = frame
+                out_windows[var] = {loc["id"]: window_doc("wexp", w) for loc, w in zip(locs, wvals)}
             for loc, v in zip(locs, cells):
                 values[loc["id"]][var] = None if v is None else half_up(CONVERT[var](v), HOUR_UNIT[var])
     except Exception as e:  # noqa: BLE001
@@ -678,10 +746,12 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
     prec = read_precip(product, t, locs, lattice if frames else None, now)
     if frames:
         out_frames["precip"] = (prec.frames or {}).get("precip") if prec.status == "ok" else None
+        out_windows["precip"] = (prec.windows or {}).get("precip") if prec.status == "ok" else None
     doc = {"schema": SCHEMA, "product": product, "valid": _iso(t), "written": _iso(now), "values": values}
     return HourResult("ok", doc=doc, frames=out_frames if frames else None,
                       precip=prec.doc if prec.status == "ok" else None,
-                      precip_error=prec.error if prec.status == "error" else None)
+                      precip_error=prec.error if prec.status == "error" else None,
+                      windows=out_windows if frames else None)
 
 
 # ------------------------------------------------------------------ writing
@@ -776,11 +846,15 @@ def write_hour(store: Storage, product: str, t: dt.datetime, res: HourResult, gr
     if res.precip is not None:
         write_precip(store, product, t, res.precip, cache)
     if res.frames:
-        write_frames(store, product, t, res.frames, grid_index, now)
+        write_frames(store, product, t, res.frames, grid_index, now, res.windows)
         write_grid_index(store, grid_index, now)
 
 
-def write_frames(store: Storage, product: str, t: dt.datetime, frames: dict, grid_index: dict, now: dt.datetime) -> None:
+def write_frames(store: Storage, product: str, t: dt.datetime, frames: dict, grid_index: dict, now: dt.datetime,
+                 windows: Optional[dict] = None) -> None:
+    """One frame file per variable sampled, the place windows of that
+    variable inside it under `windows` when they were sampled (a frame
+    without them is the older shape and the page accepts it)."""
     stamp = _stamp(t)
     day, hh = f"{t:%Y-%m-%d}", f"{t:%H}"
     for var in HOURLY_VARS:
@@ -790,6 +864,9 @@ def write_frames(store: Storage, product: str, t: dt.datetime, frames: dict, gri
         doc = {"schema": SCHEMA, "product": product, "var": var, "valid": _iso(t), "asof": _iso(t),
                "written": _iso(now), "unit": UNITS[var], "scale": SCALE[var],
                "cols": LATTICE_COLS, "rows": LATTICE_ROWS, "pitch": LATTICE_PITCH, "values": vals}
+        wins = (windows or {}).get(var)
+        if wins is not None:
+            doc["windows"] = wins
         store.put(FRAME_KEY.format(product=product, var=var, stamp=stamp), _dump(doc), "application/json", CACHE_FINAL)
         hours = grid_index.setdefault(product, {}).setdefault(var, {}).setdefault(day, [])
         if hh not in hours:
@@ -1046,7 +1123,7 @@ def retry_precip(store: Storage, product: str, state: dict, locs: list, lattice:
                 if write_precip(store, product, t, prec.doc, cache):
                     touched |= touched_by(t, locs)
                     if prec.frames and prec.frames.get("precip") is not None:
-                        write_frames(store, product, t, prec.frames, grid_index, now)
+                        write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
                         write_grid_index(store, grid_index, now)
                 stored = get_precip(store, product, t, cache) or {}
                 if stored.get("complete"):

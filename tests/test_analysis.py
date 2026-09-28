@@ -7,10 +7,14 @@ precipitation revision, the local day that spans two UTC directories, the
 object is an absence and never a raised error; a raising fetch or decode is
 recorded against its product and the pass still writes everything else; the
 alarm fires when NOAA stops landing hours; precipitation coverage fills in
-through its own rewritable key. The fake bucket holds synthetic GRIB2
+through its own rewritable key; each frame carries the 21 x 21 cell window
+round every place at the field's own values, on the grid the file is on, and
+the day rebuild never reads a frame. The fake bucket holds synthetic GRIB2
 "messages" that carry only their identity, and the fake fields answer by
 cell index so no 3.7 million floats are ever built. No network, and no
-dependence on pipeline/grib2.py being present."""
+dependence on pipeline/grib2.py being present except in the cell geometry
+tests at the end, which run the real Lambert and Albers maths of
+scripts/build_analysis_grid.py for one place."""
 import contextlib
 import datetime as dt
 import gzip
@@ -192,10 +196,14 @@ class Fakes:
 
 
 class Recording(storage.LocalStorage):
-    """The local backend, counting writes and deletes."""
+    """The local backend, counting reads, writes and deletes."""
     def __init__(self, root):
         super().__init__(root)
-        self.puts, self.deletes = [], []
+        self.puts, self.deletes, self.gets = [], [], []
+
+    def get(self, key):
+        self.gets.append(key)
+        return super().get(key)
 
     def put(self, key, data, content_type="application/octet-stream", cache_control=None):
         self.puts.append((key, content_type, cache_control))
@@ -211,8 +219,22 @@ LOCS = [l for l in ALL_LOCS if l["id"] in ("new-york-ny", "chicago-il", "los-ang
 NY = next(l for l in LOCS if l["id"] == "new-york-ny")
 LA = next(l for l in LOCS if l["id"] == "los-angeles-ca")
 NY_K = NY["cell"]["wexp"][2]
+NY_K184 = NY["cell"]["g184"][2]
 LA_K = LA["cell"]["wexp"][2]
 LA_K184 = LA["cell"]["g184"][2]
+# a place three cells in from the western edge and two from the southern one
+# on both grids, so its window runs off the grid on two sides
+EDGE = {"id": "edge-xx", "name": "Edge", "state": "XX", "geoid": "0", "pop2024": 1, "lat": 20.0, "lon": -125.0,
+        "tz": "America/Los_Angeles", "note": "", "px": 0.0, "py": 0.0,
+        "cell": {"wexp": [3, 2, 2 * 2345 + 3], "g184": [3, 2, 2 * 2145 + 3], "centre": [20.0, -125.0], "distanceKm": 0.0}}
+TINY = {"Ni": 5, "Nj": 4}
+
+
+def wexp_window_value(k):
+    """A temperature field whose Fahrenheit value names its cell: cell k is
+    32 + (k mod 997) F, so a window entry is 320 + 10 * (k mod 997) in tenths
+    and a value from any other cell shows."""
+    return 273.15 + (k % 997) * 5.0 / 9.0
 QUIET = {"user_agent": "test", "pass_budget_seconds": 120}
 
 
@@ -433,6 +455,28 @@ class Frames(unittest.TestCase):
         self.assertEqual(analysis.frame_from_field([68.05, 20.45], [0, 1], 10), [681, 205])
 
 
+class Windows(unittest.TestCase):
+    def test_window_indices_walk_row_major_and_are_null_off_the_grid(self):
+        # a 5 x 4 grid, one cell either way: dj outer, di inner, -1 off the grid
+        self.assertEqual(analysis.window_indices((2, 1, 7), TINY, half=1), [1, 2, 3, 6, 7, 8, 11, 12, 13])
+        self.assertEqual(analysis.window_indices((0, 0, 0), TINY, half=1), [-1, -1, -1, -1, 0, 1, -1, 5, 6])
+        self.assertEqual(analysis.window_indices((4, 3, 19), TINY, half=1), [13, 14, -1, 18, 19, -1, -1, -1, -1])
+        self.assertEqual(analysis.WINDOW_HALF, 10)
+        ks = analysis.window_indices(NY["cell"]["wexp"], WEXP)
+        self.assertEqual(len(ks), 441)
+        self.assertEqual(ks[220], NY_K)                                   # the centre entry is the resolving cell
+        self.assertEqual(ks[0], (NY["cell"]["wexp"][1] - 10) * 2345 + NY["cell"]["wexp"][0] - 10)
+        self.assertEqual(ks[440], (NY["cell"]["wexp"][1] + 10) * 2345 + NY["cell"]["wexp"][0] + 10)
+
+    def test_window_from_field_takes_the_field_at_k_and_keeps_holes(self):
+        field = Field(lambda k: None if k == 7 else 273.15 + k, 20)
+        ks = analysis.window_indices((2, 1, 7), TINY, half=1)
+        out = analysis.window_from_field(field, ks, 10, analysis.k_to_f)
+        self.assertEqual(out, [338, 356, 374, 428, None, 464, 518, 536, 554])
+        self.assertEqual(analysis.window_from_field(field, [-1, 0], 10, analysis.k_to_f), [None, 320])
+        self.assertEqual(analysis.window_doc("g184", [1, None]), {"grid": "g184", "half": 10, "values": [1, None]})
+
+
 # ------------------------------------------------------------------ the job on storage
 class Job(unittest.TestCase):
     def setUp(self):
@@ -542,6 +586,110 @@ class Job(unittest.TestCase):
         self.assertFalse(any(k.startswith("snapshots/analysis/grid/rtma/") for k, _, _ in self.st.puts[n:]))
         self.assertFalse(any(k.startswith("archive/analysis/") and not k.endswith("state.json") for k, _, _ in self.st.puts[n:]))
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
+
+    def test_frames_carry_each_places_window_on_the_grid_the_file_is_on(self):
+        t_r, t_u = hour(2026, 9, 26, 19), hour(2026, 9, 26, 13)
+        analysis.load_locations = lambda path=None: LOCS + [EDGE]
+        self.fx.add_hour("rtma", t_r)
+        self.fx.add_hour("urma", t_u)
+        self.fx.values[("rtma", "temp", iso(t_r))] = wexp_window_value
+        # one cell beside New York's is missing from the bitmap
+        self.fx.values[("rtma", "gust", iso(t_r))] = lambda k: None if k == NY_K + 1 else 10.0
+        # 1 inch at New York's G184 cell and half an inch at its wexp index: the
+        # RTMA precipitation window must read the G184 one, the URMA the wexp one
+        def pcp(k):
+            return 25.4 if k == NY_K184 else (12.7 if k == NY_K else 0.0)
+        self.fx.values[("rtma", "precip", iso(t_r))] = pcp
+        self.fx.values[("urma", "precip", iso(t_u))] = pcp
+        self.assertEqual(self.run_pass(), 0)
+        temp = self.read(analysis.FRAME_KEY.format(product="rtma", var="temp", stamp="20260926T19Z"))
+        # the frame is otherwise the shape it was
+        self.assertEqual(sorted(temp), sorted(["schema", "product", "var", "valid", "asof", "written", "unit", "scale",
+                                               "cols", "rows", "pitch", "values", "windows"]))
+        self.assertEqual(len(temp["values"]), 64000)
+        self.assertEqual(set(temp["windows"]), {"new-york-ny", "chicago-il", "los-angeles-ca", "edge-xx"})
+        w = temp["windows"]["new-york-ny"]
+        self.assertEqual((w["grid"], w["half"], len(w["values"])), ("wexp", 10, 441))
+        i, j = NY["cell"]["wexp"][0], NY["cell"]["wexp"][1]
+        for a, b in ((0, 0), (-10, -10), (10, -10), (10, 10), (-10, 10), (3, -7)):
+            k = (j + b) * 2345 + (i + a)
+            self.assertEqual(w["values"][(b + 10) * 21 + (a + 10)], 320 + 10 * (k % 997), (a, b))
+        self.assertEqual(w["values"][220], 320 + 10 * (NY_K % 997))
+        # the archive hour is the value at the resolving cell, unchanged in shape
+        arc = self.read(analysis.hour_key("rtma", t_r))
+        self.assertEqual(sorted(arc), ["product", "schema", "valid", "values", "written"])
+        self.assertEqual(arc["values"]["new-york-ny"]["temp"], round(32 + NY_K % 997, 1))
+        # a cell the bitmap leaves out is null in the window
+        gust = self.read(analysis.FRAME_KEY.format(product="rtma", var="gust", stamp="20260926T19Z"))["windows"]["new-york-ny"]
+        self.assertIsNone(gust["values"][221])
+        self.assertEqual(gust["values"].count(None), 1)
+        self.assertEqual(gust["values"][220], 224)                        # 10 m/s is 22.4 mph
+        # off the grid is null: a place 3 cells in from the west and 2 from the
+        # south has 14 x 13 cells of its window on the grid
+        edge = temp["windows"]["edge-xx"]
+        self.assertEqual(edge["values"].count(None), 441 - 14 * 13)
+        self.assertIsNone(edge["values"][0])
+        self.assertIsNotNone(edge["values"][220])
+        self.assertEqual(edge["values"][(0 + 10) * 21 + (-3 + 10)], 320 + 10 * ((2 * 2345 + 0) % 997))
+        # the precipitation window is on G184 for RTMA and on wexp for URMA
+        pr = self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z"))["windows"]
+        self.assertEqual(pr["new-york-ny"]["grid"], "g184")
+        self.assertEqual(pr["new-york-ny"]["values"][220], 100)
+        self.assertEqual(pr["edge-xx"]["values"].count(None), 441 - 14 * 13)
+        pu = self.read(analysis.FRAME_KEY.format(product="urma", var="precip", stamp="20260926T13Z"))["windows"]
+        self.assertEqual(pu["new-york-ny"]["grid"], "wexp")
+        self.assertEqual(pu["new-york-ny"]["values"][220], 50)
+        for var in analysis.HOURLY_VARS:
+            fr = self.read(analysis.FRAME_KEY.format(product="urma", var=var, stamp="20260926T13Z"))
+            self.assertEqual(fr["windows"]["los-angeles-ca"]["grid"], "wexp", var)
+            self.assertEqual(len(fr["windows"]["los-angeles-ca"]["values"]), 441, var)
+
+    def test_a_precipitation_refetch_rewrites_the_frame_with_its_window(self):
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t, precip=False)
+        self.assertEqual(self.run_pass(), 0)
+        self.assertIsNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z")))
+        self.fx.add_precip("rtma", t)
+        self.fx.values[("rtma", "precip", iso(t))] = lambda k: 2.54 if k == NY_K184 else 0.0
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
+        fr = self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z"))
+        self.assertEqual(fr["windows"]["new-york-ny"]["grid"], "g184")
+        self.assertEqual(fr["windows"]["new-york-ny"]["values"][220], 10)
+
+    def test_the_day_rebuild_never_reads_a_frame_so_a_frame_without_windows_is_fine(self):
+        t_r, t_u = hour(2026, 9, 26, 19), hour(2026, 9, 26, 13)
+        self.fx.add_hour("rtma", t_r)
+        self.fx.add_hour("urma", t_u)
+        self.fx.values[("rtma", "temp", iso(t_r))] = lambda k: 300.15 if k == NY_K else 293.15
+        self.assertEqual(self.run_pass(), 0)
+        day_before = self.read(analysis.DAY_KEY.format(day="2026-09-26"))
+        loc_before = self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))
+        # rewrite every frame in the shape the lane wrote before windows
+        # existed, and one of them as it would be after a page-side tool
+        # touched it, then rebuild the day from scratch
+        frames = [k for k, _, _ in self.st.puts if k.startswith("snapshots/analysis/grid/") and not k.endswith("index.json")]
+        self.assertEqual(len(frames), 8)
+        for key in frames:
+            doc = self.read(key)
+            self.assertIn("windows", doc)
+            del doc["windows"]
+            self.st.put(key, analysis._dump(doc), "application/json", analysis.CACHE_FINAL)
+        self.st.gets = []
+        later = NOW + dt.timedelta(minutes=10)
+        cache = {}
+        day_doc, loc_docs = analysis.build_day(self.st, "2026-09-26", LOCS, cache, later, analysis.load_state(self.st))
+        self.assertEqual(day_doc["locations"], day_before["locations"])
+        self.assertEqual(loc_docs["new-york-ny"]["hours"], loc_before["hours"])
+        self.assertFalse([k for k in self.st.gets if k.startswith("snapshots/analysis/grid/")])
+        # and a whole second pass, which rebuilds the closing days, still reads
+        # no frame and rewrites none
+        n = len(self.st.puts)
+        self.assertEqual(self.run_pass(later), 0)
+        self.assertFalse([k for k in self.st.gets if k.startswith("snapshots/analysis/grid/") and not k.endswith("index.json")])
+        self.assertFalse([k for k, _, _ in self.st.puts[n:] if k.startswith("snapshots/analysis/grid/") and not k.endswith("index.json")])
+        for key in frames:
+            self.assertNotIn("windows", self.read(key))
+        self.assertEqual(self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"], day_before["locations"])
 
     def test_the_place_file_carries_the_hourly_precipitation_to_a_ten_thousandth(self):
         # owner's decision 2026-09-27: the hour table adds up to the exact total
@@ -1082,11 +1230,39 @@ class Config(unittest.TestCase):
             self.assertEqual(len(l["cell"]["wexp"]), 3, l["id"])
             self.assertLess(l["cell"]["distanceKm"], 2.0, l["id"])
             self.assertEqual(l["cell"]["wexp"][2], l["cell"]["wexp"][1] * 2345 + l["cell"]["wexp"][0])
+            # the cell geometry of docs/analysis.md section 1, per grid
+            for g in ("wexp", "g184"):
+                px, box, basis = l["cell"][g + "Px"], l["cell"][g + "Box"], l["cell"][g + "Basis"]
+                self.assertEqual((len(px), len(box), sorted(basis)), (2, 4, ["di", "dj"]), (l["id"], g))
+                self.assertLess(abs(px[0] - l["px"]) + abs(px[1] - l["py"]), 1.0, (l["id"], g))   # the cell is at the dot
+                for corner in box:
+                    self.assertLess(abs(corner[0] - px[0]) + abs(corner[1] - px[1]), 1.0, (l["id"], g))
+                for v in ("di", "dj"):
+                    step = (basis[v][0] ** 2 + basis[v][1] ** 2) ** 0.5
+                    self.assertTrue(0.44 < step < 0.53, (l["id"], g, v, step))   # 2.5 km at the fit's 5 km per unit
+            # the two grids' nearest cells are the same ground to within a cell
+            self.assertLess(abs(l["cell"]["wexpPx"][0] - l["cell"]["g184Px"][0])
+                            + abs(l["cell"]["wexpPx"][1] - l["cell"]["g184Px"][1]), 0.6, l["id"])
         lat = analysis.load_lattice()
         self.assertEqual((lat["pitch"], lat["cols"], lat["rows"], lat["viewBox"]), (3, 320, 200, "0 0 960 600"))
         self.assertEqual(len(lat["wexp"]), 64000)
         self.assertEqual(len(lat["g184"]), 64000)
         self.assertTrue(all(-1 <= k < 2345 * 1597 for k in lat["wexp"]))
+
+    def test_the_window_convention_is_stated_in_the_page_prose_rules(self):
+        """docs/analysis.md section 1: the index's conventions carry an entry
+        for the 21 x 21 window, and the page prints every entry as it is, so
+        it takes the rules scripts/verify.py holds page copy to."""
+        import re
+        w = analysis.CONVENTIONS["window"]
+        self.assertIn("21 by 21", w)
+        self.assertIn("resolving cell", w)
+        self.assertIn("ten cells either way", w)
+        for k, t in analysis.CONVENTIONS.items():
+            self.assertIsNone(re.search(r"[a-z)][:]\s+[a-z]", t), (k, t))     # verify.py's colon rule
+            self.assertNotIn("\u2014", t, k)                                    # and its dash rule
+            self.assertNotIn(" -- ", t, k)
+            self.assertIsNone(re.search(r"\bWhat this is not\b|\bis a [a-z ]+, not a\b", t), (k, t))
 
     def test_the_job_is_registered_and_packaged(self):
         from pipeline import run
@@ -1101,6 +1277,85 @@ class Config(unittest.TestCase):
         self.assertIn("cron(8/10 * * * ? *)", tpl)
         self.assertIn('{"job": "analysis"}', tpl)
         self.assertIn("five EventBridge schedules", tpl)
+
+
+# ------------------------------------------------------------------ the build script's geometry
+class CellGeometry(unittest.TestCase):
+    """The real Lambert inverse and Albers fit for one place: the linear
+    frame the page draws the window with must land on the exact projected
+    cell centres out to ten cells either way, and the box on the exact
+    corners, within FRAME_TOL viewBox units (0.02; the measured worst over
+    the fifty is 0.0092)."""
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import build_analysis_grid   # noqa: E402
+        from pipeline import basemap, grib2   # noqa: E402
+        cls.bag, cls.grib2 = build_analysis_grid, grib2
+        cls.tr = basemap.Transform.from_json(basemap.load_field_grid()["transform"])
+
+    def test_the_basis_reproduces_the_projected_window_cells_for_new_york(self):
+        i, j = NY["cell"]["wexp"][0], NY["cell"]["wexp"][1]
+        geom = self.bag.cell_geometry(self.grib2.WEXP, i, j, self.tr)
+        self.assertEqual(geom["px"], NY["cell"]["wexpPx"])
+        self.assertEqual(geom["box"], NY["cell"]["wexpBox"])
+        self.assertEqual(geom["basis"], NY["cell"]["wexpBasis"])
+        cx, cy = geom["px"]
+        di, dj = geom["basis"]["di"], geom["basis"]["dj"]
+        worst = 0.0
+        for a in (-10, 0, 10):
+            for b in (-10, 0, 10):
+                ex, ey = self.bag.cell_px(self.grib2.WEXP, i + a, j + b, self.tr)
+                err = ((cx + a * di[0] + b * dj[0] - ex) ** 2 + (cy + a * di[1] + b * dj[1] - ey) ** 2) ** 0.5
+                worst = max(worst, err)
+                self.assertLess(err, self.bag.FRAME_TOL, (a, b, err))
+        for n, (sa, sb) in enumerate(((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5))):
+            bx, by = geom["box"][n]
+            err = ((cx + sa * di[0] + sb * dj[0] - bx) ** 2 + (cy + sa * di[1] + sb * dj[1] - by) ** 2) ** 0.5
+            self.assertLess(err, self.bag.FRAME_TOL, (n, err))
+        e = self.bag.frame_error(self.grib2.WEXP, i, j, self.tr, geom)
+        self.assertLess(e["cells"], self.bag.FRAME_TOL)
+        self.assertLess(e["corners"], self.bag.FRAME_TOL)
+        self.assertGreaterEqual(e["cells"], worst - 1e-9)                # the whole window is at least the corners
+        # the centre of the resolving cell is where the Lambert inverse puts it
+        lat, lon = self.grib2.lcc_latlon(self.grib2.WEXP, i, j)
+        self.assertEqual([round(lat, 4), round(lon, 4)], NY["cell"]["centre"])
+        self.assertEqual([round(v, 3) for v in self.tr.project(lon, lat)], geom["px"])
+        # j runs north on this grid, so dj points up the screen; i runs east
+        self.assertLess(dj[1], 0)
+        self.assertGreater(di[0], 0)
+
+    def test_the_checked_in_geometry_is_what_the_script_computes(self):
+        for l in ALL_LOCS:
+            for name, grid in (("wexp", self.grib2.WEXP), ("g184", self.grib2.G184)):
+                geom = self.bag.cell_geometry(grid, l["cell"][name][0], l["cell"][name][1], self.tr)
+                self.assertEqual(geom["px"], l["cell"][name + "Px"], (l["id"], name))
+                self.assertEqual(geom["box"], l["cell"][name + "Box"], (l["id"], name))
+                self.assertEqual(geom["basis"], l["cell"][name + "Basis"], (l["id"], name))
+
+    def test_the_tolerance_is_just_above_the_measured_worst_case(self):
+        self.assertEqual(self.bag.FRAME_TOL, 0.02)
+        worst = self.bag.frame_sanity(ALL_LOCS, self.tr)
+        self.assertLess(worst["cells"], 0.01)          # the comments say about 0.01 units
+        self.assertLess(worst["corners"], 0.002)
+
+    def test_the_census_dot_sits_inside_the_outlined_resolving_cell(self):
+        """The page draws the Census point at (px, py) and the resolving cell
+        round its centre; written to a tenth the dot crossed the outline at
+        Los Angeles, Austin and Tulsa, so px and py carry three decimals and
+        the dot's offset from the centre, solved through the basis, stays
+        inside the half-cell box at every place on both grids."""
+        for l in ALL_LOCS:
+            self.assertEqual(l["px"], round(l["px"], 3), l["id"])
+            self.assertEqual(l["py"], round(l["py"], 3), l["id"])
+            for g in ("wexp", "g184"):
+                cx, cy = l["cell"][g + "Px"]
+                di, dj = l["cell"][g + "Basis"]["di"], l["cell"][g + "Basis"]["dj"]
+                ex, ey = l["px"] - cx, l["py"] - cy
+                det = di[0] * dj[1] - di[1] * dj[0]
+                a = (ex * dj[1] - ey * dj[0]) / det
+                b = (di[0] * ey - di[1] * ex) / det
+                self.assertLessEqual(max(abs(a), abs(b)), 0.5, (l["id"], g, a, b))
 
 
 if __name__ == "__main__":

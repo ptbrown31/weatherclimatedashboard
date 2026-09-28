@@ -215,30 +215,45 @@ window.WXVarMap = (() => {
       const [cx, cy] = atPoint(ev);
       zoomAbout(ev.deltaY < 0 ? 1.18 : 1 / 1.18, cx, cy);
     }, { passive: false });
+    /* A pan starts on pointerdown but takes the pointer only once it has
+       moved past the click threshold. Capturing on pointerdown made Chromium
+       deliver every click to the svg itself, so a dot clicked while the map
+       was zoomed never opened its station. Until the threshold the pointer
+       is tracked on the svg with a window-level pointerup, so a click that
+       ends off the map still ends the gesture. */
     let drag = null, moved = 0;
+    const DRAG_PX = 4;
     svg.addEventListener('pointerdown', ev => {
       if (VIEW0.w / view.w <= 1.02) return;            // nothing to pan at full extent
-      drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, id: ev.pointerId };
-      moved = 0; svg.setPointerCapture(ev.pointerId); svg.classList.add('grabbing');
+      if (ev.button != null && ev.button !== 0) return;
+      drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, id: ev.pointerId, captured: false };
+      moved = 0;
     });
     svg.addEventListener('pointermove', ev => {
-      if (!drag) return;
-      const k = view.w / svg.getBoundingClientRect().width;
+      if (!drag || ev.pointerId !== drag.id) return;
       const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy;
-      moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+      moved = Math.max(moved, Math.hypot(dx, dy));           // straight-line distance, so a diagonal wobble is still a click
+      if (moved <= DRAG_PX) return;                    // still a click in the making
+      if (!drag.captured) {
+        drag.captured = true; svg.classList.add('grabbing');
+        try { svg.setPointerCapture(drag.id); } catch (e) { /* the pointer is gone; the window pointerup ends it */ }
+      }
+      const k = view.w / svg.getBoundingClientRect().width;
       view.x = drag.vx - dx * k; view.y = drag.vy - dy * k;
       clampView(); applyView();
     });
     const endDrag = ev => {
-      if (!drag) return;
-      try { svg.releasePointerCapture(drag.id); } catch (e) { /* already released */ }
+      if (!drag || (ev && ev.pointerId != null && ev.pointerId !== drag.id)) return;
+      if (drag.captured) { try { svg.releasePointerCapture(drag.id); } catch (e) { /* already released */ } }
       drag = null; svg.classList.remove('grabbing');
     };
     svg.addEventListener('pointerup', endDrag);
     svg.addEventListener('pointercancel', endDrag);
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
     // a pan that ends over a dot must not also open that station
     svg.addEventListener('click', ev => {
-      if (moved > 4) { ev.stopPropagation(); ev.preventDefault(); moved = 0; }
+      if (moved > DRAG_PX) { ev.stopPropagation(); ev.preventDefault(); moved = 0; }
     }, true);
 
     const bar = h('div', { class: 'bar', id: 'vmapZoom' });
