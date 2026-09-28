@@ -216,6 +216,11 @@ def _fetch_geometry(b: str) -> dict:
         "geometryAdvisory": geom_adv, "geometryFetched": _iso(dt.datetime.now(dt.timezone.utc)),
         "points": [{"lon": _round(f["geometry"]["coordinates"][0]), "lat": _round(f["geometry"]["coordinates"][1]),
                     "kt": f["properties"].get("maxwind"), "type": f["properties"].get("stormtype"),
+                    # NHC's own strength for the point: its Saffir-Simpson category
+                    # (0 below hurricane strength) and its development label
+                    # ("Major Hurricane", "Tropical Storm", "Subtropical Depression"),
+                    # so the page names the point the way NHC's forecast does
+                    "ssnum": f["properties"].get("ssnum"), "tcdvlp": f["properties"].get("tcdvlp"),
                     "label": f["properties"].get("datelbl"), "tau": f["properties"].get("tau")}
                    for f in pts if f.get("geometry")],
         "track": [_round(f["geometry"]["coordinates"]) for f in trk if f.get("geometry")],
@@ -249,7 +254,11 @@ def hurricane_pass(cfg: dict, store: Storage) -> int:
             "id": s["id"], "bin": b, "name": s["name"], "classification": s["classification"],
             "intensityKt": int(s["intensity"]), "pressureMb": s.get("pressure"),
             "lat": s.get("latitudeNumeric"), "lon": s.get("longitudeNumeric"),
-            "movementDir": s.get("movementDir"), "movementKt": s.get("movementSpeed"),
+            # NHC's CurrentStorms.json gives intensity in knots but movementSpeed in
+            # miles per hour (its Tropical Cyclone Status JSON File Reference); the
+            # field was stored as movementKt until 2026-09-28 and the page labelled
+            # it knots, so a storm moving at 10 mph read as 10 kt
+            "movementDir": s.get("movementDir"), "movementMph": s.get("movementSpeed"),
             "basin": s["id"][:2].upper(), "updated": s.get("lastUpdate"), "advisory": adv,
             "advisoryUrl": (s.get("publicAdvisory") or {}).get("url"),
             "windProbsUrl": (s.get("windSpeedProbabilities") or {}).get("url"),

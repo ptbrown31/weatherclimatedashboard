@@ -30,8 +30,12 @@ window.WXHur = (() => {
   const REGION_ALIAS = { 'The Bahamas': 'Bahamas, The', 'Bahamas': 'Bahamas, The' };
   const COUNT = { TROPA: 'Atlantic named storms', HCAB: 'Atlantic hurricanes', MHCMA: 'Atlantic major hurricanes by month', HCAT4: 'Category 4 hurricane in the US', HLF: 'Hurricane landfall' };
   // NHC GIS point types; anything not listed shows as its code
+  // (the storm roster's classification uses NHC's CurrentStorms.json codes,
+  // where PTC is a post-tropical cyclone or remnants and PC a potential
+  // tropical cyclone, per NHC's Tropical Cyclone Status JSON File Reference)
   const TYPES = { HU: 'hurricane', MH: 'major hurricane', TS: 'tropical storm', TD: 'tropical depression', STS: 'subtropical storm', STD: 'subtropical depression',
-    PTC: 'potential tropical cyclone', PC: 'post-tropical cyclone', EX: 'extratropical', RL: 'remnant low', LO: 'low', DB: 'disturbance' };
+    SS: 'subtropical storm', SD: 'subtropical depression',
+    PTC: 'post-tropical cyclone', PC: 'potential tropical cyclone', EX: 'extratropical', RL: 'remnant low', LO: 'low', DB: 'disturbance' };
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   const RAMP = ['#fde8c8', '#f9cf94', '#f2ad5e', '#e68a2e', '#cf6a14', '#a84e0b', '#7a3607'];
@@ -121,7 +125,51 @@ window.WXHur = (() => {
     node.onclick = e => tip.pin(e, typeof html === 'function' ? html() : html);
     node.setAttribute('data-tip-pin', '1');
   }
-  const mph = kt => (kt == null ? null : Math.round(kt * 1.151));
+  /* Wind as NHC states it to the public. NHC analyses and forecasts intensity
+     in knots and gives the public mph rounded to the nearest 5 (100 kt is
+     115 mph, 40 kt is 45 mph, 30 kt is 35 mph, as its advisories of
+     2026-09-28 read), so the number here is the advisory's number. The name
+     after it is the strength NHC gives that wind: a hurricane's
+     Saffir-Simpson category (64 kt and up, with categories 2 to 5 beginning
+     at 83, 96, 113 and 137 kt), a tropical storm from 34 kt, a tropical
+     depression below. A subtropical, post-tropical or potential tropical
+     cyclone is not rated on the scale and keeps NHC's own name. A forecast
+     point carries NHC's own category and label (ssnum, tcdvlp), which are
+     used as they are; the knots decide only where those are missing. */
+  const mph = kt => (kt == null ? null : Math.round(kt * 1.15078 / 5) * 5);
+  const SUBTROPICAL = { SS: 1, SD: 1, STS: 1, STD: 1 };
+  const UNRATED = { PTC: 'post-tropical cyclone', PC: 'potential tropical cyclone', EX: 'extratropical cyclone', RL: 'remnant low', LO: 'low', DB: 'disturbance' };
+  const SHORT = { 'tropical storm': 'TS', 'tropical depression': 'TD', 'subtropical storm': 'SS', 'subtropical depression': 'SD' };
+  function strength(kt, type, nhc) {
+    const cat = n => ({ long: 'Category ' + n + ' hurricane', mid: 'Category ' + n, short: 'Cat ' + n });
+    const named = w => ({ long: w, mid: w, short: SHORT[w] || w });
+    const ss = nhc && nhc.ssnum != null ? Number(nhc.ssnum) : null;
+    if (ss >= 1 && ss <= 5) return cat(ss);
+    const dev = nhc && nhc.tcdvlp ? String(nhc.tcdvlp).trim().toLowerCase() : '';
+    if (dev && !/hurricane/.test(dev)) return named(dev);
+    if (kt == null) return null;
+    if (SUBTROPICAL[type]) return named(kt >= 34 ? 'subtropical storm' : 'subtropical depression');
+    if (UNRATED[type]) return named(UNRATED[type]);
+    if (kt >= 64) return cat(kt >= 137 ? 5 : kt >= 113 ? 4 : kt >= 96 ? 3 : kt >= 83 ? 2 : 1);
+    return named(kt >= 34 ? 'tropical storm' : 'tropical depression');
+  }
+  // "115 mph, Category 3 hurricane" (form long), "115 mph, Category 3" (mid), "115 mph Cat 3" (short)
+  function windText(kt, type, nhc, form) {
+    if (kt == null) return null;
+    const st = strength(kt, type, nhc);
+    if (!st) return mph(kt) + ' mph';
+    return form === 'short' ? mph(kt) + ' mph ' + st.short : mph(kt) + ' mph, ' + st[form || 'long'];
+  }
+  // the storm's own motion, which NHC's roster already gives in mph
+  const motionMph = s => (s.movementMph != null ? s.movementMph : s.movementKt);
+  // the forecast point at the storm's current position, when it is the roster's
+  // own advisory and says the same wind; an intermediate advisory can move the
+  // roster's knots past a category boundary the point still carries
+  const stormNow = st => {
+    if (st.geometryStale) return null;
+    const p0 = (st.points || []).find(p => p.tau === 0);
+    return p0 && p0.kt === st.intensityKt ? p0 : null;
+  };
   const compass = d => (d == null ? null : COMPASS[Math.round(((d % 360) + 360) % 360 / 22.5) % 16]);
   const position = (lat, lon) => (lat == null || lon == null ? null : Math.abs(lat).toFixed(2) + (lat < 0 ? 'S' : 'N') + ' ' + Math.abs(lon).toFixed(2) + (lon < 0 ? 'W' : 'E'));
   const typeText = t => (t ? esc(t) + (TYPES[t] ? ' · ' + TYPES[t] : '') : null);
@@ -225,20 +273,23 @@ window.WXHur = (() => {
             ? [{ lon: s.lon, lat: s.lat, kt: s.intensityKt, type: s.classification, tau: 0, label: null }] : []);
       pts.forEach((p, i) => {
         svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: (p.tau === 0 ? 6 : 4.5) * g, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 * g }));
-        if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + p.kt + 'kt' : ''), { x: X(p.lon) + 8 * g, y: Y(p.lat) + (i % 2 ? 14 : -8) * g, 'font-size': 9 * g, fill: 'var(--ink)', class: 'lbl', style: halo }));
-        if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · ' + (p.kt != null ? p.kt : s.intensityKt) + 'kt · adv ' + advNow,
+        // a forecast point's label is short (the full name is in its hover), so a
+        // track of seven points stays readable; the current position's is full
+        if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + windText(p.kt, p.type, p, 'short') : ''), { x: X(p.lon) + 8 * g, y: Y(p.lat) + (i % 2 ? 14 : -8) * g, 'font-size': 9 * g, fill: 'var(--ink)', class: 'lbl', style: halo }));
+        if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · '
+          + (p.kt != null ? windText(p.kt, p.type || s.classification, p, 'mid') : windText(s.intensityKt, s.classification, null, 'mid')) + ' · adv ' + advNow,
           { x: X(p.lon) + 10 * g, y: Y(p.lat) - 20 * g, 'font-size': 12.5 * g, 'font-weight': 700, fill: 'var(--navy)', class: 'lbl', style: halo }));
         // the hover target: an invisible circle wider than the drawn point
         const now = p.tau === 0;
         const rows = [
           ['Valid', esc(p.label || '—')],
-          ['Wind', p.kt != null ? p.kt + ' kt (' + mph(p.kt) + ' mph)' : '—'],
+          ['Wind', p.kt != null ? windText(p.kt, p.type || s.classification, p) : '—'],
           ['Type', typeText(p.type || s.classification)],
           ['Position', position(p.lat, p.lon)],
           ['Advisory', esc(advNow)],
           now ? null : ['Lead', (p.tau != null ? p.tau : '—') + ' h'],
           now ? ['Pressure', s.pressureMb ? esc(s.pressureMb) + ' mb' : '—'] : null,
-          now ? ['Movement', s.movementDir != null ? s.movementDir + '° (' + compass(s.movementDir) + ')' + (s.movementKt != null ? ' at ' + s.movementKt + ' kt' : '') : '—'] : null,
+          now ? ['Movement', s.movementDir != null ? s.movementDir + '° (' + compass(s.movementDir) + ')' + (motionMph(s) != null ? ' at ' + motionMph(s) + ' mph' : '') : '—'] : null,
           now ? ['NHC last update', utc(s.updated)] : null,
         ];
         const html = tip.rows(esc(p.type || s.classification) + ' ' + name + ' — ' + (now ? 'current position' : 'forecast point'), rows,
@@ -646,20 +697,22 @@ window.WXHur = (() => {
     here.slice().sort((a, b) => (Date.parse(b.updated || '') || 0) - (Date.parse(a.updated || '') || 0)).forEach(s => {
       list.appendChild(h('div', { class: 'stormrow' }, [
         h('b', { text: s.classification + ' ' + s.name }),
-        h('span', { text: s.basin + ' · ' + s.intensityKt + ' kt · ' + (s.pressureMb || '--') + ' mb · advisory ' + s.advisory + (s.geometryAdvisory && String(s.geometryAdvisory).replace(/^0+/, '') !== String(s.advisory).replace(/^0+/, '') ? ' (map shows ' + s.geometryAdvisory + ')' : '') }),
+        h('span', { text: s.basin + ' · ' + windText(s.intensityKt, s.classification, stormNow(s)) + ' · ' + (s.pressureMb || '--') + ' mb · advisory ' + s.advisory + (s.geometryAdvisory && String(s.geometryAdvisory).replace(/^0+/, '') !== String(s.advisory).replace(/^0+/, '') ? ' (map shows ' + s.geometryAdvisory + ')' : '') }),
         s.advisoryUrl ? h('a', { href: s.advisoryUrl, text: 'NHC advisory', target: '_blank', rel: 'noopener' }) : h('span'),
         s.windProbsUrl ? h('a', { href: s.windProbsUrl, text: 'wind speed probabilities', target: '_blank', rel: 'noopener' }) : h('span'),
       ]));
       if (s.windProbs && s.windProbs.length) {
         const tb = h('table', { class: 'pws' });
-        // the product is issued in knots; the page reads in mph, at the
-        // strengths those thresholds define — 34 kt is the 39 mph of a
-        // tropical storm, 64 kt the 74 mph of a hurricane
-        tb.appendChild(h('tr', {}, [h('th', { text: 'NHC five-day cumulative probability, sustained winds' }), h('th', { class: 'num', text: '≥39 mph' }), h('th', { class: 'num', text: '≥58 mph' }), h('th', { class: 'num', text: '≥74 mph' })]));
+        // the product is issued in knots; the page reads in mph, with the
+        // strength each threshold defines where it defines one: 34 kt is the
+        // 39 mph of tropical-storm force, 64 kt the 74 mph of hurricane force,
+        // and 50 kt (58 mph) is not a category boundary
+        const thr = (v, name) => h('th', { class: 'num' }, name ? [v, h('br'), h('span', { class: 'pwsn', text: name })] : [v]);
+        tb.appendChild(h('tr', {}, [h('th', { text: 'NHC five-day cumulative probability, sustained winds' }), thr('≥39 mph', 'tropical-storm force'), thr('≥58 mph'), thr('≥74 mph', 'hurricane force')]));
         s.windProbs.slice(0, 14).forEach(r => {
           const tr = h('tr', {}, [h('td', { text: r.location }), h('td', { class: 'num', text: r.p34 + '%' }), h('td', { class: 'num', text: r.p50 + '%' }), h('td', { class: 'num', text: r.p64 + '%' })]);
           attach(tr, tip.rows(esc(r.location) + ' — NHC wind speed probabilities',
-            [['≥39 mph (34 kt)', r.p34 != null ? r.p34 + '%' : '—'], ['≥58 mph (50 kt)', r.p50 != null ? r.p50 + '%' : '—'], ['≥74 mph (64 kt)', r.p64 != null ? r.p64 + '%' : '—']],
+            [['≥39 mph, tropical-storm force', r.p34 != null ? r.p34 + '%' : '—'], ['≥58 mph', r.p50 != null ? r.p50 + '%' : '—'], ['≥74 mph, hurricane force', r.p64 != null ? r.p64 + '%' : '—']],
             'sustained winds, cumulative through the 5-day forecast, NHC PWSAT, advisory ' + esc(s.advisory)));
           tb.appendChild(tr);
         });

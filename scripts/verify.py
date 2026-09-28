@@ -3251,7 +3251,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   const heads = [...tb.querySelectorAll('th')].map(t => t.textContent);
                   const caps = [...document.querySelectorAll('#storms .cap')].map(c => c.textContent).join(' ');
                   return { heads, sustained: /sustained winds/.test(heads.join(' ')),
-                           mph: heads.some(t => t === '≥39 mph') && heads.some(t => t === '≥74 mph'),
+                           mph: heads.some(t => t === '≥39 mphtropical-storm force') && heads.some(t => t === '≥58 mph')
+                                && heads.some(t => t === '≥74 mphhurricane force'),
                            kt: heads.some(t => /kt/.test(t)),
                            gustNote: /peak gust/.test(caps) && /not comparable/.test(caps) };
                 }""")
@@ -3260,6 +3261,60 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         str(pws and pws["heads"]))
                 chk.add(f"{scheme} hurricane: the table says it is not the LiveCyc gust quantity",
                         bool(pws and pws["gustNote"]), str(pws and pws["gustNote"]))
+                # every wind the tropical page shows is in mph, rounded to 5 the way
+                # NHC's advisories state it, followed by the strength NHC gives it;
+                # no knots on the map, in the storm list or in a hover
+                hur_state = """() => {
+                  const hits = [...document.querySelectorAll('#basin circle[fill-opacity="0"]')];
+                  const tips = hits.map(c => {
+                    const r = c.getBoundingClientRect();
+                    c.dispatchEvent(new MouseEvent('mousemove', { clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, bubbles: true }));
+                    const t = document.querySelector('#tip'); return t ? t.textContent : '';
+                  });
+                  const labels = [...document.querySelectorAll('#basin text.lbl')].map(t => t.textContent);
+                  const rows = [...document.querySelectorAll('#storms .stormrow span')].map(t => t.textContent);
+                  const all = labels.concat(rows, tips);
+                  return { labels, rows, tips, knots: all.filter(t => /\\d\\s*kt\\b/.test(t)) };
+                }"""
+                hs0 = page.evaluate(hur_state)
+                chk.add(f"{scheme} hurricane: no wind on the map, in the storm list or in a hover is in knots",
+                        bool(hs0["labels"]) and bool(hs0["tips"]) and not hs0["knots"], str(hs0["knots"][:3]))
+                chk.add(f"{scheme} hurricane: the current position reads mph and NHC's strength",
+                        any("Iselle · 50 mph, tropical storm · adv" in t for t in hs0["labels"]), str(hs0["labels"][:6]))
+                chk.add(f"{scheme} hurricane: forecast points read mph with the strength in short",
+                        any(t.endswith("45 mph TS") for t in hs0["labels"]) and any(t.endswith("40 mph SS") for t in hs0["labels"])
+                        and any(t.endswith("35 mph SD") for t in hs0["labels"]), str(hs0["labels"][:8]))
+                chk.add(f"{scheme} hurricane: the storm list reads mph and the strength",
+                        any("50 mph, tropical storm" in t for t in hs0["rows"]), str(hs0["rows"][:2]))
+                hcur = next((t for t in hs0["tips"] if "current position" in t and "Iselle" in t), "")
+                chk.add(f"{scheme} hurricane: the current position's hover gives the wind in mph and the motion in mph",
+                        "Wind50 mph, tropical storm" in hcur and " mph" in hcur.split("Movement", 1)[-1][:40], hcur[:160])
+
+                # a point carrying NHC's own category and label is named by them,
+                # and the roster's motion reads from its mph field when it has one
+                def hur_nhc(route):
+                    resp = route.fetch(); d = json.loads(resp.text())
+                    for st in d.get("storms") or []:
+                        if st.get("name") == "Iselle":
+                            st["movementMph"] = 12; st.pop("movementKt", None)
+                            for pt in st.get("points") or []:
+                                if pt.get("tau") == 0:
+                                    pt.update({"ssnum": 0, "tcdvlp": "Tropical Storm"})
+                                if pt.get("tau") == 12:
+                                    pt.update({"kt": 100, "type": "MH", "ssnum": 3, "tcdvlp": "Major Hurricane"})
+                    return route.fulfill(response=resp, body=json.dumps(d))
+
+                page.route("**/snapshots/hurricane.json", hur_nhc)
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(900)
+                page.locator("#b2").click(); page.wait_for_timeout(700)
+                hs1 = page.evaluate(hur_state)
+                page.unroute("**/snapshots/hurricane.json")
+                chk.add(f"{scheme} hurricane: a point with NHC's category reads it, short on the map and in full in its hover",
+                        any(t.endswith("115 mph Cat 3") for t in hs1["labels"])
+                        and any("Wind115 mph, Category 3 hurricane" in t for t in hs1["tips"]), str(hs1["labels"][:6]))
+                hcur1 = next((t for t in hs1["tips"] if "current position" in t and "Iselle" in t), "")
+                chk.add(f"{scheme} hurricane: the motion reads from the roster's mph field",
+                        "at 12 mph" in hcur1, hcur1[-120:])
                 # zooming the map keeps features the same size on screen: the
                 # viewBox shrinks and the glyphs redraw smaller by the same
                 # factor, so a label at 4x does not fill the Gulf
