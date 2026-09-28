@@ -1008,6 +1008,26 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} analysis: the hypothetical rungs are hatched and say Yes or No only",
                         pn["hatched"] >= 5 and pn["fills"] == ["url(#wxHatch)"] and pn["rungs"] == ["No", "Yes"],
                         str([pn["hatched"], pn["fills"], pn["rungs"]]))
+                # owner's decision 2026-09-28: a value equal to the strike resolves Yes,
+                # at or above for the high and at or below for the low
+                ana_rungs = """() => {
+                  const p = document.querySelector('#locPanel');
+                  const yn = [...p.querySelectorAll('text.anarung')].map(t => t.textContent);
+                  const st = [...p.querySelectorAll('text.anastrike')].map(t => t.textContent);
+                  return st.map((k, i) => [k, yn[i]]);
+                }"""
+                ny_u = (ana_entries.get(ana_day) or {}).get("urma") or {}
+                hv = (ny_u.get("high") or {}).get("value"); lv = (ny_u.get("low") or {}).get("value")
+                rh = dict(page.evaluate(ana_rungs))
+                chk.add(f"{scheme} analysis: a high equal to the strike resolves Yes, a strike one above it No, and the rungs read at least",
+                        hv is not None and rh.get(f"\u2265{hv}°F") == "Yes" and rh.get(f"\u2265{hv + 1}°F") == "No"
+                        and all(k.startswith("\u2265") for k in rh), str([hv, rh]))
+                page.click('button[data-var="low"]'); page.wait_for_timeout(900)
+                rl = dict(page.evaluate(ana_rungs))
+                chk.add(f"{scheme} analysis: a low equal to the strike resolves Yes, a strike one below it No, and the rungs read at most",
+                        lv is not None and rl.get(f"\u2264{lv}°F") == "Yes" and rl.get(f"\u2264{lv - 1}°F") == "No"
+                        and all(k.startswith("\u2264") for k in rl), str([lv, rl]))
+                page.click('button[data-var="high"]'); page.wait_for_timeout(700)
                 chk.add(f"{scheme} analysis: no rung carries a link or a price, and the panel keeps the exchange's language",
                         pn["links"] == 0 and "¢" not in pn["text"]
                         and not re.search(r"\b(ask|sell|offer|bid)\b", pn["text"], re.I)

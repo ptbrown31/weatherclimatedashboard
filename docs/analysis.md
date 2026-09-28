@@ -9,7 +9,8 @@ of station reports. No contract settles on it. The page says so on every view, i
 the site's navigation, and carries `<meta name="robots" content="noindex">`
 (owner's decisions 2026-09-27: population centres only; unlisted; local civil day 00 to 23;
 30 days backfilled from NOAA Open Data then live; URMA final, RTMA provisional; today's
-rounding and strict inequalities; hourly map frames; precipitation resolves at the first
+rounding, with the strict inequalities of the exchange's contracts until the owner's decision
+of 2026-09-28 made a value equal to the strike resolve Yes; hourly map frames; precipitation resolves at the first
 complete URMA read and later revisions are shown beside it; the daylight-time days keep every
 analysis of the civil date; a negative half rounds away from zero).
 
@@ -93,20 +94,27 @@ and has 24 hours every day.
 
 | variable | rule | shown as | resolves Yes when |
 |---|---|---|---|
-| high | max of the hourly temperatures | whole °F, half up | value > strike |
-| low | min of the hourly temperatures | whole °F, half up | value < strike |
-| gust | max of the hourly gusts | whole mph, half up | value > strike |
-| wind | mean of the hourly sustained winds | whole mph, half up | value > strike |
-| precip | sum of the hourly accumulations | inches to 0.01, half up | value > strike |
+| high | max of the hourly temperatures | whole °F, half up | value ≥ strike |
+| low | min of the hourly temperatures | whole °F, half up | value ≤ strike |
+| gust | max of the hourly gusts | whole mph, half up | value ≥ strike |
+| wind | mean of the hourly sustained winds | whole mph, half up | value ≥ strike |
+| precip | sum of the hourly accumulations | inches to 0.01, half up | value ≥ strike |
 
 Conversions: K to °F exactly; m/s to mph by 2.2369362921; mm to inches by 1/25.4. Half up
 means half away from zero: -20.5 °F is -21, -0.5 is -1, the way the published tables read
 (owner's decision 2026-09-27, pinned by tests on -20.5 and -0.5). It is applied once, on the
 aggregate. The exact value is kept beside the rounded one: the high, low and gust to a tenth,
 the mean wind to a hundredth (a mean of tenths, so the whole value is never the rounding of
-an already rounded number) and precipitation to a ten-thousandth of an inch. Equal to the
-strike resolves No. These mirror the exchange's daily temperature and wind contracts; mean
-wind and precipitation have no live contract and take the same shape by the owner's decision.
+an already rounded number) and precipitation to a ten-thousandth of an inch. A value equal
+to the strike resolves Yes, at or above it for the high, gust, mean wind and precipitation and
+at or below it for the low, so the boundary case is Yes whichever way the contract runs
+(owner's decision 2026-09-28, for the proposed contracts that resolve on RTMA and URMA; until
+then the page resolved it No). The Yes and No are drawn from the published values rather than
+stored, so the rule holds on every day the page shows, the backfill included. The exchange's
+current daily temperature and MG wind contracts keep the strict test (greater than, less than,
+equal resolving No) and are unchanged, so on the boundary this framework deliberately parts
+from the board. Mean wind and precipitation have no live contract and take the same shape by
+the owner's decision.
 
 **Hourly values.** The hourly value of each variable is the analysis at the top of that hour
 (precipitation: the accumulation over the hour ending then), kept exact to a tenth of a
@@ -507,7 +515,7 @@ report conventions have no analogue here.
   trip, refusal of a message on another grid.
 - `tests/test_analysis.py`: with a recording `LocalStorage` and a monkeypatched fetch and
   decoder, a product-hour is written to the archive, its precipitation key and the frames
-  with the grid index; day rules (half-up rounding away from zero, strict inequalities,
+  with the grid index; day rules (half-up rounding away from zero, the at-least strike test,
   partial and closed days, precipitation revision by exact total and by rounded hundredth,
   the local day spanning two UTC directories, the 23- and 25-hour daylight-time days,
   Arizona unchanged); `index.json` written last; a missing object is an absence; a raising

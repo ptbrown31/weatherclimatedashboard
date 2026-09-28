@@ -36,9 +36,12 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     temperature, the mean wind, the summed accumulation); the exact value
     shown beside the whole one is that same aggregate to a tenth, the mean
     wind to a hundredth and precipitation to a ten-thousandth, so a reader
-    can check the rounding and never sees it applied twice. Yes resolves on
-    a strict inequality and equal to the strike is No. These mirror the
-    exchange's daily contracts.
+    can check the rounding and never sees it applied twice. A value equal to
+    the strike resolves Yes, at or above it for the high, gust, mean wind and
+    precipitation and at or below it for the low (owner's decision
+    2026-09-28). The exchange's current daily temperature and wind contracts
+    keep the strict test, so on the boundary this framework and the board
+    part company by design.
 
     A day still short of its hours 48 hours after its local end is closed
     incomplete: its value stands on the hours read, is never marked final,
@@ -209,18 +212,23 @@ CONVENTIONS = {
            "not occur) and 25 on the fall-back day (both 01:00 analyses count). Complete means every one of "
            "them was read; the mean wind is over the hours read.",
     "high": "The highest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
-            "Yes when the value is above the strike.",
+            "Yes when the value is at or above the strike.",
     "low": "The lowest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
-           "Yes when the value is below the strike.",
+           "Yes when the value is at or below the strike.",
     "gust": "The highest hourly gust of the day, whole miles per hour rounded half up; "
-            "Yes when the value is above the strike.",
+            "Yes when the value is at or above the strike.",
     "wind": "The mean of the day's hourly sustained winds, whole miles per hour rounded half up; "
-            "Yes when the value is above the strike.",
+            "Yes when the value is at or above the strike.",
     "precip": "The sum of the day's hourly accumulations, inches to a hundredth rounded half up; "
-              "Yes when the value is above the strike.",
+              "Yes when the value is at or above the strike.",
     "rounding": "Half up, away from zero (-20.5 is -21), once, on the day's aggregate; the exact value beside "
                 "the whole one is that aggregate to a tenth, the mean wind to a hundredth and precipitation to "
-                "a ten-thousandth of an inch. Equal to the strike resolves No.",
+                "a ten-thousandth of an inch.",
+    "strike": "A value equal to the strike resolves Yes, at or above it for the high, gust, mean wind and "
+              "precipitation and at or below it for the low (owner's decision 2026-09-28). Until that date "
+              "the page resolved a value equal to the strike No, as the exchange's current daily temperature "
+              "and wind contracts still do, so a rung at a day's own value that read No now reads Yes on "
+              "every day shown.",
     "provisional": "RTMA is always provisional. URMA is final when every hourly analysis file of the day has been "
                    "read, and its precipitation is resolved at the first read that has a value for every hour. "
                    "A later re-read that differs is shown beside the resolved value, which stands.",
@@ -484,13 +492,15 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
 
 def resolves(var: str, value, strike) -> Optional[bool]:
     """Whether a hypothetical contract on a daily variable resolves Yes at a
-    strike: the low resolves on value below the strike, everything else on
-    value above it, and equal to the strike is No on both. The rule the page
-    draws its ladders with; kept here so a test can pin it and a reader can
-    find it in one place. None while the day has no value."""
+    strike: the low resolves on a value at or below the strike, everything
+    else on a value at or above it, so the boundary case is Yes whichever way
+    the contract runs (owner's decision 2026-09-28; it was strict before, as
+    the exchange's current contracts still are). The rule the page draws its
+    ladders with; kept here so a test can pin it and a reader can find it in
+    one place. None while the day has no value."""
     if value is None:
         return None
-    return value < strike if var == "low" else value > strike
+    return value <= strike if var == "low" else value >= strike
 
 
 def _frame_ints(sampled, scale: int, convert: Optional[Callable]) -> list:

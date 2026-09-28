@@ -64,3 +64,6 @@ frames, and one of those frames carries windows.
 fixture days files with the job's own `day_status` and `last_resolved_day`, the same way a live pass
 writes them; its `conventions` block was refreshed from `pipeline/analysis.py` for the new
 `resolvedDay` entry. Nothing else in the tree was touched.
+
+On 2026-09-28 (later) the `conventions` and `variables` blocks were refreshed again for the owner's
+at-least strike rule (a value equal to the strike resolves Yes); the values are untouched.

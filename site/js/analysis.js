@@ -4,8 +4,9 @@
    Daily high, low, peak gust, mean wind and precipitation at the fifty most
    populous places of the lower 48, read from NOAA's hourly 2.5 km analyses
    (RTMA within the hour, URMA about seven hours later) instead of a station's
-   reports, and resolved the way the exchange's daily contracts resolve: whole
-   units rounded half up, away from zero, strictly above or below a strike. No
+   reports, and resolved in whole units rounded half up, away from zero, with a
+   value equal to the strike resolving Yes (owner's decision 2026-09-28; the
+   exchange's current daily contracts resolve strictly). No
    contract settles on it, the page says so on every view, and it is not in
    the navigation.
 
@@ -1008,7 +1009,7 @@ window.WXAnalysis = (() => {
         svg2.appendChild(E('rect', { x: RX, y: yy - RH / 2, width: RW, height: RH, fill: 'url(#wxHatch)', stroke: 'var(--line)',
                                      'stroke-width': .8, 'stroke-dasharray': '3 2', class: 'hatched', 'pointer-events': 'none' }));
         svg2.appendChild(T(r.yes ? 'Yes' : 'No', { x: RX + RW / 2, y: yy + RF * 0.36, class: 'anarung', 'text-anchor': 'middle', style: 'font-size:' + RF + 'px' }));
-        svg2.appendChild(T((Vv.yes === 'below' ? '<' : '>') + Number(r.strike).toFixed(Vv.dec) + (Vv.dec ? '' : Vv.unit === 'mph' ? '' : Vv.unit),
+        svg2.appendChild(T((Vv.yes === 'below' ? '\u2264' : '\u2265') + Number(r.strike).toFixed(Vv.dec) + (Vv.dec ? '' : Vv.unit === 'mph' ? '' : Vv.unit),
                            { x: RX - 3, y: yy + RF * 0.36, class: 'ax anastrike', 'text-anchor': 'end', style: 'font-size:' + RF + 'px' }));
       });
       /* The day-end label sits at the foot of the plot's right edge, a gap
@@ -1049,12 +1050,13 @@ window.WXAnalysis = (() => {
 
     /* The rungs a ladder on this value would have carried: whole units either
        side of the value, or the fixed precipitation strikes. Yes when the
-       value is strictly on the contract's side of the strike; equal is No. */
+       value is at the strike or on the contract's side of it, so the rung at
+       the day's own value reads Yes (owner's decision 2026-09-28). */
     function rungsFor(res) {
       if (!res || res.value == null) return [];
       const Vv = V(), v = res.value;
       const strikes = Vv.rungs ? Vv.rungs.slice() : [-3, -2, -1, 0, 1, 2, 3].map(d => Math.round(v) + d);
-      return strikes.map(s => ({ strike: s, yes: Vv.yes === 'below' ? v < s : v > s })).sort((a, b) => b.strike - a.strike);
+      return strikes.map(s => ({ strike: s, yes: Vv.yes === 'below' ? v <= s : v >= s })).sort((a, b) => b.strike - a.strike);
     }
 
     function hourTable(hours, L) {
@@ -1090,7 +1092,7 @@ window.WXAnalysis = (() => {
     // the keys pipeline/analysis.py CONVENTIONS writes; an unknown key is shown as itself
     const LABELS = { day: 'Day', high: 'High', low: 'Low', gust: 'Peak gust', wind: 'Mean wind', precip: 'Precipitation',
                      rounding: 'Rounding and the strike', provisional: 'Provisional, final and revised',
-                     closed: 'Closed incomplete days', hourly: 'Hourly values', cell: 'Cell', window: 'Window', resolvedDay: 'Fully resolved day',
+                     closed: 'Closed incomplete days', hourly: 'Hourly values', cell: 'Cell', window: 'Window', strike: 'Value at the strike', resolvedDay: 'Fully resolved day',
                      lattice: 'Map lattice', units: 'Units' };
     host.appendChild(h('h2', { text: 'Method' }));
     host.appendChild(h('p', { text: STATEMENT + ' The conventions below are fixed in the pipeline and every file the page reads carries the times of the analyses it was built from.' }));

@@ -273,7 +273,8 @@ class Rules(unittest.TestCase):
         self.assertEqual(analysis.half_up(-20.49, 1), -20)
         s = analysis.day_summary(hours_of([-20.5, -3.0], day="2026-01-10"), "America/New_York", "2026-01-10", NOW)
         self.assertEqual((s["low"]["value"], s["low"]["exact"]), (-21, -20.5))
-        self.assertEqual(analysis.resolves("low", -21, -21), False)
+        self.assertEqual(analysis.resolves("low", -21, -22), False)
+        self.assertEqual(analysis.resolves("low", -21, -21), True)     # at the strike is Yes
         self.assertEqual(analysis.resolves("low", -21, -20), True)
 
     def test_units_are_exact(self):
@@ -282,12 +283,16 @@ class Rules(unittest.TestCase):
         self.assertAlmostEqual(analysis.ms_to_mph(10.0), 22.369362921)
         self.assertAlmostEqual(analysis.mm_to_inch(25.4), 1.0)
 
-    def test_strict_inequalities_on_a_ladder(self):
-        # high 71: Yes below the value, No at it and above it
-        self.assertEqual([analysis.resolves("high", 71, k) for k in (69, 70, 71, 72)], [True, True, False, False])
-        # low 58: No at and below the value, Yes above it
-        self.assertEqual([analysis.resolves("low", 58, k) for k in (57, 58, 59, 60)], [False, False, True, True])
-        self.assertEqual([analysis.resolves("precip", 0.49, k) for k in (0.25, 0.49, 0.5)], [True, False, False])
+    def test_at_least_on_a_ladder(self):
+        # owner's decision 2026-09-28: a value equal to the strike resolves Yes
+        # whichever way the contract runs
+        # high 71: Yes at the value and below it, No above it
+        self.assertEqual([analysis.resolves("high", 71, k) for k in (69, 70, 71, 72)], [True, True, True, False])
+        # low 58: No below the value, Yes at it and above it
+        self.assertEqual([analysis.resolves("low", 58, k) for k in (57, 58, 59, 60)], [False, True, True, True])
+        self.assertEqual([analysis.resolves("precip", 0.49, k) for k in (0.25, 0.49, 0.5)], [True, True, False])
+        self.assertEqual([analysis.resolves("gust", 40, k) for k in (40, 41)], [True, False])
+        self.assertEqual([analysis.resolves("wind", 12, k) for k in (12, 13)], [True, False])
         self.assertIsNone(analysis.resolves("gust", None, 30))
 
     def test_daily_values_from_the_hours(self):
