@@ -135,6 +135,12 @@ def _head(url: str) -> bool:
 # ---------------------------------------------------------------------------
 NODD_RTMA = "https://noaa-rtma-pds.s3.amazonaws.com"
 NODD_URMA = "https://noaa-urma-pds.s3.amazonaws.com"
+# NCEP's own server keeps the last fourteen days of both products under the
+# same directory and file names, answers byte ranges with 206 like S3, and is
+# where the analysis lane reads a file NOAA Open Data does not have (the RTMA
+# analysis of 2026-09-23 19Z reached NOMADS and never NOAA Open Data)
+NOMADS_RTMA = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod"
+NOMADS_URMA = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/urma/prod"
 
 
 def _fetch_absent(url: str, tries: int, timeout: int, headers: dict, with_headers: bool = False):

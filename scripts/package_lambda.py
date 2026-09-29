@@ -24,7 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INCLUDE = ["pipeline", "config/site.json", "config/cities.json", "config/field_grid.json",
            "config/contracts.json", "config/cat4_climatology.json", "config/severe_climo.json", "config/nearby_stations.json",
            "config/analysis_locations.json", "config/analysis_lattice.json",
-           "geo/rapid_amoc_annual.json", "geo/reask_locations.csv", "geo/population_centres.csv"]
+           "geo/rapid_amoc_annual.json", "geo/reask_locations.csv", "geo/settlement_locations.csv"]
 
 
 def main(argv=None) -> int:

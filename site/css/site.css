@@ -696,7 +696,7 @@ table.lad th{font-weight:600;border-bottom:1px solid var(--line)}
 /* the site's dot hover thickens the last circle in viewBox units, which at
    sixty times in is a ring the size of the window; the Census dot keeps no
    stroke and the hover goes to the outline, whose stroke does not scale */
-#vdots g.cellmark circle.census,#vdots g.cellmark:hover circle.census,#vdots g.dot.cellmark:focus-visible circle.census{stroke:none}
+#vdots g.cellmark circle.posdot,#vdots g.cellmark:hover circle.posdot,#vdots g.dot.cellmark:focus-visible circle.posdot{stroke:none}
 #vdots g.cellmark:hover path.rcell{stroke-width:3}
 /* the focus ring of a cell mark is the outline itself in the accent, at a
    width that does not scale; the generic dot focus rule above would have

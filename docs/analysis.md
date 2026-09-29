@@ -1,18 +1,24 @@
 # The analysis resolution page: conventions and data contract
 
 This document is the contract for the `analysis` lane: the job (`pipeline/analysis.py`,
-reading GRIB2 through `pipeline/grib2.py`), the files it writes under `snapshots/analysis/`,
+reading GRIB2 through `pipeline/grib2.py`), the files it writes under `snapshots/analysis2/`,
 and the page (`site/analysis-resolution.html`, `site/js/analysis.js`) that draws them. The
 lane shows how a proposed settlement framework would have resolved: daily and hourly
-weather variables at population centres, taken from NOAA's gridded hourly analyses instead
-of station reports. No contract settles on it. The page says so on every view, is not in
-the site's navigation, and carries `<meta name="robots" content="noindex">`
-(owner's decisions 2026-09-27: population centres only; unlisted; local civil day 00 to 23;
-30 days backfilled from NOAA Open Data then live; URMA final, RTMA provisional; today's
-rounding, with the strict inequalities of the exchange's contracts until the owner's decision
-of 2026-09-28 made a value equal to the strike resolve Yes; hourly map frames; precipitation resolves at the first
-complete URMA read and later revisions are shown beside it; the daylight-time days keep every
-analysis of the civil date; a negative half rounds away from zero).
+weather variables at the settlement locations, taken from NOAA's gridded hourly analyses
+instead of station reports. No contract settles on it. The page says so on every view, is
+not in the site's navigation, and carries `<meta name="robots" content="noindex">`.
+
+Owner's decisions. 2026-09-27: unlisted; local civil day; 30 days backfilled from NOAA Open
+Data then live; hourly map frames; the daylight-time days keep every analysis of the civil
+date; a negative half rounds away from zero. 2026-09-28: a value equal to the strike resolves
+Yes. 2026-09-29 (schema 2, this document): **RTMA resolves every variable, precipitation
+included, and URMA is shown for comparison**; the sixty-seven settlement locations approved
+that day replace the fifty population centres; every value is converted exactly and the
+day's aggregate rounded once; the day's precipitation runs from midnight to midnight; a file
+NOAA Open Data lacks is read from NCEP's NOMADS server. Schema 1's files under
+`snapshots/analysis/` and `archive/analysis/` are left as they were and are no longer
+written; the page reads schema 2 only. The owner's draft terms for contracts on this
+framework are the RTMA Daily Weather Contract Terms of 2026-09-29.
 
 Everything here is computed by the site's own pipeline in the standard library. Nothing
 reaches the page except the JSON files of section 4. Sections 1, 3, 4 and 5 describe what
@@ -43,7 +49,14 @@ after which it no longer changes. The western River
 Forecast Center region is often absent from the bitmap until the 25-hour rerun (on 2026-09-28 at
 10Z the 13Z through 23Z files of the 27th still lacked it, while the 10Z through 12Z files had
 it), and the rerun files carry the whole grid. The hourly analysis files are never
-rewritten, so the lane treats the two kinds of file differently (section 5).
+rewritten, so the lane treats the two kinds of file differently (section 5). Over the thirty
+days to 2026-09-27 one file of the 1,440 analysis hours and none of the precipitation hours was
+missing from NOAA Open Data: the RTMA analysis of 2026-09-23 19Z, which NOMADS had (published
+there at 19:46Z) and which never reached the bucket. NCEP's NOMADS server keeps the last
+fourteen days of both products under the same directory and file names
+(`https://nomads.ncep.noaa.gov/pub/data/nccf/com/{rtma,urma}/prod/`) and answers byte ranges
+with 206; a file not on NOAA Open Data three hours after its hour is read from there, while
+NOMADS still keeps it (section 5), and every archive document records its `source`.
 
 **Products and where each variable comes from.**
 
@@ -64,31 +77,41 @@ precipitation hour `HH` covers `HH-1` to `HH` UTC.
 tangent cone at 25 N (Latin1 = Latin2 = LaD = 25), LoV 265 E, first grid point 19.228976 N,
 233.723448 E, Dx = Dy = 2539.703 m, Ni = 2345, Nj = 1597, scanning mode 64 (i then j, both
 increasing), index `k = j * Ni + i`. Grid G184 (RTMA precipitation only): the same
-projection, first grid point 20.191999 N, 238.445999 E, Ni = 2145, Nj = 1377. The job
+projection, first grid point 20.191999 N, 238.445999 E, Ni = 2145, Nj = 1377. It is the wexp
+grid without its western expansion: the wexp cell `(i, j)` is the G184 cell `(i - 200, j)`,
+the same point on the ground to within 8.3 m over the sixty-seven locations (the two first
+points are published to a millionth of a degree). The job
 verifies section 3 of every message it decodes against these definitions and refuses a
 message on any other grid.
 
-**Locations.** The fifty most populous incorporated places of the lower 48 states in the
-Census Bureau's Vintage 2024 population estimates (`sub-est2024.csv`, SUMLEV 162; Alaska,
-Hawaii and Puerto Rico are outside the CONUS grid and excluded), each represented by the
-Census 2024 Gazetteer internal point of the place. One documented override: San
-Francisco's internal point lies in the Pacific because the Farallon Islands belong to the
-city, so it is represented by City Hall, 37.7793 N, 122.4193 W. Each point's IANA zone was
-read from api.weather.gov `/points`. The cell is the nearest grid cell to the point
-(fractional i and j rounded half up); the cell's own centre and its distance from the point
-are recorded and shown. The list is vendored in `geo/population_centres.csv` (columns id,
-name, state, geoid, pop2024, lat, lon, tz, note) and `scripts/build_analysis_grid.py`
-derives `config/analysis_locations.json` from it. Location ids are slugs of name and state
-(`new-york-ny`, `los-angeles-ca`, `nashville-tn`, `louisville-ky`, `indianapolis-in`,
-`washington-dc`).
+**Locations.** The sixty-seven settlement locations the owner approved on 2026-09-29: the
+fifty most populous metropolitan areas of the lower 48 states and the District of Columbia in
+the Census Bureau's Vintage 2024 estimates, then for each lower-48 state with no main city
+among them its most populous metro whose main city lies in the state (New Jersey and Delaware
+have none, by ruling). Each settles at one wexp cell: the cell whose 2.5 km square contains the
+centre of the main city's City Hall building footprint (its `position`, OpenStreetMap), frozen
+as approved. Rulings of 2026-09-29: Hampton Roads settles at Norfolk, South Carolina at
+Charleston, West Virginia at Huntington, Louisville at the building the city names City Hall,
+and Miami downtown at its administration building, whose own square is water to the analysis,
+so the nearest land cell settles (1.72 km from the position). The list is vendored in
+`geo/settlement_locations.csv` (columns id, name, state, metro, metro_rank, basis, position,
+lat, lon, i, j, tz, note), with the approved cell given, never recomputed;
+`scripts/build_analysis_grid.py` derives `config/analysis_locations.json` from it and refuses to
+write a cell that is not the one containing the position unless the list records why (Miami).
+Time zones are from the National Weather Service points service. Location ids are slugs of
+name and state (`new-york-ny`, `st-louis-mo`, `portland-or`, `portland-me`).
 
 **Day.** The local civil date at the location through its IANA zone: every top-of-hour
 analysis whose local civil time falls on that date. That is 24 analyses on an ordinary day,
 23 on the spring-forward day (02:00 local does not occur, and no analysis is counted twice
 for it) and 25 on the fall-back day (01:00 local occurs twice, and both analyses belong to
 the date). *Complete* means every one of them was read (23, 24 or 25), and the mean wind is
-over the hours read. A local day spans two UTC day directories. Arizona keeps standard time
-and has 24 hours every day.
+over the hours read. The day's **precipitation** is the one-hour accumulations that together
+cover the date from midnight to midnight: the accumulations NOAA files under the hours after
+each analysis, the same 23, 24 or 25, so the day's row for the analysis at HH:00 carries the
+accumulation over the hour that starts then (owner's decision 2026-09-29; schema 1 summed the
+accumulations filed under 00 to 23 local, which ran from 23:00 the day before). A local day
+spans two UTC day directories. Arizona keeps standard time and has 24 hours every day.
 
 **Daily variables, all from the day's hourly values.**
 
@@ -100,47 +123,54 @@ and has 24 hours every day.
 | wind | mean of the hourly sustained winds | whole mph, half up | value ≥ strike |
 | precip | sum of the hourly accumulations | inches to 0.01, half up | value ≥ strike |
 
-Conversions: K to °F exactly; m/s to mph by 2.2369362921; mm to inches by 1/25.4. Half up
-means half away from zero: -20.5 °F is -21, -0.5 is -1, the way the published tables read
-(owner's decision 2026-09-27, pinned by tests on -20.5 and -0.5). It is applied once, on the
-aggregate. The exact value is kept beside the rounded one: the high, low and gust to a tenth,
-the mean wind to a hundredth (a mean of tenths, so the whole value is never the rounding of
-an already rounded number) and precipitation to a ten-thousandth of an inch. A value equal
+Conversions: K to °F as (K − 273.15) × 9/5 + 32; m/s to mph by 2.2369362921; mm to inches by
+1/25.4; all in decimal arithmetic on the stored values, which are the files' own numbers
+(hundredths of a kelvin and of a metre per second), so a value the file holds exactly is
+converted exactly: 250.65 K is −8.5 °F, which binary floating point makes −8.49999999999995.
+Nothing is rounded before the day's aggregate (owner's decision 2026-09-29; schema 1 rounded
+each hour to a tenth first, which moved the whole value on about 5% of days: New York's high
+of 2026-09-26 was 290.09 K, 62.492 °F, published as 63). Half up means half away from zero:
+-20.5 °F is -21, -0.5 is -1, the way the published tables read (owner's decision 2026-09-27,
+pinned by tests on -20.5 and -0.5). It is applied once, on the aggregate. The exact value
+beside the rounded one is that aggregate CUT toward zero to a thousandth (precipitation to a
+ten-thousandth of an inch), never rounded, so a mean wind of 16.4996 shows as 16.499 beside its
+16 and never as a 16.500 that looks as if it rounds up; a temperature is exact at a thousandth,
+since the file holds hundredths of a kelvin. A value equal
 to the strike resolves Yes, at or above it for the high, gust, mean wind and precipitation and
 at or below it for the low, so the boundary case is Yes whichever way the contract runs
-(owner's decision 2026-09-28, for the proposed contracts that resolve on RTMA and URMA; until
-then the page resolved it No). The Yes and No are drawn from the published values rather than
+(owner's decision 2026-09-28; until then the page resolved it No). The Yes and No are drawn from the published values rather than
 stored, so the rule holds on every day the page shows, the backfill included. The exchange's
 current daily temperature and MG wind contracts keep the strict test (greater than, less than,
 equal resolving No) and are unchanged, so on the boundary this framework deliberately parts
 from the board. Mean wind and precipitation have no live contract and take the same shape by
 the owner's decision.
 
-**Hourly values.** The hourly value of each variable is the analysis at the top of that hour
-(precipitation: the accumulation over the hour ending then), kept exact to a tenth of a
-degree and of a mile per hour and a ten-thousandth of an inch. A place's hourly precipitation
-value, once read and stored, stands: the resolved daily total is the sum of the stored
-hourlies and stays reproducible from the hour table. A later file only fills the hours and
-places that had no value yet. There is no analogue of the station report conventions (last
-report in the hour, specials, tenths group); the page says this in its method note.
+**Hourly values.** Each row of a day is the analysis at the top of that hour and the
+precipitation over the hour that starts then. The archive keeps the files' own numbers
+(kelvin, metres per second, millimetres); the place files show them converted and cut to a
+thousandth (precipitation a ten-thousandth of an inch). A place's hourly precipitation value,
+once read and stored, stands, and a later file only fills the hours and places that had no
+value yet: RTMA precipitation files are never rewritten, and URMA's are, for up to eight days.
+There is no analogue of the station report conventions (last report in the hour, specials,
+tenths group); the page says this in its method note.
 
-**Provisional, final, resolved, revised.** RTMA is always provisional. A URMA day's high,
-low, gust and wind are *final* when every hourly analysis file of the day has been read
-(`complete`). Its precipitation is *resolved* at the first rebuild that finds a value for
-every hour of the day (`precip.hours` equal to the day's hour count), and that resolved total
-does not change. The job re-reads the URMA precipitation of each of the last eight local days
-once a day (any day that is complete, whether or not its precipitation has resolved): a place
-still without a value for some hour takes the re-read's, so a day short of a value can still
-resolve; for a resolved place a re-read total that differs from the resolved one by 0.01 inch
-or more, or whose rounded hundredth differs from the resolved rounded value (owner's decision
-2026-09-27), is recorded as `revised` with its time and shown beside the resolved value, and a
-re-read that comes back within that withdraws the revision. A partial day carries the running
-value over the hours read and is labelled with the count. A day still short of its hours
-48 hours after its local end is *closed incomplete*: its value stands on the hours read, it is
-never marked final, and the count is shown. Both products carry `closed` and `final`; RTMA's
-`final` is always false. The valid times of the analyses are the `at`, `t`, `valid` and
-`asof` stamps; `resolvedAt` and `revised.at` are the times of the pass that resolved or
-revised, and `written` is the pass that wrote the file.
+**Final, provisional, comparison.** RTMA resolves (owner's decision 2026-09-29;
+`index.resolvesOn`). An RTMA day's high, low, gust and wind are *final* when every hourly
+analysis file of the day has been read (`complete`), and its precipitation is *resolved* when
+every hourly precipitation file of the day has been read (`precip.hours` equal to the day's
+hour count), stamped `resolvedAt` by the first pass that found them all. NOAA never revises an
+RTMA file, so neither changes afterwards and RTMA carries no revision. URMA is read, stored
+and shown for **comparison** and is never final (`final` is always false for it). Because its
+precipitation files are rewritten for up to eight days, its comparison total keeps the schema 1
+rules: resolved at the first rebuild with every hour, the last eight local days re-read once a
+day (a place still without a value takes the re-read's), and a re-read total that differs by
+0.01 inch or more, or in the rounded hundredth (owner's decision 2026-09-27), carried beside it
+as `revised`. A partial day carries the running value over the hours read and is labelled with
+the count. A day still short of its hours 48 hours after its local end is *closed incomplete*:
+its value stands on the hours read, it is never marked final, and the count is shown. The valid
+times of the analyses are the `at`, `t`, `valid` and `asof` stamps; `resolvedAt` and
+`revised.at` are the times of the pass that resolved or revised, and `written` is the pass
+that wrote the file.
 
 **Map lattice.** For the map, each hourly field is sampled onto a regular lattice in the
 site's CONUS screen space (the 960 × 600 Albers viewBox of `pipeline/basemap.py`): pitch 3 px,
@@ -167,16 +197,17 @@ parallelogram `± di/2 ± dj/2`. Over a window of ten cells either way the error
 frame against the exact projection is about 0.01 viewBox units at worst (measured 0.0092 at the
 outer corner of a corner cell, Seattle on G184), which is far below a screen pixel only up to
 about 20× zoom and about one screen pixel at the 96× maximum; the build script refuses to write a
-frame past 0.02. `px` and `py` are written to three decimals so the Census dot the page draws at
-them sits inside the outlined resolving cell (to a tenth it crossed the outline at three
-places). Around each place every frame
+frame past 0.02. `px` and `py` (the position, the City Hall) are written to three decimals so
+the dot the page draws at them sits inside the outlined resolving cell (to a tenth such a dot
+crossed the outline), everywhere except Miami, whose position is outside its cell by ruling. Around each place every frame
 also carries a **window**: the true 2.5 km values of the 21 × 21 cells centred on the resolving
 cell (`WINDOW_HALF = 10`, about 52 km across) on the grid that product and variable use, so the
 zoomed map shows the analysis at its own resolution rather than the 14 km lattice.
 
 ## 2. Naming
 
-- `analysis` is the lane, the job name in `pipeline/run.py`, and the snapshot directory.
+- `analysis` is the lane and the job name in `pipeline/run.py`; its snapshots are under
+  `snapshots/analysis2/` and its archive under `archive/analysis2/` (schema 2).
 - Products are `rtma` and `urma`. Variables are `high`, `low`, `gust`, `wind`, `precip`
   (daily) and `temp`, `wind`, `gust`, `precip` (hourly frames and hourly series).
 - Hours are UTC ISO strings `YYYY-MM-DDTHH:00:00Z`; frame and archive file names use `YYYYMMDDTHHZ`.
@@ -215,7 +246,7 @@ Memory: a field is 3.7 million points and the lane runs in a 512 MB Lambda. `dec
 holds the packed integers and the floats of a whole field together (simple packing is read
 and converted a slice at a time; complex packing converts its ints in place, in slices, and
 undoes the spatial differencing in place), and the job samples a simple-packed field cell by
-cell for the map frame (64,000 lattice cells plus the fifty places) rather than decoding it
+cell for the map frame (64,000 lattice cells plus the places) rather than decoding it
 whole. Measured on 2026-09-27 on real files: one product-hour with its four frames peaks at
 184 to 236 MB of resident memory under python 3.9.6 and 3.13.5, in 1 to 2 s; a whole
 100 s pass of the local job (21 hours backfilled with frames, the days rebuilt) at 314 MB.
@@ -229,28 +260,29 @@ sampled cell. Tests (`tests/test_grib2.py`) run offline on small checked-in fixt
 
 ## 4. Files
 
-All files carry `schema: "analysis/1"`, `asof` (the newest analysis valid time they
+All files carry `schema: "analysis/2"`, `asof` (the newest analysis valid time they
 contain, or for `index.json` the newest hour actually read) and `written` (the pass time).
 Cache-Control: frames and location-day files that are final with resolved precipitation
 `public, max-age=300, stale-while-revalidate=1800, stale-if-error=86400`; everything
 else `public, max-age=60, stale-while-revalidate=300, stale-if-error=86400`.
 
-**`snapshots/analysis/index.json`**
+**`snapshots/analysis2/index.json`**
 
 ```
-{ "schema": "analysis/1", "asof": ..., "written": ...,
+{ "schema": "analysis/2", "asof": ..., "written": ..., "resolvesOn": "rtma",
   "statement": "A proposed settlement framework. No contract settles on it.",
   "conventions": { "day": "...", "high": "...", ... , "cell": "...", "lattice": "...", "units": "..." },
   "sources": { "rtma": {"bucket": "noaa-rtma-pds", "lagMinutes": 47, "latest": "2026-09-27T17:00:00Z"},
                "urma": {"bucket": "noaa-urma-pds", "lagMinutes": 414, "latest": "2026-09-27T10:00:00Z"} },
-  "locations": [ {"id": "new-york-ny", "name": "New York", "state": "NY", "geoid": "3651000",
-                  "pop2024": 8478072, "lat": 40.6627, "lon": -73.9387, "tz": "America/New_York",
-                  "px": 833.1, "py": 231.4, "cell": {"wexp": [i, j, k], "g184": [i, j, k],
-                  "centre": [lat, lon], "distanceKm": 0.9}, "note": ""} , ... 50 ],
-  "days": ["2026-07-29", ..., "2026-09-27"],
-  "dayStatus": { "2026-09-26": {"places": 50, "final": 50, "resolved": 50, "closed": 0},
-                 "2026-09-27": {"places": 50, "final": 16, "resolved": 16, "closed": 0}, ... },
-  "lastResolvedDay": "2026-09-26",
+  "locations": [ {"id": "new-york-ny", "name": "New York", "state": "NY",
+                  "metro": "New York-Newark-Jersey City, NY-NJ", "metroRank": 1, "basis": "top50",
+                  "position": "New York City Hall, City Hall, New York, NY 10007 (...)",
+                  "lat": 40.7128, "lon": -74.006, "tz": "America/New_York", "note": "",
+                  "px": 852.0, "py": 208.6, "cell": {"wexp": [2010, 857, 2011675], "g184": [1810, 857, 1840075],
+                  "centre": [40.7141, -74.0129], "distanceKm": 0.63, ...geometry...}} , ... 67 ],
+  "days": ["2026-08-30", ..., "2026-09-29"],
+  "dayStatus": { "2026-09-27": {"places": 67, "final": 67, "resolved": 67, "closed": 0}, ... },
+  "lastResolvedDay": "2026-09-27",
   "lattice": {"pitch": 3, "cols": 320, "rows": 200, "viewBox": "0 0 960 600"},
   "variables": { "high": {"unit": "°F", "hourly": "temp", "rule": "..."}, ... },
   "backfill": {"pointsDays": 30, "frameDays": 7, "done": false, "cursor": {...}} }
@@ -261,21 +293,22 @@ else `public, max-age=60, stale-while-revalidate=300, stale-if-error=86400`.
 `days` lists the newest 60 day files; the day and place files themselves are kept
 indefinitely (the archive can rebuild any of them).
 
-**`snapshots/analysis/days/YYYY-MM-DD.json`** — one entry per location for that local date.
+**`snapshots/analysis2/days/YYYY-MM-DD.json`** — one entry per location for that local date.
 
 ```
-{ "schema": "analysis/1", "day": "2026-09-26", "asof": ..., "written": ...,
+{ "schema": "analysis/2", "day": "2026-09-26", "asof": ..., "written": ...,
   "locations": { "new-york-ny": {
-      "rtma": { "hours": 24, "of": 24, "complete": true, "closed": false, "final": false,
-                "high": {"value": 71, "exact": 70.6, "at": "2026-09-26T19:00:00Z"},
-                "low":  {"value": 58, "exact": 57.9, "at": "..."},
-                "gust": {"value": 46, "exact": 45.7, "at": "..."},
-                "wind": {"value": 21, "exact": 20.83},
-                "precip": {"value": 0.49, "exact": 0.4917, "hours": 24} },
-      "urma": { "hours": 24, "of": 24, "complete": true, "closed": false, "final": true,
+      "rtma": { "hours": 24, "of": 24, "complete": true, "closed": false, "final": true,
+                "high": {"value": 64, "exact": 64.148, "at": "2026-09-26T18:00:00Z"},
+                "low":  {"value": 58, "exact": 57.902, "at": "..."},
+                "gust": {"value": 46, "exact": 45.703, "at": "..."},
+                "wind": {"value": 21, "exact": 20.833},
+                "precip": {"value": 0.49, "exact": 0.4917, "hours": 24, "resolved": true,
+                           "resolvedAt": "2026-09-27T04:28:45Z", "revised": null} },
+      "urma": { "hours": 24, "of": 24, "complete": true, "closed": false, "final": false,
                 "high": {...}, "low": {...}, "gust": {...}, "wind": {...},
                 "precip": {"value": 0.53, "exact": 0.5284, "hours": 24, "resolved": true,
-                           "resolvedAt": "2026-09-27T07:08:31Z",
+                           "resolvedAt": "2026-09-27T11:08:31Z",
                            "revised": null } } } } }
 ```
 
@@ -283,35 +316,38 @@ indefinitely (the archive can rebuild any of them).
 hours with a precipitation value and is on both products. An hour whose analysis file never
 landed still adds its precipitation, a separate file: it counts in `precip.hours` and never in
 `hours`, so it cannot make a day complete (RTMA 2026-09-23 19Z never reached NOAA Open Data,
-and its precipitation file did); `resolved`, `resolvedAt` and
-`revised` are URMA only. `revised`, when set, is `{"value": 0.61, "exact": 0.6104, "at":
+and its precipitation file did). `final` is only ever true for the resolving product (RTMA).
+`resolved` and `resolvedAt` are on both; `revised` is always null for RTMA, whose files NOAA
+never rewrites. For URMA `revised`, when set, is `{"value": 0.61, "exact": 0.6104, "at":
 "2026-09-29T13:08:12Z"}`, the `at` being the pass that recorded it. A partial product-day
 has `complete: false` and `hours < of`; a closed incomplete day has `closed: true` and
 `final: false`. A product-day with no hours yet is absent. `high`, `low`, `gust`, `wind` or
 `precip` is `null` when no hour read has a value for it.
 
-**`snapshots/analysis/loc/<id>/YYYY-MM-DD.json`** — the location-day at the hourly scale.
+**`snapshots/analysis2/loc/<id>/YYYY-MM-DD.json`** — the location-day at the hourly scale.
 
 ```
-{ "schema": "analysis/1", "id": "new-york-ny", "day": "2026-09-26", "tz": "America/New_York",
+{ "schema": "analysis/2", "id": "new-york-ny", "day": "2026-09-26", "tz": "America/New_York",
   "asof": ..., "written": ...,
   "hours": [ {"local": "00", "t": "2026-09-26T04:00:00Z",
-              "rtma": {"temp": 63.1, "wind": 18.2, "gust": 33.5, "precip": 0.0197},
-              "urma": {"temp": 63.0, "wind": 18.4, "gust": 33.1, "precip": 0.0315}}, ... ],
+              "rtma": {"temp": 63.14, "wind": 18.223, "gust": 33.506, "precip": 0.0197},
+              "urma": {"temp": 63.032, "wind": 18.401, "gust": 33.103, "precip": 0.0315}}, ... ],
   "summary": { ...the same object as this location's entry in days/YYYY-MM-DD.json... } }
 ```
 
 `hours` has one row per analysis of the local date (23, 24 or 25 rows); on the fall-back day
-the second 01:00 is labelled `01*`, and the UTC stamp `t` sits beside every label. Hourly
-values are exact as stored (tenths of °F and mph, precipitation to a ten-thousandth of an
-inch), so the hourly precipitation adds up to the day's exact total and the page's running
-sum can meet it. A product missing at an hour is `null`, and a product read at an hour whose
+the second 01:00 is labelled `01*`, and the UTC stamp `t` sits beside every label. A row's
+`temp`, `wind` and `gust` are the analysis at `t` and its `precip` the accumulation over the
+hour that starts at `t`, which NOAA files under `t` plus an hour, all converted from the
+archive's own numbers and cut to a thousandth (precipitation a ten-thousandth of an inch). The
+page's running sum of the rows is pinned to the summary's exact total once every hourly file is
+read. A product missing at an hour is `null`, and a product read at an hour whose
 precipitation file had no value yet has `precip: null`.
 
-**`snapshots/analysis/grid/index.json`** — which frames exist.
+**`snapshots/analysis2/grid/index.json`** — which frames exist.
 
 ```
-{ "schema": "analysis/1", "asof": ..., "written": ...,
+{ "schema": "analysis/2", "asof": ..., "written": ...,
   "frames": { "rtma": { "temp": { "2026-09-27": ["00", "01", ...] }, "wind": {...}, "gust": {...}, "precip": {...} },
               "urma": { ... } } }
 ```
@@ -320,10 +356,10 @@ Frame days here are UTC days. The index is rewritten after every hour's frames (
 2 KB), so a frame on the bucket is always listed, and again at the end of every pass. Frames
 are kept for 30 days and pruned once a day.
 
-**`snapshots/analysis/grid/<product>/<var>/YYYYMMDDTHHZ.json`** — one lattice frame.
+**`snapshots/analysis2/grid/<product>/<var>/YYYYMMDDTHHZ.json`** — one lattice frame.
 
 ```
-{ "schema": "analysis/1", "product": "rtma", "var": "temp", "valid": "2026-09-27T16:00:00Z",
+{ "schema": "analysis/2", "product": "rtma", "var": "temp", "valid": "2026-09-27T16:00:00Z",
   "unit": "°F", "scale": 10, "cols": 320, "rows": 200, "pitch": 3,
   "values": [ 612, 615, null, ... 64000 ints, row-major from the top-left lattice point ] }
 ```
@@ -333,8 +369,9 @@ Each frame also carries `windows`, keyed by location id:
 `di` from −10 to +10 inside each row, on the same `scale`, `null` where the cell is off the
 grid or missing in the bitmap. For RTMA precipitation the window grid is `g184` and every other
 frame's is `wexp`. A window is 1 to 2 KB (three-digit tenths for temperature, fewer digits for
-the rest); the fifty add about 50 to 90 KB to a frame, measured on real files at 47 KB for
-precipitation and 91 KB for temperature, at a cost of about 0.1 s per product-hour.
+the rest); fifty such windows added about 50 to 90 KB to a frame on real files (47 KB for
+precipitation and 91 KB for temperature), at a cost of about 0.1 s per product-hour, and the
+sixty-seven add about a third more.
 
 The row of an hour whose analysis file never landed has `temp`, `wind` and `gust` null and
 its `precip` set.
@@ -343,14 +380,15 @@ its `precip` set.
 precipitation in inches). A precipitation frame is rewritten when a refetch of the hour's
 file adds coverage within the frame window.
 
-**Archive.** `archive/analysis/hours/<product>/YYYYMMDDTHHZ.json.gz` holds the fifty
-locations' exact hourly temperature, wind and gust for that product-hour (write once,
-`put_if_absent`). `archive/analysis/precip/<product>/YYYYMMDDTHHZ.json.gz` holds the fifty
-locations' exact hourly accumulation for that product-hour and may be rewritten: `read`
-(a file was decoded), `complete` (every place has a value), `missing` (the places whose
-cell was absent from the bitmap) and `values`; a rewrite only ever adds values, never
-changes one. Together they let any day file be rebuilt from the archive without re-reading
-NOAA. `archive/analysis/_meta/state.json` holds the cursors: per product `newest` (the
+**Archive.** `archive/analysis2/hours/<product>/YYYYMMDDTHHZ.json.gz` holds the locations'
+hourly temperature (kelvin), wind and gust (metres per second) for that product-hour, the
+files' own numbers kept to four decimals, and `source` (`nodd` or `nomads`) (write once,
+`put_if_absent`). `archive/analysis2/precip/<product>/YYYYMMDDTHHZ.json.gz` holds the
+locations' accumulation for the hour ending then, in millimetres to a millionth, and may be
+rewritten: `read` (a file was decoded), `complete` (every place has a value), `missing` (the
+places whose cell was absent from the bitmap), `source` and `values`; a rewrite only ever adds
+values, never changes one. Together they let any day file be rebuilt from the archive without
+re-reading NOAA. `archive/analysis2/_meta/state.json` holds the cursors: per product `newest` (the
 newest hour read), `scanned` (how far the live walk has looked), `since` (when the lane first
 looked), `gaps` (hours passed without a read, retried for 48 hours), `precipPending`
 (archived hours whose precipitation file is still being refetched) and `reads`; per product
@@ -389,10 +427,13 @@ timeout is never what stops it.
    present. A cursor more than 24 hours behind jumps to the present and queues the skipped
    span for the backfill (once, and no older than the backfill reaches). For each hour, up
    to three reads per product per pass: fetch the `.idx`, range-fetch TMP, WIND and GUST,
-   sample each field at the fifty cells and onto the lattice, then fetch the precipitation
+   sample each field at the places' cells and onto the lattice, then fetch the precipitation
    file and do the same. Write the archive hour (once), the precipitation key, the four
    frames and `grid/index.json`; queue the hour in `precipPending` when its precipitation
-   is short and its wait has not run out. A `.idx` that is not there (403 or 404) is an
+   is short and its wait has not run out. A file NOAA Open Data does not have is looked for
+   on NOMADS once it is `NOMADS_AFTER_HOURS = 3` hours past its hour and until
+   `NOMADS_KEEP_HOURS` (thirteen days, a day short of what NOMADS keeps), and the archive
+   document records `source: "nomads"`. A `.idx` that is on neither (403 or 404) is an
    *absence*: the hour becomes a gap, `scanned` moves past it, and the walk continues. The
    absent hour's precipitation file is read all the same, on every retry of the gap until
    every place has a value, and stored without an archive hour. After one refused
@@ -418,13 +459,13 @@ timeout is never what stops it.
    when it differs by 0.01 inch or more or in the rounded hundredth, withdraw one that came
    back within that. Rebuild the days touched. A re-read cut short by the deadline is not
    stamped and is due again next pass.
-4b. **Precipitation sweep.** Once a day (`PRECIP_SWEEP_HOURS = 24`), over the hours both walks
-   have passed (from the backfill's `oldest`, at most 30 days back, to 48 hours before the live
-   cursor, outside queued catch-up spans), read the precipitation of every hour that has
-   neither an archive hour nor a precipitation key, and rebuild the days it touches. A
-   refused file ends that product's sweep until the next day's; a sweep cut short by the
-   deadline is not stamped and is due again next pass. Until 2026-09-29 the lane read no
-   precipitation for an hour whose analysis was absent; the sweep recovers those hours.
+4b. **Sweep.** Once a day (`PRECIP_SWEEP_HOURS = 24`), over the hours both walks have passed
+   (from the backfill's `oldest`, at most 30 days back, to 48 hours before the live cursor,
+   outside queued catch-up spans): read the analysis of every hour that has no archive hour
+   while NOMADS may still keep it, and the precipitation of every hour that has no
+   precipitation key, and rebuild the days they touch. A refused file ends that product's
+   sweep until the next day's; a sweep cut short by the deadline is not stamped and is due
+   again next pass.
 5. **Backfill.** With the remaining budget, walk both products backwards, alternating,
    newest first: a queued catch-up span first, then from the cursor back to 30 days ago;
    frames for the last seven days, point reads only before that. The cursor advances only
@@ -451,10 +492,13 @@ NOAA's side is an alarm after about three hours and a corrupt file among readabl
 not. `LAST_STATUS` carries the counts and the lists (reads, absences, waiting precipitation,
 errors), and `newest` per product.
 
-Write budget per pass with fifty places: a pass where one hour of each product lands writes
+Write budget per pass (measured with fifty places): a pass where one hour of each product lands writes
 about 70 objects; an empty pass five; a precipitation refetch that adds coverage one key,
-one frame, one day file and fifty place files. With RTMA and URMA landing in different passes
-that is about 110k PUTs a month, and the 30-day backfill a one-time 15k.
+one frame, one day file and one place file per place. With RTMA and URMA landing in different passes
+that is about 110k PUTs a month, and the 30-day backfill a one-time 15k (about a third more
+with sixty-seven places). Schema 2's first 30 days were filled on 2026-09-29 by a local run of
+the lane's own `read_hour`, `write_hour` and `rebuild_days` with the reads in parallel, then
+uploaded, so the live lane started with its backfill done.
 
 ## 6. The page
 
@@ -464,24 +508,23 @@ statement, a `.bar` with the controls and `#pageStatus`, the map card, the locat
 the method prose, `p.cap#foot`. Scripts: common, data, then `js/analysis.js`; `WXAnalysis.init()`.
 
 **Controls.** Variable buttons High · Low · Peak gust · Mean wind · Precipitation; product
-buttons RTMA · URMA; a day `<select>` over `index.days` (newest first, labelled with the
+buttons RTMA · URMA, RTMA first and the default, since it resolves; a day `<select>` over `index.days` (newest first, labelled with the
 weekday, and a day short of every place resolving marked `provisional`, or `closed` when its
 unresolved places have all stopped waiting); an hour stepper under the map (◀ ▶ Play, the valid hour in UTC and in the selected
-location's zone when one is picked). State lives in the URL: `?var=high&product=urma&day=2026-09-26&hour=16&loc=new-york-ny`.
+location's zone when one is picked). State lives in the URL: `?var=high&product=rtma&day=2026-09-26&hour=16&loc=new-york-ny`.
 With no `day` in the address the page opens on `index.lastResolvedDay` (owner's request
-2026-09-28), the newest local date on which every one of the fifty places has its URMA day
-final and its precipitation total resolved (`dayStatus.resolved == dayStatus.places`); an index
-without the field opens on the newest day. The job keeps each day's status in its state as it
-rebuilds the day and fills a status it lacks from the day's file. Because URMA's precipitation
-for the western River Forecast Centers usually arrives with the 25-hour rerun, a day becomes
-fully resolved about a day and a half after it ends in the west, so the page typically opens
-two days back.
+2026-09-28), the newest local date on which every one of the sixty-seven places has its RTMA
+day final and its precipitation total resolved (`dayStatus.resolved == dayStatus.places`); an
+index without the field opens on the newest day. The job keeps each day's status in its state
+as it rebuilds the day and fills a status it lacks from the day's file. An RTMA day resolves
+within about an hour of its local end, so the page typically opens on yesterday.
 
 **Map.** The 960 × 600 SVG with `assets/basemap.json` state paths, the hour's frame drawn
 onto a 320 × 200 canvas with the variable's fixed ramp and placed as an `<image>` filling the
-viewBox with `image-rendering: pixelated`, clipped to the state outlines; the fifty location
-dots sized and coloured by that day's resolved value of the selected variable and product,
-dashed at fill-opacity .55 when provisional, hollow when the day has no value yet; hover
+viewBox with `image-rendering: pixelated`, clipped to the state outlines; the sixty-seven
+location dots sized and coloured by that day's value of the selected variable and product,
+solid once RTMA has resolved it, dashed at fill-opacity .55 while provisional and on the URMA
+comparison, hollow when the day has no value yet; hover
 reads the cell under the pointer from the frame and the dot's daily value; click opens the
 location panel. Zoom and pan as in `varmap.js`. Ramps are pinned: temperature −20 to 110 °F
 on the site's nine-stop ramp, gust 0 to 60 mph, wind 0 to 30 mph, precipitation 0 to 2 in
@@ -492,7 +535,7 @@ changes what it draws: the lattice raster is hidden (a 3 px lattice block would 
 patch far larger than a cell, and the caption says the field is hidden at this zoom), every
 place in view draws its 21 × 21 window as parallelograms from its basis, coloured on the same
 ramp, and its resolving cell with a dark border (`--ink`, 2 px, `vector-effect:
-non-scaling-stroke`); the Census point is a small dot; the place's value leaves the dot and
+non-scaling-stroke`); the position (the City Hall) is a small dot; the place's value leaves the dot and
 floats in a label outside the cell at a fixed screen offset (up and to the right, flipped when it
 would leave the map), on a `--panel` background, with a leader line from the label to the centre
 of the cell. The label, the cell and the window cells all open the panel on click and answer
@@ -503,7 +546,7 @@ wind and hourly maps share the fix in `site/js/varmap.js`). A window cell whose 
 `null` is drawn clear (no fill, no stroke) so hover still answers, with the value for a dry cell,
 "off the grid" when the cell index leaves the grid and "missing in this hour" for a bitmap gap,
 and the precipitation caption says dry cells are left clear. Keyboard focus on a mark outlines
-the resolving cell in the accent at a fixed 1.5 px and leaves the Census dot alone. A place
+the resolving cell in the accent at a fixed 1.5 px and leaves the position dot alone. A place
 whose index entry has no cell geometry keeps its plain dot and value in cell mode, with Zoom to
 the cell disabled. Below that zoom the dots draw as before, with the value text in `--ink` (it
 was `--muted`, faint on the dark theme). The zoom range is raised so
@@ -514,15 +557,17 @@ can be linked.
 
 **Location panel** (`#locPanel`, shown on pick or `?loc=`): the name, state, the day and
 zone, previous and next day buttons; a resolution row of five cards (rounded value, exact
-value, status pill final / provisional / revised / n of the day's hours, the time of the
-extreme); the hourly chart for the selected variable, a 960-wide `svg.ts` in a `.card` in
-the style of `WXK.plot`: local hours on the x axis, midnight and the day end marked, RTMA as
-a dashed line in `--ana-rtma`, URMA solid in `--ana-urma`, the resolved value as a horizontal
+value cut to a thousandth, status pill final / provisional / closed on RTMA and comparison on
+URMA, with n of the day's hours while incomplete, the time of the extreme, and the other
+product's value); the hourly chart for the selected variable, a 960-wide `svg.ts` in a `.card` in
+the style of `WXK.plot`: local hours on the x axis, midnight and the day end marked, URMA as
+a dashed line in `--ana-urma` underneath and RTMA solid in `--ana-rtma` on top, the value as a horizontal
 line, and a ladder column of hypothetical rungs at whole units around the value (precip at
 0.01, 0.05, 0.10, 0.25, 0.50, 1.00, 2.00): Yes in `--yes`, No in `--no`, hatched with
 `#wxHatch`, labelled "Yes" and "No", never cents, never linked; an hour table with one row
-per analysis of the day (local hour, UTC, both products, all four hourly variables); the
-cell note (cell centre, distance from the Census point, the override note when present). Two
+per analysis of the day (local hour, UTC, both products, all four hourly variables, the
+precipitation over the hour that starts at the stamp); the cell note (cell centre, distance
+from the position and its building, the grid cell on both grids, the ruling when present). Two
 tokens are added to all three theme blocks of `site.css`: `--ana-rtma` and `--ana-urma`.
 
 **Method note.** The conventions block of `index.json` rendered as a definition list, the
@@ -545,7 +590,11 @@ report conventions have no analogue here.
   the outage passes and `asof` stays on the hour read; frames are indexed the pass they are
   written; a partial bitmap is retried and filled; a re-read fills a place the first read
   had no cell for; the catch-up span is queued once and clamped; the backfill starts behind
-  a late newest hour; the place file carries the hourly precipitation to a ten-thousandth; an
+  a late newest hour; the place file carries the precipitation in the row of the hour it
+  starts; the day's precipitation runs midnight to midnight; a value the file holds exactly is
+  converted exactly and the aggregate rounded once; an RTMA day is final and URMA only
+  compares; a file missing from NOAA Open Data is read from NOMADS after three hours and not
+  past thirteen days, and the sweep reads a missing analysis from there; an
   hour whose analysis never lands still adds its precipitation, in the live lane, in the
   backfill and through the daily sweep, without counting toward the day's analyses, and a
   refused file ends a product's sweep for the day;
@@ -553,9 +602,11 @@ report conventions have no analogue here.
 - `scripts/verify.py`: the page in the `pages` sweep; checks that the variable and product
   buttons change the legend and the frame, the day select and hour stepper change the caption,
   a dot click opens the panel with the hour rows and five cards, the hypothetical rungs are
-  hatched and carry no `data-contract-url`, the provisional pill appears when `urma` is
-  incomplete, `?loc=` opens the panel on load, and the 503 degradation shows "No data".
-  Fixtures under `samples/snapshots/analysis/` come from a real local run of the job.
+  hatched and carry no `data-contract-url`, the provisional pill appears when `rtma` is
+  incomplete, the chart rule says resolved on a final RTMA day and value on the URMA
+  comparison, the exact figures are cut to a thousandth, `?loc=` opens the panel on load, and
+  the 503 degradation shows "No data". Fixtures under `samples/snapshots/analysis2/` come from
+  a real local run of the job.
 - Cell mode: at the national extent no cell outline is drawn; after Zoom to the cell on a
   fixture place the resolving cell's outline exists with the `--ink` stroke, the label carries the
   dot's value and a leader line, the raster image is hidden and the caption says so, the window

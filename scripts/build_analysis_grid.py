@@ -1,15 +1,16 @@
 """
 build_analysis_grid.py — the analysis lane's two derived config files.
 
-Run once, by hand, when geo/population_centres.csv or the basemap changes;
+Run once, by hand, when geo/settlement_locations.csv or the basemap changes;
 the scheduled job reads the outputs and never projects anything itself.
 
     python3 scripts/build_analysis_grid.py
 
-    config/analysis_locations.json   the fifty places with their nearest cell on
-                                     the wexp grid and on G184, the cell's own
-                                     centre and its distance from the Census
-                                     point, the screen position (px, py) on
+    config/analysis_locations.json   the sixty-seven settlement locations with
+                                     their frozen cell on the wexp grid and the
+                                     same point on G184, the cell's own centre
+                                     and its distance from the position (the
+                                     City Hall), the screen position (px, py) on
                                      the site's CONUS map, and per grid the
                                      cell's screen geometry (docs/analysis.md
                                      section 1, cell geometry): its centre
@@ -21,8 +22,15 @@ the scheduled job reads the outputs and never projects anything itself.
                                      grid cell under it on each grid, or -1 off
                                      the grid
 
-The cell is the nearest grid cell to the point, fractional i and j rounded half
-up, which is what pipeline.grib2.nearest_cell does. The lattice inverts the
+The cell is the one the owner approved on 2026-09-29 and is read from the
+list, never recomputed: a later change to the projection code must not move
+a settlement point. It is the grid point whose square contains the position,
+which is the nearest cell, fractional i and j rounded half up, as
+pipeline.grib2.nearest_cell computes it; the script checks that for every
+location and refuses to write a file where they differ, except where the
+list records why (Miami, whose own square is water to the analysis, settles
+at the nearest land point). The G184 cell is (i - 200, j), the same point on
+the ground: G184 is the wexp grid without its western expansion. The lattice inverts the
 site's fitted screen transform and its Albers projection (pipeline/basemap.py)
 to a longitude and latitude, then goes forward through the Lambert projection
 to a cell; both projections are on a sphere, so the round trip is exact to the
@@ -47,7 +55,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from pipeline import basemap, grib2  # noqa: E402
 
-CSV_PATH = os.path.join(ROOT, "geo", "population_centres.csv")
+CSV_PATH = os.path.join(ROOT, "geo", "settlement_locations.csv")
 LOCATIONS_PATH = os.path.join(ROOT, "config", "analysis_locations.json")
 LATTICE_PATH = os.path.join(ROOT, "config", "analysis_lattice.json")
 EARTH_KM = 6371.2                 # the grids' own sphere (6,371,200 m), so distances are on the same earth
@@ -57,7 +65,7 @@ PITCH, COLS, ROWS = 3, 320, 200   # docs/analysis.md section 1: 960 x 600 at 3 p
 # lays out); the frame check below covers exactly this span
 WINDOW_HALF = 10
 # the linear frame may be this far from the exact projection anywhere in the
-# window, in viewBox units. Measured over the fifty places on both grids the
+# window, in viewBox units. Measured over the fifty places of 2026-09-27 on both grids the
 # worst cell centre is 0.0084 units out (Seattle, G184, offset -10, -10) and
 # the worst drawn corner 0.0092, which is the curvature of the composed
 # projection over ten cells rather than the basis (a central-difference
@@ -68,6 +76,14 @@ WINDOW_HALF = 10
 # is set just above the measured worst so a projection change shows up
 FRAME_TOL = 0.02
 GRIDS = {"wexp": grib2.WEXP, "g184": grib2.G184}
+# G184 is the wexp grid without its western expansion: the same lattice with
+# its first point 200 columns east, so (i, j) on wexp is (i - 200, j) on G184
+G184_OFFSET = 200
+G184_TOL_KM = 0.05
+EXPECTED = 67
+# locations whose approved cell is not the one containing the position, and
+# why (the settlement list, 2026-09-29); anything else that differs stops the build
+NOT_NEAREST = {"miami-fl": "the position's own square is water to the analysis; the nearest land point settles"}
 
 
 def read_centres(path: str = CSV_PATH) -> list:
@@ -77,9 +93,9 @@ def read_centres(path: str = CSV_PATH) -> list:
     out = []
     for r in rows:
         out.append({"id": r["id"].strip(), "name": r["name"].strip(), "state": r["state"].strip(),
-                    "geoid": r["geoid"].strip(), "pop2024": int(r["pop2024"]),
-                    "lat": float(r["lat"]), "lon": float(r["lon"]), "tz": r["tz"].strip(),
-                    "note": (r.get("note") or "").strip()})
+                    "metro": r["metro"].strip(), "metroRank": int(r["metro_rank"]), "basis": r["basis"].strip(),
+                    "position": r["position"].strip(), "lat": float(r["lat"]), "lon": float(r["lon"]),
+                    "i": int(r["i"]), "j": int(r["j"]), "tz": r["tz"].strip(), "note": (r.get("note") or "").strip()})
     return out
 
 
@@ -170,14 +186,24 @@ def frame_error(grid: dict, i: int, j: int, tr: basemap.Transform, geom: dict, h
 def build_locations(centres: list, tr: basemap.Transform) -> list:
     out = []
     for c in centres:
-        wexp = grib2.nearest_cell(grib2.WEXP, c["lat"], c["lon"])
-        g184 = grib2.nearest_cell(grib2.G184, c["lat"], c["lon"])
-        if wexp is None or g184 is None:
-            raise SystemExit(f"{c['id']} is off the analysis grid ({c['lat']}, {c['lon']})")
-        clat, clon = grib2.lcc_latlon(grib2.WEXP, wexp[0], wexp[1])
+        i, j = c["i"], c["j"]
+        wexp = (i, j, j * grib2.WEXP["Ni"] + i)
+        g184 = (i - G184_OFFSET, j, j * grib2.G184["Ni"] + i - G184_OFFSET)
+        near = grib2.nearest_cell(grib2.WEXP, c["lat"], c["lon"])
+        if near is None or tuple(near[:2]) != (i, j):
+            if c["id"] not in NOT_NEAREST:
+                raise SystemExit(f"{c['id']}: the approved cell {i}, {j} is not the one containing the position "
+                                 f"({near}) and the list gives no reason")
+        clat, clon = grib2.lcc_latlon(grib2.WEXP, i, j)
         clon = wrap_lon(clon)
+        glat, glon = grib2.lcc_latlon(grib2.G184, g184[0], g184[1])
+        # the two grids' first points are published to a millionth of a
+        # degree, so the same point differs by a few metres between them
+        # (8.3 m at worst over the list); a kilometre would mean a wrong offset
+        if haversine_km(glat, wrap_lon(glon), clat, clon) > G184_TOL_KM:
+            raise SystemExit(f"{c['id']}: the G184 point is not the wexp point on the ground")
         px, py = tr.project(c["lon"], c["lat"])
-        row = dict(c)
+        row = {k: v for k, v in c.items() if k not in ("i", "j")}
         cell = {"wexp": list(wexp), "g184": list(g184),
                 "centre": [round(clat, 4), round(clon, 4)],
                 "distanceKm": round(haversine_km(c["lat"], c["lon"], clat, clon), 2)}
@@ -187,7 +213,7 @@ def build_locations(centres: list, tr: basemap.Transform) -> list:
         for name, ij in (("wexp", wexp), ("g184", g184)):
             g = cell_geometry(GRIDS[name], ij[0], ij[1], tr)
             cell[name + "Px"], cell[name + "Box"], cell[name + "Basis"] = g["px"], g["box"], g["basis"]
-        # three decimals: the page draws the Census point at (px, py) inside
+        # three decimals: the page draws the position at (px, py) inside
         # the outlined resolving cell, and a cell is only about 0.47 units
         # across, so rounding to a tenth (up to 0.07 units) put the dot across
         # the outline at three places; a thousandth is 0.002 cells
@@ -245,7 +271,7 @@ def frame_sanity(locations: list, tr: basemap.Transform) -> dict:
     """Every location's linear frame, on both grids, must reproduce the exact
     projected centre of every window cell out to (i +- WINDOW_HALF,
     j +- WINDOW_HALF) and the box corners within FRAME_TOL. Returns the worst
-    case over the fifty; anything past the tolerance means the page would
+    case over the list; anything past the tolerance means the page would
     draw a window cell in the wrong place, so the file is not written."""
     worst = {"id": None, "grid": None, "cells": -1.0, "at": None, "corners": -1.0}
     for loc in locations:
@@ -265,8 +291,8 @@ def frame_sanity(locations: list, tr: basemap.Transform) -> dict:
 def main() -> int:
     tr = basemap.Transform.from_json(basemap.load_field_grid()["transform"])
     centres = read_centres()
-    if len(centres) != 50:
-        raise SystemExit(f"expected 50 population centres, read {len(centres)}")
+    if len(centres) != EXPECTED:
+        raise SystemExit(f"expected {EXPECTED} settlement locations, read {len(centres)}")
     locations = build_locations(centres, tr)
     lattice = build_lattice(tr)
     worst = sanity(locations, lattice, tr)

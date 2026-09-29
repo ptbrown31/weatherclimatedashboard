@@ -1,0 +1,83 @@
+# The sixty-seven settlement locations the owner approved on 2026-09-29, one row each, in the list's order.
+# Choice: the fifty most populous metropolitan statistical areas of the lower 48 states and the District of
+#   Columbia in the Census Bureau's Vintage 2024 estimates (cbsa-est2024-alldata.csv, July 2023 delineations),
+#   then for each lower-48 state with no main city among them, its most populous metro whose main city lies in
+#   the state; New Jersey and Delaware have none, by ruling. A metro's main city is the first city of its name.
+# Position: the centre of the main city's City Hall building footprint (OpenStreetMap), or where the city names
+#   no City Hall, the seat of its government; the building's name and address are in `position`.
+# Cell (i, j): the wexp grid point whose 2.5 km square contains the position, FROZEN as approved. Where the
+#   analysis treats that square as water (it analyses significant wave height there) the nearest land point
+#   stands in: only Miami. The precipitation point on Grid 184 is (i - 200, j), the same point on the ground.
+# Rulings of 2026-09-29: Hampton Roads settles at Norfolk, South Carolina at Charleston, West Virginia at
+#   Huntington, Miami downtown at its administration building, Louisville at the building the city names City Hall.
+# Time zone: the National Weather Service points service at each square's centre.
+# basis: top50 for the fifty metros, state for the one-per-state additions; metro_rank is the metro's rank among
+#   lower-48 and DC metros. Rebuild config/analysis_locations.json with scripts/build_analysis_grid.py.
+id,name,state,metro,metro_rank,basis,position,lat,lon,i,j,tz,note
+new-york-ny,New York,NY,"New York-Newark-Jersey City, NY-NJ",1,top50,"New York City Hall, City Hall, New York, NY 10007 (City Hall Park, Lower Manhattan; the city publishes no street number)",40.7128,-74.006,2010,857,America/New_York,
+los-angeles-ca,Los Angeles,CA,"Los Angeles-Long Beach-Anaheim, CA",2,top50,"Los Angeles City Hall, 200 N Spring St, Los Angeles, CA 90012",34.0537,-118.2428,438,575,America/Los_Angeles,
+chicago-il,Chicago,IL,"Chicago-Naperville-Elgin, IL-IN",3,top50,"Chicago City Hall (west half of the City Hall-County Building), 121 N LaSalle St, Chicago, IL 60602",41.8839,-87.632,1539,861,America/Chicago,
+dallas-tx,Dallas,TX,"Dallas-Fort Worth-Arlington, TX",4,top50,"Dallas City Hall (I. M. Pei building), 1500 Marilla St, Dallas, TX 75201",32.7763,-96.7969,1221,446,America/Chicago,
+houston-tx,Houston,TX,"Houston-Pasadena-The Woodlands, TX",5,top50,"Houston City Hall, 901 Bagby St, Houston, TX 77002",29.7602,-95.3694,1274,313,America/Chicago,
+miami-fl,Miami,FL,"Miami-Fort Lauderdale-West Palm Beach, FL",6,top50,"City of Miami Administrative Building (Miami Riverside Center), 444 SW 2nd Ave, Miami, FL 33130",25.7703,-80.1982,1870,169,America/New_York,"Ruling of 2026-09-29: Miami settles downtown, at the city's administration building, rather than at City Hall on Dinner Key in Coconut Grove. The position's own grid point, 1871, 169, is water to URMA, so the nearest land grid point settles."
+washington-dc,Washington,DC,"Washington-Arlington-Alexandria, DC-VA-MD-WV",7,top50,"John A. Wilson Building, 1350 Pennsylvania Ave NW, Washington, DC 20004",38.895,-77.0313,1918,760,America/New_York,
+atlanta-ga,Atlanta,GA,"Atlanta-Sandy Springs-Roswell, GA",8,top50,"Atlanta City Hall (1930 tower plus 1989 annex), 55 Trinity Ave SW, Atlanta, GA 30303",33.7486,-84.3905,1679,504,America/New_York,The position is 30 m inside the square's edge.
+philadelphia-pa,Philadelphia,PA,"Philadelphia-Camden-Wilmington, PA-NJ-DE-MD",9,top50,"Philadelphia City Hall, 1400 John F. Kennedy Blvd, Philadelphia, PA 19107",39.9524,-75.1636,1976,817,America/New_York,
+phoenix-az,Phoenix,AZ,"Phoenix-Mesa-Chandler, AZ",10,top50,"Phoenix City Hall, 200 W Washington St, Phoenix, AZ 85003",33.4488,-112.0772,659,515,America/Phoenix,
+boston-ma,Boston,MA,"Boston-Cambridge-Newton, MA-NH",11,top50,"Boston City Hall, 1 City Hall Square, Boston, MA 02201",42.3604,-71.058,2097,948,America/New_York,
+riverside-ca,Riverside,CA,"Riverside-San Bernardino-Ontario, CA",12,top50,"Riverside City Hall, 3900 Main Street, Riverside, CA 92522",33.9806,-117.3754,469,566,America/Los_Angeles,
+san-francisco-ca,San Francisco,CA,"San Francisco-Oakland-Fremont, CA",13,top50,"San Francisco City Hall, 1 Dr. Carlton B. Goodlett Place, San Francisco, CA 94102",37.7793,-122.4192,321,766,America/Los_Angeles,
+detroit-mi,Detroit,MI,"Detroit-Warren-Dearborn, MI",14,top50,"Coleman A. Young Municipal Center (Administration Tower), 2 Woodward Avenue, Detroit, MI 48226",42.3297,-83.0434,1694,893,America/Detroit,
+seattle-wa,Seattle,WA,"Seattle-Tacoma-Bellevue, WA",15,top50,"Seattle City Hall, 600 4th Avenue, Seattle, WA 98104",47.6039,-122.3299,415,1210,America/Los_Angeles,The NWS page's square is offset up to 524 m (SEW office grid).
+minneapolis-mn,Minneapolis,MN,"Minneapolis-St. Paul-Bloomington, MN-WI",16,top50,"Minneapolis City Hall, 350 South 5th Street, Minneapolis, MN 55415",44.9773,-93.2654,1345,998,America/Chicago,
+tampa-fl,Tampa,FL,"Tampa-St. Petersburg-Clearwater, FL",17,top50,"Tampa City Hall (Old City Hall), 315 East Kennedy Boulevard, Tampa, FL 33602",27.9477,-82.4572,1773,255,America/New_York,
+san-diego-ca,San Diego,CA,"San Diego-Chula Vista-Carlsbad, CA",18,top50,"City Administration Building (San Diego City Hall), 202 C Street, San Diego, CA 92101",32.717,-117.1629,468,510,America/Los_Angeles,
+denver-co,Denver,CO,"Denver-Aurora-Centennial, CO",19,top50,"Denver City and County Building, 1437 Bannock Street, Denver, CO 80202",39.7392,-104.991,940,770,America/Denver,
+orlando-fl,Orlando,FL,"Orlando-Kissimmee-Sanford, FL",20,top50,"Orlando City Hall, 400 South Orange Avenue, Orlando, FL 32801",28.5377,-81.3796,1812,285,America/New_York,
+charlotte-nc,Charlotte,NC,"Charlotte-Concord-Gastonia, NC-SC",21,top50,"Charlotte-Mecklenburg Government Center (CMGC), 600 E. 4th Street, Charlotte, NC 28202",35.2213,-80.8395,1802,581,America/New_York,
+baltimore-md,Baltimore,MD,"Baltimore-Columbia-Towson, MD",22,top50,"Baltimore City Hall, 100 N. Holliday Street, Baltimore, MD 21202",39.2909,-76.6107,1930,780,America/New_York,
+st-louis-mo,St. Louis,MO,"St. Louis, MO-IL",23,top50,"St. Louis City Hall, 1200 Market Street, St. Louis, MO 63103",38.6268,-90.1994,1457,709,America/Chicago,
+san-antonio-tx,San Antonio,TX,"San Antonio-New Braunfels, TX",24,top50,"San Antonio City Hall, 100 Military Plaza, San Antonio, TX 78205",29.4246,-98.4951,1154,300,America/Chicago,The position is 36 m inside the square's edge.
+austin-tx,Austin,TX,"Austin-Round Rock-San Marcos, TX",25,top50,"Austin City Hall, 301 W. 2nd Street, Austin, TX 78701",30.2648,-97.7472,1184,336,America/Chicago,
+portland-or,Portland,OR,"Portland-Vancouver-Hillsboro, OR-WA",26,top50,"Portland City Hall, 1221 SW Fourth Avenue, Portland, OR 97204",45.515,-122.6791,384,1116,America/Los_Angeles,
+sacramento-ca,Sacramento,CA,"Sacramento-Roseville-Folsom, CA",27,top50,"Sacramento City Hall (New City Hall wing, joined to Historic City Hall), 915 I Street, Sacramento, CA 95814",38.5823,-121.4933,360,795,America/Los_Angeles,
+pittsburgh-pa,Pittsburgh,PA,"Pittsburgh, PA",28,top50,"Pittsburgh City-County Building, 414 Grant Street, Pittsburgh, PA 15219",40.4381,-79.9969,1807,817,America/New_York,
+las-vegas-nv,Las Vegas,NV,"Las Vegas-Henderson-North Las Vegas, NV",29,top50,"Las Vegas City Hall, 495 S. Main Street, Las Vegas, NV 89101",36.1674,-115.1485,564,650,America/Los_Angeles,
+cincinnati-oh,Cincinnati,OH,"Cincinnati, OH-KY-IN",30,top50,"Cincinnati City Hall, 801 Plum Street, Cincinnati, OH 45202",39.1042,-84.5196,1655,742,America/New_York,
+kansas-city-mo,Kansas City,MO,"Kansas City, MO-KS",31,top50,"Kansas City City Hall, 414 E. 12th Street, Kansas City, MO 64106",39.1006,-94.578,1303,728,America/Chicago,
+columbus-oh,Columbus,OH,"Columbus, OH",32,top50,"Columbus City Hall, 90 West Broad Street, Columbus, OH 43215",39.9627,-83.0035,1705,785,America/New_York,
+indianapolis-in,Indianapolis,IN,"Indianapolis-Carmel-Greenwood, IN",33,top50,"City-County Building, 200 E. Washington St., Indianapolis, IN 46204",39.768,-86.1536,1596,768,America/Indiana/Indianapolis,
+cleveland-oh,Cleveland,OH,"Cleveland, OH",34,top50,"Cleveland City Hall, 601 Lakeside Ave, Cleveland, OH 44114",41.5051,-81.6936,1743,859,America/New_York,The position is 31 m inside the square's edge.
+nashville-tn,Nashville,TN,"Nashville-Davidson--Murfreesboro--Franklin, TN",35,top50,"Historic Metro Courthouse (Davidson County Courthouse / Nashville City Hall), 1 Public Square, Nashville, TN 37201",36.1672,-86.7786,1584,605,America/Chicago,
+san-jose-ca,San Jose,CA,"San Jose-Sunnyvale-Santa Clara, CA",36,top50,"San José City Hall, 200 East Santa Clara Street, San Jose, CA 95113",37.3376,-121.8859,335,743,America/Los_Angeles,
+norfolk-va,Norfolk,VA,"Virginia Beach-Chesapeake-Norfolk, VA-NC",37,top50,"Norfolk City Hall (City Hall Building, Norfolk Civic Center), 810 Union Street, Norfolk, VA 23510",36.8447,-76.2856,1956,673,America/New_York,"Ruling of 2026-09-29: Norfolk, the historic downtown of Hampton Roads, over Virginia Beach, the first city of the metro's title. The position is 32 m inside the square's edge. The Census geocoder's point for the address falls at grid point 1956, 672."
+jacksonville-fl,Jacksonville,FL,"Jacksonville, FL",38,top50,"City Hall at St. James Building, 117 W. Duval St., Jacksonville, FL 32202",30.3301,-81.659,1794,362,America/New_York,
+providence-ri,Providence,RI,"Providence-Warwick, RI-MA",39,top50,"Providence City Hall, 25 Dorrance Street, Providence, RI 02903",41.8241,-71.413,2090,922,America/New_York,
+milwaukee-wi,Milwaukee,WI,"Milwaukee-Waukesha, WI",40,top50,"Milwaukee City Hall, 200 E. Wells St., Milwaukee, WI 53202",43.0419,-87.9099,1527,914,America/Chicago,
+raleigh-nc,Raleigh,NC,"Raleigh-Cary, NC",41,top50,"Raleigh Municipal Building (RMB), the current seat of city government, 222 W. Hargett St., Raleigh, NC 27601",35.7787,-78.643,1878,614,America/New_York,
+oklahoma-city-ok,Oklahoma City,OK,"Oklahoma City, OK",42,top50,"Oklahoma City City Hall (Municipal Building), 200 N. Walker Ave., Oklahoma City, OK 73102",35.4689,-97.5207,1197,566,America/Chicago,The NWS page's square is offset up to 861 m (OUN office grid).
+louisville-ky,Louisville,KY,"Louisville/Jefferson County, KY-IN",43,top50,"Louisville City Hall (Historic City Hall, Metro Council chambers), 601 W. Jefferson St., Louisville, KY 40202",38.2546,-85.7606,1614,701,America/New_York,"The mayor's office is next door in Metro Hall, at the neighbouring grid point."
+richmond-va,Richmond,VA,"Richmond, VA",44,top50,"Richmond City Hall, 900 E. Broad St., Richmond, VA 23219",37.541,-77.433,1912,698,America/New_York,
+memphis-tn,Memphis,TN,"Memphis, TN-MS-AR",45,top50,"Memphis City Hall, 125 N. Main St., Memphis, TN 38103",35.1489,-90.0522,1468,554,America/Chicago,
+salt-lake-city-ut,Salt Lake City,UT,"Salt Lake City-Murray, UT",46,top50,"Salt Lake City and County Building (Salt Lake City's City Hall), 451 S. State St., Salt Lake City, UT 84111",40.7596,-111.8868,707,839,America/Denver,"The position is 9 m inside the square's edge. The Census geocoder's point for the address falls at grid point 706, 839."
+birmingham-al,Birmingham,AL,"Birmingham, AL",47,top50,"Birmingham City Hall, 710 20th Street North, Birmingham, AL 35203",33.5204,-86.8111,1590,487,America/Chicago,
+fresno-ca,Fresno,CA,"Fresno, CA",48,top50,"Fresno City Hall, 2600 Fresno Street, Fresno, CA 93721",36.7397,-119.7845,404,703,America/Los_Angeles,
+grand-rapids-mi,Grand Rapids,MI,"Grand Rapids-Wyoming-Kentwood, MI",49,top50,"Grand Rapids City Hall, 300 Monroe Avenue NW, Grand Rapids, MI 49503",42.9693,-85.6715,1603,915,America/Detroit,
+hartford-ct,Hartford,CT,"Hartford-West Hartford-East Hartford, CT",50,top50,"Hartford City Hall (Municipal Building), 550 Main Street, Hartford, CT 06103",41.7626,-72.6735,2048,912,America/New_York,
+omaha-ne,Omaha,NE,"Omaha, NE-IA",55,state,"Omaha/Douglas Civic Center, 1819 Farnam Street, Omaha, NE 68183",41.257,-95.9404,1256,826,America/Chicago,
+new-orleans-la,New Orleans,LA,"New Orleans-Metairie, LA",58,state,"New Orleans City Hall, 1300 Perdido Street, New Orleans, LA 70112",29.9521,-90.0771,1475,324,America/Chicago,
+albuquerque-nm,Albuquerque,NM,"Albuquerque, NM",61,state,"Albuquerque Government Center (One Civic Plaza, the former Albuquerque/Bernalillo County Government Center), 1 Civic Plaza NW, Albuquerque, NM 87102",35.0877,-106.6517,864,566,America/Denver,
+charleston-sc,Charleston,SC,"Charleston-North Charleston, SC",70,state,"Charleston City Hall, 80 Broad Street, Charleston, SC 29401",32.7767,-79.9308,1847,477,America/New_York,"Ruling of 2026-09-29: Charleston-North Charleston over Greenville-Anderson-Greer, the rule's choice and the state's largest metro, and over Columbia, larger than Charleston by 253 people."
+boise-id,Boise,ID,"Boise City, ID",73,state,"Boise City Hall, 150 N. Capitol Blvd., Boise, ID 83702",43.6151,-116.2014,579,990,America/Boise,
+little-rock-ar,Little Rock,AR,"Little Rock-North Little Rock-Conway, AR",79,state,"Little Rock City Hall, 500 West Markham Street, Little Rock, AR 72201",34.7493,-92.2756,1387,534,America/Chicago,"The position is 36 m inside the square's edge. The Census geocoder's point for the address falls at grid point 1388, 534."
+des-moines-ia,Des Moines,IA,"Des Moines-West Des Moines, IA",81,state,"Des Moines City Hall, in the T.M. Franklin Cownie City Administration Building, 1200 Locust St., Des Moines, IA 50309",41.5847,-93.6328,1335,841,America/Chicago,
+wichita-ks,Wichita,KS,"Wichita, KS",88,state,"Wichita City Hall, 455 N. Main St., Wichita, KS 67202",37.6926,-97.339,1205,665,America/Chicago,
+jackson-ms,Jackson,MS,"Jackson, MS",94,state,"Jackson City Hall, 219 S. President Street, Jackson, MS 39201",32.2978,-90.1825,1468,427,America/Chicago,
+portland-me,Portland,ME,"Portland-South Portland, ME",102,state,"Portland City Hall, 389 Congress Street, Portland, ME 04101",43.6593,-70.2573,2113,1012,America/New_York,
+manchester-nh,Manchester,NH,"Manchester-Nashua, NH",127,state,"Manchester City Hall, One City Hall Plaza, Manchester, NH 03101 (building street address 908 Elm Street)",42.991,-71.4634,2079,974,America/New_York,
+huntington-wv,Huntington,WV,"Huntington-Ashland, WV-KY-OH",153,state,"Huntington City Hall, 800 Fifth Avenue, Huntington, WV 25701",38.4196,-82.445,1731,718,America/New_York,
+sioux-falls-sd,Sioux Falls,SD,"Sioux Falls, SD-MN",168,state,"Sioux Falls City Hall, 224 W. Ninth St., Sioux Falls, SD 57104",43.5476,-96.7294,1230,932,America/Chicago,
+fargo-nd,Fargo,ND,"Fargo, ND-MN",185,state,"Fargo City Hall, 225 4th Street North, Fargo, ND 58102",46.8785,-96.7829,1230,1088,America/Chicago,
+burlington-vt,Burlington,VT,"Burlington-South Burlington, VT",207,state,"Burlington City Hall, 149 Church Street, Burlington, VT 05401",44.4763,-73.2129,2010,1032,America/New_York,
+billings-mt,Billings,MT,"Billings, MT",236,state,"Billings City Hall (former James F. Battin Federal Building / Stillwater Building), 316 N. 26th Street, Billings, MT 59101",45.7853,-108.5058,846,1058,America/Denver,
+cheyenne-wy,Cheyenne,WY,"Cheyenne, WY",357,state,"Cheyenne Municipal Building (City Hall), 2101 O'Neil Avenue, Cheyenne, WY 82001",41.1356,-104.8221,950,832,America/Denver,

@@ -1,12 +1,14 @@
 /* The analysis resolution page: a proposed settlement framework, shown as it
    would have resolved.
 
-   Daily high, low, peak gust, mean wind and precipitation at the fifty most
-   populous places of the lower 48, read from NOAA's hourly 2.5 km analyses
-   (RTMA within the hour, URMA about seven hours later) instead of a station's
-   reports, and resolved in whole units rounded half up, away from zero, with a
-   value equal to the strike resolving Yes (owner's decision 2026-09-28; the
-   exchange's current daily contracts resolve strictly). No
+   Daily high, low, peak gust, mean wind and precipitation at the sixty-seven
+   settlement locations the owner approved on 2026-09-29 (the grid cell that
+   holds each main city's City Hall), read from NOAA's hourly 2.5 km RTMA
+   instead of a station's reports, precipitation included (owner's decision
+   2026-09-29), with URMA, NOAA's later analysis of record, shown for
+   comparison. Resolved in whole units rounded once, half up, away from zero,
+   with a value equal to the strike resolving Yes (owner's decision
+   2026-09-28; the exchange's current daily contracts resolve strictly). No
    contract settles on it, the page says so on every view, and it is not in
    the navigation.
 
@@ -26,25 +28,30 @@ window.WXAnalysis = (() => {
      reads the same as a frame from another; `yes` is the side of the strike
      the value has to be on; `rungs` for precipitation are the fixed strikes of
      docs/analysis.md, the others take whole units around the value. `exactDec`
-     is the precision the job keeps the exact aggregate at (CONVENTIONS.rounding:
-     a tenth, the mean wind a hundredth, precipitation a ten-thousandth of an
+     is the precision the job cuts the exact aggregate to (CONVENTIONS.rounding:
+     a thousandth, precipitation a ten-thousandth of an
      inch), so the card shows the file's figure and never a re-rounding of it
      that could equal the whole value it sits beside. */
   const VARS = {
-    high:   { label: 'High', hourly: 'temp', unit: '°F', lo: -20, hi: 110, ramp: RAMP, dec: 0, exactDec: 1, yes: 'above', noun: 'high' },
-    low:    { label: 'Low', hourly: 'temp', unit: '°F', lo: -20, hi: 110, ramp: RAMP, dec: 0, exactDec: 1, yes: 'below', noun: 'low' },
-    gust:   { label: 'Peak gust', hourly: 'gust', unit: 'mph', lo: 0, hi: 60, ramp: RAMP, dec: 0, exactDec: 1, yes: 'above', noun: 'peak gust' },
-    wind:   { label: 'Mean wind', hourly: 'wind', unit: 'mph', lo: 0, hi: 30, ramp: RAMP, dec: 0, exactDec: 2, yes: 'above', noun: 'mean wind' },
+    high:   { label: 'High', hourly: 'temp', unit: '°F', lo: -20, hi: 110, ramp: RAMP, dec: 0, exactDec: 3, yes: 'above', noun: 'high' },
+    low:    { label: 'Low', hourly: 'temp', unit: '°F', lo: -20, hi: 110, ramp: RAMP, dec: 0, exactDec: 3, yes: 'below', noun: 'low' },
+    gust:   { label: 'Peak gust', hourly: 'gust', unit: 'mph', lo: 0, hi: 60, ramp: RAMP, dec: 0, exactDec: 3, yes: 'above', noun: 'peak gust' },
+    wind:   { label: 'Mean wind', hourly: 'wind', unit: 'mph', lo: 0, hi: 30, ramp: RAMP, dec: 0, exactDec: 3, yes: 'above', noun: 'mean wind' },
     precip: { label: 'Precipitation', hourly: 'precip', unit: 'in', lo: 0, hi: 2, ramp: RAIN, dec: 2, exactDec: 4, yes: 'above',
               noun: 'precipitation', zeroClear: true, rungs: [0.01, 0.05, 0.10, 0.25, 0.50, 1.00, 2.00], running: true },
   };
   const PRODUCTS = { rtma: 'RTMA', urma: 'URMA' };
+  // the lane's second schema (2026-09-29): the sixty-seven settlement
+  // locations, RTMA resolving, one rounding and a midnight-to-midnight rain day
+  const DATA = 'analysis2/';
+  // the product that resolves, from the index; RTMA until it says otherwise
+  const settles = () => (S.index && S.index.resolvesOn) || 'rtma';
   // the hourly variables as the captions name them; the keys are the files'
   const HOURLY = { temp: 'temperature', wind: 'sustained wind', gust: 'gust', precip: 'precipitation' };
   // the precision the loc files carry each hourly value at (docs/analysis.md
-  // section 4): a tenth, and precipitation a ten-thousandth of an inch, so
-  // that the running sum of the hours can meet the day's exact total
-  const hourlyDec = hv => (hv === 'precip' ? 4 : 1);
+  // section 4), cut rather than rounded: a thousandth, and precipitation a
+  // ten-thousandth of an inch
+  const hourlyDec = hv => (hv === 'precip' ? 4 : 3);
   // the day's hour count is the file's `of` (23, 24 or 25, docs/analysis.md
   // section 4); 24 only for a file written before that field existed
   const hoursInDay = e => (e && e.of) || 24;
@@ -54,7 +61,7 @@ window.WXAnalysis = (() => {
   // `view` is the map's zoom when it is in, `{z, cx, cy}` in viewBox units,
   // kept by applyView below so a zoomed cell can be linked; null at the
   // whole country
-  const S = { var: 'high', product: 'urma', day: null, hour: null, loc: null, view: null,
+  const S = { var: 'high', product: 'rtma', day: null, hour: null, loc: null, view: null,
               index: null, grid: null, frames: new Map(), days: new Map(), locs: new Map() };
   const V = () => VARS[S.var];
   const fmt = (v, dec) => (v == null ? '' : Number(v).toFixed(dec == null ? V().dec : dec));
@@ -101,7 +108,7 @@ window.WXAnalysis = (() => {
 
   // ---- the files, each fetched once and kept
   const once = (map, key, cadence, opts) => {
-    if (!map.has(key)) map.set(key, WXD.get('analysis/' + key, cadence, opts));
+    if (!map.has(key)) map.set(key, WXD.get(DATA + key, cadence, opts));
     return map.get(key);
   };
   const dayFile = day => once(S.days, 'days/' + day + '.json', 60);
@@ -118,36 +125,40 @@ window.WXAnalysis = (() => {
   /* One location's day for the selected product and variable, with the
      status the page draws it in. A closed incomplete day is closed whichever
      product it is: the job closes an RTMA day the same way it closes a URMA
-     one, and one file state has to get one word. Otherwise RTMA is always
-     provisional. A URMA day is final once its analyses are read; precipitation
-     resolves at the first complete pass and a later re-read that differs is
-     `revised`. A day short of its hours carries its count, a closed day is
-     never final. `word` is what the chart rule and the tooltips call the
-     value: a value that can still move is `running`, one that cannot is
-     `resolved`, and a closed day's value is `closed`. */
+     one, and one file state has to get one word. Otherwise the resolving
+     product (RTMA) is final once its analyses are read, and its precipitation
+     once every hourly file is; NOAA never revises either. URMA is shown for
+     comparison and its status is `comparison`. A day short of its hours
+     carries its count, a closed day is never final. `word` is what the chart
+     rule and the tooltips call the value: a value that can still move is
+     `running`, one that cannot is `resolved`, a closed day's value is
+     `closed` and a comparison is a `value`. */
   function resolution(entry, product, varKey) {
     const e = entry && entry[product];
     if (!e || !e[varKey]) return null;
-    const val = e[varKey], n = e.hours || 0, total = hoursInDay(e);
+    const val = e[varKey], total = hoursInDay(e);
+    let n = e.hours || 0;
     let kind;
     if (e.closed) kind = 'closed';
-    else if (product === 'rtma') kind = 'provisional';
-    else if (varKey === 'precip') kind = val.revised ? 'revised' : val.resolved ? 'final' : 'provisional';
+    else if (product !== settles()) kind = 'comparison';
+    else if (varKey === 'precip') kind = val.resolved ? 'final' : 'provisional';
     else kind = e.final ? 'final' : 'provisional';
+    // the precipitation's own hour count, which an hour without its analysis can differ from
+    if (varKey === 'precip' && val.hours != null) n = val.hours;
     const count = n + ' of ' + total + ' hours';
-    const provisional = kind === 'provisional' || kind === 'closed';
-    const label = kind === 'closed' ? 'closed, ' + count : (kind === 'provisional' && n < total) ? kind + ', ' + count : kind;
+    const provisional = kind !== 'final';
+    const label = kind === 'closed' ? 'closed, ' + count : (kind !== 'final' && n < total) ? kind + ', ' + count : kind;
     return { value: val.value, exact: val.exact, at: val.at || null, revised: val.revised || null,
              kind, label, hours: n, total, provisional,
-             word: kind === 'closed' ? 'closed' : provisional ? 'running' : 'resolved',
-             status: provisional ? kind + ', ' + count : kind };
+             word: kind === 'closed' ? 'closed' : kind === 'comparison' ? 'value' : provisional ? 'running' : 'resolved',
+             status: label };
   }
 
   async function init() {
     WXC.chrome('analysis-resolution.html');
     readUrl();
     const host = $('#anaMap'), strip = $('#pageStatus');
-    const ri = await WXD.get('analysis/index.json', 10);
+    const ri = await WXD.get(DATA + 'index.json', 10);
     /* The index's `asof` is the newest analysis valid hour, which NOAA's own
        lag keeps 47 to 107 minutes behind the clock, so judged against the ten
        minute job cadence it would read as behind on every load. The job's
@@ -167,7 +178,7 @@ window.WXAnalysis = (() => {
       host.appendChild(h('p', { class: 'cap' }, 'The analysis index is not available right now. ' + STATEMENT));
       return;
     }
-    const rg = await WXD.get('analysis/grid/index.json', 10);
+    const rg = await WXD.get(DATA + 'grid/index.json', 10);
     S.grid = rg.data || { frames: {} };
     const src = S.index.sources || {};
     const validAt = s => (s && s.latest ? String(s.latest).replace('T', ' ').replace(/:00Z$/, ' UTC') : 'none read');
@@ -350,7 +361,7 @@ window.WXAnalysis = (() => {
     /* A pan starts on pointerdown but takes the pointer only once it has
        moved past the click threshold. Capturing on pointerdown made Chromium
        deliver every click to the svg itself, so nothing under the pointer
-       (a window cell, the label, the outline, the Census dot, a plain dot)
+       (a window cell, the label, the outline, the position dot, a plain dot)
        opened while the map was zoomed. Until the threshold the pointer is
        tracked on the svg with a window-level pointerup, so a click that
        ends off the map still ends the gesture. */
@@ -553,7 +564,7 @@ window.WXAnalysis = (() => {
 
     /* The marks of cell mode, one g.dot per place with geometry so the
        keyboard and the picked-dot rules hold: the resolving cell's outline,
-       a small dot at the Census point, and the day's value in a label at a
+       a small dot at the position (the City Hall), and the day's value in a label at a
        fixed screen offset up and to the right of the cell, flipped when it
        would leave the view, with a leader to the cell's centre. Sizes are
        in screen pixels converted at the current zoom, since the viewBox
@@ -599,7 +610,7 @@ window.WXAnalysis = (() => {
                                    class: 'rcellhalo', 'pointer-events': 'none' }));
         g.appendChild(el('path', { d, fill: 'none', stroke: 'var(--cell-line)', 'stroke-width': 2, 'vector-effect': 'non-scaling-stroke',
                                    class: 'rcell ' + (v == null ? 'absent' : res.provisional ? 'prov' : 'final') }));
-        g.appendChild(el('circle', { cx: L.px, cy: L.py, r: 2.2 * u, fill: 'var(--cell-line)', class: 'census' }));
+        g.appendChild(el('circle', { cx: L.px, cy: L.py, r: 2.2 * u, fill: 'var(--cell-line)', class: 'posdot' }));
         g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button');
         g.setAttribute('aria-label', L.name + ', ' + L.state + (v != null ? ', ' + res.word + ' ' + withUnit(v) : ', no value yet'));
         g.onclick = () => openPlace(L);
@@ -758,7 +769,7 @@ window.WXAnalysis = (() => {
       const lo = (Vv.lo < 0 ? '−' + Math.abs(Vv.lo) : Vv.lo), hi = Vv.hi;
       legend.appendChild(h('span', { text: Vv.label + ' from the ' + PRODUCTS[S.product] + ' analysis, ' + lo + ' to ' + hi + ' '
         + Vv.unit + (Vv.zeroClear ? ', zero left clear' : '') + '.' }));
-      legend.appendChild(h('span', { text: 'Dots carry the day’s resolved ' + Vv.noun + ' per place, dashed while provisional, hollow with no value yet.' }));
+      legend.appendChild(h('span', { text: 'Dots carry the day’s ' + Vv.noun + ' per place, solid once RTMA has resolved it, dashed while provisional and on the URMA comparison, hollow with no value yet.' }));
       legend.appendChild(h('span', { text: 'Zoomed in far enough, the map draws the 2.5 km cells around each place and outlines the cell the place resolves on.' }));
       legend.appendChild(h('span', { class: 'kn', text: 'The field is a 3 px subsample of the 2.5 km analysis, about 14 km between points nationally. ' + STATEMENT }));
     }
@@ -885,8 +896,10 @@ window.WXAnalysis = (() => {
       }
       const c = L.cell || {};
       let note = 'Cell centre ' + ((c.centre || [])[0] != null ? c.centre[0].toFixed(4) + ' N, ' + Math.abs(c.centre[1]).toFixed(4) + (c.centre[1] < 0 ? ' W' : ' E') : 'unknown')
-        + (c.distanceKm != null ? ', ' + c.distanceKm + ' km from the Census internal point at ' + L.lat.toFixed(4) + ' N, ' + Math.abs(L.lon).toFixed(4) + (L.lon < 0 ? ' W' : ' E') : '')
-        + (c.wexp ? ', grid cell i ' + c.wexp[0] + ' j ' + c.wexp[1] : '') + '.';
+        + (c.distanceKm != null ? ', ' + c.distanceKm + ' km from the position at ' + L.lat.toFixed(4) + ' N, ' + Math.abs(L.lon).toFixed(4) + (L.lon < 0 ? ' W' : ' E') : '')
+        + (c.wexp ? ', grid cell i ' + c.wexp[0] + ' j ' + c.wexp[1] : '')
+        + (c.g184 ? ', and i ' + c.g184[0] + ' j ' + c.g184[1] + ' on the grid RTMA files its precipitation on' : '') + '.'
+        + (L.position ? ' The position is ' + L.position + '.' : '');
       if (L.note) note += ' ' + L.note;
       panel.appendChild(h('p', { class: 'cap', id: 'anaCell', text: note }));
     }
@@ -925,7 +938,11 @@ window.WXAnalysis = (() => {
           if (Vv.running) { acc += v; return { k, v: acc }; }
           return { k, v };
         });
-        const ep = entry && entry[p], ex = ep && ep.complete && ep[S.var] ? ep[S.var].exact : null;
+        // pinned once the day's own count is whole: the analyses for a
+        // temperature or a wind, the hourly files for precipitation
+        const ep = entry && entry[p], ev = ep && ep[S.var];
+        const whole = ev && (Vv.running ? ev.hours === hoursInDay(ep) : ep.complete);
+        const ex = whole ? ev.exact : null;
         if (Vv.running && last >= 0 && ex != null) pts[last].v = Number(ex);
         return pts;
       };
@@ -964,8 +981,9 @@ window.WXAnalysis = (() => {
         d = d.trim();
         if (d) svg2.appendChild(E('path', { d, fill: 'none', stroke, 'stroke-width': width, 'stroke-dasharray': dash || null, class: 'anaseries' }));
       };
-      line(rt, 'var(--ana-rtma)', 1.4, '5 3');
-      line(ur, 'var(--ana-urma)', 1.9, null);
+      // URMA dashed underneath, for comparison; RTMA, which resolves, solid on top
+      line(ur, 'var(--ana-urma)', 1.4, '5 3');
+      line(rt, 'var(--ana-rtma)', 1.9, null);
       if (res && res.value != null) {
         svg2.appendChild(E('line', { x1: Lm, x2: PX, y1: y(res.value), y2: y(res.value), stroke: 'var(--ink)', 'stroke-width': 1.1, class: 'anares' }));
         // labelled at the left end of the rule, and by its state: running
@@ -1038,7 +1056,8 @@ window.WXAnalysis = (() => {
       });
       // the legend names each line, in its own colour
       let lx = Lm;
-      [[(entry && entry.rtma && entry.rtma.closed) ? 'RTMA, closed' : 'RTMA, provisional', 'var(--ana-rtma)', '5 3'], ['URMA, final when complete', 'var(--ana-urma)', null]].forEach(([label, color, dash]) => {
+      const rstate = entry && entry.rtma ? (entry.rtma.closed ? 'closed' : entry.rtma.final ? 'final' : 'provisional') : 'provisional';
+      [['RTMA, ' + rstate, 'var(--ana-rtma)', null], ['URMA, for comparison', 'var(--ana-urma)', '5 3']].forEach(([label, color, dash]) => {
         svg2.appendChild(E('line', { x1: lx, x2: lx + 14, y1: TOP - 6, y2: TOP - 6, stroke: color, 'stroke-width': 2, 'stroke-dasharray': dash }));
         svg2.appendChild(T(label, { x: lx + 18, y: TOP - 2.5, class: 'ax' }));
         lx += 26 + label.length * 6.0;
@@ -1070,13 +1089,13 @@ window.WXAnalysis = (() => {
       const cell = (o, k, dec) => { const v = (o || {})[k]; return h('td', { class: 'num' + (v == null ? ' dim' : ''), text: v == null ? '·' : Number(v).toFixed(dec) }); };
       hours.forEach(hr => {
         const tr = h('tr', {}, [h('td', { text: hr.local + ':00' }), h('td', { text: hr.t.slice(5, 16).replace('T', ' ') })]);
-        ['rtma', 'urma'].forEach(p => { tr.appendChild(cell(hr[p], 'temp', 1)); tr.appendChild(cell(hr[p], 'wind', 1)); tr.appendChild(cell(hr[p], 'gust', 1)); tr.appendChild(cell(hr[p], 'precip', hourlyDec('precip'))); });
+        ['rtma', 'urma'].forEach(p => { ['temp', 'wind', 'gust', 'precip'].forEach(k => tr.appendChild(cell(hr[p], k, hourlyDec(k)))); });
         tbody.appendChild(tr);
       });
       t.appendChild(tbody);
       wrap.appendChild(t);
-      wrap.appendChild(h('p', { class: 'cap', text: 'Temperature in °F, wind and gust in mph to a tenth, precipitation in inches to a ten-thousandth over the hour ending at the stamp. '
-        + 'Each hourly value is the analysis at the top of that hour in ' + L.tz + '.' }));
+      wrap.appendChild(h('p', { class: 'cap', text: 'Temperature in °F and wind and gust in mph to a thousandth, cut rather than rounded; precipitation in inches to a ten-thousandth over the hour that starts at the stamp, which NOAA files under the hour it ends. '
+        + 'Each temperature, wind and gust is the analysis at the top of that hour in ' + L.tz + '.' }));
       return wrap;
     }
 
@@ -1091,7 +1110,7 @@ window.WXAnalysis = (() => {
     const conv = S.index.conventions || {};
     // the keys pipeline/analysis.py CONVENTIONS writes; an unknown key is shown as itself
     const LABELS = { day: 'Day', high: 'High', low: 'Low', gust: 'Peak gust', wind: 'Mean wind', precip: 'Precipitation',
-                     rounding: 'Rounding and the strike', provisional: 'Provisional, final and revised',
+                     rounding: 'Rounding', provisional: 'Final, provisional and comparison', missing: 'Missing files',
                      closed: 'Closed incomplete days', hourly: 'Hourly values', cell: 'Cell', window: 'Window', strike: 'Value at the strike', resolvedDay: 'Fully resolved day',
                      lattice: 'Map lattice', units: 'Units' };
     host.appendChild(h('h2', { text: 'Method' }));
@@ -1105,14 +1124,15 @@ window.WXAnalysis = (() => {
     const src = S.index.sources || {};
     const lag = m => (m == null ? 'an unmeasured lag' : m < 90 ? 'about ' + Math.round(m) + ' minutes' : 'about ' + Math.floor(m / 60) + ' hours ' + (m % 60) + ' minutes');
     const latest = s => (s && s.latest ? ', newest hour read ' + s.latest.replace('T', ' ').replace(':00:00Z', ' UTC') : '');
-    host.appendChild(h('p', { text: 'Sources. RTMA is read from NOAA Open Data (' + ((src.rtma || {}).bucket || 'noaa-rtma-pds') + '), '
-      + lag((src.rtma || {}).lagMinutes) + ' after each hour' + latest(src.rtma) + '. URMA is the same analysis run again with the late-arriving observations, read from '
+    host.appendChild(h('p', { text: 'Sources. RTMA, which resolves, is read from NOAA Open Data (' + ((src.rtma || {}).bucket || 'noaa-rtma-pds') + '), '
+      + lag((src.rtma || {}).lagMinutes) + ' after each hour' + latest(src.rtma) + '; its precipitation is NOAA’s radar-only estimate. URMA, shown for comparison, is the same analysis run again with the late-arriving observations, read from '
       + ((src.urma || {}).bucket || 'noaa-urma-pds') + ', ' + lag((src.urma || {}).lagMinutes) + ' after each hour' + latest(src.urma)
-      + '. URMA precipitation is rewritten for up to eight days as the River Forecast Centers rerun their gauge analyses, which is why a resolved total can gain a revised one beside it.' }));
+      + '. URMA precipitation is rewritten for up to eight days as the River Forecast Centers rerun their analyses, which is why its total can gain a revised one beside it. '
+      + 'A file NOAA Open Data does not have three hours after its hour is read from NCEP’s NOMADS server.' }));
     host.appendChild(h('p', { text: 'The map is a subsample. Each hourly field is sampled at a 3 px pitch in the site’s map space, about 14 km between points nationally, '
-      + 'and the dot values come from the place’s own nearest 2.5 km cell rather than from the picture.' }));
+      + 'and the dot values come from the place’s own 2.5 km cell rather than from the picture.' }));
     host.appendChild(h('p', { text: 'Station report conventions have no analogue here. There is no last report in the hour, no special report and no tenths group; '
-      + 'the hourly value is the analysis at the top of the hour, and precipitation is the accumulation over the hour ending then.' }));
+      + 'each hour is the analysis at the top of the hour, and precipitation is the accumulation over the hour that starts then.' }));
   }
 
   return { init };

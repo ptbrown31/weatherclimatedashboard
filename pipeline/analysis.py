@@ -1,6 +1,6 @@
 """
 analysis.py — how a settlement framework built on NOAA's gridded analyses
-would have resolved, at fifty population centres.
+would have resolved, at the sixty-seven settlement locations.
 
 The contracts settle on station reports, and this site's other lanes read
 those. This lane shows the alternative the owner asked to see (docs/analysis.md):
@@ -12,31 +12,39 @@ nothing here feeds any other lane.
 
 Conventions, all from docs/analysis.md section 1 and fixed there:
 
-    The value at a place is the nearest 2.5 km grid cell to the Census internal
-    point of the place, never an interpolation, because a contract needs one
-    number that two readers can recompute from the same file.
+    The value at a place is the analysis at one 2.5 km grid cell, never an
+    interpolation, because a contract needs one number that two readers can
+    recompute from the same file: the cell whose square contains the main
+    city's City Hall, frozen in the settlement list the owner approved on
+    2026-09-29 (config/analysis_locations.json).
+
+    RTMA resolves (owner's decision 2026-09-29), precipitation included; URMA,
+    NOAA's later analysis of record, is read and shown for comparison and
+    never resolves.
 
     The day is the local civil date at the place through its IANA zone. Every
     top-of-hour analysis whose local civil time falls on that date counts. That is
     24 analyses on an ordinary day, 23 on the spring-forward day (02:00 local
     does not occur) and 25 on the fall-back day (01:00 local occurs twice, and
-    both analyses belong to the date). Complete means every one of them was
-    read; the mean wind is over the hours read. RTMA is always provisional.
-    URMA is the analysis of record: its high, low, gust and wind are final
-    when every hourly analysis file of the day has been read; its
-    precipitation is resolved at the first read that has a value for every
-    hour of the day, and that total never changes. The River Forecast
-    Centers rerun their gauge analyses for up to eight days, so the URMA
-    precipitation of each of the last eight local days is re-read once a day
-    and a total that differs from the resolved one is carried beside it as a
-    revision, never in its place.
+    both analyses belong to the date). Precipitation is the one-hour
+    accumulations that together cover the date from midnight to midnight: a
+    day's row for the analysis at HH:00 carries the accumulation over the hour
+    that starts then, which NOAA files under the hour it ends. Complete means
+    every analysis was read; the mean wind is over the hours read. An RTMA day
+    is final when every hourly analysis file has been read, and its
+    precipitation is resolved when every hourly precipitation file has; NOAA
+    never revises an RTMA file, so neither changes afterwards. URMA's
+    precipitation files are rewritten for up to eight days, so for comparison
+    its total is kept at the first read with every hour, the last eight local
+    days are re-read once a day, and a total that differs is carried beside it.
 
-    Rounding is half up, away from zero (-20.5 F is -21, the way a published
-    table shows it), once, on the aggregate itself (the highest hourly
-    temperature, the mean wind, the summed accumulation); the exact value
-    shown beside the whole one is that same aggregate to a tenth, the mean
-    wind to a hundredth and precipitation to a ten-thousandth, so a reader
-    can check the rounding and never sees it applied twice. A value equal to
+    Every stored value is in the file's own unit and is converted exactly, in
+    decimal arithmetic, and the aggregate (the highest hourly temperature,
+    the mean wind, the summed accumulation) is rounded once, half up, away
+    from zero (-20.5 F is -21, the way a published table shows it). The exact
+    value shown beside the whole one is that aggregate cut toward zero to a
+    thousandth (precipitation a ten-thousandth of an inch), so it never looks
+    as if it rounds the other way. A value equal to
     the strike resolves Yes, at or above it for the high, gust, mean wind and
     precipitation and at or below it for the low (owner's decision
     2026-09-28). The exchange's current daily temperature and wind contracts
@@ -46,11 +54,13 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     A day still short of its hours 48 hours after its local end is closed
     incomplete: its value stands on the hours read, is never marked final,
     and the count is shown. The hourly analysis files are never rewritten
-    upstream, so a missing hour stays missing. Its precipitation is a
-    separate file and is read all the same: it adds to the day's total and
-    never to the count of analyses read. The precipitation files are
-    rewritten upstream, so an hour's precipitation lives in its own key and
-    is filled in as the files improve.
+    upstream, so a missing hour stays missing once NCEP's NOMADS server, which
+    keeps fourteen days and is read for any file NOAA Open Data lacks three
+    hours after its hour, has none either. Its precipitation is a separate
+    file and is read all the same: it adds to the day's total and never to
+    the count of analyses read. The precipitation files are rewritten
+    upstream (URMA's), so an hour's precipitation lives in its own key and is
+    filled in as the files improve.
 
 Reads   noaa-rtma-pds and noaa-urma-pds through pipeline/gov_weather.py; the
         .idx sidecar of each analysis file and a range request per message
@@ -86,7 +96,7 @@ import json
 import math
 import os
 import time
-from decimal import Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -99,23 +109,28 @@ try:
 except ImportError:  # the decoder is a separate module; without it the pass reports and writes nothing
     grib2 = None  # type: ignore
 
-SCHEMA = "analysis/1"
+# Schema 2 (owner's decisions of 2026-09-29): the sixty-seven settlement
+# locations, RTMA resolving, the archive in the files' own units with one
+# rounding, and precipitation from midnight to midnight. Schema 1's files
+# under snapshots/analysis/ and archive/analysis/ are left as they were and
+# are no longer written.
+SCHEMA = "analysis/2"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCATIONS_PATH = os.path.join(ROOT, "config", "analysis_locations.json")
 LATTICE_PATH = os.path.join(ROOT, "config", "analysis_lattice.json")
 
-PREFIX = "snapshots/analysis/"
+PREFIX = "snapshots/analysis2/"
 INDEX_KEY = PREFIX + "index.json"
 DAY_KEY = PREFIX + "days/{day}.json"
 LOC_KEY = PREFIX + "loc/{loc}/{day}.json"
 GRID_INDEX_KEY = PREFIX + "grid/index.json"
 FRAME_KEY = PREFIX + "grid/{product}/{var}/{stamp}.json"
-HOUR_KEY = "archive/analysis/hours/{product}/{stamp}.json.gz"
+HOUR_KEY = "archive/analysis2/hours/{product}/{stamp}.json.gz"
 # the precipitation of a product-hour is its own key because NOAA rewrites
 # the precipitation files (the RFC regions land in batches and the gauge
 # reruns follow for days) while the analysis hour is written once
-PRECIP_KEY = "archive/analysis/precip/{product}/{stamp}.json.gz"
-STATE_KEY = "archive/analysis/_meta/state.json"
+PRECIP_KEY = "archive/analysis2/precip/{product}/{stamp}.json.gz"
+STATE_KEY = "archive/analysis2/_meta/state.json"
 HEALTH_KEY = "archive/_meta/health_analysis.json"   # this lane's own failure streaks (see archive.update_health)
 # frames never change and a final place-day changes only by a revision; everything else is live
 CACHE_FINAL = "public, max-age=300, stale-while-revalidate=1800, stale-if-error=86400"
@@ -133,6 +148,20 @@ STATEMENT = "A proposed settlement framework. No contract settles on it."
 # in a batch, with the western RFC region absent from the bitmap, and are
 # rewritten later; the lane never waits on them before archiving the analysis.
 NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com", "urma": "https://noaa-urma-pds.s3.amazonaws.com"}
+# NCEP's own server keeps the last fourteen days of both products under the
+# same directory and file names. A file not on NOAA Open Data this long after
+# its hour is read from there (the RTMA analysis of 2026-09-23 19Z never
+# reached NOAA Open Data and NOMADS had it), and the lane stops asking a day
+# short of the fourteen
+NOMADS_DEFAULT = {"rtma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod",
+                  "urma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/urma/prod"}
+NOMADS_AFTER_HOURS = 3
+NOMADS_KEEP_HOURS = 13 * 24
+# the product that resolves (owner's decision 2026-09-29): RTMA for every
+# variable, precipitation included. URMA, NOAA's analysis of record, reruns
+# each hour about seven hours later with late observations; it is read and
+# shown for comparison and never resolves
+SETTLE = "rtma"
 PRODUCTS = {
     "rtma": {"bucket": "noaa-rtma-pds", "dir": "rtma2p5", "anl": "rtma2p5.t{hh}z.2dvaranl_ndfd.grb2_wexp",
              "pcp": "rtma2p5.{ymdh}.pcp.184.grb2", "pcpGrid": "g184", "lagMinutes": 47},
@@ -152,17 +181,25 @@ UNITS = {"temp": "°F", "wind": "mph", "gust": "mph", "precip": "in"}
 # what a frame's int is divided by: tenths of a degree and of a mile per
 # hour, hundredths of an inch
 SCALE = {"temp": 10, "wind": 10, "gust": 10, "precip": 100}
-# the exact hourly value kept in the archive: tenths, and precipitation to a
-# ten-thousandth of an inch so a day's sum carries the thousandths the
-# contract shows beside the rounded total
-HOUR_UNIT = {"temp": 0.1, "wind": 0.1, "gust": 0.1, "precip": 0.0001}
-# the whole value a strike is compared with, and the precision of the exact
-# aggregate shown beside it (a mean of tenths is kept to a hundredth so the
-# whole value is never the rounding of an already rounded number)
+# the archive keeps each value in the file's own unit (kelvin, metres per
+# second, millimetres) at the file's precision, and nothing is rounded before
+# the day's aggregate: the analysis fields are packed to hundredths, so four
+# decimals hold them exactly and drop the float noise of the decode, and the
+# precipitation is kept to a millionth of a millimetre
+RAW_DIGITS = {"temp": 4, "wind": 4, "gust": 4, "precip": 6}
+# the whole value a strike is compared with (the aggregate rounded once, half
+# up, away from zero), the exact aggregate shown beside it, and an hourly
+# value in the place file. The shown values are CUT toward zero at their
+# precision, never rounded, so a mean wind of 16.4996 shows as 16.499 beside
+# its whole 16 and never as a 16.500 that looks as if it should be 17; a
+# temperature is exact at a thousandth of a degree, since the file holds
+# hundredths of a kelvin
 DAY_UNIT = {"high": 1, "low": 1, "gust": 1, "wind": 1, "precip": 0.01}
-EXACT_UNIT = {"high": 0.1, "low": 0.1, "gust": 0.1, "wind": 0.01, "precip": 0.0001}
+EXACT_UNIT = {"high": 0.001, "low": 0.001, "gust": 0.001, "wind": 0.001, "precip": 0.0001}
+HOUR_SHOW = {"temp": 0.001, "wind": 0.001, "gust": 0.001, "precip": 0.0001}
 MPH_PER_MS = 2.2369362921
 MM_PER_INCH = 25.4
+K0_DEC, MPH_DEC, MM_DEC = Decimal("273.15"), Decimal("2.2369362921"), Decimal("25.4")
 
 LATTICE_PITCH = 3
 LATTICE_COLS, LATTICE_ROWS = 320, 200
@@ -213,11 +250,13 @@ FETCH_TRIES = 2
 FETCH_TIMEOUT = 20
 
 CONVENTIONS = {
-    "day": "The local civil date at the place through its IANA zone. Every top-of-hour analysis whose local "
-           "civil time falls on that date counts, 24 on an ordinary day, 23 on the spring-forward day (02:00 does "
-           "not occur) and 25 on the fall-back day (both 01:00 analyses count). Complete means every one of "
-           "them was read; the mean wind is over the hours read. An hour whose analysis file never landed still "
-           "adds its precipitation, which NOAA publishes as a separate file.",
+    "day": "The local civil date at the place through its IANA zone. Temperature, wind and gust use every "
+           "top-of-hour analysis whose local civil time falls on that date, 24 on an ordinary day, 23 on the "
+           "spring-forward day (02:00 does not occur) and 25 on the fall-back day (both 01:00 analyses count). "
+           "Precipitation uses the one-hour accumulations that together cover the date from midnight to "
+           "midnight, the same count. Complete means every analysis was read; the mean wind is over the hours "
+           "read. An hour whose analysis file never landed still adds its precipitation, which NOAA publishes "
+           "as a separate file.",
     "high": "The highest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
             "Yes when the value is at or above the strike.",
     "low": "The lowest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
@@ -228,24 +267,30 @@ CONVENTIONS = {
             "Yes when the value is at or above the strike.",
     "precip": "The sum of the day's hourly accumulations, inches to a hundredth rounded half up; "
               "Yes when the value is at or above the strike.",
-    "rounding": "Half up, away from zero (-20.5 is -21), once, on the day's aggregate; the exact value beside "
-                "the whole one is that aggregate to a tenth, the mean wind to a hundredth and precipitation to "
-                "a ten-thousandth of an inch.",
+    "rounding": "Every hourly value is converted exactly, in decimal arithmetic, and the day's aggregate is "
+                "rounded once, half up, away from zero (-20.5 is -21). The exact value beside the whole one is "
+                "that aggregate cut, not rounded, to a thousandth (precipitation to a ten-thousandth of an inch), "
+                "so it never looks as if it rounds the other way.",
     "strike": "A value equal to the strike resolves Yes, at or above it for the high, gust, mean wind and "
-              "precipitation and at or below it for the low (owner's decision 2026-09-28). Until that date "
-              "the page resolved a value equal to the strike No, as the exchange's current daily temperature "
-              "and wind contracts still do, so a rung at a day's own value that read No now reads Yes on "
-              "every day shown.",
-    "provisional": "RTMA is always provisional. URMA is final when every hourly analysis file of the day has been "
-                   "read, and its precipitation is resolved at the first read that has a value for every hour. "
-                   "A later re-read that differs is shown beside the resolved value, which stands.",
+              "precipitation and at or below it for the low (owner's decision 2026-09-28). The exchange's "
+              "current daily temperature and wind contracts resolve a value equal to the strike No.",
+    "provisional": "RTMA resolves, precipitation included (owner's decision 2026-09-29). An RTMA day is final "
+                   "when every hourly analysis file of the day has been read, and its precipitation when every "
+                   "hourly precipitation file has been read. NOAA never revises either file, so a final value "
+                   "never changes. URMA, NOAA's analysis of record, reruns each hour about seven hours later "
+                   "with late observations; it is shown for comparison and never resolves.",
     "closed": "A day still short of its hours 48 hours after its local end is closed incomplete. Its value "
               "stands on the hours read, it is never marked final, and the count is shown.",
-    "hourly": "The hourly value is the analysis at the top of the hour, and for precipitation the accumulation "
-              "over the hour ending then. Station report conventions (the last report in the hour, specials, "
-              "the tenths group) have no analogue here.",
-    "cell": "The nearest 2.5 km grid cell to the Census internal point of the place, fractional grid "
-            "coordinates rounded half up. The cell's own centre and its distance from the point are shown.",
+    "missing": "A file not on NOAA Open Data three hours after its hour is read from NCEP's NOMADS server, "
+               "which keeps fourteen days. An hour on neither stays missing.",
+    "hourly": "Each row is the analysis at the top of the hour and the precipitation over the hour that starts "
+              "then, which NOAA files under the hour it ends. Station report conventions (the last report in "
+              "the hour, specials, the tenths group) have no analogue here.",
+    "cell": "The settlement grid cell approved on 2026-09-29: the 2.5 km cell whose square contains the main "
+            "city's City Hall (in Miami the nearest land cell to the city's administration building, whose own "
+            "cell is water to the analysis). The value is the analysis at the cell, never an average over the "
+            "square. RTMA files its precipitation on a grid 200 columns narrower, and the same point there is "
+            "200 columns to the left in the same row.",
     "lattice": "The map samples each hourly field onto a 320 by 200 lattice at 3 screen pixels, about 14 km "
                "between points nationally. It is a subsample for display; the place values come from the "
                "full grid.",
@@ -253,11 +298,11 @@ CONVENTIONS = {
               "resolving cell, ten cells either way on the 2.5 km grid, about 52 km across. The zoomed map draws "
               "those cells at their own resolution in place of the lattice and outlines the resolving cell; the "
               "place value is that cell's own.",
-    "resolvedDay": "A day is fully resolved when every one of the fifty places has its URMA day final and "
+    "resolvedDay": "A day is fully resolved when every one of the sixty-seven places has its RTMA day final and "
                    "its precipitation total resolved. The page opens on the newest such day, and the day "
                    "select marks the days after it as provisional.",
-    "units": "Kelvin to Fahrenheit exactly, metres per second to miles per hour by 2.2369362921, "
-             "millimetres to inches by 1/25.4.",
+    "units": "Kelvin to Fahrenheit as (K - 273.15) x 9/5 + 32, metres per second to miles per hour by "
+             "2.2369362921, millimetres to inches by 1/25.4, all in decimal arithmetic.",
 }
 VARIABLES = {
     "high": {"unit": "°F", "hourly": "temp", "rule": CONVENTIONS["high"]},
@@ -298,18 +343,46 @@ def _half_up_int(x: float) -> int:
     return int(math.floor(x + 0.5)) if x >= 0 else -int(math.floor(-x + 0.5))
 
 
-def half_up(x: float, unit: float = 1):
-    """x rounded half up, away from zero, to a multiple of unit (1, 0.1,
-    0.01, 0.0001). The scaling goes through Decimal on the value's shortest
-    repr, because 70.55 in binary is a hair under 70.55 and 70.55 / 0.1 lands
-    at 705.4999, which would round the wrong way. Whole units return an int."""
+def _dec(x) -> Decimal:
+    """A value as a Decimal: a Decimal as it is, a float through its shortest
+    repr (to nine decimals, which drops the noise of a sum like 70.549999999
+    and nothing a file holds)."""
+    return x if isinstance(x, Decimal) else Decimal(repr(round(float(x), 9)))
+
+
+def half_up(x, unit: float = 1):
+    """x rounded half up, away from zero, to a multiple of unit (1, 0.01,
+    0.0001), in decimal arithmetic: 70.55 in binary is a hair under 70.55 and
+    would round the wrong way in floats. Whole units return an int."""
     if x is None:
         return None
-    if unit == 1:
-        return _half_up_int(float(x))
-    q = Decimal(repr(round(float(x), 9))) / Decimal(repr(unit))
-    n = _half_up_int(float(q))
-    return float(Decimal(n) * Decimal(repr(unit)))
+    q = _dec(x).quantize(Decimal(repr(unit)) if unit != 1 else Decimal(1), rounding=ROUND_HALF_UP)
+    return int(q) if unit == 1 else float(q)
+
+
+def cut(x, unit: float):
+    """x cut toward zero to a multiple of unit, for a value shown beside a
+    rounded one, so it never looks as if it rounds the other way."""
+    if x is None:
+        return None
+    return float(_dec(x).quantize(Decimal(repr(unit)), rounding=ROUND_DOWN))
+
+
+def exact(var: str, raw) -> Optional[Decimal]:
+    """A stored value in the contract's unit, exactly: kelvin to degrees
+    Fahrenheit, metres per second to miles per hour, millimetres to inches,
+    in decimal arithmetic on the stored value, so a value the file holds
+    exactly is converted exactly. 250.65 K is -8.5 F, which binary floating
+    point makes -8.49999999999995, a hair short of the half: rounded as it
+    stands that is -8 where the exact value is -9."""
+    if raw is None:
+        return None
+    d = _dec(raw)
+    if var == "temp":
+        return (d - K0_DEC) * 9 / 5 + 32
+    if var in ("wind", "gust"):
+        return d * MPH_DEC
+    return d / MM_DEC
 
 
 def k_to_f(k: float) -> float:
@@ -448,7 +521,7 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     complete = n == expected
 
     def series(var):
-        return [(h, rec[var]) for h, rec in read if rec.get(var) is not None]
+        return [(h, _dec(rec[var])) for h, rec in read if rec.get(var) is not None]
 
     def extreme(var, daily, pick):
         s = series(var)
@@ -460,7 +533,7 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
             at, v = max(s, key=lambda p: (p[1], -p[0].timestamp()))
         else:
             at, v = min(s, key=lambda p: (p[1], p[0].timestamp()))
-        return {"value": half_up(v, DAY_UNIT[daily]), "exact": half_up(v, EXACT_UNIT[daily]), "at": _iso(at)}
+        return {"value": half_up(v, DAY_UNIT[daily]), "exact": cut(v, EXACT_UNIT[daily]), "at": _iso(at)}
 
     winds = series("wind")
     precip = series("precip")
@@ -468,23 +541,38 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     out["high"] = extreme("temp", "high", max)
     out["low"] = extreme("temp", "low", min)
     out["gust"] = extreme("gust", "gust", max)
+    # the aggregate is exact (decimal arithmetic on unrounded values) and is
+    # rounded once, here, for the whole value (owner's decision 2026-09-29)
     if winds:
         mean = sum(v for _, v in winds) / len(winds)
-        out["wind"] = {"value": half_up(mean, DAY_UNIT["wind"]), "exact": half_up(mean, EXACT_UNIT["wind"])}
+        out["wind"] = {"value": half_up(mean, DAY_UNIT["wind"]), "exact": cut(mean, EXACT_UNIT["wind"])}
     else:
         out["wind"] = None
     if precip:
         total = sum(v for _, v in precip)
-        out["precip"] = {"value": half_up(total, DAY_UNIT["precip"]), "exact": half_up(total, EXACT_UNIT["precip"]),
+        out["precip"] = {"value": half_up(total, DAY_UNIT["precip"]), "exact": cut(total, EXACT_UNIT["precip"]),
                          "hours": len(precip)}
     else:
         out["precip"] = None
     # closed incomplete: the local day ended CLOSE_AFTER_HOURS ago and hours are still missing
     closed = (not complete) and now >= day_end(day_iso, tz) + dt.timedelta(hours=CLOSE_AFTER_HOURS)
     out["closed"] = closed
-    # RTMA is provisional by definition; URMA is the analysis of record
-    out["final"] = bool(product == "urma" and complete)
-    if product == "urma" and out["precip"] is not None:
+    # only the resolving product is ever final (owner's decision 2026-09-29)
+    out["final"] = bool(product == SETTLE and complete)
+    if product == SETTLE and out["precip"] is not None:
+        # NOAA never revises an RTMA precipitation file, so the total is
+        # resolved once every hour has a value and cannot change after
+        p = out["precip"]
+        was = (prior or {}).get("precip") or {}
+        if len(precip) == expected:
+            p.update({"resolved": True, "resolvedAt": was.get("resolvedAt") if was.get("resolved") else _iso(now)})
+        else:
+            p.update({"resolved": False, "resolvedAt": None})
+        p["revised"] = None
+    elif out["precip"] is not None:
+        # URMA, for comparison: its precipitation files are rewritten for up
+        # to eight days, so its total is kept at the first read with every
+        # hour and a later re-read that differs is carried beside it
         p = out["precip"]
         was = (prior or {}).get("precip") or {}
         if was.get("resolved"):
@@ -573,18 +661,31 @@ def _bucket(product: str) -> str:
     return getattr(gw, "NODD_" + product.upper(), NODD_DEFAULT[product])
 
 
-def anl_url(product: str, t: dt.datetime) -> str:
+def _base(product: str, nomads: bool = False) -> str:
+    if nomads:
+        return getattr(gw, "NOMADS_" + product.upper(), NOMADS_DEFAULT[product])
+    return _bucket(product)
+
+
+def anl_url(product: str, t: dt.datetime, nomads: bool = False) -> str:
     p = PRODUCTS[product]
     t = t.astimezone(dt.timezone.utc)
-    return f"{_bucket(product)}/{p['dir']}.{t:%Y%m%d}/{p['anl'].format(hh=f'{t:%H}')}"
+    return f"{_base(product, nomads)}/{p['dir']}.{t:%Y%m%d}/{p['anl'].format(hh=f'{t:%H}')}"
 
 
-def pcp_url(product: str, t: dt.datetime) -> str:
+def pcp_url(product: str, t: dt.datetime, nomads: bool = False) -> str:
     """The precipitation file whose hour HH covers HH-1 to HH UTC, so the
     accumulation for the hour ending at t carries t's own stamp."""
     p = PRODUCTS[product]
     t = t.astimezone(dt.timezone.utc)
-    return f"{_bucket(product)}/{p['dir']}.{t:%Y%m%d}/{p['pcp'].format(ymdh=f'{t:%Y%m%d%H}')}"
+    return f"{_base(product, nomads)}/{p['dir']}.{t:%Y%m%d}/{p['pcp'].format(ymdh=f'{t:%Y%m%d%H}')}"
+
+
+def nomads_ok(t: dt.datetime, now: dt.datetime) -> bool:
+    """Whether a file for hour t not on NOAA Open Data is looked for on NOMADS:
+    once it is NOMADS_AFTER_HOURS late, and while NOMADS still keeps it."""
+    age = (now - t).total_seconds() / 3600.0
+    return NOMADS_AFTER_HOURS <= age <= NOMADS_KEEP_HOURS
 
 
 def precip_due(product: str, t: dt.datetime) -> dt.datetime:
@@ -694,8 +795,12 @@ def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict
     # precipitation, wexp for everything else, the same choice as the cell
     grid_name = p["pcpGrid"]
     ks = [loc["cell"][grid_name][2] for loc in locs]
+    source = "nodd"
     try:
         raw = gw.fetch_bytes(pcp_url(product, t), tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+        if raw is None and nomads_ok(t, now):
+            raw = gw.fetch_bytes(pcp_url(product, t, nomads=True), tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+            source = "nomads"
         if raw is None:
             return HourResult("absent")
         why = check_message(raw, "precip", _grid(grid_name), t)
@@ -705,9 +810,11 @@ def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict
         cells, frame, wvals = _sample(raw, "precip", grid_name, ks, lattice, wins)
     except Exception as e:  # noqa: BLE001
         return HourResult("error", error=f"{type(e).__name__}: {e}")
-    values = {loc["id"]: (None if v is None else half_up(mm_to_inch(v), HOUR_UNIT["precip"]))
-              for loc, v in zip(locs, cells)}
+    # millimetres, as the file holds them; nothing is converted or rounded
+    # until the day's total (owner's decision 2026-09-29)
+    values = {loc["id"]: (None if v is None else round(float(v), RAW_DIGITS["precip"])) for loc, v in zip(locs, cells)}
     doc = precip_doc(product, t, values, now, read=True)
+    doc["source"] = source
     if lattice is None:
         return HourResult("ok", doc=doc)
     return HourResult("ok", doc=doc, frames={"precip": frame},
@@ -717,7 +824,8 @@ def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict
 def precip_doc(product: str, t: dt.datetime, values: dict, now: dt.datetime, read: bool) -> dict:
     """The precipitation document of a product-hour: `read` when a file was
     decoded, `complete` when every place has a value, `missing` the places
-    that do not (their cells were absent from the bitmap)."""
+    that do not (their cells were absent from the bitmap), `values` in
+    millimetres, and `source` (nodd or nomads) where the file came from."""
     missing = sorted(lid for lid, v in values.items() if v is None)
     return {"schema": SCHEMA, "product": product, "valid": _iso(t), "written": _iso(now),
             "read": read, "complete": not missing, "missing": missing, "values": values}
@@ -744,9 +852,14 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
     # the analysis fields are all on wexp, so one set of window indices
     # serves the three messages
     wins = [window_indices(loc["cell"]["wexp"], _grid("wexp")) for loc in locs] if frames else None
+    source = "nodd"
     try:
         url = anl_url(product, t)
         idx_raw = gw.fetch_bytes(url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+        if idx_raw is None and nomads_ok(t, now):
+            url = anl_url(product, t, nomads=True)
+            idx_raw = gw.fetch_bytes(url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+            source = "nomads"
         if idx_raw is None:
             if not precip_if_absent:
                 return HourResult("absent")
@@ -773,15 +886,17 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
             if frames:
                 out_frames[var] = frame
                 out_windows[var] = {loc["id"]: window_doc("wexp", w) for loc, w in zip(locs, wvals)}
+            # kelvin and metres per second, as the file holds them
             for loc, v in zip(locs, cells):
-                values[loc["id"]][var] = None if v is None else half_up(CONVERT[var](v), HOUR_UNIT[var])
+                values[loc["id"]][var] = None if v is None else round(float(v), RAW_DIGITS[var])
     except Exception as e:  # noqa: BLE001
         return HourResult("error", error=f"{type(e).__name__}: {e}")
     prec = read_precip(product, t, locs, lattice if frames else None, now)
     if frames:
         out_frames["precip"] = (prec.frames or {}).get("precip") if prec.status == "ok" else None
         out_windows["precip"] = (prec.windows or {}).get("precip") if prec.status == "ok" else None
-    doc = {"schema": SCHEMA, "product": product, "valid": _iso(t), "written": _iso(now), "values": values}
+    doc = {"schema": SCHEMA, "product": product, "valid": _iso(t), "written": _iso(now), "source": source,
+           "values": values}
     return HourResult("ok", doc=doc, frames=out_frames if frames else None,
                       precip=prec.doc if prec.status == "ok" else None,
                       precip_error=prec.error if prec.status == "error" else None,
@@ -846,17 +961,12 @@ def get_hour(store: Storage, product: str, t: dt.datetime, cache: dict) -> Optio
     return doc
 
 
-def precip_only_hour(pdoc: Optional[dict]) -> Optional[dict]:
-    """The day rebuild's view of an hour whose analysis file never landed but
-    whose precipitation was read: each place with a value carries it with
-    `anl` False, so the day adds the hour's precipitation but does not count
-    the hour among its analyses, and temperature, wind and gust are None.
-    None when no place has a value."""
-    vals = {lid: {"temp": None, "wind": None, "gust": None, "precip": v, "anl": False}
-            for lid, v in ((pdoc or {}).get("values") or {}).items() if v is not None}
-    if not vals:
-        return None
-    return {"values": vals, "precipRead": bool(pdoc.get("complete")), "anl": False}
+def get_anl(store: Storage, product: str, t: dt.datetime, cache: dict) -> Optional[dict]:
+    """The archived analysis hour as written, without its precipitation."""
+    ck = ("anl", product, _iso(t))
+    if ck not in cache:
+        cache[ck] = _read_gz(store, hour_key(product, t))
+    return cache[ck]
 
 
 def merge_precip(old: Optional[dict], new: dict) -> dict:
@@ -901,6 +1011,7 @@ def write_hour(store: Storage, product: str, t: dt.datetime, res: HourResult, gr
     they were made, its frames with the grid index rewritten behind them so
     a frame on the bucket is never one the page cannot find."""
     store.put_if_absent(hour_key(product, t), _gz(res.doc), "application/gzip")
+    cache[("anl", product, _iso(t))] = res.doc
     cache[(product, _iso(t))] = _merged(res.doc, get_precip(store, product, t, cache))
     if res.precip is not None:
         write_precip(store, product, t, res.precip, cache)
@@ -956,14 +1067,17 @@ def frames_indexed(grid_index: dict, product: str, t: dt.datetime) -> bool:
 
 
 def touched_by(t: dt.datetime, locs: list) -> set:
-    """The (location, local day) pairs one UTC hour belongs to."""
-    days_by_tz = {}
+    """The (location, local day) pairs one UTC hour belongs to: the day its
+    analysis falls on, and the day of the hour before it, whose row carries
+    the precipitation that ends at t (they differ only at local midnight)."""
+    days_by_tz: dict = {}
     out = set()
     for loc in locs:
         tz = loc["tz"]
         if tz not in days_by_tz:
-            days_by_tz[tz] = local_day_of(t, tz)
-        out.add((loc["id"], days_by_tz[tz]))
+            days_by_tz[tz] = {local_day_of(t, tz), local_day_of(t - dt.timedelta(hours=1), tz)}
+        for d in days_by_tz[tz]:
+            out.add((loc["id"], d))
     return out
 
 
@@ -984,24 +1098,31 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
         rows = [{"local": hour_label(h, tz), "t": _iso(h)} for h in hours]
         for product in PRODUCTS:
             product_hours = {}
+            latest = expected_latest(product, now)
             for h, row in zip(hours, rows):
-                doc = get_hour(store, product, h, cache)
-                if doc is None and h <= expected_latest(product, now):
-                    # an hour whose analysis never landed still carries its
-                    # precipitation, a separate file (RTMA 2026-09-23 19Z)
-                    doc = precip_only_hour(get_precip(store, product, h, cache))
-                vals = (doc or {}).get("values", {}).get(lid) if doc else None
+                # each row is the analysis at the top of the hour and the
+                # precipitation over the hour that starts then, which NOAA
+                # files under the hour it ends, so the day's rows cover it
+                # from midnight to midnight (owner's decision 2026-09-29).
+                # An hour whose analysis never landed still carries its
+                # precipitation, a separate file (RTMA 2026-09-23 19Z).
+                end = h + dt.timedelta(hours=1)
+                anl = get_anl(store, product, h, cache) if h <= latest else None
+                pre = get_precip(store, product, end, cache) if end <= latest else None
+                va = ((anl or {}).get("values") or {}).get(lid)
+                vp = ((pre or {}).get("values") or {}).get(lid)
                 row[product] = None
-                if vals is not None:
-                    product_hours[_iso(h)] = vals
-                    # the hourly values as stored: tenths, and precipitation to
-                    # the ten-thousandth of an inch the day's sum is made of, so
-                    # the hour table adds up to the exact total (owner's
-                    # decision 2026-09-27)
-                    row[product] = {"temp": vals.get("temp"), "wind": vals.get("wind"), "gust": vals.get("gust"),
-                                    "precip": vals.get("precip")}
-                    if asof is None or h > asof:
-                        asof = h
+                if va is None and vp is None:
+                    continue
+                rec = {var: exact(var, (va or {}).get(var)) for var in ANALYSIS_VARS}
+                rec["precip"] = exact("precip", vp)
+                rec["anl"] = va is not None
+                product_hours[_iso(h)] = rec
+                # the hourly values in the contract's units, cut to a
+                # thousandth (precipitation a ten-thousandth of an inch)
+                row[product] = {var: cut(rec[var], HOUR_SHOW[var]) for var in HOURLY_VARS}
+                if asof is None or h > asof:
+                    asof = h
             was = (prior_locs.get(lid) or {}).get(product)
             # the re-read record in the state wins (None there is a withdrawn
             # one); a day the state no longer carries keeps what it published
@@ -1034,7 +1155,7 @@ def day_status(day_doc: dict, locs: list) -> dict:
     entries = (day_doc or {}).get("locations") or {}
     out = {"places": len(locs), "final": 0, "resolved": 0, "closed": 0}
     for loc in locs:
-        u = (entries.get(loc["id"]) or {}).get("urma") or {}
+        u = (entries.get(loc["id"]) or {}).get(SETTLE) or {}
         if u.get("closed"):
             out["closed"] += 1
         if u.get("final"):
@@ -1417,7 +1538,8 @@ def reread_precip(store: Storage, day_iso: str, state: dict, locs: list, now: dt
     cache = {} if cache is None else cache
     doc = _read_json(store, DAY_KEY.format(day=day_iso)) or {}
     entries = doc.get("locations") or {}
-    hours_by_loc = {loc["id"]: local_day_hours(day_iso, loc["tz"]) for loc in locs}
+    # the accumulations that end in the day's rows: the hour after each analysis
+    hours_by_loc = {loc["id"]: [h + dt.timedelta(hours=1) for h in local_day_hours(day_iso, loc["tz"])] for loc in locs}
     wanted = sorted({h for hs in hours_by_loc.values() for h in hs})
     totals: Dict[str, dict] = {}   # hour iso -> {loc: inches}
     changed: set = set()
@@ -1450,11 +1572,12 @@ def reread_precip(store: Storage, day_iso: str, state: dict, locs: list, now: dt
         vals = [totals.get(_iso(h), {}).get(lid) for h in hours_by_loc[lid]]
         if any(v is None for v in vals):
             continue   # a re-read short of the day's hours says nothing about the total
-        total = half_up(sum(vals), HOUR_UNIT["precip"])
-        value = half_up(total, DAY_UNIT["precip"])
+        total_dec = sum(exact("precip", v) for v in vals)
+        total = cut(total_dec, EXACT_UNIT["precip"])
+        value = half_up(total_dec, DAY_UNIT["precip"])
         # owner's decision 2026-09-27: a revision when the exact totals differ
         # by a hundredth of an inch or more OR the rounded hundredths differ
-        differs = abs(total - float(resolved["exact"])) >= 0.01 - 1e-9 or value != resolved.get("value")
+        differs = abs(_dec(total) - _dec(resolved["exact"])) >= Decimal("0.01") or value != resolved.get("value")
         before = revs.get(lid)
         if differs:
             rec = {"value": value, "exact": total, "at": _iso(now)}
@@ -1492,17 +1615,16 @@ def _stamps(store: Storage, key_fmt: str, product: str, start: dt.datetime) -> s
 
 def precip_sweep(store: Storage, state: dict, locs: list, lattice: dict, cache: dict, grid_index: dict,
                  now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
-    """Once a day, read the precipitation of every hour the live walk and
-    the backfill have both passed whose analysis file never landed and
-    whose precipitation was never read. The live lane retries a missing
-    analysis for CLOSE_AFTER_HOURS and the backfill walks past one, and
-    before 2026-09-29 neither read such an hour's precipitation: the RTMA
-    analysis of 2026-09-23 19Z never reached NOAA Open Data and its
-    precipitation file did. Hours in a queued catch-up span are left to the
-    backfill. A refused file ends that product's sweep until the next day's,
-    so an outage costs one failing read. A sweep cut short by the deadline is
-    not stamped and is due again next pass. Returns the (location, day) pairs
-    whose values changed."""
+    """Once a day, over every hour the live walk and the backfill have both
+    passed: read the analysis of an hour without one while NOMADS may still
+    keep it, and the precipitation of an hour without it. The live lane
+    retries a missing analysis for CLOSE_AFTER_HOURS and the backfill walks
+    past one; the RTMA analysis of 2026-09-23 19Z never reached NOAA Open Data
+    while NOMADS had it and NOAA Open Data had its precipitation file. Hours
+    in a queued catch-up span are left to the backfill. A refused file ends
+    that product's sweep until the next day's, so an outage costs one failing
+    read. A sweep cut short by the deadline is not stamped and is due again
+    next pass. Returns the (location, day) pairs whose values changed."""
     touched: set = set()
     frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
     window_start = _floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS)
@@ -1522,25 +1644,44 @@ def precip_sweep(store: Storage, state: dict, locs: list, lattice: dict, cache: 
             while t <= _parse_iso(b):
                 queued.add(t)
                 t += dt.timedelta(hours=1)
-        have = _stamps(store, HOUR_KEY, product, start) | _stamps(store, PRECIP_KEY, product, start)
+        have_anl = _stamps(store, HOUR_KEY, product, start)
+        have_pcp = _stamps(store, PRECIP_KEY, product, start)
         t = start
         while t <= end:
-            if _stamp(t) not in have and t not in queued:
+            stamp = _stamp(t)
+            want_anl = stamp not in have_anl and nomads_ok(t, now)
+            want_pcp = stamp not in have_pcp
+            if (want_anl or want_pcp) and t not in queued:
                 if deadline.over(RESERVE_SECONDS + 30):
                     status["swept"] = {"tried": tried, "filled": filled, "done": False}
                     return touched
                 tried += 1
-                prec = read_precip(product, t, locs, lattice if t >= frame_cutoff else None, now)
-                if prec.status == "ok":
-                    if write_precip(store, product, t, prec.doc, cache):
+                frames = t >= frame_cutoff
+                if want_anl:
+                    res = read_hour(product, t, locs, lattice, frames=frames, now=now, precip_if_absent=want_pcp)
+                    if res.status == "ok":
+                        write_hour(store, product, t, res, grid_index, cache, now)
                         filled += 1
                         touched |= touched_by(t, locs)
-                        if prec.frames and prec.frames.get("precip") is not None:
-                            write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
-                            write_grid_index(store, grid_index, now)
-                elif prec.status == "error":
-                    _fail(status, f"{product} {_iso(t)} precipitation: {prec.error}")
-                    break
+                    elif res.status == "absent":
+                        if write_precip_only(store, product, t, res, grid_index, cache, now):
+                            filled += 1
+                            touched |= touched_by(t, locs)
+                    if res.status == "error" or res.precip_error:
+                        _fail(status, f"{product} {_iso(t)}: {res.error or res.precip_error}")
+                        break
+                else:
+                    prec = read_precip(product, t, locs, lattice if frames else None, now)
+                    if prec.status == "ok":
+                        if write_precip(store, product, t, prec.doc, cache):
+                            filled += 1
+                            touched |= touched_by(t, locs)
+                            if prec.frames and prec.frames.get("precip") is not None:
+                                write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
+                                write_grid_index(store, grid_index, now)
+                    elif prec.status == "error":
+                        _fail(status, f"{product} {_iso(t)} precipitation: {prec.error}")
+                        break
             t += dt.timedelta(hours=1)
     state["precipSwept"] = _iso(now)
     status["swept"] = {"tried": tried, "filled": filled, "done": True}
@@ -1693,7 +1834,7 @@ def write_index(store: Storage, state: dict, locs: list, grid_index: dict, now: 
     sources = {p: {"bucket": PRODUCTS[p]["bucket"], "lagMinutes": PRODUCTS[p]["lagMinutes"],
                    "latest": state["products"][p].get("newest")} for p in PRODUCTS}
     bf = state["backfill"]
-    index = {"schema": SCHEMA, "asof": asof, "written": _iso(now), "statement": STATEMENT,
+    index = {"schema": SCHEMA, "asof": asof, "written": _iso(now), "statement": STATEMENT, "resolvesOn": SETTLE,
              "conventions": CONVENTIONS, "sources": sources, "locations": locs, "days": days,
              "dayStatus": {d: ds[d] for d in days if d in ds},
              "lastResolvedDay": last_resolved_day(state, days),
