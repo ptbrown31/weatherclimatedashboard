@@ -280,7 +280,10 @@ indefinitely (the archive can rebuild any of them).
 ```
 
 `of` is the day's hour count in that zone (23, 24 or 25). `precip.hours` is the number of
-hours with a precipitation value and is on both products; `resolved`, `resolvedAt` and
+hours with a precipitation value and is on both products. An hour whose analysis file never
+landed still adds its precipitation, a separate file: it counts in `precip.hours` and never in
+`hours`, so it cannot make a day complete (RTMA 2026-09-23 19Z never reached NOAA Open Data,
+and its precipitation file did); `resolved`, `resolvedAt` and
 `revised` are URMA only. `revised`, when set, is `{"value": 0.61, "exact": 0.6104, "at":
 "2026-09-29T13:08:12Z"}`, the `at` being the pass that recorded it. A partial product-day
 has `complete: false` and `hours < of`; a closed incomplete day has `closed: true` and
@@ -333,6 +336,9 @@ frame's is `wexp`. A window is 1 to 2 KB (three-digit tenths for temperature, fe
 the rest); the fifty add about 50 to 90 KB to a frame, measured on real files at 47 KB for
 precipitation and 91 KB for temperature, at a cost of about 0.1 s per product-hour.
 
+The row of an hour whose analysis file never landed has `temp`, `wind` and `gust` null and
+its `precip` set.
+
 `scale` is what the int is divided by (10 for temperature, wind and gust; 100 for
 precipitation in inches). A precipitation frame is rewritten when a refetch of the hour's
 file adds coverage within the frame window.
@@ -350,7 +356,9 @@ looked), `gaps` (hours passed without a read, retried for 48 hours), `precipPend
 (archived hours whose precipitation file is still being refetched) and `reads`; per product
 the backfill `cursor`, `oldest`, `done` and queued catch-up spans; the precipitation re-read
 stamps and revision records (both pruned past nine days; a revision lives on in its day
-file); and the prune stamp. `archive/_meta/health_analysis.json` is the lane's own failure
+file); the prune stamp; and `precipSwept`, the time of the last precipitation sweep (step 4b).
+A precipitation key without an archive hour is the precipitation of an hour whose analysis
+file never landed. `archive/_meta/health_analysis.json` is the lane's own failure
 streak file, written through `archive.update_health` under the market lane's convention so
 this lane's streaks never collide with another lane's. Pages never read `archive/`.
 
@@ -385,7 +393,11 @@ timeout is never what stops it.
    file and do the same. Write the archive hour (once), the precipitation key, the four
    frames and `grid/index.json`; queue the hour in `precipPending` when its precipitation
    is short and its wait has not run out. A `.idx` that is not there (403 or 404) is an
-   *absence*: the hour becomes a gap, `scanned` moves past it, and the walk continues. A
+   *absence*: the hour becomes a gap, `scanned` moves past it, and the walk continues. The
+   absent hour's precipitation file is read all the same, on every retry of the gap until
+   every place has a value, and stored without an archive hour. After one refused
+   precipitation file of an absent hour, the lane reads no more absent hours' precipitation
+   that pass; the gap's retries or the sweep of step 4b read it later. A
    read that fails (a short body, a message the decoder refuses, a 5xx after the retries)
    is an *error* recorded against the product in `errors`; the hour becomes a gap,
    `scanned` moves past it, and the product's walk stops for this pass so an outage costs
@@ -406,11 +418,20 @@ timeout is never what stops it.
    when it differs by 0.01 inch or more or in the rounded hundredth, withdraw one that came
    back within that. Rebuild the days touched. A re-read cut short by the deadline is not
    stamped and is due again next pass.
+4b. **Precipitation sweep.** Once a day (`PRECIP_SWEEP_HOURS = 24`), over the hours both walks
+   have passed (from the backfill's `oldest`, at most 30 days back, to 48 hours before the live
+   cursor, outside queued catch-up spans), read the precipitation of every hour that has
+   neither an archive hour nor a precipitation key, and rebuild the days it touches. A
+   refused file ends that product's sweep until the next day's; a sweep cut short by the
+   deadline is not stamped and is due again next pass. Until 2026-09-29 the lane read no
+   precipitation for an hour whose analysis was absent; the sweep recovers those hours.
 5. **Backfill.** With the remaining budget, walk both products backwards, alternating,
    newest first: a queued catch-up span first, then from the cursor back to 30 days ago;
    frames for the last seven days, point reads only before that. The cursor advances only
    after a product-hour is written or known absent or unreadable (an unreadable hour is
-   skipped and recorded, like a missing one). The state is saved every twenty hours read.
+   skipped and recorded, like a missing one). An absent hour's precipitation is read and
+   stored as in step 2, with the same limit of one refused file per product per pass. The
+   state is saved every twenty hours read.
 6. **Prune**, once a day: frames older than 30 days and their index entries, and re-read
    and revision records older than nine days.
 7. **Always**, in a `finally`: `grid/index.json`, the state, the health file and
@@ -524,7 +545,10 @@ report conventions have no analogue here.
   the outage passes and `asof` stays on the hour read; frames are indexed the pass they are
   written; a partial bitmap is retried and filled; a re-read fills a place the first read
   had no cell for; the catch-up span is queued once and clamped; the backfill starts behind
-  a late newest hour; the place file carries the hourly precipitation to a ten-thousandth;
+  a late newest hour; the place file carries the hourly precipitation to a ten-thousandth; an
+  hour whose analysis never lands still adds its precipitation, in the live lane, in the
+  backfill and through the daily sweep, without counting toward the day's analyses, and a
+  refused file ends a product's sweep for the day;
   `fetch_range` accepts the clamped 206 for a last message.
 - `scripts/verify.py`: the page in the `pages` sweep; checks that the variable and product
   buttons change the legend and the frame, the day select and hour stepper change the caption,

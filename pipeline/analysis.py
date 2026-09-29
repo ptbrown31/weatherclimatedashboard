@@ -46,7 +46,9 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     A day still short of its hours 48 hours after its local end is closed
     incomplete: its value stands on the hours read, is never marked final,
     and the count is shown. The hourly analysis files are never rewritten
-    upstream, so a missing hour stays missing. The precipitation files are
+    upstream, so a missing hour stays missing. Its precipitation is a
+    separate file and is read all the same: it adds to the day's total and
+    never to the count of analyses read. The precipitation files are
     rewritten upstream, so an hour's precipitation lives in its own key and
     is filled in as the files improve.
 
@@ -69,7 +71,8 @@ The pass runs on its own schedule (every ten minutes at :08) and is capped at
 PASS_CAP_SECONDS so two passes never overlap on the state file. Each pass
 retries the precipitation still pending, reads the live hours, rebuilds the
 days those hours touch, re-reads one day's URMA precipitation when one is
-due, and spends what budget remains walking backwards through the last
+due, once a day reads the precipitation of any hour whose analysis never
+landed, and spends what budget remains walking backwards through the last
 thirty days, newest first, so the page fills in from today back. Nothing a
 NOAA object does (missing, short, refused by the decoder, a 5xx after the
 retries) fails the pass: each hour's read is guarded, the failure is recorded
@@ -188,6 +191,9 @@ LIVE_HOURS_PER_PASS = 3         # new hours read per product per pass
 # that the hour keeps whatever coverage it has and, for URMA, the daily
 # re-read fills the rest
 PRECIP_WAIT_HOURS = 3
+# how often the pass looks, over the backfill's reach, for hours whose
+# analysis never landed and whose precipitation was never read
+PRECIP_SWEEP_HOURS = 24
 # a product whose newest hour READ is this much or more behind what should
 # have landed counts as a failed pass toward the lane's alarm; short of it,
 # an empty pass is the normal wait between landings
@@ -210,7 +216,8 @@ CONVENTIONS = {
     "day": "The local civil date at the place through its IANA zone. Every top-of-hour analysis whose local "
            "civil time falls on that date counts, 24 on an ordinary day, 23 on the spring-forward day (02:00 does "
            "not occur) and 25 on the fall-back day (both 01:00 analyses count). Complete means every one of "
-           "them was read; the mean wind is over the hours read.",
+           "them was read; the mean wind is over the hours read. An hour whose analysis file never landed still "
+           "adds its precipitation, which NOAA publishes as a separate file.",
     "high": "The highest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
             "Yes when the value is at or above the strike.",
     "low": "The lowest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
@@ -420,7 +427,10 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
 
     product_hours maps the hour's UTC ISO string to {temp, wind, gust, precip}
     exact values (None where the product had no value at that hour). An hour
-    is read when it has an entry at all. The result is the contract's
+    is read when it has an entry, except that an entry with `anl` False is an
+    hour whose analysis file never landed: it carries only its precipitation
+    and adds to the day's total, never to the count of analyses read that
+    makes the day complete. The result is the contract's
     product-day shape, or None when no hour of the day has been read.
     `prior` is the summary published before, which keeps the resolved
     precipitation and its stamp once set; `revised` is the re-read record
@@ -433,7 +443,7 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
             read.append((h, rec))
     if not read:
         return None
-    n = len(read)
+    n = sum(1 for _, rec in read if rec.get("anl", True))
     expected = len(hours)
     complete = n == expected
 
@@ -660,7 +670,8 @@ def _sample(msg: bytes, var: str, grid_name: str, ks: list, lattice: Optional[di
 
 class HourResult:
     """What reading one product-hour came to: `status` is ok, absent (the
-    analysis file is not on the bucket) or error; `doc` is the write-once
+    analysis file is not on the bucket, and the hour's precipitation, read
+    all the same, may still be in `precip`) or error; `doc` is the write-once
     archive hour, `precip` the precipitation document (None when its file
     was absent or refused, with `precip_error` saying why), `frames` the
     lattice samples when they were asked for, and `windows` beside them the
@@ -712,12 +723,20 @@ def precip_doc(product: str, t: dt.datetime, values: dict, now: dt.datetime, rea
             "read": read, "complete": not missing, "missing": missing, "values": values}
 
 
-def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: bool, now: dt.datetime) -> HourResult:
+def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: bool, now: dt.datetime,
+              precip_if_absent: bool = True) -> HourResult:
     """Fetch and decode one product-hour: the three analysis messages, then
     the precipitation file. With `frames` every field is sampled onto the
     lattice as well as at the fifty cells. Nothing raises out of here: any
     failure in a fetch or a decode is an `error` result the lane records
-    against the product and moves past."""
+    against the product and moves past.
+
+    An hour whose analysis file is not on the bucket is `absent`, and its
+    precipitation, a separate file, is read all the same unless
+    `precip_if_absent` is False (the store already holds all of it). The
+    RTMA analysis of 2026-09-23 19Z never reached NOAA Open Data while its
+    precipitation file did, and until 2026-09-29 the lane dropped that
+    hour's precipitation with the missing analysis."""
     ks_wexp = [loc["cell"]["wexp"][2] for loc in locs]
     values: Dict[str, dict] = {loc["id"]: {} for loc in locs}
     out_frames: dict = {}
@@ -729,7 +748,9 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
         url = anl_url(product, t)
         idx_raw = gw.fetch_bytes(url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
         if idx_raw is None:
-            return HourResult("absent")
+            if not precip_if_absent:
+                return HourResult("absent")
+            return _absent_with_precip(read_precip(product, t, locs, lattice if frames else None, now))
         entries = grib2.parse_idx(idx_raw.decode("ascii", "replace"))
         for var, name, level in MESSAGES:
             hit = [e for e in entries if e.get("var") == name and e.get("level") == level]
@@ -765,6 +786,18 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
                       precip=prec.doc if prec.status == "ok" else None,
                       precip_error=prec.error if prec.status == "error" else None,
                       windows=out_windows if frames else None)
+
+
+def _absent_with_precip(prec: HourResult) -> HourResult:
+    """An absent analysis hour carrying what its precipitation read came to:
+    the document, with its frame and windows when they were sampled, when the
+    file was read; the reason when it was refused; nothing when the file is
+    absent too."""
+    if prec.status == "ok":
+        frames = {"precip": prec.frames.get("precip")} if prec.frames else None
+        windows = {"precip": prec.windows.get("precip")} if prec.windows else None
+        return HourResult("absent", precip=prec.doc, frames=frames, windows=windows)
+    return HourResult("absent", precip_error=prec.error if prec.status == "error" else None)
 
 
 # ------------------------------------------------------------------ writing
@@ -811,6 +844,19 @@ def get_hour(store: Storage, product: str, t: dt.datetime, cache: dict) -> Optio
         doc = _merged(doc, get_precip(store, product, t, cache))
     cache[ck] = doc
     return doc
+
+
+def precip_only_hour(pdoc: Optional[dict]) -> Optional[dict]:
+    """The day rebuild's view of an hour whose analysis file never landed but
+    whose precipitation was read: each place with a value carries it with
+    `anl` False, so the day adds the hour's precipitation but does not count
+    the hour among its analyses, and temperature, wind and gust are None.
+    None when no place has a value."""
+    vals = {lid: {"temp": None, "wind": None, "gust": None, "precip": v, "anl": False}
+            for lid, v in ((pdoc or {}).get("values") or {}).items() if v is not None}
+    if not vals:
+        return None
+    return {"values": vals, "precipRead": bool(pdoc.get("complete")), "anl": False}
 
 
 def merge_precip(old: Optional[dict], new: dict) -> dict:
@@ -861,6 +907,21 @@ def write_hour(store: Storage, product: str, t: dt.datetime, res: HourResult, gr
     if res.frames:
         write_frames(store, product, t, res.frames, grid_index, now, res.windows)
         write_grid_index(store, grid_index, now)
+
+
+def write_precip_only(store: Storage, product: str, t: dt.datetime, res: HourResult, grid_index: dict,
+                      cache: dict, now: dt.datetime) -> bool:
+    """The precipitation of an hour whose analysis file is missing: stored
+    (merged) with its frame when one was sampled, and no archive hour, so the
+    analysis stays a gap the live lane retries. Returns True when the stored
+    precipitation changed, which is when the days it touches need rebuilding."""
+    if res.precip is None:
+        return False
+    changed = write_precip(store, product, t, res.precip, cache)
+    if changed and res.frames and res.frames.get("precip") is not None:
+        write_frames(store, product, t, res.frames, grid_index, now, res.windows)
+        write_grid_index(store, grid_index, now)
+    return changed
 
 
 def write_frames(store: Storage, product: str, t: dt.datetime, frames: dict, grid_index: dict, now: dt.datetime,
@@ -925,6 +986,10 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
             product_hours = {}
             for h, row in zip(hours, rows):
                 doc = get_hour(store, product, h, cache)
+                if doc is None and h <= expected_latest(product, now):
+                    # an hour whose analysis never landed still carries its
+                    # precipitation, a separate file (RTMA 2026-09-23 19Z)
+                    doc = precip_only_hour(get_precip(store, product, h, cache))
                 vals = (doc or {}).get("values", {}).get(lid) if doc else None
                 row[product] = None
                 if vals is not None:
@@ -1075,7 +1140,7 @@ def _product_state() -> dict:
 def new_state() -> dict:
     return {"schema": SCHEMA, "products": {p: _product_state() for p in PRODUCTS},
             "backfill": {p: {"cursor": None, "oldest": None, "done": False, "queue": []} for p in PRODUCTS},
-            "rereads": {}, "revisions": {}, "dayStatus": {}, "pruned": None}
+            "rereads": {}, "revisions": {}, "dayStatus": {}, "pruned": None, "precipSwept": None}
 
 
 def load_state(store: Storage) -> dict:
@@ -1232,6 +1297,10 @@ def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: di
     touched: set = retry_precip(store, product, state, locs, lattice, cache, grid_index, now, deadline, status)
     reads = 0
     frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
+    # one refused precipitation file of an absent hour per pass: the absent
+    # hours after it are passed without their precipitation, which the
+    # retries of the gap or the daily sweep read later
+    precip_ok = True
     for t in live_candidates(product, state, now):
         if reads >= LIVE_HOURS_PER_PASS or deadline.over(RESERVE_SECONDS):
             break
@@ -1245,7 +1314,10 @@ def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: di
             if have is not None and (frames_indexed(grid_index, product, t) or t < frame_cutoff):
                 res = HourResult("ok", doc=have)
             else:
-                res = read_hour(product, t, locs, lattice, frames=True, now=now)
+                # a gap retried pass after pass reads its precipitation only
+                # until every place has a value
+                need_p = precip_ok and not (get_precip(store, product, t, cache) or {}).get("complete")
+                res = read_hour(product, t, locs, lattice, frames=True, now=now, precip_if_absent=need_p)
                 # an archived hour whose frames could not be made is left as
                 # the gap the next passes retry; the archive already holds its
                 # values, and a read that keeps failing is a failure to report
@@ -1257,6 +1329,16 @@ def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: di
             break
         if res.status == "absent":
             status["absent"].append(f"{product} {iso}")
+            # the analysis is missing but its precipitation may not be: it is
+            # stored now, and the hour stays a gap for its analysis
+            if res.precip_error:
+                _fail(status, f"{product} {iso} precipitation: {res.precip_error}")
+                precip_ok = False
+            try:
+                if write_precip_only(store, product, t, res, grid_index, cache, now):
+                    touched |= touched_by(t, locs)
+            except Exception as e:  # noqa: BLE001
+                _fail(status, f"{product} {iso} precipitation: {type(e).__name__}: {e}")
             if not is_gap:
                 # an hour the bucket has not got: remembered and retried, and
                 # the walk moves on so one missing file cannot stall the lane
@@ -1393,6 +1475,78 @@ def reread_precip(store: Storage, day_iso: str, state: dict, locs: list, now: dt
     return changed
 
 
+def precip_sweep_due(state: dict, now: dt.datetime) -> bool:
+    """Whether the once-a-day sweep of precipitation for hours whose analysis
+    never landed is due."""
+    last = state.get("precipSwept")
+    return not last or now - _parse_iso(last) >= dt.timedelta(hours=PRECIP_SWEEP_HOURS)
+
+
+def _stamps(store: Storage, key_fmt: str, product: str, start: dt.datetime) -> set:
+    """The hours with an archive key of this kind from `start` on."""
+    tail = ".json.gz"
+    prefix = key_fmt.format(product=product, stamp="")[:-len(tail)]
+    keys = store.list(prefix, start_after=prefix + _stamp(start - dt.timedelta(hours=1)) + tail)
+    return {k[len(prefix):-len(tail)] for k in keys if k.startswith(prefix) and k.endswith(tail)}
+
+
+def precip_sweep(store: Storage, state: dict, locs: list, lattice: dict, cache: dict, grid_index: dict,
+                 now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
+    """Once a day, read the precipitation of every hour the live walk and
+    the backfill have both passed whose analysis file never landed and
+    whose precipitation was never read. The live lane retries a missing
+    analysis for CLOSE_AFTER_HOURS and the backfill walks past one, and
+    before 2026-09-29 neither read such an hour's precipitation: the RTMA
+    analysis of 2026-09-23 19Z never reached NOAA Open Data and its
+    precipitation file did. Hours in a queued catch-up span are left to the
+    backfill. A refused file ends that product's sweep until the next day's,
+    so an outage costs one failing read. A sweep cut short by the deadline is
+    not stamped and is due again next pass. Returns the (location, day) pairs
+    whose values changed."""
+    touched: set = set()
+    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
+    window_start = _floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS)
+    tried = filled = 0
+    for product in PRODUCTS:
+        cursor = _scan_cursor(state["products"][product])
+        bf = state["backfill"][product]
+        if cursor is None or not bf.get("oldest"):
+            continue
+        start = max(window_start, _parse_iso(bf["oldest"]))
+        end = cursor - dt.timedelta(hours=CLOSE_AFTER_HOURS)
+        if end < start:
+            continue
+        queued = set()
+        for a, b in bf.get("queue") or []:
+            t = _parse_iso(a)
+            while t <= _parse_iso(b):
+                queued.add(t)
+                t += dt.timedelta(hours=1)
+        have = _stamps(store, HOUR_KEY, product, start) | _stamps(store, PRECIP_KEY, product, start)
+        t = start
+        while t <= end:
+            if _stamp(t) not in have and t not in queued:
+                if deadline.over(RESERVE_SECONDS + 30):
+                    status["swept"] = {"tried": tried, "filled": filled, "done": False}
+                    return touched
+                tried += 1
+                prec = read_precip(product, t, locs, lattice if t >= frame_cutoff else None, now)
+                if prec.status == "ok":
+                    if write_precip(store, product, t, prec.doc, cache):
+                        filled += 1
+                        touched |= touched_by(t, locs)
+                        if prec.frames and prec.frames.get("precip") is not None:
+                            write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
+                            write_grid_index(store, grid_index, now)
+                elif prec.status == "error":
+                    _fail(status, f"{product} {_iso(t)} precipitation: {prec.error}")
+                    break
+            t += dt.timedelta(hours=1)
+    state["precipSwept"] = _iso(now)
+    status["swept"] = {"tried": tried, "filled": filled, "done": True}
+    return touched
+
+
 def backfill_next(product: str, state: dict, now: dt.datetime) -> Optional[dt.datetime]:
     """The next hour the backfill reads for a product, or None when it is
     done: a queued span first (newest hour first), then the walk back from
@@ -1445,6 +1599,10 @@ def backfill_lane(store: Storage, state: dict, locs: list, lattice: dict, cache:
     touched: set = set()
     frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
     since_save = 0
+    # as in the live lane: after one refused precipitation file of an absent
+    # hour, a product's absent hours are walked past without their
+    # precipitation this pass, and the daily sweep reads it later
+    precip_ok = {p: True for p in PRODUCTS}
     while not deadline.over(RESERVE_SECONDS):
         progressed = False
         for product in PRODUCTS:
@@ -1462,7 +1620,8 @@ def backfill_lane(store: Storage, state: dict, locs: list, lattice: dict, cache:
                 if have is not None and (not want_frames or frames_indexed(grid_index, product, t)):
                     res = HourResult("ok", doc=have)
                 else:
-                    res = read_hour(product, t, locs, lattice, frames=want_frames, now=now)
+                    need_p = precip_ok[product] and not (get_precip(store, product, t, cache) or {}).get("complete")
+                    res = read_hour(product, t, locs, lattice, frames=want_frames, now=now, precip_if_absent=need_p)
                     if have is not None and res.status != "ok":
                         # the archive holds the hour and only its frames are
                         # missing; the backfill does not retry, so it says so
@@ -1478,6 +1637,14 @@ def backfill_lane(store: Storage, state: dict, locs: list, lattice: dict, cache:
                 continue
             if res.status == "absent":
                 status["absent"].append(f"{product} {iso}")
+                if res.precip_error:
+                    _fail(status, f"{product} {iso} precipitation: {res.precip_error}")
+                    precip_ok[product] = False
+                try:
+                    if write_precip_only(store, product, t, res, grid_index, cache, now):
+                        touched |= touched_by(t, locs)
+                except Exception as e:  # noqa: BLE001
+                    _fail(status, f"{product} {iso} precipitation: {type(e).__name__}: {e}")
                 backfill_advance(product, state, t)
                 continue
             if res.status == "error":
@@ -1642,6 +1809,14 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
                     save_state(store, state, now)
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"urma reread: {type(e).__name__}: {e}")
+        # 3b. once a day, the precipitation of hours whose analysis never landed
+        if not deadline.over(RESERVE_SECONDS + 120) and precip_sweep_due(state, now):
+            try:
+                changed = precip_sweep(store, state, locs, lattice, cache, grid_index, now, deadline, status)
+                status["days"] += rebuild_days(store, changed, locs, cache, now, state)
+                save_state(store, state, now)
+            except Exception as e:  # noqa: BLE001
+                _fail(status, f"precipitation sweep: {type(e).__name__}: {e}")
         # 4. backfill with what remains, then the days it touched
         try:
             bt = backfill_lane(store, state, locs, lattice, cache, grid_index, now, deadline, status)

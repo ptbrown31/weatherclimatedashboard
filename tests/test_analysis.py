@@ -358,6 +358,24 @@ class Rules(unittest.TestCase):
         self.assertEqual(s2["precip"]["exact"], 0.24)
         self.assertEqual(s2["precip"]["revised"]["value"], 0.26)
 
+    def test_an_hour_with_only_its_precipitation_adds_rain_but_no_analysis(self):
+        # RTMA 2026-09-23 19Z: the analysis never landed, the precipitation did
+        ph = hours_of([60.0, 70.0], precip=0.1)
+        h3 = analysis.local_day_hours("2026-09-26", "America/New_York")[2]
+        ph[iso(h3)] = {"temp": None, "wind": None, "gust": None, "precip": 0.2, "anl": False}
+        s = analysis.day_summary(ph, "America/New_York", "2026-09-26", NOW)
+        self.assertEqual((s["hours"], s["of"], s["complete"]), (2, 24, False))
+        self.assertEqual(s["high"]["value"], 70)
+        self.assertEqual(s["precip"], {"value": 0.4, "exact": 0.4, "hours": 3})
+        # on URMA the precipitation of a whole day resolves while the analyses do not
+        hs = analysis.local_day_hours("2026-09-26", "America/New_York")
+        ph = {iso(h): {"temp": 60.0, "wind": 5.0, "gust": 8.0, "precip": 0.0} for h in hs[:-1]}
+        ph[iso(hs[-1])] = {"temp": None, "wind": None, "gust": None, "precip": 0.05, "anl": False}
+        s = analysis.day_summary(ph, "America/New_York", "2026-09-26", NOW, product="urma")
+        self.assertEqual((s["hours"], s["complete"], s["final"]), (23, False, False))
+        self.assertTrue(s["precip"]["resolved"])
+        self.assertEqual(s["precip"]["value"], 0.05)
+
     def test_an_empty_day_is_absent(self):
         self.assertIsNone(analysis.day_summary({}, "America/New_York", "2026-09-26", NOW))
 
@@ -720,6 +738,101 @@ class Job(unittest.TestCase):
         self.assertEqual(state["products"]["rtma"]["scanned"], iso(hour(2026, 9, 26, 19)))
         self.assertEqual(state["products"]["rtma"]["since"], iso(NOW))
 
+    def test_an_hour_whose_analysis_never_lands_still_adds_its_precipitation(self):
+        # RTMA 2026-09-23 19Z never reached NOAA Open Data; its precipitation file did
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_precip("rtma", t)
+        self.fx.values[("rtma", "precip", iso(t))] = 2.54          # 0.1 in
+        self.assertEqual(self.run_pass(), 0)
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
+        self.assertTrue(self.read(analysis.precip_key("rtma", t))["complete"])
+        self.assertEqual(self.state()["products"]["rtma"]["gaps"], [iso(t)])
+        self.assertIsNone(self.state()["products"]["rtma"]["newest"])
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["hours"], ny["complete"], ny["final"]), (0, False, False))
+        self.assertIsNone(ny["high"])
+        self.assertEqual(ny["precip"], {"value": 0.1, "exact": 0.1, "hours": 1})
+        row = next(r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]
+                   if r["t"] == iso(t))
+        self.assertEqual(row["rtma"], {"temp": None, "wind": None, "gust": None, "precip": 0.1})
+        fr = self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z"))
+        self.assertIsNotNone(fr)
+        # the gap is retried for its analysis, and the whole precipitation is not fetched again
+        n = len(self.fx.fetched)
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
+        self.assertNotIn(analysis.pcp_url("rtma", t), self.fx.fetched[n:])
+        self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[n:])
+        # the analysis lands late: the hour is read and the stored precipitation stands
+        self.fx.add_hour("rtma", t, precip=False)
+        self.fx.values[("rtma", "precip", iso(t))] = 5.08
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=20)), 0)
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["hours"], ny["high"]["value"], ny["precip"]["value"]), (1, 68, 0.1))
+        self.assertEqual(self.state()["products"]["rtma"]["gaps"], [])
+
+    def test_the_backfill_keeps_the_precipitation_of_an_hour_without_its_analysis(self):
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        t0 = t - dt.timedelta(hours=1)
+        self.fx.add_precip("rtma", t0)
+        self.fx.values[("rtma", "precip", iso(t0))] = 2.54
+        self.assertEqual(self.run_pass(), 0)
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t0)))
+        self.assertTrue(self.read(analysis.precip_key("rtma", t0))["complete"])
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["hours"], ny["precip"]["hours"], ny["precip"]["value"]), (1, 2, 0.1))
+
+    def test_the_daily_sweep_reads_the_precipitation_of_an_hour_both_walks_passed(self):
+        old = hour(2026, 9, 23, 19)
+        self.fx.add_precip("rtma", old)
+        self.fx.values[("rtma", "precip", iso(old))] = 2.54
+        kept = hour(2026, 9, 22, 19)                   # an hour whose analysis is archived
+        self.fx.add_hour("rtma", kept)
+        res = analysis.read_hour("rtma", kept, LOCS, {"wexp": [], "g184": []}, frames=False, now=NOW)
+        analysis.write_hour(self.st, "rtma", kept, res, {}, {}, NOW)
+        queued = hour(2026, 9, 21, 7)                  # an hour of a span the backfill has yet to read
+        self.fx.add_precip("rtma", queued)
+        state = analysis.new_state()
+        state["products"]["rtma"]["newest"] = iso(hour(2026, 9, 26, 19))
+        state["backfill"]["rtma"].update({"oldest": iso(hour(2026, 8, 28, 0)), "done": True,
+                                          "queue": [[iso(hour(2026, 9, 21, 0)), iso(hour(2026, 9, 21, 12))]]})
+        status = {"errors": [], "failed": 0}
+        n = len(self.fx.fetched)
+        touched = analysis.precip_sweep(self.st, state, LOCS, analysis.load_lattice(), {}, {}, NOW,
+                                        archive.Deadline(600), status)
+        self.assertIn(("new-york-ny", "2026-09-23"), touched)
+        self.assertTrue(self.read(analysis.precip_key("rtma", old))["complete"])
+        self.assertIsNotNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260923T19Z")))
+        self.assertNotIn(analysis.pcp_url("rtma", kept), self.fx.fetched[n:])
+        self.assertNotIn(analysis.pcp_url("rtma", queued), self.fx.fetched[n:])
+        # nothing newer than the live lane's own 48 hours of retries
+        self.assertNotIn(analysis.pcp_url("rtma", hour(2026, 9, 25, 19)), self.fx.fetched[n:])
+        self.assertEqual((status["swept"]["filled"], status["swept"]["done"]), (1, True))
+        self.assertEqual(state["precipSwept"], iso(NOW))
+        self.assertFalse(analysis.precip_sweep_due(state, NOW + dt.timedelta(hours=23)))
+        self.assertTrue(analysis.precip_sweep_due(state, NOW + dt.timedelta(hours=24)))
+        # the rebuilt day adds the swept hour to the day's precipitation
+        cache = {}
+        day, _ = analysis.build_day(self.st, "2026-09-23", LOCS, cache, NOW, state)
+        self.assertEqual(day["locations"]["new-york-ny"]["rtma"]["precip"]["value"], 0.1)
+        self.assertEqual(day["locations"]["new-york-ny"]["rtma"]["hours"], 0)
+
+    def test_a_refused_file_ends_the_products_sweep_for_the_day(self):
+        a, b = hour(2026, 9, 23, 19), hour(2026, 9, 23, 20)
+        self.fx.add_precip("rtma", a)
+        self.fx.add_precip("rtma", b)
+        self.fx.grids[("rtma", "APCP", iso(a))] = "other"          # a file on another grid is refused
+        state = analysis.new_state()
+        state["products"]["rtma"]["newest"] = iso(hour(2026, 9, 26, 19))
+        state["backfill"]["rtma"].update({"oldest": iso(hour(2026, 9, 23, 0)), "done": True})
+        status = {"errors": [], "failed": 0}
+        n = len(self.fx.fetched)
+        analysis.precip_sweep(self.st, state, LOCS, analysis.load_lattice(), {}, {}, NOW, archive.Deadline(600), status)
+        self.assertEqual(status["failed"], 1)
+        self.assertNotIn(analysis.pcp_url("rtma", b), self.fx.fetched[n:])
+        self.assertIsNone(self.read(analysis.precip_key("rtma", b)))
+        self.assertEqual(state["precipSwept"], iso(NOW))        # tried again tomorrow
+
     def test_a_message_on_another_grid_is_refused_and_reported(self):
         t = hour(2026, 9, 26, 19)
         self.fx.add_hour("rtma", t)
@@ -748,7 +861,10 @@ class Job(unittest.TestCase):
         self.assertIsNotNone(self.read(analysis.INDEX_KEY))
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
         self.assertEqual(archive.LAST_STATUS["errors"], 0)     # something was read
-        self.assertEqual(archive.LAST_STATUS["failed"], 1)
+        # the hour's read, and the precipitation of the first absent hour the
+        # backfill reaches; the absent hours after it are walked past
+        # without their precipitation, so an outage costs one of each
+        self.assertEqual(archive.LAST_STATUS["failed"], 2)
         self.assertEqual(self.health()["urma"]["fail_streak"], 1)
         self.assertEqual(self.health()["rtma"]["fail_streak"], 0)
         self.assertEqual(self.state()["products"]["urma"]["gaps"], [iso(t_u)])
