@@ -16,7 +16,7 @@ this one has to stay up and stay fresh on its own.
 ## Hard constraints, decided, do not relitigate
 
 - **US government data only** for weather content: api.weather.gov, aviationweather.gov, NOAA Open
-  Data on AWS (the NBM bulletins; RTMA and URMA on NOAA Open Data feed the unlisted analysis-resolution
+  Data on AWS (the NBM bulletins; RTMA on NOAA Open Data feeds the unlisted analysis-resolution
   page), NOMADS, NHC, NCEI, NOAA GML, NOAA/NESDIS STAR. No Open-Meteo, no commercial vendors.
   Documented exceptions: USGS The National Map imagery for the station locators (a US government
   work, fetched server side and served from this site's own bucket), Natural Earth basemap outlines (public domain) and the RAPID AMOC annual means
@@ -114,7 +114,7 @@ parameters: `station`, `theme`, `market`.
                      locator.py (a metro-scale USGS map per station, fetched once),
                      traffic.py (page views from the CDN access logs),
                      basemap.py, storage.py, config.py,
-                     analysis.py (the gridded-analysis resolution lane: RTMA resolving and URMA for comparison at the
+                     analysis.py (the gridded-analysis resolution lane: RTMA resolving at the
                      sixty-seven settlement locations, on its own schedule; unlisted page, no contract settles on it),
                      grib2.py (a GRIB2 reader in the standard library, used only by analysis.py),
                      run.py (command line), handler.py (the only vendor-specific file)

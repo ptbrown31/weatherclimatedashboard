@@ -15,7 +15,7 @@ Sources, all US government, all public domain, no key and no subscription.
   api.weather.gov       CLI text product            -> official daily climate report
   NHC / NOAA GIS        storms, cones, tracks       -> the hurricane page
   NHC HURDAT2           Atlantic best-track archive -> the season pace figure
-  NOAA Open Data (S3)   RTMA and URMA GRIB2 analyses -> the analysis resolution page
+  NOAA Open Data (S3)   RTMA GRIB2 analyses -> the analysis resolution page
 
 Run it standalone for a quick look at three stations:
     python3 -m pipeline.gov_weather KLAX KPHX
@@ -122,7 +122,7 @@ def _head(url: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# NOAA Open Data: the RTMA and URMA analysis buckets (pipeline/analysis.py).
+# NOAA Open Data: the RTMA analysis bucket (pipeline/analysis.py).
 #
 # Public S3 buckets, no credentials. Each hourly analysis file is about 85 MB
 # and carries thirteen or fourteen messages; the lane reads the .idx sidecar
@@ -134,13 +134,11 @@ def _head(url: str) -> bool:
 # is a missing key: the next hour's file is 403 until it lands.
 # ---------------------------------------------------------------------------
 NODD_RTMA = "https://noaa-rtma-pds.s3.amazonaws.com"
-NODD_URMA = "https://noaa-urma-pds.s3.amazonaws.com"
-# NCEP's own server keeps the last fourteen days of both products under the
+# NCEP's own server keeps the last fourteen days of the analysis under the
 # same directory and file names, answers byte ranges with 206 like S3, and is
 # where the analysis lane reads a file NOAA Open Data does not have (the RTMA
 # analysis of 2026-09-23 19Z reached NOMADS and never NOAA Open Data)
 NOMADS_RTMA = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod"
-NOMADS_URMA = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/urma/prod"
 
 
 def _fetch_absent(url: str, tries: int, timeout: int, headers: dict, with_headers: bool = False):

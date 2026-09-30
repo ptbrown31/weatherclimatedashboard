@@ -5,10 +5,9 @@ would have resolved, at the sixty-seven settlement locations.
 The contracts settle on station reports, and this site's other lanes read
 those. This lane shows the alternative the owner asked to see (docs/analysis.md):
 the daily and hourly values a contract would resolve on if it were written on
-the Real-Time Mesoscale Analysis (RTMA) and its rerun with the late-arriving
-observations, the Unrestricted Mesoscale Analysis (URMA), read from NOAA Open
-Data on AWS. No contract settles on it, the page says so on every view, and
-nothing here feeds any other lane.
+the Real-Time Mesoscale Analysis (RTMA), read from NOAA Open Data on AWS. No
+contract settles on it, the page says so on every view, and nothing here
+feeds any other lane.
 
 Conventions, all from docs/analysis.md section 1 and fixed there:
 
@@ -18,9 +17,9 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     city's City Hall, frozen in the settlement list the owner approved on
     2026-09-29 (config/analysis_locations.json).
 
-    RTMA resolves (owner's decision 2026-09-29), precipitation included; URMA,
-    NOAA's later analysis of record, is read and shown for comparison and
-    never resolves.
+    RTMA resolves every variable, precipitation included (owner's decision
+    2026-09-29), and is the only analysis the lane reads: URMA, which does not
+    resolve, was dropped from the lane and the page on 2026-09-30.
 
     The day is the local civil date at the place through its IANA zone. Every
     top-of-hour analysis whose local civil time falls on that date counts. That is
@@ -29,14 +28,11 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     both analyses belong to the date). Precipitation is the one-hour
     accumulations that together cover the date from midnight to midnight: a
     day's row for the analysis at HH:00 carries the accumulation over the hour
-    that starts then, which NOAA files under the hour it ends. Complete means
-    every analysis was read; the mean wind is over the hours read. An RTMA day
-    is final when every hourly analysis file has been read, and its
-    precipitation is resolved when every hourly precipitation file has; NOAA
-    never revises an RTMA file, so neither changes afterwards. URMA's
-    precipitation files are rewritten for up to eight days, so for comparison
-    its total is kept at the first read with every hour, the last eight local
-    days are re-read once a day, and a total that differs is carried beside it.
+    that starts then, which NOAA files under the hour it ends. A day is final
+    once every hour's file is either read or known not published, and its value
+    is then the hours available (owner's decision 2026-09-29): a missing file
+    does not hold the day open. NOAA never revises an RTMA file and a final
+    value stands, so an hour that turns up later is shown and not counted.
 
     Every stored value is in the file's own unit and is converted exactly, in
     decimal arithmetic, and the aggregate (the highest hourly temperature,
@@ -51,42 +47,41 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     keep the strict test, so on the boundary this framework and the board
     part company by design.
 
-    A day still short of its hours 48 hours after its local end is closed
-    incomplete: its value stands on the hours read, is never marked final,
-    and the count is shown. The hourly analysis files are never rewritten
-    upstream, so a missing hour stays missing once NCEP's NOMADS server, which
-    keeps fourteen days and is read for any file NOAA Open Data lacks three
-    hours after its hour, has none either. Its precipitation is a separate
-    file and is read all the same: it adds to the day's total and never to
-    the count of analyses read. The precipitation files are rewritten
-    upstream (URMA's), so an hour's precipitation lives in its own key and is
-    filled in as the files improve.
+    A file NOAA Open Data does not have half an hour after it usually lands is
+    read from NCEP's NOMADS server, which keeps fourteen days, and a file there
+    counts as published; a file on neither by then is not published. An
+    hour's precipitation is a separate file and is read even when its
+    analysis is missing: it adds to the day's total and never to the count of
+    analyses read. A day that has not resolved 48 hours after its local end is
+    closed: its value stands on the hours read and it is never marked final.
 
-Reads   noaa-rtma-pds and noaa-urma-pds through pipeline/gov_weather.py; the
-        .idx sidecar of each analysis file and a range request per message
-        (TMP 2 m, WIND 10 m, GUST 10 m, about 6 MB each), the one-message
-        precipitation file whole; GRIB2 decoded by pipeline/grib2.py.
-Writes  archive/analysis/hours/<product>/<stamp>.json.gz   the fifty exact hourly temperature, wind and gust values, write once
-        archive/analysis/precip/<product>/<stamp>.json.gz  the fifty exact hourly accumulations, rewritten as coverage fills in
-        archive/analysis/_meta/state.json                  cursors, gaps, pending precipitation, re-read and prune stamps, revisions
-        archive/_meta/health_analysis.json                 the lane's own failure streaks
-        snapshots/analysis/grid/<product>/<var>/<stamp>.json   one map frame on the 320 x 200 lattice, with the
-                                                           21 x 21 cell window round each place at full resolution
-        snapshots/analysis/grid/index.json                 which frames exist, rewritten after every hour's frames
-        snapshots/analysis/days/YYYY-MM-DD.json            every place's product-days for that local date
-        snapshots/analysis/loc/<id>/YYYY-MM-DD.json        one place-day at the hourly scale
-        snapshots/analysis/index.json                      last, so a reader sees a consistent set
+Reads   noaa-rtma-pds (and NOMADS for a file it lacks) through
+        pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
+        range request per message (TMP 2 m, WIND 10 m, GUST 10 m, about 6 MB
+        each), the one-message precipitation file whole; GRIB2 decoded by
+        pipeline/grib2.py.
+Writes  archive/analysis2/hours/rtma/<stamp>.json.gz      the places' hourly temperature, wind and gust in the file's units, write once
+        archive/analysis2/precip/rtma/<stamp>.json.gz     the places' hourly accumulations in millimetres, filled in as reads add values
+        archive/analysis2/_meta/state.json                cursors, gaps, pending precipitation, hours not published, stamps
+        archive/_meta/health_analysis.json                the lane's own failure streaks
+        snapshots/analysis2/grid/rtma/<var>/<stamp>.json  one map frame on the 320 x 200 lattice, with the
+                                                          21 x 21 cell window round each place at full resolution
+        snapshots/analysis2/grid/index.json               which frames exist, rewritten after every hour's frames
+        snapshots/analysis2/days/YYYY-MM-DD.json          every place's day for that local date
+        snapshots/analysis2/loc/<id>/YYYY-MM-DD.json      one place-day at the hourly scale
+        snapshots/analysis2/csv/YYYY-MM-DD-{raw,processed}.csv   the day as CSV
+        snapshots/analysis2/index.json                    last, so a reader sees a consistent set
 
 The pass runs on its own schedule (every ten minutes at :08) and is capped at
 PASS_CAP_SECONDS so two passes never overlap on the state file. Each pass
 retries the precipitation still pending, reads the live hours, rebuilds the
-days those hours touch, re-reads one day's URMA precipitation when one is
-due, once a day reads the precipitation of any hour whose analysis never
-landed, and spends what budget remains walking backwards through the last
-thirty days, newest first, so the page fills in from today back. Nothing a
-NOAA object does (missing, short, refused by the decoder, a 5xx after the
-retries) fails the pass: each hour's read is guarded, the failure is recorded
-against its product, and the state and the indexes are written in every case.
+days those hours touch, once a day sweeps for files the walks passed
+without, rewrites a few listed days that lack their CSV files or predate the
+current layout, and spends what budget remains walking backwards through the
+last thirty days, newest first, so the page fills in from today back.
+Nothing a NOAA object does (missing, short, refused by the decoder, a 5xx
+after the retries) fails the pass: each hour's read is guarded, the failure
+is recorded, and the state and the indexes are written in every case.
 """
 from __future__ import annotations
 
@@ -132,50 +127,50 @@ FRAME_KEY = PREFIX + "grid/{product}/{var}/{stamp}.json"
 CSV_RAW_KEY = PREFIX + "csv/{day}-raw.csv"
 CSV_DAY_KEY = PREFIX + "csv/{day}-processed.csv"
 HOUR_KEY = "archive/analysis2/hours/{product}/{stamp}.json.gz"
-# the precipitation of a product-hour is its own key because NOAA rewrites
-# the precipitation files (the RFC regions land in batches and the gauge
-# reruns follow for days) while the analysis hour is written once
+# the precipitation of a product-hour is its own key because it is a
+# separate file that lands on its own time and is read even when the
+# analysis never lands (RTMA 2026-09-23 19Z); a later read fills a place
+# still without a value, while the analysis hour is written once
 PRECIP_KEY = "archive/analysis2/precip/{product}/{stamp}.json.gz"
 STATE_KEY = "archive/analysis2/_meta/state.json"
 HEALTH_KEY = "archive/_meta/health_analysis.json"   # this lane's own failure streaks (see archive.update_health)
-# frames never change and a final place-day changes only by a revision; everything else is live
+# frames never change and a final place-day changes only to show a late hour or when LAYOUT
+# does; everything else is live
 CACHE_FINAL = "public, max-age=300, stale-while-revalidate=1800, stale-if-error=86400"
 CACHE_LIVE = "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400"
 
 STATEMENT = "A proposed settlement framework. No contract settles on it."
 
-# The two products and where each file lives: <bucket>/<dir>.<YYYYMMDD>/<file>.
+# The product and where each file lives: <bucket>/<dir>.<YYYYMMDD>/<file>.
 # The analysis file is one per hour with a .idx sidecar; the precipitation
-# file is one message. RTMA precipitation is on the smaller G184 grid, URMA's
-# on the wexp grid of the analysis itself. lagMinutes is the measured landing
-# time of the analysis after the valid hour (docs/analysis.md, 2026-09-27),
-# and is what the live lane and the health check expect, not a promise NOAA
-# makes. The URMA precipitation files appear hours ahead of their analysis,
-# in a batch, with the western RFC region absent from the bitmap, and are
-# rewritten later; the lane never waits on them before archiving the analysis.
-NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com", "urma": "https://noaa-urma-pds.s3.amazonaws.com"}
-# NCEP's own server keeps the last fourteen days of both products under the
+# file is one message, on the smaller G184 grid. lagMinutes is the measured
+# landing time of the analysis after the valid hour (docs/analysis.md,
+# 2026-09-27), and is what the live lane and the health check expect, not a
+# promise NOAA makes. The lane is written over PRODUCTS so another analysis
+# could be added; since 2026-09-30 RTMA is the only one (the owner dropped
+# URMA, which does not resolve).
+NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com"}
+# NCEP's own server keeps the last fourteen days of the analysis under the
 # same directory and file names, and a file there counts as published
 # (owner's decision 2026-09-29; the RTMA analysis of 2026-09-23 19Z never
 # reached NOAA Open Data and NOMADS had it). A file NOAA Open Data does not
 # have half an hour after the product usually lands is read from NOMADS, a
 # file on neither by then is not published, and the lane stops asking NOMADS
 # a day short of its fourteen
-NOMADS_DEFAULT = {"rtma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod",
-                  "urma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/urma/prod"}
+NOMADS_DEFAULT = {"rtma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod"}
 NOMADS_AFTER_MINUTES = 30
 NOMADS_KEEP_HOURS = 13 * 24
 # the product that resolves (owner's decision 2026-09-29): RTMA for every
-# variable, precipitation included. URMA, NOAA's analysis of record, reruns
-# each hour about seven hours later with late observations; it is read and
-# shown for comparison and never resolves
+# variable, precipitation included
 SETTLE = "rtma"
 PRODUCTS = {
     "rtma": {"bucket": "noaa-rtma-pds", "dir": "rtma2p5", "anl": "rtma2p5.t{hh}z.2dvaranl_ndfd.grb2_wexp",
              "pcp": "rtma2p5.{ymdh}.pcp.184.grb2", "pcpGrid": "g184", "lagMinutes": 47},
-    "urma": {"bucket": "noaa-urma-pds", "dir": "urma2p5", "anl": "urma2p5.t{hh}z.2dvaranl_ndfd.grb2_wexp",
-             "pcp": "urma2p5.{ymdh}.pcp_01h.wexp.grb2", "pcpGrid": "wexp", "lagMinutes": 414},
 }
+# the layout of the published files; when it changes, every listed day is
+# rewritten, a few a pass, so no day keeps the old one (2026-09-30: URMA
+# dropped from the days, the place files and the CSV files)
+LAYOUT = "rtma-only-2026-09-30"
 # the three messages read from the analysis file, by the .idx sidecar's names
 MESSAGES = (("temp", "TMP", "2 m above ground"), ("wind", "WIND", "10 m above ground"),
             ("gust", "GUST", "10 m above ground"))
@@ -227,21 +222,19 @@ BACKFILL_POINT_DAYS = 30        # location values this far back, by random-acces
 BACKFILL_FRAME_DAYS = 7         # map frames this far back
 FRAME_KEEP_DAYS = 30            # frames older than this are pruned
 INDEX_DAYS = 60                 # index.json lists this many newest days; the day files themselves are kept
-PRECIP_REREAD_DAYS = 8          # the RFC gauge reruns reach back about this far
 CLOSE_AFTER_HOURS = 48          # a day still incomplete this long after its local end is closed
 LIVE_HOURS_PER_PASS = 3         # new hours read per product per pass
 # a product-hour whose precipitation file is absent, refused, or short of a
-# location cell (the western RFC region lands late in the URMA files) has
-# that file refetched every pass until this long past the analysis lag; after
-# that the hour keeps whatever coverage it has and, for URMA, the daily
-# re-read fills the rest
+# location cell has that file refetched every pass until this long past the
+# analysis lag; after that the hour keeps whatever coverage it has
 PRECIP_WAIT_HOURS = 3
 # how often the pass looks, over the backfill's reach, for hours whose
 # analysis never landed and whose precipitation was never read
 PRECIP_SWEEP_HOURS = 24
 # listed days still without their two CSV files (every day written before
-# the files existed, or a write that failed) are rebuilt this many a pass
-CSV_FILL_DAYS_PER_PASS = 6
+# the files existed, or a write that failed), or written in an older LAYOUT,
+# are rebuilt this many a pass
+REFRESH_DAYS_PER_PASS = 6
 # a product whose newest hour READ is this much or more behind what should
 # have landed counts as a failed pass toward the lane's alarm; short of it,
 # an empty pass is the normal wait between landings
@@ -289,9 +282,7 @@ CONVENTIONS = {
                    "once every hour's analysis file is either in or not published, and its value is the hours "
                    "available, so a missing file does not hold the day open; its precipitation resolves the same "
                    "way, the last file being the accumulation that ends at midnight. NOAA never revises an RTMA "
-                   "file, so a final value never changes, and an hour that turns up later is shown and not counted. "
-                   "URMA, NOAA's analysis of record, reruns each hour about seven hours later with late "
-                   "observations; it is shown for comparison and never resolves.",
+                   "file, so a final value never changes, and an hour that turns up later is shown and not counted.",
     "closed": "A day that has not resolved 48 hours after its local end (its files never came) is closed. Its "
               "value stands on the hours read, it is never marked final, and the count is shown.",
     "missing": "A file NOAA Open Data does not have half an hour after the product usually lands is read from "
@@ -302,7 +293,7 @@ CONVENTIONS = {
               "the hour, specials, the tenths group) have no analogue here.",
     "cell": "The settlement grid cell approved on 2026-09-29: the 2.5 km cell whose square contains the main "
             "city's City Hall (in Miami the nearest land cell to the city's administration building, whose own "
-            "cell is water to the analysis). The value is the analysis at the cell, never an average over the "
+            "cell counts as water). The value is the analysis at the cell, never an average over the "
             "square. RTMA files its precipitation on a grid 200 columns narrower, and the same point there is "
             "200 columns to the left in the same row.",
     "lattice": "The map samples each hourly field onto a 320 by 200 lattice at 3 screen pixels, about 14 km "
@@ -508,8 +499,7 @@ def local_day_of(t: dt.datetime, tz: str) -> str:
     return t.astimezone(ZoneInfo(tz)).date().isoformat()
 
 
-def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, product: str = "rtma",
-                prior: Optional[dict] = None, revised: Optional[dict] = None,
+def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, prior: Optional[dict] = None,
                 missing: Optional[set] = None, pmissing: Optional[set] = None) -> Optional[dict]:
     """One product-day at a place, from its exact hourly values.
 
@@ -520,11 +510,10 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     and adds to the day's total, never to the count of analyses read that
     makes the day complete. The result is the contract's
     product-day shape, or None when no hour of the day has been read.
-    `prior` is the summary published before, which keeps the resolved
-    precipitation and its stamp once set; `revised` is the re-read record
-    (None for none, or a withdrawn one).
+    `prior` is the summary published before, whose final values and
+    resolved precipitation stand once set.
 
-    For the resolving product (owner's decision 2026-09-29) a day is final
+    A day is final (owner's decision 2026-09-29)
     once every hour's analysis is either read or known not published
     (`missing`, the ISO hours of the day on neither NOAA Open Data nor
     NOMADS once due), and its value is then the hours available: a missing
@@ -581,57 +570,33 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
                          "hours": len(precip)}
     else:
         out["precip"] = None
-    if product == SETTLE:
-        # only the resolving product is ever final (owner's decision 2026-09-29)
-        was = prior or {}
-        anl_read = {_iso(h) for h, rec in read if rec.get("anl", True)}
-        if missing is None:
-            settled = complete
-        else:
-            settled = all(_iso(h) in anl_read or _iso(h) in missing for h in hours)
-        if was.get("final"):
-            # final values stand: an hour that turned up after is not counted
-            for k in ("hours", "complete", "high", "low", "gust", "wind"):
-                out[k] = was.get(k)
-            out["final"], out["finalAt"] = True, was.get("finalAt")
-        else:
-            out["final"] = settled
-            out["finalAt"] = _iso(now) if settled else None
-        pcp_read = {_iso(h) for h, rec in read if rec.get("precip") is not None or rec.get("pcpRead")}
-        if pmissing is None:
-            pcp_settled = len(precip) == expected
-        else:
-            pcp_settled = all(_iso(h) in pcp_read or _iso(h) in pmissing for h in hours)
-        pw = was.get("precip") or {}
-        if pw.get("resolved"):
-            # NOAA never revises an RTMA precipitation file; the resolved total stands
-            out["precip"] = dict(pw, revised=None)
-        elif out["precip"] is not None:
-            out["precip"].update({"resolved": pcp_settled, "resolvedAt": _iso(now) if pcp_settled else None,
-                                  "revised": None})
-        # a day that never resolved: its last file did not come within CLOSE_AFTER_HOURS
-        out["closed"] = (not out["final"]) and now >= day_end(day_iso, tz) + dt.timedelta(hours=CLOSE_AFTER_HOURS)
-        return out
-    # closed incomplete: the local day ended CLOSE_AFTER_HOURS ago and hours are still missing
-    closed = (not complete) and now >= day_end(day_iso, tz) + dt.timedelta(hours=CLOSE_AFTER_HOURS)
-    out["closed"] = closed
-    out["final"] = False
-    if out["precip"] is not None:
-        # URMA, for comparison: its precipitation files are rewritten for up
-        # to eight days, so its total is kept at the first read with every
-        # hour and a later re-read that differs is carried beside it
-        p = out["precip"]
-        was = (prior or {}).get("precip") or {}
-        if was.get("resolved"):
-            # the resolved total stands; a differing re-read is a revision beside it
-            p.update({"value": was["value"], "exact": was["exact"], "resolved": True,
-                      "resolvedAt": was.get("resolvedAt")})
-        elif len(precip) == expected:
-            # resolvedAt is the pass that first saw every hour, not an analysis time
-            p.update({"resolved": True, "resolvedAt": _iso(now)})
-        else:
-            p.update({"resolved": False, "resolvedAt": None})
-        p["revised"] = revised if (p["resolved"] and revised) else None
+    was = prior or {}
+    anl_read = {_iso(h) for h, rec in read if rec.get("anl", True)}
+    if missing is None:
+        settled = complete
+    else:
+        settled = all(_iso(h) in anl_read or _iso(h) in missing for h in hours)
+    if was.get("final"):
+        # final values stand: an hour that turned up after is not counted
+        for k in ("hours", "complete", "high", "low", "gust", "wind"):
+            out[k] = was.get(k)
+        out["final"], out["finalAt"] = True, was.get("finalAt")
+    else:
+        out["final"] = settled
+        out["finalAt"] = _iso(now) if settled else None
+    pcp_read = {_iso(h) for h, rec in read if rec.get("precip") is not None or rec.get("pcpRead")}
+    if pmissing is None:
+        pcp_settled = len(precip) == expected
+    else:
+        pcp_settled = all(_iso(h) in pcp_read or _iso(h) in pmissing for h in hours)
+    pw = was.get("precip") or {}
+    if pw.get("resolved"):
+        # NOAA never revises an RTMA precipitation file; the resolved total stands
+        out["precip"] = {k: v for k, v in pw.items() if k != "revised"}
+    elif out["precip"] is not None:
+        out["precip"].update({"resolved": pcp_settled, "resolvedAt": _iso(now) if pcp_settled else None})
+    # a day that never resolved: its last file did not come within CLOSE_AFTER_HOURS
+    out["closed"] = (not out["final"]) and now >= day_end(day_iso, tz) + dt.timedelta(hours=CLOSE_AFTER_HOURS)
     return out
 
 
@@ -1036,9 +1001,8 @@ def merge_precip(old: Optional[dict], new: dict) -> dict:
     """The stored precipitation document brought up to date by a new read.
     A place's value, once stored, stands: the resolved daily total is the
     sum of the stored hourlies and has to stay reproducible from the hour
-    table, so a rerun that changes a value is a revision beside the total
-    (reread_precip), never a rewrite of the hour. Only places still without
-    a value take the new read's."""
+    table, so a read never rewrites a stored value. Only places still
+    without a value take the new read's."""
     if old is None:
         return new
     values = dict(old.get("values") or {})
@@ -1152,7 +1116,6 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
     raw CSV."""
     prior = _read_json(store, DAY_KEY.format(day=day_iso)) or {}
     prior_locs = prior.get("locations") or {}
-    revisions = (state.get("revisions") or {}).get(day_iso)
     day_doc: dict = {"schema": SCHEMA, "day": day_iso, "asof": None, "written": _iso(now), "locations": {}}
     loc_docs: dict = {}
     asof = None
@@ -1200,28 +1163,21 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     row[product]["late"] = True
                 if pcp_at and vp is not None and (pre or {}).get("written", "") > pcp_at:
                     row[product]["pcpLate"] = True
-                if raw is not None:
-                    raw.append([day_iso, lid, product, hour_label(h, tz), _iso(h),
+                if raw is not None and product == SETTLE:
+                    raw.append([day_iso, lid, hour_label(h, tz), _iso(h),
                                 (va or {}).get("temp"), (va or {}).get("wind"), (va or {}).get("gust"),
                                 vp, _iso(end), (anl or {}).get("source") if va is not None else None,
                                 (pre or {}).get("source") if pre is not None else None])
                 if asof is None or h > asof:
                     asof = h
-            # the re-read record in the state wins (None there is a withdrawn
-            # one); a day the state no longer carries keeps what it published
-            if revisions is not None and lid in revisions:
-                revised = revisions[lid]
-            else:
-                revised = ((was or {}).get("precip") or {}).get("revised")
-            s = day_summary(product_hours, tz, day_iso, now, product=product, prior=was, revised=revised,
-                            missing=day_missing, pmissing=day_pmissing)
+            s = day_summary(product_hours, tz, day_iso, now, prior=was, missing=day_missing, pmissing=day_pmissing)
             if s is not None:
                 entry[product] = s
         if not entry:
             continue
         day_doc["locations"][lid] = entry
         if only is None or lid in only:
-            loc_asof = max((r["t"] for r in rows if r.get("rtma") or r.get("urma")), default=None)
+            loc_asof = max((r["t"] for r in rows if any(r.get(p) for p in PRODUCTS)), default=None)
             loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "asof": loc_asof,
                              "written": _iso(now), "hours": rows, "summary": entry}
     day_doc["asof"] = _iso(asof) if asof else None
@@ -1230,12 +1186,13 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
 
 def day_status(day_doc: dict, locs: list) -> dict:
     """How far one local date has resolved, counted over every place: `final`
-    places have all their URMA analysis hours read, `resolved` places are final
-    and have their precipitation total resolved too, `closed` places stopped
-    waiting short of a full day. A day is fully resolved when `resolved`
-    equals `places`; the page opens on the newest such day. A place with no
-    URMA hours yet counts toward `places` and nothing else, so a day is never
-    called resolved on the places that happen to have landed."""
+    places have every analysis hour read or known not published, `resolved`
+    places are final and have their precipitation total resolved too,
+    `closed` places stopped waiting short of a full day. A day is fully
+    resolved when `resolved` equals `places`; the page opens on the newest
+    such day. A place with no hours yet counts toward `places` and nothing
+    else, so a day is never called resolved on the places that happen to
+    have landed."""
     entries = (day_doc or {}).get("locations") or {}
     out = {"places": len(locs), "final": 0, "resolved": 0, "closed": 0}
     for loc in locs:
@@ -1283,9 +1240,9 @@ def last_resolved_day(state: dict, days: list) -> Optional[str]:
     return None
 
 
-RAW_HEADER = ["date", "location", "product", "local_hour", "valid_utc", "temp_k", "wind_ms", "gust_ms",
+RAW_HEADER = ["date", "location", "local_hour", "valid_utc", "temp_k", "wind_ms", "gust_ms",
               "precip_mm", "precip_file_utc", "analysis_source", "precip_source"]
-DAY_HEADER = ["date", "location", "name", "state", "product", "final", "final_at", "hours", "of",
+DAY_HEADER = ["date", "location", "name", "state", "final", "final_at", "hours", "of",
               "high_f", "high_exact", "low_f", "low_exact", "gust_mph", "gust_exact", "wind_mph", "wind_exact",
               "precip_in", "precip_exact", "precip_hours", "precip_resolved", "precip_resolved_at"]
 
@@ -1309,41 +1266,51 @@ def raw_csv(rows: list) -> bytes:
 
 
 def processed_csv(day_iso: str, day_doc: dict, locs: list) -> bytes:
-    """The day's values per place and product as they resolve: the whole
-    value, the exact aggregate cut to its precision, the hour counts and the
-    status."""
+    """The day's values per place as they resolve: the whole value, the
+    exact aggregate cut to its precision, the hour counts and the status."""
     rows = []
     for loc in locs:
-        entry = (day_doc.get("locations") or {}).get(loc["id"]) or {}
-        for product in PRODUCTS:
-            e = entry.get(product)
-            if not e:
-                continue
-            g = lambda k, f: (e.get(k) or {}).get(f)
-            p = e.get("precip") or {}
-            rows.append([day_iso, loc["id"], loc["name"], loc["state"], product, e.get("final"), e.get("finalAt"),
-                         e.get("hours"), e.get("of"), g("high", "value"), g("high", "exact"), g("low", "value"),
-                         g("low", "exact"), g("gust", "value"), g("gust", "exact"), g("wind", "value"),
-                         g("wind", "exact"), p.get("value"), p.get("exact"), p.get("hours"), p.get("resolved"),
-                         p.get("resolvedAt")])
+        e = ((day_doc.get("locations") or {}).get(loc["id"]) or {}).get(SETTLE)
+        if not e:
+            continue
+        g = lambda k, f: (e.get(k) or {}).get(f)
+        p = e.get("precip") or {}
+        rows.append([day_iso, loc["id"], loc["name"], loc["state"], e.get("final"), e.get("finalAt"),
+                     e.get("hours"), e.get("of"), g("high", "value"), g("high", "exact"), g("low", "value"),
+                     g("low", "exact"), g("gust", "value"), g("gust", "exact"), g("wind", "value"),
+                     g("wind", "exact"), p.get("value"), p.get("exact"), p.get("hours"), p.get("resolved"),
+                     p.get("resolvedAt")])
     return _csv(rows, DAY_HEADER)
 
 
-def csv_fill(store: Storage, state: dict, locs: list, cache: dict, now: dt.datetime, deadline: arch.Deadline,
-             status: dict) -> int:
-    """Rebuild, newest first and CSV_FILL_DAYS_PER_PASS at most, the listed
-    days that lack either CSV file, so every day the page offers links to
-    files that exist. Returns the number of files written."""
+def refresh_days(store: Storage, state: dict, locs: list, cache: dict, now: dt.datetime, deadline: arch.Deadline,
+                 status: dict) -> int:
+    """Rebuild, newest first and REFRESH_DAYS_PER_PASS at most, the listed
+    days that lack either CSV file or were written in an older LAYOUT, so
+    every day the page offers links to files that exist and no day keeps a
+    layout the page has left behind. The first pass after LAYOUT changes
+    queues every listed day. Returns the number of files written."""
+    days = index_days(store)
+    if state.get("layout") != LAYOUT:
+        state["layout"] = LAYOUT
+        state["relayout"] = list(days)
+    stale = set(state.get("relayout") or []) & set(days)
     prefix = PREFIX + "csv/"
     have = {k[len(prefix):] for k in store.list(prefix)}
-    todo = [d for d in reversed(index_days(store)) if f"{d}-raw.csv" not in have or f"{d}-processed.csv" not in have]
+    todo = [d for d in reversed(days)
+            if d in stale or f"{d}-raw.csv" not in have or f"{d}-processed.csv" not in have]
     written = done = 0
-    for day_iso in todo[:CSV_FILL_DAYS_PER_PASS]:
+    for day_iso in todo[:REFRESH_DAYS_PER_PASS]:
         if deadline.over(RESERVE_SECONDS + 60):
             break
         written += rebuild_days(store, {(loc["id"], day_iso) for loc in locs}, locs, cache, now, state)
+        stale.discard(day_iso)
         done += 1
-    status["csvFilled"] = {"days": done, "left": max(0, len(todo) - done)}
+    if stale:
+        state["relayout"] = sorted(stale)
+    else:
+        state.pop("relayout", None)
+    status["refreshed"] = {"days": done, "left": max(0, len(todo) - done)}
     return written
 
 
@@ -1439,17 +1406,29 @@ def _mark_precip(ps: dict, product: str, t: dt.datetime, res: HourResult, now: d
 
 
 def new_state() -> dict:
-    return {"schema": SCHEMA, "products": {p: _product_state() for p in PRODUCTS},
+    return {"schema": SCHEMA, "layout": LAYOUT, "products": {p: _product_state() for p in PRODUCTS},
             "backfill": {p: {"cursor": None, "oldest": None, "done": False, "queue": []} for p in PRODUCTS},
-            "rereads": {}, "revisions": {}, "dayStatus": {}, "pruned": None, "precipSwept": None}
+            "dayStatus": {}, "pruned": None, "precipSwept": None}
 
 
 def load_state(store: Storage) -> dict:
-    s = _read_json(store, STATE_KEY) or {}
+    s = _read_json(store, STATE_KEY)
+    if not s:
+        return new_state()
     base = new_state()
+    # a state written before LAYOUT existed was written in an older layout
+    s.setdefault("layout", None)
     for k, v in base.items():
         if k not in s:
             s[k] = v
+    # what a product no longer read (URMA, dropped 2026-09-30) or its
+    # re-reads left behind
+    for k in ("rereads", "revisions"):
+        s.pop(k, None)
+    for k in ("products", "backfill"):
+        for p in list(s[k]):
+            if p not in PRODUCTS:
+                del s[k][p]
     for p in PRODUCTS:
         ps = s["products"].setdefault(p, {})
         for k, v in _product_state().items():
@@ -1464,16 +1443,8 @@ def save_state(store: Storage, state: dict, now: dt.datetime) -> None:
 
 
 def prune_state(state: dict, now: dt.datetime) -> None:
-    """Drop re-read stamps and revision records of days past the re-read
-    window; a revision lives on in the day file it was published in (the
-    rebuild keeps a prior's revision when the state has no record)."""
-    cutoff = (now - dt.timedelta(days=PRECIP_REREAD_DAYS + 1)).date().isoformat()
-    for k in ("rereads", "revisions"):
-        d = state.get(k) or {}
-        for day in list(d):
-            if day < cutoff:
-                del d[day]
-    # the hours known not published, past the reach of any rebuild
+    """Drop the hours known not published that are past the reach of any
+    rebuild."""
     oldest = _iso(_floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS + 3))
     for ps in (state.get("products") or {}).values():
         for k in ("missing", "pmissing"):
@@ -1695,110 +1666,13 @@ def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: di
 
 def _seed_backfill(state: dict, product: str, iso: str) -> None:
     """The backfill starts just behind the first hour the live walk looked
-    at, whether or not that hour was there. On 2026-09-27 both products'
+    at, whether or not that hour was there. On 2026-09-27 both analyses'
     newest hours were late by half an hour when a fresh lane first looked,
     and a cursor seeded only by a read left the backfill idle until one
     landed; the absent hour itself stays a gap of the live lane."""
     bf = state["backfill"][product]
     if bf.get("cursor") is None:
         bf["cursor"] = iso
-
-
-def reread_due(store: Storage, state: dict, locs: list, now: dt.datetime) -> Optional[str]:
-    """The one local day whose URMA precipitation is re-read this pass, or
-    None: the oldest of the last PRECIP_REREAD_DAYS days with a complete
-    URMA day at any place (resolved, or complete and still short of a
-    precipitation value somewhere) that has not been re-read in the last
-    day."""
-    zones = sorted({loc["tz"] for loc in locs})
-    days = set()
-    for tz in zones:
-        for back in range(1, PRECIP_REREAD_DAYS + 1):
-            days.add(local_day_of(now - dt.timedelta(days=back), tz))
-    stamps = state.get("rereads") or {}
-    for day_iso in sorted(days):
-        last = stamps.get(day_iso)
-        if last and now - _parse_iso(last) < dt.timedelta(hours=24):
-            continue
-        doc = _read_json(store, DAY_KEY.format(day=day_iso))
-        if not doc:
-            continue
-        if any((e.get("urma") or {}).get("complete") for e in (doc.get("locations") or {}).values()):
-            return day_iso
-    return None
-
-
-def reread_precip(store: Storage, day_iso: str, state: dict, locs: list, now: dt.datetime,
-                  deadline: arch.Deadline, status: dict, cache: Optional[dict] = None) -> set:
-    """Re-read the URMA precipitation of one local day at every place. Two
-    things come of it: places still without a stored value for an hour take
-    the re-read's (the precipitation key is rewritten, so a day short of a
-    value can still resolve), and for a resolved place a re-read total that
-    differs from the resolved one, by a hundredth of an inch or in the
-    rounded hundredth, is recorded as a revision beside it (a re-read back
-    within that is a withdrawal). Returns the (location, day) pairs whose
-    values or revision changed, for the day rebuild."""
-    cache = {} if cache is None else cache
-    doc = _read_json(store, DAY_KEY.format(day=day_iso)) or {}
-    entries = doc.get("locations") or {}
-    # the accumulations that end in the day's rows: the hour after each analysis
-    hours_by_loc = {loc["id"]: [h + dt.timedelta(hours=1) for h in local_day_hours(day_iso, loc["tz"])] for loc in locs}
-    wanted = sorted({h for hs in hours_by_loc.values() for h in hs})
-    totals: Dict[str, dict] = {}   # hour iso -> {loc: inches}
-    changed: set = set()
-    for h in wanted:
-        if deadline.over(RESERVE_SECONDS + 30):
-            # not stamped, so the day is due again next pass
-            status["errors"].append(f"reread {day_iso}: deadline")
-            status["reread"] = {"day": day_iso, "hours": len(totals), "revisions": 0}
-            return changed
-        prec = read_precip("urma", h, locs, None, now)
-        if prec.status == "absent":
-            continue
-        if prec.status == "error":
-            status["errors"].append(f"reread {day_iso} {_iso(h)}: {prec.error}")
-            continue
-        totals[_iso(h)] = prec.doc["values"]
-        try:
-            if write_precip(store, "urma", h, prec.doc, cache):
-                changed |= touched_by(h, locs)
-        except Exception as e:  # noqa: BLE001
-            status["errors"].append(f"reread {day_iso} {_iso(h)}: {type(e).__name__}: {e}")
-    state.setdefault("rereads", {})[day_iso] = _iso(now)
-    revs = state.setdefault("revisions", {}).setdefault(day_iso, {})
-    n_rev = 0
-    for loc in locs:
-        lid = loc["id"]
-        resolved = ((entries.get(lid) or {}).get("urma") or {}).get("precip") or {}
-        if not resolved.get("resolved"):
-            continue
-        vals = [totals.get(_iso(h), {}).get(lid) for h in hours_by_loc[lid]]
-        if any(v is None for v in vals):
-            continue   # a re-read short of the day's hours says nothing about the total
-        total_dec = sum(exact("precip", v) for v in vals)
-        total = cut(total_dec, EXACT_UNIT["precip"])
-        value = half_up(total_dec, DAY_UNIT["precip"])
-        # owner's decision 2026-09-27: a revision when the exact totals differ
-        # by a hundredth of an inch or more OR the rounded hundredths differ
-        differs = abs(_dec(total) - _dec(resolved["exact"])) >= Decimal("0.01") or value != resolved.get("value")
-        before = revs.get(lid)
-        if differs:
-            rec = {"value": value, "exact": total, "at": _iso(now)}
-            if before is None or before.get("exact") != rec["exact"]:
-                revs[lid] = rec
-                changed.add((lid, day_iso))
-                n_rev += 1
-        elif before is not None:
-            # the rerun came back to the resolved total: the revision is
-            # withdrawn, and None stays as the record of that so a rebuild
-            # does not resurrect it from the day file
-            revs[lid] = None
-            changed.add((lid, day_iso))
-            n_rev += 1
-    if not revs:
-        state["revisions"].pop(day_iso, None)
-    status["reread"] = {"day": day_iso, "hours": len(totals), "revisions": n_rev}
-    return changed
 
 
 def precip_sweep_due(state: dict, now: dt.datetime) -> bool:
@@ -1947,8 +1821,8 @@ def backfill_advance(product: str, state: dict, t: dt.datetime) -> None:
 
 def backfill_lane(store: Storage, state: dict, locs: list, lattice: dict, cache: dict, grid_index: dict,
                   now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
-    """With the remaining budget, walk both products backwards, newest
-    first, alternating so the two fill in together. Hours within
+    """With the remaining budget, walk the products backwards, newest
+    first, alternating when there is more than one. Hours within
     BACKFILL_FRAME_DAYS get frames; older ones are point reads only. An
     hour that fails to read is skipped, like a missing one."""
     touched: set = set()
@@ -2094,9 +1968,9 @@ def health_results(state: dict, status: dict, now: dt.datetime) -> dict:
         ps = state["products"][p]
         ok = any(s.startswith(p + " ") for s in status["read"]) or status["backfilledBy"].get(p, 0) > 0
         failed = any(s.startswith(p + " ") for s in status["errors"])
-        # a failure outside the product lanes (the rebuild, a re-read, the
-        # prune, a refused snapshot write) is the lane's failure as well
-        failed = failed or any(not s.startswith(("rtma ", "urma ")) for s in status["errors"])
+        # a failure outside the product lanes (the rebuild, the prune, a
+        # refused snapshot write) is the lane's failure as well
+        failed = failed or any(not s.startswith(tuple(q + " " for q in PRODUCTS)) for s in status["errors"])
         newest, since = ps.get("newest"), ps.get("since")
         overdue = False
         if newest:
@@ -2113,7 +1987,10 @@ def _health(store: Storage, state: dict, status: dict, now: dt.datetime) -> list
     """Advance the lane's failure streaks and name the alarms they raise."""
     try:
         health = arch.update_health(store, health_results(state, status, now), now, key=HEALTH_KEY)
-        return ["analysis: no %s hour readable for %d passes" % (p, health[p]["fail_streak"]) for p in arch.alarms_in(health)]
+        # a product the lane no longer reads keeps its last streak in the
+        # file and raises nothing
+        return ["analysis: no %s hour readable for %d passes" % (p, health[p]["fail_streak"])
+                for p in arch.alarms_in(health) if p in PRODUCTS]
     except Exception as e:  # noqa: BLE001
         status["errors"].append(f"health: {type(e).__name__}: {e}")
         return []
@@ -2123,9 +2000,9 @@ def _health(store: Storage, state: dict, status: dict, now: dt.datetime) -> list
 def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) -> int:
     """Entry point. Returns 1 only when every read this pass failed, so the
     scheduler flags an outage; a missing object is an absence, reported and
-    never a failure. Each lane is guarded on its own so one product's
-    trouble never costs the other product, the day rebuild, the state or
-    the indexes, which are written in every case."""
+    never a failure. Each lane is guarded on its own so one lane's trouble
+    never costs the day rebuild, the state or the indexes, which are
+    written in every case."""
     t0 = time.time()
     now = now or dt.datetime.now(dt.timezone.utc)
     gw.set_user_agent(cfg.get("user_agent", ""))
@@ -2144,10 +2021,14 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
     state = load_state(store)
     cache: dict = {}
     grid_index = (_read_json(store, GRID_INDEX_KEY) or {}).get("frames") or {}
+    # the frames of a product the lane no longer reads (URMA, dropped
+    # 2026-09-30) leave the index; the files stay where they are
+    for p in list(grid_index):
+        if p not in PRODUCTS:
+            del grid_index[p]
     touched: set = set()
     try:
-        # 1. live hours (each product on its own), then 2. the days they
-        # touch (and any day due to close)
+        # 1. live hours, then 2. the days they touch (and any day due to close)
         for product in PRODUCTS:
             try:
                 touched |= live_lane(store, product, state, locs, lattice, cache, grid_index, now, deadline, status)
@@ -2159,17 +2040,7 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
             _fail(status, f"days to close: {type(e).__name__}: {e}")
         status["days"] += rebuild_days(store, touched, locs, cache, now, state)
         save_state(store, state, now)
-        # 3. one day's URMA precipitation re-read, when one is due
-        if not deadline.over(RESERVE_SECONDS + 120):
-            try:
-                day_iso = reread_due(store, state, locs, now)
-                if day_iso:
-                    changed = reread_precip(store, day_iso, state, locs, now, deadline, status, cache)
-                    status["days"] += rebuild_days(store, changed, locs, cache, now, state)
-                    save_state(store, state, now)
-            except Exception as e:  # noqa: BLE001
-                _fail(status, f"urma reread: {type(e).__name__}: {e}")
-        # 3b. once a day, the precipitation of hours whose analysis never landed
+        # 3. once a day, the precipitation of hours whose analysis never landed
         if not deadline.over(RESERVE_SECONDS + 120) and precip_sweep_due(state, now):
             try:
                 changed = precip_sweep(store, state, locs, lattice, cache, grid_index, now, deadline, status)
@@ -2177,12 +2048,13 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
                 save_state(store, state, now)
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"precipitation sweep: {type(e).__name__}: {e}")
-        # 3c. the CSV files of listed days that lack them, a few a pass
+        # 3b. listed days without their CSV files or in an older layout, a few a pass
         if not deadline.over(RESERVE_SECONDS + 120):
             try:
-                status["days"] += csv_fill(store, state, locs, cache, now, deadline, status)
+                status["days"] += refresh_days(store, state, locs, cache, now, deadline, status)
+                save_state(store, state, now)
             except Exception as e:  # noqa: BLE001
-                _fail(status, f"csv fill: {type(e).__name__}: {e}")
+                _fail(status, f"refresh days: {type(e).__name__}: {e}")
         # 4. backfill with what remains, then the days it touched
         try:
             bt = backfill_lane(store, state, locs, lattice, cache, grid_index, now, deadline, status)

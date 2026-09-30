@@ -4,23 +4,23 @@ The output of a real local run of the lane's own code against NOAA Open Data and
 2026-09-29 (a fresh local root; `read_hour`, `write_hour`, `write_precip_only` and
 `rebuild_days` from `pipeline/analysis.py`, with the reads in a thread pool, for the thirty
 days to 20:09 UTC, 1,434 product-hours, no absent hours and no errors), trimmed so the samples
-tree stays small. Nothing here is invented. Every value is the job's own read of the RTMA and
-URMA files at the sixty-seven settlement locations of `config/analysis_locations.json`.
+tree stays small. Nothing here is invented. Every value is the job's own read of the RTMA
+files at the sixty-seven settlement locations of `config/analysis_locations.json`.
 
 What was kept. `index.json` with its `days` list cut to the newest six local days, 2026-09-24
 to 2026-09-29, and its `dayStatus` cut to match; every `days/` and `loc/` file of those six
 days (2026-09-29 is the live day, and 2026-09-24 to 2026-09-28 are final with their
 precipitation resolved at all sixty-seven places, so `lastResolvedDay` is 2026-09-28); and, per
-product and variable, the newest four frames the run had made (RTMA 16 to 19 UTC and URMA 10
-to 13 UTC on 2026-09-29), with `grid/index.json` rewritten to list only those. Every frame
-carries `windows` for all sixty-seven places.
+variable, the newest four frames the run had made (16 to 19 UTC on 2026-09-29), with
+`grid/index.json` rewritten to list only those. Every frame carries `windows` for all
+sixty-seven places.
 
 One thing in the data is NOAA's, not the job's. `rtma2p5.t19z` of 2026-09-23 is not on NOAA
 Open Data; the run read it from NOMADS (`source: "nomads"` in its archive document), so every
 place's RTMA 2026-09-23 is 24 of 24 hours. That day is outside the six kept here.
 
-The values follow schema 2 (docs/analysis.md): RTMA resolves and URMA is shown for
-comparison, the archive keeps kelvin, metres per second and millimetres, the day's aggregate is
+The values follow schema 2 (docs/analysis.md): RTMA resolves, the archive keeps kelvin,
+metres per second and millimetres, the day's aggregate is
 rounded once with the exact figure cut to a thousandth (precipitation a ten-thousandth of an
 inch), and each row's precipitation is the accumulation over the hour that starts at its stamp.
 
@@ -35,3 +35,11 @@ every other file is known not published) and asked for the day's values as CSV. 
 rebuilt from the run's own archive with that code, which added `finalAt` to each RTMA entry (null on
 these days, which were final before the field existed) and wrote `csv/<day>-raw.csv` and
 `csv/<day>-processed.csv` for each; no value changed.
+
+On 2026-09-30 the owner dropped URMA from the lane and the page. The run's own archive was
+rewritten with that code (`load_state`, then `refresh_days` over every listed day, then the
+indexes, at the run's time of 2026-09-29 20:20 UTC): the day and place files lost their `urma`
+entries and rows and each precipitation total its `revised` field, the CSV files lost their
+`product` column, the index lost `sources.urma`, and the four URMA frames per variable left the
+tree with their `grid/index.json` entries. Every RTMA value of the 2,077 place-days of the run is
+unchanged.

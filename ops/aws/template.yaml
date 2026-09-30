@@ -514,10 +514,10 @@ Resources:
         Input: '{"job": "daily"}'
         RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 }
   # The analysis lane has its own schedule rather than a place in a chain:
-  # RTMA lands about 47 minutes after each hour and URMA about seven hours
-  # after, so :08 catches each RTMA hour on the pass after it lands, and a
-  # pass may spend its whole budget walking the thirty-day backfill, which
-  # no chained lane could wait behind. Its minute is between the observation
+  # RTMA lands about 47 minutes after each hour, so :08 catches each hour
+  # on the pass after it lands, and a pass may spend its whole budget
+  # walking the thirty-day backfill, which no chained lane could wait
+  # behind. Its minute is between the observation
   # lane (:00) and the quote lane (:03), and the pass caps itself well under
   # ten minutes (pipeline/analysis.py PASS_CAP_SECONDS) so two never overlap.
   ScheduleAnalysis:

@@ -490,7 +490,7 @@
   "lat": 25.7703,
   "lon": -80.1982,
   "tz": "America/New_York",
-  "note": "Ruling of 2026-09-29: Miami settles downtown, at the city's administration building, rather than at City Hall on Dinner Key in Coconut Grove. The position's own grid point, 1871, 169, is water to URMA, so the nearest land grid point settles.",
+  "note": "Ruling of 2026-09-29: Miami settles downtown, at the city's administration building, rather than at City Hall on Dinner Key in Coconut Grove. The position's own grid point, 1871, 169, counts as water, so the nearest land grid point settles.",
   "px": 804.877,
   "py": 554.811,
   "cell": {

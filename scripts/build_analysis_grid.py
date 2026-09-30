@@ -28,8 +28,8 @@ a settlement point. It is the grid point whose square contains the position,
 which is the nearest cell, fractional i and j rounded half up, as
 pipeline.grib2.nearest_cell computes it; the script checks that for every
 location and refuses to write a file where they differ, except where the
-list records why (Miami, whose own square is water to the analysis, settles
-at the nearest land point). The G184 cell is (i - 200, j), the same point on
+list records why (Miami, whose own square counts as water, settles at the
+nearest land point). The G184 cell is (i - 200, j), the same point on
 the ground: G184 is the wexp grid without its western expansion. The lattice inverts the
 site's fitted screen transform and its Albers projection (pipeline/basemap.py)
 to a longitude and latitude, then goes forward through the Lambert projection

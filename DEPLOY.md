@@ -79,9 +79,9 @@ creates the `market` schedule (every 10 minutes, offset from the observation job
 the exchange's listed contracts; no credential is involved. The stack also creates the `analysis`
 schedule (`cron(8/10 * * * ? *)`, every ten minutes at :08, no retry) for the gridded-analysis
 lane, which runs on its own rather than in a chain because a pass may spend its whole budget on
-the thirty-day backfill (`docs/analysis.md`). It reads RTMA and URMA from NOAA Open Data
-(`noaa-rtma-pds`, `noaa-urma-pds`; public, no credential) and writes `data/snapshots/analysis/`
-and `data/archive/analysis/`. The page it feeds, `analysis-resolution.html`, is unlisted and
+the thirty-day backfill (`docs/analysis.md`). It reads RTMA from NOAA Open Data
+(`noaa-rtma-pds`; public, no credential), and from NCEP's NOMADS server a file NOAA Open Data
+lacks, and writes `data/snapshots/analysis2/` and `data/archive/analysis2/`. The page it feeds, `analysis-resolution.html`, is unlisted and
 `noindex`. `ReaskApiKey` is an optional parameter for the vendor lane (section 10). Outputs:
 
     aws cloudformation describe-stacks --stack-name weather-tools-site \
@@ -178,9 +178,9 @@ takes minutes to an hour.
 - CloudWatch → Log groups → `/aws/lambda/weather-tools-site-pipeline` shows one JSON line per
   request; `archive/_runs/latest.json` in the bucket is the newest pass.
 - The `weather-tools-site-pipeline-errors` alarm is OK; `pipeline-silent` is OK.
-- `https://<domain>/data/snapshots/analysis/index.json` shows `sources.rtma.latest` within two
-  hours of now and `sources.urma.latest` within eight (each is the newest hour actually read);
-  `data/archive/_meta/health_analysis.json` is the lane's own streak file.
+- `https://<domain>/data/snapshots/analysis2/index.json` shows `sources.rtma.latest` within two
+  hours of now (the newest hour actually read); `data/archive/_meta/health_analysis.json` is the
+  lane's own streak file.
 
 ## 9. Operations
 

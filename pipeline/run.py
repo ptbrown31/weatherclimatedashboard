@@ -31,8 +31,8 @@ Jobs:
     catquotes    prices for the catalogue's monthly and annual contracts   (every 30 min)
     accuracy     the record builder's accuracy figures, copied from the
                  archive prefix it writes to when its manifest changes  (every 30 min, after catquotes)
-    analysis     gridded-analysis resolution at fifty population centres,
-                 RTMA and URMA from NOAA Open Data; its own schedule     (every 10 min, alone)
+    analysis     gridded-analysis resolution at the 67 settlement locations,
+                 RTMA from NOAA Open Data; its own schedule              (every 10 min, alone)
     daily        scorecard, normals, climate, season, catalogue, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
 """
@@ -71,8 +71,8 @@ def _register():
     JOBS["severe"] = severe.severe_pass
     JOBS["accuracy"] = accuracy.accuracy_pass
     # analysis is in no chain: it runs on its own schedule because RTMA lands
-    # at H+47 and URMA at H+7 h, and a pass may spend its whole budget on
-    # the backfill, which no chained lane could afford to wait behind
+    # at H+47, and a pass may spend its whole budget on the backfill, which
+    # no chained lane could afford to wait behind
     JOBS["analysis"] = analysis.analysis_pass
 
     def chain(*names):
