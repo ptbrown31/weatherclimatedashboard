@@ -29,3 +29,9 @@ from dates written into the script, and finds the frames it drives cell mode on 
 `windows`, so a later re-run of the job can replace this tree without touching the checks, as
 long as some day has a complete New York RTMA entry, some selectable day lists two RTMA
 temperature frames, and those frames carry windows.
+
+Later on 2026-09-29 the owner set the missing-hour rule (a day resolves on the hours available once
+every other file is known not published) and asked for the day's values as CSV. The kept days were
+rebuilt from the run's own archive with that code, which added `finalAt` to each RTMA entry (null on
+these days, which were final before the field existed) and wrote `csv/<day>-raw.csv` and
+`csv/<day>-processed.csv` for each; no value changed.

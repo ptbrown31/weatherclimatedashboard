@@ -402,6 +402,33 @@ class Rules(unittest.TestCase):
         self.assertTrue(s["precip"]["resolved"])
         self.assertEqual(s["precip"]["value"], 0.05)
 
+    def test_a_day_resolves_on_the_hours_available_once_the_rest_are_not_published(self):
+        # owner's decision 2026-09-29
+        hs = analysis.local_day_hours("2026-09-26", "America/New_York")
+        ph = hours_of([60.0 + i for i in range(24)], precip=0.01)
+        del ph[iso(hs[10])]                                  # 10:00 local on neither server
+        s = analysis.day_summary(ph, "America/New_York", "2026-09-26", NOW, missing=set(), pmissing=set())
+        self.assertEqual((s["final"], s["hours"], s["closed"]), (False, 23, False))    # still pending
+        s = analysis.day_summary(ph, "America/New_York", "2026-09-26", NOW, missing={iso(hs[10])},
+                                 pmissing={iso(hs[10])})
+        self.assertEqual((s["final"], s["finalAt"], s["hours"], s["complete"]), (True, iso(NOW), 23, False))
+        self.assertEqual(s["high"]["value"], 83)
+        self.assertEqual((s["precip"]["resolved"], s["precip"]["hours"], s["precip"]["value"]), (True, 23, 0.23))
+        # the file turns up later: the day stands on the hours it resolved on
+        ph[iso(hs[10])] = {"temp": 99.0, "wind": 5.0, "gust": 8.0, "precip": 1.0}
+        later = NOW + dt.timedelta(hours=3)
+        s2 = analysis.day_summary(ph, "America/New_York", "2026-09-26", later, prior=s, missing=set(), pmissing=set())
+        self.assertEqual((s2["final"], s2["finalAt"], s2["hours"], s2["high"]["value"]), (True, iso(NOW), 23, 83))
+        self.assertEqual((s2["precip"]["value"], s2["precip"]["resolvedAt"]), (0.23, iso(NOW)))
+        # never settled: 48 hours after the day it is closed, not final
+        end = analysis.day_end("2026-09-26", "America/New_York")
+        s3 = analysis.day_summary(ph, "America/New_York", "2026-09-26", end + dt.timedelta(hours=49),
+                                  missing=set(), pmissing=set())
+        del ph[iso(hs[10])]
+        s3 = analysis.day_summary(ph, "America/New_York", "2026-09-26", end + dt.timedelta(hours=49),
+                                  missing=set(), pmissing=set())
+        self.assertEqual((s3["final"], s3["closed"]), (False, True))
+
     def test_an_empty_day_is_absent(self):
         self.assertIsNone(analysis.day_summary({}, "America/New_York", "2026-09-26", NOW))
 
@@ -628,7 +655,7 @@ class Job(unittest.TestCase):
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
         for key, ctype, cache in self.st.puts:
             if key.startswith("snapshots/"):
-                self.assertEqual(ctype, "application/json", key)
+                self.assertEqual(ctype, "text/csv; charset=utf-8" if key.endswith(".csv") else "application/json", key)
                 self.assertIn(cache, (analysis.CACHE_FINAL, analysis.CACHE_LIVE), key)
         self.assertEqual(archive.LAST_STATUS["job"], "analysis")
         self.assertEqual(archive.LAST_STATUS["errors"], 0)
@@ -878,16 +905,20 @@ class Job(unittest.TestCase):
         for a, b in pairs:
             self.fx.bucket[b] = self.fx.bucket.pop(a)
 
-    def test_a_file_missing_from_open_data_is_read_from_nomads_after_three_hours(self):
-        # RTMA 2026-09-23 19Z reached NOMADS and never NOAA Open Data
+    def test_a_file_missing_from_open_data_is_read_from_nomads_half_an_hour_after_it_is_due(self):
+        # RTMA 2026-09-23 19Z reached NOMADS and never NOAA Open Data; a file
+        # on NOMADS counts as published (owner's decision 2026-09-29). RTMA
+        # usually lands 47 minutes after its hour, so NOMADS is asked from 77
         t = hour(2026, 9, 26, 12)
         self.fx.add_hour("rtma", t)
         self._to_nomads("rtma", t)
         empty = {"wexp": [], "g184": []}
-        res = analysis.read_hour("rtma", t, LOCS, empty, frames=False, now=t + dt.timedelta(hours=2, minutes=50))
-        self.assertEqual(res.status, "absent")
-        self.assertFalse(any("nomads" in u for u in self.fx.fetched))       # not asked before three hours
-        res = analysis.read_hour("rtma", t, LOCS, empty, frames=False, now=t + dt.timedelta(hours=3))
+        self.assertEqual(analysis.settled_after("rtma", t), t + dt.timedelta(minutes=77))
+        res = analysis.read_hour("rtma", t, LOCS, empty, frames=False, now=t + dt.timedelta(minutes=70))
+        self.assertEqual((res.status, res.precip_status), ("absent", "absent"))
+        self.assertFalse(any("nomads" in u for u in self.fx.fetched))       # not asked before it is due
+        self.assertFalse(analysis.absence_final("rtma", t, t + dt.timedelta(minutes=70)))
+        res = analysis.read_hour("rtma", t, LOCS, empty, frames=False, now=t + dt.timedelta(minutes=77))
         self.assertEqual((res.status, res.doc["source"], res.precip["source"]), ("ok", "nomads", "nomads"))
         self.assertEqual(res.doc["values"]["new-york-ny"]["temp"], 293.15)
         n = len(self.fx.fetched)
@@ -929,6 +960,72 @@ class Job(unittest.TestCase):
         self.assertEqual(self.read(analysis.precip_key("rtma", old))["source"], "nodd")
         self.assertIn(("new-york-ny", "2026-09-23"), touched)
         self.assertEqual(status["failed"], 0)
+
+    def test_an_hour_that_turns_up_after_the_day_resolved_is_shown_and_not_counted(self):
+        # New York 2026-09-26 with 12:00 local (16Z) on neither server when
+        # the day's last file lands: the day resolves on 23 hours; the file
+        # turns up the next morning and the row shows it, marked late
+        hs = analysis.local_day_hours("2026-09-26", "America/New_York")
+        state, cache, gi = analysis.new_state(), {}, {}
+        # after the midnight precipitation file is due (it is read with the next day's first hour)
+        now = hs[-1] + dt.timedelta(minutes=140)
+        gone = hs[12]
+        for h in hs + [hs[-1] + dt.timedelta(hours=1)]:
+            if h != gone:
+                self.fx.add_hour("rtma", h)
+                res = analysis.read_hour("rtma", h, LOCS, {"wexp": [], "g184": []}, frames=False, now=now)
+                analysis.write_hour(self.st, "rtma", h, res, gi, cache, now)
+        analysis._mark(state["products"]["rtma"], "missing", gone)
+        analysis._mark(state["products"]["rtma"], "pmissing", gone)       # the 11:00 row's accumulation
+        analysis.rebuild_days(self.st, {("new-york-ny", "2026-09-26")}, LOCS, cache, now, state)
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["final"], ny["hours"], ny["finalAt"]), (True, 23, iso(now)))
+        self.assertEqual((ny["precip"]["resolved"], ny["precip"]["hours"]), (True, 23))
+        # the late file
+        later = now + dt.timedelta(hours=8)
+        self.fx.add_hour("rtma", gone)
+        self.fx.values[("rtma", "temp", iso(gone))] = 310.15                # 98.6 F, which would move the high
+        res = analysis.read_hour("rtma", gone, LOCS, {"wexp": [], "g184": []}, frames=False, now=later)
+        analysis.write_hour(self.st, "rtma", gone, res, gi, cache, later)
+        analysis._unmark(state["products"]["rtma"], "missing", gone)
+        analysis.rebuild_days(self.st, {("new-york-ny", "2026-09-26")}, LOCS, cache, later, state)
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["hours"], ny["high"]["value"]), (23, 68))
+        row = next(r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]
+                   if r["t"] == iso(gone))
+        self.assertEqual((row["rtma"]["temp"], row["rtma"].get("late")), (98.6, True))
+
+    def test_the_day_is_written_as_raw_and_processed_csv(self):
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        self.fx.add_precip("rtma", t + dt.timedelta(hours=1))
+        self.fx.values[("rtma", "precip", iso(t + dt.timedelta(hours=1)))] = 2.54
+        self.assertEqual(self.run_pass(t + dt.timedelta(hours=1, minutes=50)), 0)
+        raw = self.st.get(analysis.CSV_RAW_KEY.format(day="2026-09-26")).decode().splitlines()
+        self.assertEqual(raw[0], ",".join(analysis.RAW_HEADER))
+        ny = [l.split(",") for l in raw[1:] if l.split(",")[1] == "new-york-ny" and l.split(",")[2] == "rtma"]
+        row = next(r for r in ny if r[4] == iso(t))
+        self.assertEqual(row[3:10], ["15", iso(t), "293.15", "5.0", "8.0", "2.54", iso(t + dt.timedelta(hours=1))])
+        self.assertEqual(row[10:], ["nodd", "nodd"])
+        day = self.st.get(analysis.CSV_DAY_KEY.format(day="2026-09-26")).decode().splitlines()
+        self.assertEqual(day[0], ",".join(analysis.DAY_HEADER))
+        p = next(l.split(",") for l in day[1:] if l.startswith("2026-09-26,new-york-ny,New York,NY,rtma,"))
+        self.assertEqual(p[9:11], ["68", "68.0"])                               # high, whole and exact
+
+    def test_listed_days_without_their_csv_files_get_them_a_few_a_pass(self):
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        self.assertEqual(self.run_pass(), 0)
+        # a day written before the CSV files existed: its day file is there, its CSVs are not
+        self.st.put(analysis.DAY_KEY.format(day="2026-09-24"), b'{"locations": {}}', "application/json")
+        for k in (analysis.CSV_RAW_KEY, analysis.CSV_DAY_KEY):
+            self.assertIsNone(self.st.get(k.format(day="2026-09-24")))
+        status = {"errors": [], "failed": 0}
+        analysis.csv_fill(self.st, analysis.load_state(self.st), LOCS, {}, NOW, archive.Deadline(600), status)
+        self.assertEqual(status["csvFilled"], {"days": 1, "left": 0})
+        # a day with no hours has no rows, so no files are written for it, and it is left to the next pass
+        self.assertIsNone(self.st.get(analysis.CSV_RAW_KEY.format(day="2026-09-24")))
+        self.assertIsNotNone(self.st.get(analysis.CSV_RAW_KEY.format(day="2026-09-26")))
 
     def test_a_message_on_another_grid_is_refused_and_reported(self):
         t = hour(2026, 9, 26, 19)
@@ -1326,18 +1423,22 @@ class Job(unittest.TestCase):
         state["rereads"]["2026-09-24"] = iso(now - dt.timedelta(hours=25))
         self.assertEqual(analysis.reread_due(self.st, state, LOCS, now), "2026-09-24")
 
-    def test_an_open_day_past_its_close_time_is_closed_without_a_new_hour(self):
+    def test_a_day_whose_other_files_are_not_published_resolves_on_the_hours_available(self):
+        # owner's decision 2026-09-29: a missing file does not hold a day open.
+        # One hour lands; the pass two days later walks the rest of the day,
+        # finds every other file on neither NOAA Open Data nor NOMADS, and the
+        # day resolves on the one hour it has, never closed
         t = hour(2026, 9, 26, 19)
         self.fx.add_hour("rtma", t)
         self.assertEqual(self.run_pass(), 0)
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
-        self.assertFalse(ny["closed"])
+        self.assertEqual((ny["final"], ny["closed"]), (False, False))
         later = analysis.day_end("2026-09-26", "America/Los_Angeles") + dt.timedelta(hours=49)
         self.assertEqual(self.run_pass(later), 0)
         day = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]
-        self.assertTrue(day["new-york-ny"]["rtma"]["closed"])
-        self.assertTrue(day["los-angeles-ca"]["rtma"]["closed"])
-        self.assertEqual(day["new-york-ny"]["rtma"]["hours"], 1)
+        self.assertEqual((day["new-york-ny"]["rtma"]["final"], day["new-york-ny"]["rtma"]["closed"]), (True, False))
+        self.assertEqual((day["new-york-ny"]["rtma"]["hours"], day["new-york-ny"]["rtma"]["high"]["value"]), (1, 68))
+        self.assertIn(iso(t - dt.timedelta(hours=1)), self.state()["products"]["rtma"]["missing"])
 
     def test_old_frames_are_pruned_once_a_day(self):
         old = NOW - dt.timedelta(days=analysis.FRAME_KEEP_DAYS + 1)

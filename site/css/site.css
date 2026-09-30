@@ -687,6 +687,7 @@ table.lad th{font-weight:600;border-bottom:1px solid var(--line)}
 #vdots g.dot{cursor:pointer;outline:none}
 #vdots g.dot:focus-visible circle:last-of-type{stroke:var(--accent);stroke-width:2.2px;stroke-dasharray:none}
 #anaBar #anaNewest{margin:0;min-width:0}   /* wraps at phone width; nowrap pushed the page to 469 px at 390 */
+#anaBar .anacsv{font-size:.85rem;color:var(--muted);min-width:0}
 /* cell mode: the window cells and the resolving cell open the panel like a
    dot; the value text on a dot is in the ink, the muted grey was faint on
    the dark theme */

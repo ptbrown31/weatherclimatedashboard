@@ -46,6 +46,8 @@ window.WXAnalysis = (() => {
   const DATA = 'analysis2/';
   // the product that resolves, from the index; RTMA until it says otherwise
   const settles = () => (S.index && S.index.resolvesOn) || 'rtma';
+  // the CSV links under the controls, set once the bar is built
+  let setCsv = () => {};
   // the hourly variables as the captions name them; the keys are the files'
   const HOURLY = { temp: 'temperature', wind: 'sustained wind', gust: 'gust', precip: 'precipitation' };
   // the precision the loc files carry each hourly value at (docs/analysis.md
@@ -147,7 +149,10 @@ window.WXAnalysis = (() => {
     if (varKey === 'precip' && val.hours != null) n = val.hours;
     const count = n + ' of ' + total + ' hours';
     const provisional = kind !== 'final';
-    const label = kind === 'closed' ? 'closed, ' + count : (kind !== 'final' && n < total) ? kind + ', ' + count : kind;
+    // a day short of hours says so whatever its state: a final day that
+    // resolved on the hours available (owner's decision 2026-09-29) reads
+    // "final, 23 of 24 hours"
+    const label = kind === 'closed' ? 'closed, ' + count : n < total ? kind + ', ' + count : kind;
     return { value: val.value, exact: val.exact, at: val.at || null, revised: val.revised || null,
              kind, label, hours: n, total, provisional,
              word: kind === 'closed' ? 'closed' : kind === 'comparison' ? 'value' : provisional ? 'running' : 'resolved',
@@ -247,6 +252,20 @@ window.WXAnalysis = (() => {
     bar.insertBefore(daySel, strip);
     bar.insertBefore(locSel, strip);
     bar.insertBefore(zoomCellB, strip);
+    // the day's values as CSV, raw (the files' own units, every hour and
+    // place) and processed (the day's values as they resolve), rewritten by
+    // the job with the day
+    const csvLinks = h('span', { class: 'anacsv', id: 'anaCsv' });
+    bar.insertBefore(csvLinks, strip);
+    setCsv = () => {
+      csvLinks.textContent = '';
+      if (!S.day) return;
+      const at = kind => WXD.base() + '/snapshots/' + DATA + 'csv/' + S.day + '-' + kind + '.csv';
+      csvLinks.appendChild(document.createTextNode('CSV of the day: '));
+      csvLinks.appendChild(h('a', { href: at('raw'), download: S.day + '-raw.csv', text: 'raw values' }));
+      csvLinks.appendChild(document.createTextNode(' · '));
+      csvLinks.appendChild(h('a', { href: at('processed'), download: S.day + '-processed.csv', text: 'processed values' }));
+    };
 
     // ---- the map: land, the frame under a clip of the states, outlines, dots
     const svg = el('svg', { viewBox: '0 0 960 600', id: 'vmap' });
@@ -808,6 +827,7 @@ window.WXAnalysis = (() => {
       stop();
       pressed();
       setLegend();
+      setCsv();
       if (what === 'day' || what === 'init') await showDay();
       else drawDots();
       writeUrl();
@@ -1086,7 +1106,14 @@ window.WXAnalysis = (() => {
                                      'URMA temp', 'URMA wind', 'URMA gust', 'URMA precip'].map((s, i) => h('th', { class: i > 1 ? 'num' : '', text: s }))));
       t.appendChild(thead);
       const tbody = h('tbody');
-      const cell = (o, k, dec) => { const v = (o || {})[k]; return h('td', { class: 'num' + (v == null ? ' dim' : ''), text: v == null ? '·' : Number(v).toFixed(dec) }); };
+      // an hour whose file came after the day resolved is shown, dimmed, and
+      // not counted (owner's decision 2026-09-29)
+      const cell = (o, k, dec) => {
+        const v = (o || {})[k], late = !!(o && (k === 'precip' ? o.pcpLate : o.late));
+        const td = h('td', { class: 'num' + (v == null || late ? ' dim' : '') + (late ? ' late' : ''), text: v == null ? '·' : Number(v).toFixed(dec) });
+        if (late) td.title = 'arrived after the day resolved; not counted';
+        return td;
+      };
       hours.forEach(hr => {
         const tr = h('tr', {}, [h('td', { text: hr.local + ':00' }), h('td', { text: hr.t.slice(5, 16).replace('T', ' ') })]);
         ['rtma', 'urma'].forEach(p => { ['temp', 'wind', 'gust', 'precip'].forEach(k => tr.appendChild(cell(hr[p], k, hourlyDec(k)))); });
@@ -1094,8 +1121,10 @@ window.WXAnalysis = (() => {
       });
       t.appendChild(tbody);
       wrap.appendChild(t);
+      const anyLate = hours.some(hr => ['rtma', 'urma'].some(p => hr[p] && (hr[p].late || hr[p].pcpLate)));
       wrap.appendChild(h('p', { class: 'cap', text: 'Temperature in °F and wind and gust in mph to a thousandth, cut rather than rounded; precipitation in inches to a ten-thousandth over the hour that starts at the stamp, which NOAA files under the hour it ends. '
-        + 'Each temperature, wind and gust is the analysis at the top of that hour in ' + L.tz + '.' }));
+        + 'Each temperature, wind and gust is the analysis at the top of that hour in ' + L.tz + '.'
+        + (anyLate ? ' A dimmed value came after the day resolved and is not counted.' : '') }));
       return wrap;
     }
 

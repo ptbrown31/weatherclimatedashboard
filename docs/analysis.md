@@ -55,8 +55,10 @@ missing from NOAA Open Data: the RTMA analysis of 2026-09-23 19Z, which NOMADS h
 there at 19:46Z) and which never reached the bucket. NCEP's NOMADS server keeps the last
 fourteen days of both products under the same directory and file names
 (`https://nomads.ncep.noaa.gov/pub/data/nccf/com/{rtma,urma}/prod/`) and answers byte ranges
-with 206; a file not on NOAA Open Data three hours after its hour is read from there, while
-NOMADS still keeps it (section 5), and every archive document records its `source`.
+with 206. A file on NOMADS counts as published (owner's decision 2026-09-29): a file NOAA Open
+Data does not have half an hour after the product usually lands (`lagMinutes` plus
+`NOMADS_AFTER_MINUTES = 30`) is read from there while NOMADS still keeps it (section 5), a file on
+neither by then is not published, and every archive document records its `source`.
 
 **Products and where each variable comes from.**
 
@@ -155,11 +157,18 @@ There is no analogue of the station report conventions (last report in the hour,
 tenths group); the page says this in its method note.
 
 **Final, provisional, comparison.** RTMA resolves (owner's decision 2026-09-29;
-`index.resolvesOn`). An RTMA day's high, low, gust and wind are *final* when every hourly
-analysis file of the day has been read (`complete`), and its precipitation is *resolved* when
-every hourly precipitation file of the day has been read (`precip.hours` equal to the day's
-hour count), stamped `resolvedAt` by the first pass that found them all. NOAA never revises an
-RTMA file, so neither changes afterwards and RTMA carries no revision. URMA is read, stored
+`index.resolvesOn`). An RTMA day's high, low, gust and wind are *final* once every hour's
+analysis file is either read or known not published, and the value is then the hours available,
+so a missing file does not hold the day open (owner's decision 2026-09-29, the owner's terms:
+"the contract will resolve based on available hours within the contract date"); `finalAt` is the
+pass that found it so, and a day that resolved short says so (`hours < of`, labelled "final, 23 of
+24 hours" on the page). Its precipitation *resolves* the same way over the rows' accumulations,
+the last being the one that ends at midnight, stamped `resolvedAt`. A file is known not
+published when it was on neither NOAA Open Data nor NOMADS half an hour after it was due; the
+state lists such hours (`missing`, `pmissing`) and unlists one that turns up. NOAA never revises an
+RTMA file and a final value stands, so an hour that turns up after the day resolved is shown in the
+place file, marked `late` (or `pcpLate`), dimmed on the page, and not counted. A day whose files
+never come is closed 48 hours after its local end, never final. RTMA carries no revision. URMA is read, stored
 and shown for **comparison** and is never final (`final` is always false for it). Because its
 precipitation files are rewritten for up to eight days, its comparison total keeps the schema 1
 rules: resolved at the first rebuild with every hour, the last eight local days re-read once a
@@ -344,6 +353,16 @@ page's running sum of the rows is pinned to the summary's exact total once every
 read. A product missing at an hour is `null`, and a product read at an hour whose
 precipitation file had no value yet has `precip: null`.
 
+**`snapshots/analysis2/csv/YYYY-MM-DD-raw.csv` and `-processed.csv`** — the day as CSV (owner's
+decision 2026-09-29), rewritten with the day file. The raw file has one row per place, product and
+hour in the files' own units: `date, location, product, local_hour, valid_utc, temp_k, wind_ms,
+gust_ms, precip_mm, precip_file_utc, analysis_source, precip_source`, the precipitation being the
+hour that starts at `valid_utc` and filed under `precip_file_utc`, nothing converted or rounded.
+The processed file has one row per place and product: `date, location, name, state, product,
+final, final_at, hours, of, high_f, high_exact, low_f, low_exact, gust_mph, gust_exact, wind_mph,
+wind_exact, precip_in, precip_exact, precip_hours, precip_resolved, precip_resolved_at`. The page
+links both for the selected day.
+
 **`snapshots/analysis2/grid/index.json`** — which frames exist.
 
 ```
@@ -388,7 +407,8 @@ locations' accumulation for the hour ending then, in millimetres to a millionth,
 rewritten: `read` (a file was decoded), `complete` (every place has a value), `missing` (the
 places whose cell was absent from the bitmap), `source` and `values`; a rewrite only ever adds
 values, never changes one. Together they let any day file be rebuilt from the archive without
-re-reading NOAA. `archive/analysis2/_meta/state.json` holds the cursors: per product `newest` (the
+re-reading NOAA. `archive/analysis2/_meta/state.json` holds the cursors: per product `missing` and `pmissing` (the
+hours whose analysis or precipitation file is known not published, pruned past 33 days), `newest` (the
 newest hour read), `scanned` (how far the live walk has looked), `since` (when the lane first
 looked), `gaps` (hours passed without a read, retried for 48 hours), `precipPending`
 (archived hours whose precipitation file is still being refetched) and `reads`; per product
@@ -431,9 +451,11 @@ timeout is never what stops it.
    file and do the same. Write the archive hour (once), the precipitation key, the four
    frames and `grid/index.json`; queue the hour in `precipPending` when its precipitation
    is short and its wait has not run out. A file NOAA Open Data does not have is looked for
-   on NOMADS once it is `NOMADS_AFTER_HOURS = 3` hours past its hour and until
+   on NOMADS from `settled_after` (the product's lag plus `NOMADS_AFTER_MINUTES = 30`) until
    `NOMADS_KEEP_HOURS` (thirteen days, a day short of what NOMADS keeps), and the archive
-   document records `source: "nomads"`. A `.idx` that is on neither (403 or 404) is an
+   document records `source: "nomads"`; a file on neither from then is not published and its
+   hour goes on the state's `missing` (or `pmissing`) list, so the days it belongs to resolve
+   without it. A `.idx` that is on neither (403 or 404) is an
    *absence*: the hour becomes a gap, `scanned` moves past it, and the walk continues. The
    absent hour's precipitation file is read all the same, on every retry of the gap until
    every place has a value, and stored without an archive hour. After one refused
@@ -593,8 +615,10 @@ report conventions have no analogue here.
   a late newest hour; the place file carries the precipitation in the row of the hour it
   starts; the day's precipitation runs midnight to midnight; a value the file holds exactly is
   converted exactly and the aggregate rounded once; an RTMA day is final and URMA only
-  compares; a file missing from NOAA Open Data is read from NOMADS after three hours and not
-  past thirteen days, and the sweep reads a missing analysis from there; an
+  compares; a file missing from NOAA Open Data is read from NOMADS half an hour after it is due
+  and not past thirteen days, and the sweep reads a missing analysis from there; a day resolves
+  on the hours available once the rest are not published, and an hour that turns up later is
+  shown and not counted; the day is written as raw and processed CSV; an
   hour whose analysis never lands still adds its precipitation, in the live lane, in the
   backfill and through the daily sweep, without counting toward the day's analyses, and a
   refused file ends a product's sweep for the day;
@@ -605,8 +629,8 @@ report conventions have no analogue here.
   hatched and carry no `data-contract-url`, the provisional pill appears when `rtma` is
   incomplete, the chart rule says resolved on a final RTMA day and value on the URMA
   comparison, the exact figures are cut to a thousandth, `?loc=` opens the panel on load, and
-  the 503 degradation shows "No data". Fixtures under `samples/snapshots/analysis2/` come from
-  a real local run of the job.
+  the 503 degradation shows "No data", and the day's CSV links fetch the raw and processed files.
+  Fixtures under `samples/snapshots/analysis2/` come from a real local run of the job.
 - Cell mode: at the national extent no cell outline is drawn; after Zoom to the cell on a
   fixture place the resolving cell's outline exists with the `--ink` stroke, the label carries the
   dot's value and a leader line, the raster image is hidden and the caption says so, the window

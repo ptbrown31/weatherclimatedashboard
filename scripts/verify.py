@@ -920,6 +920,17 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} analysis: the days after it are marked provisional and it is not",
                         bool(newer) and all("provisional" in t for t in newer)
                         and not any("provisional" in t for v, t in dflt["opts"] if v == ana_rday), str(dflt["opts"][:3]))
+                # the day's values as CSV (owner's decision 2026-09-29): the two
+                # links follow the day and fetch the job's own files
+                ana_csv = page.evaluate("""async () => { const out = [];
+                  for (const a of document.querySelectorAll('#anaCsv a')) {
+                    const r = await fetch(a.href); out.push([a.getAttribute('href'), r.status, (await r.text()).split('\\n')[0]]); }
+                  return out; }""")
+                chk.add(f"{scheme} analysis: the day's CSV links fetch the raw and processed files with their headers",
+                        len(ana_csv) == 2 and ana_csv[0][0].endswith(f"csv/{ana_rday}-raw.csv") and ana_csv[0][1] == 200
+                        and ana_csv[0][2].startswith("date,location,product,local_hour,valid_utc,temp_k")
+                        and ana_csv[1][0].endswith(f"csv/{ana_rday}-processed.csv") and ana_csv[1][1] == 200
+                        and ana_csv[1][2].startswith("date,location,name,state,product,final"), str(ana_csv)[:220])
 
                 def ana_no_resolved(route):
                     resp = route.fetch(); d = json.loads(resp.text())
