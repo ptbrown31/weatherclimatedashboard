@@ -343,16 +343,88 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 acc_served = strip_markup(urllib.request.urlopen(f"{srv.url}/accuracy.html").read().decode())
                 chk.add(f"{scheme} accuracy: the page serves its own text without running a script",
                         len(acc_served.split()) >= 300, f"words={len(acc_served.split())}")
-                # the working paper sits at one fixed URL that each new version replaces
-                paper_sel = "a[href='papers/Brown_2026_Improvement_of_Daily_Temperature_Forecasts_from_a_Prediction_Market.pdf']"
-                acc_paper = page.locator(f".wrap {paper_sel}").count()
+                # ---- the two pages at the top, the research brief and the working
+                # paper's first page, side by side at one size. The paper is the
+                # archive's, so every link to it is its DOI and nothing links a copy.
+                doi_sel = "a[href='https://doi.org/10.31223/X5522D']"
+                acc_doi = page.locator(f".wrap {doi_sel}").count()
+                acc_copy = page.locator(".wrap a[href*='papers/']").count()
+                row = page.evaluate("""() => {
+                    const f = [...document.querySelectorAll('.paperrow .pf-frame')];
+                    const im = f.map(e => e.querySelector('img'));
+                    if (f.length !== 2 || !im.every(Boolean)) return null;
+                    const r = f.map(e => e.getBoundingClientRect()), q = im.map(e => e.getBoundingClientRect());
+                    return {order: f.map(e => e.classList.contains('pf-brief') ? 'brief' : e.classList.contains('pf-paper') ? 'paper' : '?'),
+                            sameTop: Math.abs(r[0].top - r[1].top) < 1, leftFirst: r[0].right <= r[1].left,
+                            sameSize: Math.abs(q[0].width - q[1].width) < 1 && Math.abs(q[0].height - q[1].height) < 1,
+                            loaded: im.every(e => e.complete && e.naturalWidth > 0), w: Math.round(q[0].width)};
+                }""")
+                chk.add(f"{scheme} accuracy: the brief and the paper's first page sit side by side at one size, brief to the left",
+                        bool(row) and row["order"] == ["brief", "paper"] and row["sameTop"] and row["leftFirst"]
+                        and row["sameSize"] and row["loaded"] and row["w"] > 380, str(row))
+                # a click anywhere on the paper reaches the archive, so the frame is
+                # probed by what the pointer would hit, its corners and its middle
+                paper_hit = page.evaluate("""() => {
+                    const a = document.querySelector('.paperrow a.pf-paper'); if (!a) return null;
+                    a.scrollIntoView({block: 'center'});
+                    const r = a.getBoundingClientRect();
+                    const pts = [[.5, .5], [.02, .02], [.98, .02], [.02, .98], [.98, .98], [.5, .97]];
+                    const miss = pts.filter(([x, y]) => {
+                        const e = document.elementFromPoint(r.left + x * r.width, r.top + y * r.height);
+                        return !(e && a.contains(e));
+                    });
+                    return {href: a.getAttribute('href'), download: a.hasAttribute('download'), miss: miss.length,
+                            fits: r.top >= 0 && r.bottom <= innerHeight};
+                }""")
+                chk.add(f"{scheme} accuracy: anywhere on the paper's first page is one link to its DOI",
+                        bool(paper_hit) and paper_hit["href"] == "https://doi.org/10.31223/X5522D"
+                        and not paper_hit["download"] and paper_hit["miss"] == 0 and paper_hit["fits"], str(paper_hit))
+                # the brief opens in a dialog with its download; the page stays put
+                url_before = page.url
+                page.locator(".paperrow a.pf-brief").click(); page.wait_for_timeout(900)
+                dlg = page.evaluate("""() => {
+                    const d = document.getElementById('briefDlg'); if (!d) return null;
+                    const im = d.querySelector('img'), a = d.querySelector('a[download]');
+                    return {open: d.open, modal: d.matches(':modal'), loaded: !!im && im.complete && im.naturalWidth > 0,
+                            href: a ? a.getAttribute('href') : '',
+                            plain: document.querySelector('.paperrow a.pf-brief').getAttribute('href')};
+                }""")
+                pdfs = []
+                for h_ in ([dlg["href"], dlg["plain"]] if dlg else []):
+                    try:
+                        pdfs.append(urllib.request.urlopen(f"{srv.url}/{h_}").read(5) == b"%PDF-")
+                    except Exception:
+                        pdfs.append(False)
+                page.keyboard.press("Escape"); page.wait_for_timeout(200)
+                esc_closed = not page.evaluate("document.getElementById('briefDlg').open")
+                page.locator("#briefEnlarge").click(); page.wait_for_timeout(300)
+                reopened = page.evaluate("document.getElementById('briefDlg').open")
+                page.mouse.click(4, 4); page.wait_for_timeout(200)
+                backdrop_closed = not page.evaluate("document.getElementById('briefDlg').open")
+                chk.add(f"{scheme} accuracy: the brief opens full size in a dialog with its PDF to download, and Escape or the backdrop closes it",
+                        bool(dlg) and dlg["open"] and dlg["modal"] and dlg["loaded"] and page.url == url_before
+                        and pdfs == [True, True] and esc_closed and reopened and backdrop_closed,
+                        f"{dlg} pdfs={pdfs} esc={esc_closed} reopen={reopened} backdrop={backdrop_closed}")
+                ph_ctx = browser.new_context(color_scheme=scheme, viewport={"width": 390, "height": 844})
+                ph = ph_ctx.new_page()
+                ph.goto(f"{srv.url}/accuracy.html"); ph.wait_for_timeout(1200)
+                narrow = ph.evaluate("""() => {
+                    const row = document.querySelector('.paperrow');
+                    const f = [...document.querySelectorAll('.paperrow .pf-frame')].map(e => e.getBoundingClientRect());
+                    return {pair: f.length === 2 && Math.abs(f[0].top - f[1].top) < 1 && f[0].right <= f[1].left,
+                            fits: !!row && row.getBoundingClientRect().right <= innerWidth && row.scrollWidth <= row.clientWidth};
+                }""")
+                ph_ctx.close()
+                chk.add(f"{scheme} accuracy: at phone width the two pages keep one row inside the screen",
+                        narrow["pair"] and narrow["fits"], str(narrow))
                 no_wilson = "wilson" not in page.locator("#accProbKey").inner_text().lower()
                 page.goto(f"{srv.url}/faq.html"); page.wait_for_timeout(400)
                 chk.add(f"{scheme} accuracy: the FAQ still reaches the page",
                         page.locator(".prose a[href='accuracy.html']").count() >= 1, "")
-                chk.add(f"{scheme} accuracy: the page and the FAQ link the working paper at its fixed URL, and the diagrams claim no per-bin interval",
-                        acc_paper == 1 and page.locator(f".prose {paper_sel}").count() == 1 and no_wilson,
-                        f"accuracy={acc_paper} wilson_free={no_wilson}")
+                chk.add(f"{scheme} accuracy: the page and the FAQ link the working paper by its DOI and no copy of it, and the diagrams claim no per-bin interval",
+                        acc_doi == 3 and acc_copy == 0 and page.locator(f".prose {doi_sel}").count() == 1
+                        and page.locator(".prose a[href*='papers/']").count() == 0 and no_wilson,
+                        f"accuracy_doi={acc_doi} copies={acc_copy} wilson_free={no_wilson}")
                 page.goto(f"{srv.url}/daily-temperature-markets.html"); page.wait_for_timeout(500)
                 art_t = " ".join(" ".join(t.split()) for t in page.locator(".prose").all_inner_texts())
                 chk.add(f"{scheme} article: the settlement convention is stated exactly",

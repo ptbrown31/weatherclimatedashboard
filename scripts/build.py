@@ -35,6 +35,9 @@ STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorec
               "section.html", "category.html", "contract.html", "js/catalogue.js",
               "js/chart-city.js", "js/city-score.js", "js/city-days.js", "js/discussion.js", "js/advanced.js", "js/artmap.js", "js/map.js", "js/hurricane.js", "js/storm.js", "js/scorecard.js", "js/climate.js", "js/forecast.js",
               "js/acc-common.js", "js/acc-lead.js", "js/acc-prob.js", "js/acc-map.js", "js/acc-grid.js",
+              # the two pages at the top of the accuracy page (scripts/paper_images.py)
+              "js/acc-paper.js", "assets/Brown_2026_prediction_market_brief.pdf",
+              "assets/research-brief.jpg", "assets/research-brief-large.jpg", "assets/paper-first-page.jpg",
               "agriculture.html", "js/agriculture.js", "js/panels.js",
               "fossil-fuels.html", "electricity-renewables.html", "js/energy.js",
               "weather.html", "js/weather.js", "js/severe.js",
@@ -382,14 +385,17 @@ def stamp_assets(out: str) -> int:
 
     Only what the pages reference by a plain relative path is stamped. Anything
     fetched at runtime is a snapshot, and those carry their own freshness.
+    The files under assets/ are stamped too, for the same reason. The research
+    brief and its page image are cached for a day, and a new brief has to reach
+    a returning visitor with the page that describes it.
     """
     digests = {}
     for base, _, names in os.walk(out):
         for n in names:
-            if not (n.endswith(".js") or n.endswith(".css")):
-                continue
             full = os.path.join(base, n)
             rel = os.path.relpath(full, out).replace(os.sep, "/")
+            if not (n.endswith(".js") or n.endswith(".css") or rel.startswith("assets/")):
+                continue
             with open(full, "rb") as fh:
                 digests[rel] = hashlib.sha256(fh.read()).hexdigest()[:8]
     n_rewritten = 0

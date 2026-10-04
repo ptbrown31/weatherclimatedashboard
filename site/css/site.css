@@ -10,6 +10,8 @@
   --night:#EEF1F6; --shade:#F4F7FB; --map-land:#EEF1F5; --map-sea:#F6F9FC; --map-line:#FFFFFF;
   --chip:#EEF2F7; --warn:#8A5A00; --warn-soft:#FFF4DC; --bad:#A6452B; --bad-soft:#F8E5DF; --ok:#2E6B3F; --ok-soft:#E3EFE6;
   --tip-bg:#12161C; --tip-ink:#FFFFFF;
+  /* the archive's PDF viewer, the same in both themes as it is there */
+  --viewer:#404040; --viewer-line:#2E2E2E;
   --ana-rtma:#B8722C; --cell-line:#111111;
   --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t12:#3F6B45; --t13:#8F5530; --t14:#57499A; --t15:#245A76; --t16:#6E5730; --t17:#8A3F58; --t18:#47657E; --t-extra:#9AA3AD;
 }
@@ -492,6 +494,43 @@ svg.emph-exchange .lcline,svg.emph-exchange .ldot,svg.emph-exchange .calcline,sv
 
 /* the mean under each column of the scored-days table, set off from the days */
 tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
+
+/* The two pages at the top of the accuracy page, side by side at one size.
+   The research brief opens in a dialog with its download. The working paper's
+   first page sits in the dark frame of the archive's own viewer, and the whole
+   frame is one link to its DOI. Both pages are images of the PDFs
+   (scripts/paper_images.py) and stay white in either theme, as paper does. */
+.paperrow{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:12px 0 18px}
+.paperfig{margin:0;min-width:0;display:flex;flex-direction:column;gap:8px}
+.pf-frame{position:relative;display:block;padding:16px;border-radius:10px;line-height:0;text-decoration:none}
+.pf-frame img{display:block;width:100%;height:auto;background:#FFFFFF;box-shadow:0 1px 2px rgba(0,0,0,.16),0 5px 16px rgba(0,0,0,.12)}
+.pf-brief{background:var(--shade);border:1px solid var(--line);cursor:zoom-in}
+.pf-paper{background:var(--viewer);border:1px solid var(--viewer-line)}
+.pf-paper img{box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.pf-frame:focus-visible{outline-offset:3px}
+.pf-hint{position:absolute;left:50%;bottom:34px;transform:translateX(-50%);padding:7px 12px;border-radius:6px;
+  background:var(--tip-bg);color:var(--tip-ink);font-size:12.5px;font-weight:600;line-height:1.2;white-space:nowrap;
+  opacity:0;transition:opacity .15s;pointer-events:none}
+.pf-frame:hover .pf-hint,.pf-frame:focus-visible .pf-hint{opacity:.94}
+.paperfig figcaption{display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+  font-size:12.5px;line-height:1.4;color:var(--muted)}
+.paperfig figcaption b{color:var(--ink);font-weight:650}
+.pf-acts{display:flex;flex-wrap:wrap;gap:6px}
+.pf-act{font-size:12px;line-height:1.4;padding:4px 10px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel);color:var(--accent);text-decoration:none;max-width:100%;overflow-wrap:anywhere}
+.pf-act:hover{border-color:var(--accent)}
+@media (max-width:560px){.paperrow{gap:10px}.pf-frame{padding:7px;border-radius:8px}.pf-hint{display:none}}
+@media (prefers-reduced-motion:reduce){.pf-hint{transition:none}}
+.pf-dlg{width:min(960px,calc(100vw - 24px));max-width:none;max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);
+  padding:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);overflow:hidden}
+.pf-dlg[open]{display:flex;flex-direction:column}
+.pf-dlg::backdrop{background:rgba(8,12,18,.72)}
+.pf-dlg-bar{display:flex;align-items:center;gap:8px;padding:8px 10px 8px 14px;border-bottom:1px solid var(--line)}
+.pf-dlg-bar b{margin-right:auto;font-size:13.5px;color:var(--navy)}
+.pf-dlg-body{overflow:auto;padding:14px;background:var(--shade);line-height:0}
+.pf-dlg-body img{display:block;width:100%;max-width:900px;height:auto;margin:0 auto;background:#FFFFFF;
+  box-shadow:0 1px 2px rgba(0,0,0,.16),0 5px 16px rgba(0,0,0,.12)}
+html:has(.pf-dlg[open]){overflow:hidden}
 
 /* The accuracy page. The system colors are the tokens --t1 to --t18 above,
    one per panel tool in the order of docs/accuracy.md, muted so the market's

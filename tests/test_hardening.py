@@ -226,9 +226,13 @@ class AssetStamping(unittest.TestCase):
             fh.write(js_body)
         with open(os.path.join(d, "css", "site.css"), "w") as fh:
             fh.write("body{color:red}")
+        os.makedirs(os.path.join(d, "assets"))
+        with open(os.path.join(d, "assets", "brief.pdf"), "wb") as fh:
+            fh.write(b"%PDF-1.4 " + js_body.encode())
         with open(os.path.join(d, "page.html"), "w") as fh:
             fh.write('<link rel="stylesheet" href="css/site.css">'
                      '<script src="js/app.js"></script>'
+                     '<a href="assets/brief.pdf" download="brief.pdf">pdf</a>'
                      '<a href="other.html">x</a>')
         return d
 
@@ -240,6 +244,8 @@ class AssetStamping(unittest.TestCase):
             html_a = fh.read()
         self.assertRegex(html_a, r'src="js/app\.js\?v=[0-9a-f]{8}"')
         self.assertRegex(html_a, r'href="css/site\.css\?v=[0-9a-f]{8}"')
+        # a file under assets/, such as the research brief, is stamped too
+        self.assertRegex(html_a, r'href="assets/brief\.pdf\?v=[0-9a-f]{8}" download="brief\.pdf"')
         # a page link is not an asset and must be left alone
         self.assertIn('href="other.html"', html_a)
 

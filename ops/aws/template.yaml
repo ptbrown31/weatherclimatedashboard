@@ -202,19 +202,32 @@ Resources:
             QueryStringBehavior: none
 
   # directory URLs (/, /embed/) map to their index.html; CloudFront's default
-  # root object applies only at the distribution root
+  # root object applies only at the distribution root.
+  #
+  # The working paper's old address forwards to its DOI. The paper moved to
+  # EarthArXiv on 3 October 2026 and the site serves no copy of it, so a link
+  # to the old address, in a post or an email already sent, reaches the
+  # preprint's page there. The redirect is permanent, and its browser cache is
+  # held to a day so the target can still be changed.
   IndexRewrite:
     Type: AWS::CloudFront::Function
     Properties:
       Name: !Sub "${SiteName}-index-rewrite"
       AutoPublish: true
       FunctionConfig:
-        Comment: Append index.html to directory requests
+        Comment: Append index.html to directory requests and forward the old paper URL to its DOI
         Runtime: cloudfront-js-2.0
       FunctionCode: |
+        var PAPER = '/papers/Brown_2026_Improvement_of_Daily_Temperature_Forecasts_from_a_Prediction_Market.pdf';
+        var PAPER_DOI = 'https://doi.org/10.31223/X5522D';
         function handler(event) {
           var req = event.request;
           var uri = req.uri;
+          if (uri === PAPER) {
+            return { statusCode: 301, statusDescription: 'Moved Permanently',
+                     headers: { 'location': { value: PAPER_DOI },
+                                'cache-control': { value: 'public, max-age=86400' } } };
+          }
           if (uri.endsWith('/')) { req.uri = uri + 'index.html'; }
           else if (!uri.includes('.')) { req.uri = uri + '/index.html'; }
           return req;
@@ -277,7 +290,8 @@ Resources:
           # behaviour but WITHOUT the index-rewrite function.
           #
           # That function exists to turn a directory URL into its index.html,
-          # which only a path with no extension can ever need. Attached to the
+          # which only a path with no extension can ever need, and to forward
+          # the paper's old address, which sits under the default behaviour. Attached to the
           # default behaviour it ran on every file a page pulls — measured at
           # 27 August 2026: 9.2 invocations per cold page view, of which
           # exactly one, the HTML document, could do anything. The other eight

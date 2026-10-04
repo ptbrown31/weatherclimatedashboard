@@ -13,8 +13,24 @@
 <body>
 <div class="wrap">
 <h1>Weather prediction market accuracy</h1>
+<div class="paperrow">
+<figure class="paperfig">
+<a class="pf-frame pf-brief" id="briefOpen" href="assets/Brown_2026_prediction_market_brief.pdf" aria-haspopup="dialog"><img src="assets/research-brief.jpg" width="1000" height="1295" alt="The research brief, one page. It compares the ForecastEx prediction market&rsquo;s forecasts of the daily high with 20 forecast systems at 24 US locations, by lead time, by location and system by system 30 hours ahead."><span class="pf-hint">Enlarge</span></a>
+<figcaption><span class="pf-what"><b>Research brief</b>, one page, October 2026</span>
+<span class="pf-acts"><button type="button" class="pf-act" id="briefEnlarge" aria-haspopup="dialog">Enlarge</button><a class="pf-act" href="assets/Brown_2026_prediction_market_brief.pdf" download="Brown_2026_prediction_market_brief.pdf">Download PDF</a></span></figcaption>
+</figure>
+<figure class="paperfig">
+<a class="pf-frame pf-paper" href="https://doi.org/10.31223/X5522D"><img src="assets/paper-first-page.jpg" width="1000" height="1295" alt="First page of the working paper Improvement of Daily Temperature Forecasts from a Prediction Market, by Patrick T. Brown, with its abstract."><span class="pf-hint">Read on EarthArXiv</span></a>
+<figcaption><span class="pf-what"><b>Working paper</b>, EarthArXiv preprint, 33 pages, not peer reviewed</span>
+<span class="pf-acts"><a class="pf-act" href="https://doi.org/10.31223/X5522D">doi.org/10.31223/X5522D</a></span></figcaption>
+</figure>
+</div>
+<dialog class="pf-dlg" id="briefDlg" aria-labelledby="briefDlgTitle">
+<div class="pf-dlg-bar"><b id="briefDlgTitle">Research brief</b><a class="pf-act" href="assets/Brown_2026_prediction_market_brief.pdf" download="Brown_2026_prediction_market_brief.pdf">Download PDF</a><button type="button" class="pf-act" data-close>Close</button></div>
+<div class="pf-dlg-body"><img src="assets/research-brief-large.jpg" width="1800" height="2330" loading="lazy" alt="The research brief at full size."></div>
+</dialog>
 <p class="sub">ForecastEx runs daily prediction markets on the high and low temperature in cities across the US. This page scores the ForecastEx prediction market against twenty alternative forecast systems, among them the National Weather Service point forecast, the National Blend of Models, the Aviation Forecast, statistical guidance from four model families, and models and ensembles from the US, Europe, Germany, Canada, the UK, France, and Japan, including ECMWF&rsquo;s AI forecasting system. Each is described at the foot of the page. Every comparison holds the city, the day, and the lead time fixed, and scores each system against the temperature the station recorded.</p>
-<p class="cap">The working paper <a href="papers/Brown_2026_Improvement_of_Daily_Temperature_Forecasts_from_a_Prediction_Market.pdf">Improvement of Daily Temperature Forecasts from a Prediction Market</a> (Brown, 2026, PDF) reports this comparison for target days through 21 September 2026, with its robustness tests. This page rebuilds every day, so its numbers move on from the paper&rsquo;s as days are added.</p>
+<p class="cap">The working paper <a href="https://doi.org/10.31223/X5522D">Improvement of Daily Temperature Forecasts from a Prediction Market</a> (Brown, 2026, EarthArXiv preprint) reports this comparison for target days from 11 February to 1 October 2026, with its robustness tests, and the brief gives its findings on one page. This page rebuilds every day, so its numbers move on from the paper&rsquo;s as days are added.</p>
 <div class="bar"><span id="pageStatus"></span></div>
 <div class="secttl">DETERMINISTIC SKILL</div>
 <p class="cap" style="margin-top:0">One value per system, scored against the recorded temperature by hours remaining before the day ends. For the ForecastEx prediction market that value is the median of its price ladder. Under the error curve, how early each system locks onto the temperature the day ends on and stays there.</p>
@@ -71,6 +87,7 @@
 <tr><td>Basemap</td><td>US Census Bureau boundaries</td><td>The state outlines under the city map. Public domain.</td></tr>
 </tbody></table>
 </div>
+<script src="js/acc-paper.js"></script>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
 <script src="js/market.js"></script>

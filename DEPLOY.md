@@ -310,21 +310,37 @@ the old curve stays published until then. After the first accuracy pass the buil
 replaced it and `export_accuracy.py` is not run again. The job deletes nothing outside
 `snapshots/accuracy/trace/`.
 
-## 12a. The working paper
+## 12a. The working paper and the research brief
 
-The accuracy page and the FAQ link to the working paper at one fixed URL,
+The working paper is published on EarthArXiv. The accuracy page and the FAQ link its DOI,
+
+    https://doi.org/10.31223/X5522D
+
+which resolves to the preprint's page on EarthArXiv, and the site serves no copy of the paper. A new
+version goes to EarthArXiv under the same DOI, so the links stay as they are.
+
+The accuracy page opens on two pages side by side, the research brief and the paper's first page.
+The brief opens in a dialog with its PDF to download, and a click anywhere on the paper's page goes
+to the DOI. Four files in `site/assets/` carry them, the brief's PDF, an image of its page at two
+widths and an image of the paper's first page. For a new brief or a new version of the paper, run
+
+    python3 scripts/paper_images.py --brief <brief PDF> --paper <paper PDF as EarthArXiv serves it>
+
+Either argument alone replaces one of the two. The script needs `pdftoppm` (`brew install poppler`).
+Then update the caption under the page if its date or page count changed, and deploy the site
+(section 6). The build stamps every file under `assets/` with a hash of its contents, so a returning
+visitor gets the new brief along with the page.
+
+The address the site served the paper from before then,
 
     https://<domain>/papers/Brown_2026_Improvement_of_Daily_Temperature_Forecasts_from_a_Prediction_Market.pdf
 
-Each new version replaces the last at that URL, so the links never change. The PDF is kept out of
-the repository, which would hold every version in its history. Upload a version with
-
-    ops/aws/deploy.sh paper <path to the PDF>
-
-which writes it to that key with a five-minute browser cache and invalidates the path at the CDN.
-The site sync in section 6 excludes `papers/`, so deploying the site never removes the paper, and
-the paper upload touches nothing else. A clean checkout serves no paper, so the link returns 404 in
-local mode.
+forwards to the DOI with a permanent redirect, so a link to it in a post or an email already sent
+reaches the preprint. The CDN makes the redirect, in the `IndexRewrite` function in
+`ops/aws/template.yaml`, so changing it takes a stack deploy (section 3). The redirect carries a
+one-day browser cache, so a changed target reaches a returning reader within a day. The copy last
+uploaded there is still in the bucket and is never served, and the site sync in section 6 still
+excludes `papers/`, so a deploy leaves it in place.
 
 ## Cloudflare alternative
 
