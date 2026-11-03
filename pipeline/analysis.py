@@ -59,6 +59,16 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     analysis is missing: it adds to the day's total and never to the count of
     analyses read.
 
+    Each row of a place file also carries its values as the contracts show
+    them (whole degrees, whole miles an hour, a hundredth of an inch, each
+    rounded once from the exact value) and the day's values so far (the
+    running high, low, peak gust, mean wind and precipitation total, rounded
+    and exact), which `running` gets from day_summary itself over the hours
+    up to that row. The page draws them and never adds or averages a value of
+    its own, because rounded hours do not add up to the day (Boston on
+    2026-09-28, 0.83 in from its rounded hours against the 0.84 it resolved
+    on).
+
 Reads   noaa-rtma-pds (and NOMADS for a file it lacks) through
         pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
         range request per message (TMP 2 m, WIND 10 m, GUST 10 m, about 6 MB
@@ -72,7 +82,8 @@ Writes  archive/analysis2/hours/rtma/<stamp>.json.gz      the places' hourly tem
                                                           21 x 21 cell window round each place at full resolution
         snapshots/analysis2/grid/index.json               which frames exist, rewritten after every hour's frames
         snapshots/analysis2/days/YYYY-MM-DD.json          every place's day for that local date
-        snapshots/analysis2/loc/<id>/YYYY-MM-DD.json      one place-day at the hourly scale
+        snapshots/analysis2/loc/<id>/YYYY-MM-DD.json      one place-day at the hourly scale, each hour with
+                                                          its shown value and the day's values so far
         snapshots/analysis2/csv/YYYY-MM-DD-{raw,processed}.csv   the day as CSV
         snapshots/analysis2/index.json                    last, so a reader sees a consistent set
 
@@ -187,8 +198,15 @@ PRODUCTS = {
 # the layout of the published files; when it changes, every listed day is
 # rewritten, a few a pass, so no day keeps the old one (2026-09-30: URMA
 # dropped from the days, the place files and the CSV files; 2026-10-14: the
-# cut-off rule, the review state and the publication times in the CSV files)
-LAYOUT = "cutoff-2026-10-14"
+# cut-off rule, the review state and the publication times in the CSV files;
+# and on 2026-11-03 each row of a place file gained its value as the contract
+# shows it and the day's values so far, for the settlement display)
+LAYOUT = "running-2026-11-03"
+# the shape of a place file's rows, stamped on the file as `rowShape` so the
+# page can tell a file whose rows carry `show`, `run` and the publication
+# times from one written before them, which it still draws, with no running
+# figures
+ROW_SHAPE = 2
 # the three messages read from the analysis file, by the .idx sidecar's names
 MESSAGES = (("temp", "TMP", "2 m above ground"), ("wind", "WIND", "10 m above ground"),
             ("gust", "GUST", "10 m above ground"))
@@ -218,6 +236,11 @@ RAW_DIGITS = {"temp": 4, "wind": 4, "gust": 4, "precip": 6}
 DAY_UNIT = {"high": 1, "low": 1, "gust": 1, "wind": 1, "precip": 0.01}
 EXACT_UNIT = {"high": 0.001, "low": 0.001, "gust": 0.001, "wind": 0.001, "precip": 0.0001}
 HOUR_SHOW = {"temp": 0.001, "wind": 0.001, "gust": 0.001, "precip": 0.0001}
+# an hourly value as the contract shows it, in the unit its daily variable is
+# rounded to (whole degrees, whole miles an hour, a hundredth of an inch),
+# rounded once, half up, away from zero, the way an hourly contract on that
+# hour would resolve
+HOUR_UNIT = {"temp": DAY_UNIT["high"], "wind": DAY_UNIT["wind"], "gust": DAY_UNIT["gust"], "precip": DAY_UNIT["precip"]}
 MPH_PER_MS = 2.2369362921
 MM_PER_INCH = 25.4
 K0_DEC, MPH_DEC, MM_DEC = Decimal("273.15"), Decimal("2.2369362921"), Decimal("25.4")
@@ -548,10 +571,19 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     product_hours maps the hour's UTC ISO string to {temp, wind, gust, precip}
     exact values (None where the product had no value at that hour), with
     `pub` and `pcpPub`, the publication times of the analysis and the
-    precipitation file. An entry with `anl` False is an hour whose analysis
+    precipitation file, and `mm`, the stored millimetres the precipitation
+    was converted from. An entry with `anl` False is an hour whose analysis
     file never landed: it carries only its precipitation. The result is the
     contract's product-day shape, or None when no hour of the day has been
     read (build_day gives such a place its review entry at the cut-off).
+
+    The day's precipitation total is the stored millimetres added up and
+    converted once. Each hour's inches are a division by 25.4 that Decimal
+    stops at its 28th digit, so a sum of them can sit a hair under a total
+    the millimetres hold exactly. 15.875 mm is 0.625 in, which resolves 0.63,
+    and summed hour by hour it came to 0.6249999...9 and resolved 0.62 on
+    about one split in seven. A caller that gives inches without `mm` (the
+    tests' own hours) has its inches added as given.
 
     The day is final at its cut-off (owner's ruling 2026-10-14) on the hours
     whose files were published by then: an analysis counts when its file was,
@@ -614,7 +646,13 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     # the closed state ended with the cut-off rule: every day is final or in review at its cut-off
     out["closed"] = False
     if precip:
-        total = sum(v for _, v in precip)
+        # one conversion of the summed millimetres (see the docstring), so the
+        # total is exact wherever the millimetres put it on a half hundredth
+        # or a ten-thousandth of an inch, and it is rounded once below
+        if all(rec.get("mm") is not None for _, rec in pcp_rows):
+            total = exact("precip", sum(_dec(rec["mm"]) for _, rec in pcp_rows))
+        else:
+            total = sum(v for _, v in precip)
         out["precip"] = {"value": half_up(total, DAY_UNIT["precip"]), "exact": cut(total, EXACT_UNIT["precip"]),
                          "hours": len(precip), "resolved": at_cutoff, "resolvedAt": cut_iso if at_cutoff else None}
     elif at_cutoff:
@@ -623,6 +661,28 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     else:
         out["precip"] = None
     return out
+
+
+def running(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, through: dt.datetime) -> Optional[dict]:
+    """The day's values so far, from day_summary itself over the hours up to
+    and including `through`, so every running figure is resolved by the code that
+    resolves the day, with its rules on what counts (a file published after
+    the cut-off never does, a missing hour leaves the values on the hours
+    there are), and the running values of the day's last counted hour are the
+    day's own by construction. The page shows these and adds nothing up.
+
+    `hours` is the analyses counted so far; `high`, `low` and `gust` carry
+    their value, exact figure and hour, `wind` its value and exact figure,
+    and `precip` its value, exact figure and the accumulations counted, or
+    None where nothing counts yet. The flags that turn on the clock (final,
+    review, resolved) are left to the day's summary."""
+    upto = _iso(through)
+    s = day_summary({iso: rec for iso, rec in product_hours.items() if iso <= upto}, tz, day_iso, now)
+    if s is None:
+        return None
+    p = s.get("precip") or {}
+    return {"hours": s["hours"], "high": s["high"], "low": s["low"], "gust": s["gust"], "wind": s["wind"],
+            "precip": None if p.get("value") is None else {"value": p["value"], "exact": p["exact"], "hours": p["hours"]}}
 
 
 def resolves(var: str, value, strike) -> Optional[bool]:
@@ -1193,6 +1253,8 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     continue
                 rec = {var: exact(var, (va or {}).get(var)) for var in ANALYSIS_VARS}
                 rec["precip"] = exact("precip", vp)
+                # the stored millimetres, which the day's total is summed from
+                rec["mm"] = vp
                 rec["anl"] = va is not None
                 # the file was read and had no value at the place: read, not pending
                 rec["pcpRead"] = pre is not None
@@ -1208,6 +1270,13 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     row[product]["late"] = True
                 if vp is not None and not _in_time(rec["pcpPub"], cut_iso):
                     row[product]["pcpLate"] = True
+                # when and where each file was published, for the page's
+                # arrival times (none on a file read before 2026-10-14)
+                for key, val in (("pub", rec["pub"]), ("pcpPub", rec["pcpPub"] if vp is not None else None),
+                                 ("src", (anl or {}).get("source") if va is not None else None),
+                                 ("pcpSrc", (pre or {}).get("source") if vp is not None else None)):
+                    if val:
+                        row[product][key] = val
                 if raw is not None and product == SETTLE:
                     raw.append([day_iso, lid, hour_label(h, tz), _iso(h),
                                 (va or {}).get("temp"), (va or {}).get("wind"), (va or {}).get("gust"),
@@ -1218,13 +1287,23 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
             s = day_summary(product_hours, tz, day_iso, now)
             if s is not None:
                 entry[product] = s
+            # each row with a value carries it as the contract shows it, and
+            # the day's values over the hours up to it, which the settlement
+            # display steps through; only the place files carry them
+            if only is None or lid in only:
+                for h, row in zip(hours, rows):
+                    rec = product_hours.get(_iso(h))
+                    if rec is None or row[product] is None:
+                        continue
+                    row[product]["show"] = {var: half_up(rec[var], HOUR_UNIT[var]) for var in HOURLY_VARS}
+                    row[product]["run"] = running(product_hours, tz, day_iso, now, h)
         if not entry:
             continue
         day_doc["locations"][lid] = entry
         if only is None or lid in only:
             loc_asof = max((r["t"] for r in rows if any(r.get(p) for p in PRODUCTS)), default=None)
-            loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "asof": loc_asof,
-                             "written": _iso(now), "hours": rows, "summary": entry}
+            loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "rowShape": ROW_SHAPE,
+                             "asof": loc_asof, "written": _iso(now), "hours": rows, "summary": entry}
     # a place with no hour read by its cut-off goes to event review, on a day
     # the lane has hours for at other places; a day with nothing read anywhere
     # is not written at all
@@ -1240,8 +1319,8 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 for r in rows:
                     for product in PRODUCTS:
                         r[product] = None
-                loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "asof": None,
-                                 "written": _iso(now), "hours": rows, "summary": entry}
+                loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "rowShape": ROW_SHAPE,
+                                 "asof": None, "written": _iso(now), "hours": rows, "summary": entry}
     day_doc["asof"] = _iso(asof) if asof else None
     return day_doc, loc_docs
 

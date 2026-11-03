@@ -46,7 +46,7 @@ STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorec
               "wind-markets.html", "js/wind.js", "js/contracts.js", "js/city-contracts.js", "js/varmap.js",
               "wind-station.html", "js/wind-station.js",
               # unlisted: the analysis resolution page, noindex and outside the navigation
-              "analysis-resolution.html", "js/analysis.js",
+              "analysis-resolution.html", "js/analysis.js", "js/analysis-settle.js",
               "tropical-cyclone-markets.html", "js/cyclones.js",
               "allocator.html", "js/allocator.js",
               # the world GDP contract's article, its figures drawn by its own model in the browser

@@ -12,10 +12,17 @@
    the navigation.
 
    Everything drawn here is read from the files docs/analysis.md section 4
-   describes. The page computes nothing but colours, the running sum of the
-   hourly precipitation analyses (pinned to the file's own day total once the
-   day is complete), and the rung labels of a ladder that does not exist. It
-   never shows a price, and never says ask, sell or offer. */
+   describes. The page computes nothing but colours and the rung labels of a
+   ladder that does not exist. Every value, the day's running values
+   included, is the lane's, and the page never adds, averages or rounds one,
+   since rounded hours do not add up to the day. It never shows a price, and
+   never says ask, sell or offer.
+
+   A picked place opens its settlement display (js/analysis-settle.js, the
+   owner's approved design of 2026-11-03) above the map: the day's state, the
+   countdowns to the next files, the five values, the hours on three charts
+   and in a table, and a replay. The map, its frames, stepper and cell mode,
+   the CSV links, the hypothetical ladder and the method follow it. */
 window.WXAnalysis = (() => {
   const { el, txt, h, $ } = WXC;
   const STATEMENT = 'A proposed settlement framework. No contract settles on it.';
@@ -71,9 +78,12 @@ window.WXAnalysis = (() => {
   const stampOf = (day, hh) => day.replace(/-/g, '') + 'T' + hh + 'Z';
   const validOf = (day, hh) => day + 'T' + hh + ':00:00Z';
 
+  // a link that names a place and a variable opens on that variable's chart
+  let scrollVar = false;
   function readUrl() {
     const q = new URLSearchParams(location.search);
     if (VARS[q.get('var')]) S.var = q.get('var');
+    scrollVar = !!(VARS[q.get('var')] && q.get('loc'));
     if (q.get('day')) S.day = q.get('day');
     if (q.get('hour') != null && /^\d{1,2}$/.test(q.get('hour'))) S.hour = String(q.get('hour')).padStart(2, '0');
     if (q.get('loc')) S.loc = q.get('loc');
@@ -828,20 +838,51 @@ window.WXAnalysis = (() => {
       if (S.loc) openLoc(false);
     }
 
-    // ---- the location panel
+    // ---- the location panel, above the map: the place's settlement display
+    //      first, then its hypothetical ladder and its cell
     const panel = $('#locPanel');
-    function closeLoc() { S.loc = null; panel.hidden = true; syncPick(); writeUrl(); setCaption(); }
+    const pickHint = $('#anaPick');
+    let settle = null;            // the settlement display, kept while a place is open
+    function closeLoc() {
+      S.loc = null; panel.hidden = true;
+      if (settle) { settle.destroy(); settle = null; }
+      if (pickHint) pickHint.hidden = false;
+      syncPick(); writeUrl(); setCaption();
+    }
     async function openLoc(scroll) {
       const L = locOf(S.loc);
-      if (!L) { S.loc = null; panel.hidden = true; syncPick(); writeUrl(); return; }
+      if (!L) { S.loc = null; panel.hidden = true; if (pickHint) pickHint.hidden = false; syncPick(); writeUrl(); return; }
       panel.hidden = false;
+      if (pickHint) pickHint.hidden = true;
       syncPick();
       raiseDot();
       const rl = await locFile(L.id, S.day);
       if (locOf(S.loc) !== L) return;
       renderPanel(L, rl.data, (dayEntries || {})[L.id] || (rl.data && rl.data.summary) || null, rl);
       setCaption();
-      if (scroll) { try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* landed anyway */ } }
+      // a link's var= lands on its chart once, the first time its place opens
+      const chart = scrollVar && settle ? settle.chartOf(S.var) : null;
+      scrollVar = false;
+      if (chart && !chart.hidden) { try { chart.scrollIntoView({ block: 'start' }); } catch (e) { /* landed anyway */ } }
+      else if (scroll) { try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* landed anyway */ } }
+    }
+    /* A live day's two files again, each past the CDN's minute with a stamp
+       in the query string that changes once a minute, so the settlement
+       display fills in without a reload. Only a live answer replaces what
+       the page holds; the dots follow the day file. */
+    async function refetchDay(L, day) {
+      const stamp = String(Math.floor(Date.now() / 60000));
+      const lk = 'loc/' + L.id + '/' + day + '.json', dk = 'days/' + day + '.json';
+      const [rl, rd] = await Promise.all([WXD.get(DATA + lk, 60, { bust: stamp }), WXD.get(DATA + dk, 60, { bust: stamp })]);
+      if (S.day !== day || S.loc !== L.id) return null;
+      if (rd.source === 'live' && rd.data) {
+        S.days.set(dk, Promise.resolve(rd));
+        dayRes = rd; dayEntries = rd.data.locations || {};
+        drawDots();
+      }
+      if (rl.source !== 'live' || !rl.data) return null;
+      S.locs.set(lk, Promise.resolve(rl));
+      return { doc: rl.data, entry: (dayEntries || {})[L.id] || rl.data.summary || null };
     }
     function renderPanel(L, doc, entry, locRes) {
       // neither file reached the page: the day is not one with no hours,
@@ -860,7 +901,7 @@ window.WXAnalysis = (() => {
       next.onclick = () => { if (i < days.length - 1) { S.day = days[i + 1]; changed('day'); } };
       const close = h('button', { text: 'Close', title: 'close the panel' });
       close.onclick = closeLoc;
-      // the map is above the panel, so zooming from here brings it back into view
+      // the map is below the panel, so zooming from here scrolls down to it
       const zc = h('button', { text: 'Zoom to the cell', id: 'anaZoomCellPanel', title: 'zoom the map to this place’s resolving cell' });
       zc.disabled = !cellGeom(L);
       zc.onclick = () => { if (zoomToCell(L)) { try { host.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) { /* landed anyway */ } } };
@@ -870,42 +911,26 @@ window.WXAnalysis = (() => {
       panel.appendChild(h('p', { class: 'cap anastmt', text: STATEMENT + ' The values below are what the framework would have resolved for '
         + L.name + ' on ' + S.day + ' from the ' + PRODUCT_NAME + ' analysis.' }));
 
-      // the resolution row: five cards, one per daily variable
-      const cards = h('div', { class: 'anacards' });
-      Object.keys(VARS).forEach(k => {
-        const Vk = VARS[k];
-        const res = resolution(entry, k);
-        const unit = Vk.unit === 'in' ? ' in' : Vk.unit === 'mph' ? ' mph' : Vk.unit;
-        const card = h('div', { class: 'anacard' + (k === S.var ? ' on' : ''), 'data-var': k });
-        card.appendChild(h('div', { class: 'al', text: Vk.label }));
-        if (res && res.review) {
-          card.appendChild(h('div', { class: 'av dim', text: 'no value' }));
-          card.appendChild(h('div', { class: 'ae', text: 'no ' + PRODUCT_NAME + ' hour published by the 12:45 AM cut-off' }));
-          card.appendChild(h('span', { class: 'pill anapill off', text: res.label }));
-        } else if (!res || res.value == null) {
-          card.appendChild(h('div', { class: 'av dim', text: 'no value' }));
-          card.appendChild(h('div', { class: 'ae', text: unread ? 'the day file could not be read' : 'no ' + PRODUCT_NAME + ' hours read yet' }));
-        } else {
-          card.appendChild(h('div', { class: 'av', text: Number(res.value).toFixed(Vk.dec) + unit }));
-          card.appendChild(h('div', { class: 'ae', text: 'exact ' + Number(res.exact).toFixed(Vk.exactDec) + unit }));
-          card.appendChild(h('span', { class: 'pill anapill ' + (res.provisional ? 'off' : 'ok'), text: res.label }));
-          if (res.at) card.appendChild(h('div', { class: 'ae', text: 'at ' + WXC.clockFull(Date.parse(res.at), L.tz) + ' local' }));
-        }
-        card.onclick = () => { if (S.var !== k) { S.var = k; changed('var'); } };
-        cards.appendChild(card);
-      });
-      panel.appendChild(cards);
+      // the settlement display: the day's state, the countdowns, the five
+      // values, the hours on three charts and in a table, and the replay.
+      // Kept across redraws of the same place-day, so a replay holds its time
+      if (!settle) {
+        settle = WXSettle.create({ product: PRODUCT, productName: PRODUCT_NAME,
+          onVar: k => { if (S.var !== k) { S.var = k; changed('var'); } },
+          refetch: () => (S.loc ? refetchDay(locOf(S.loc), S.day) : null) });
+      }
+      panel.appendChild(settle.node);
+      settle.show({ key: L.id + '/' + S.day, doc: doc || null, entry, unread, tz: L.tz, varKey: S.var });
 
       const hours = (doc && doc.hours) || [];
       if (!hours.length) {
         panel.appendChild(h('p', { class: 'cap', text: locRes && locRes.source === 'none'
-          ? 'The hourly file for ' + L.name + ' on ' + S.day + ' could not be read. The hourly chart and table appear once it can be.'
-          : 'No hours read yet for ' + L.name + ' on ' + S.day + '. The hourly chart and table appear once the first analysis of the day is read.' }));
+          ? 'The hourly file for ' + L.name + ' on ' + S.day + ' could not be read. The hourly charts and table appear once it can be.'
+          : 'No hours read yet for ' + L.name + ' on ' + S.day + '. The hourly charts and table appear once the first analysis of the day is read.' }));
       } else {
-        panel.appendChild(h('div', { class: 'secttl', text: V().label.toUpperCase() + ' THROUGH THE DAY, ' + (V().running ? 'RUNNING SUM OF THE ' : '') + 'HOURLY ' + HOURLY[V().hourly].toUpperCase() }));
-        plot(panel, L, hours, resolution(entry, S.var), entry);
-        panel.appendChild(h('div', { class: 'secttl', text: 'EVERY HOUR' }));
-        panel.appendChild(hourTable(hours, L));
+        // the hypothetical ladder, on the day's value as the file stands
+        panel.appendChild(h('div', { class: 'secttl', text: V().label.toUpperCase() + ' ON A HYPOTHETICAL LADDER' }));
+        plot(panel, L, hours, resolution(entry, S.var), entry, !!(doc && doc.rowShape >= 2));
       }
       const c = L.cell || {};
       let note = 'Cell centre ' + ((c.centre || [])[0] != null ? c.centre[0].toFixed(4) + ' N, ' + Math.abs(c.centre[1]).toFixed(4) + (c.centre[1] < 0 ? ' W' : ' E') : 'unknown')
@@ -917,13 +942,13 @@ window.WXAnalysis = (() => {
       panel.appendChild(h('p', { class: 'cap', id: 'anaCell', text: note }));
     }
 
-    /* The hourly chart, in the language of WXK.plot: local hours 0 to 24
-       along the foot, midnight and the day end marked, the hourly analyses
-       as one line in their own token, the resolved value as a rule across
-       the plot, and a column of hypothetical rungs at the right. The rungs are
-       hatched, say Yes or No and nothing else, and link to nothing, because
-       there is no book behind them. */
-    function plot(host, L, hours, res, entry) {
+    /* The hypothetical ladder, on a chart in the language of WXK.plot: local
+       hours 0 to 24 along the foot, midnight and the day end marked, the
+       hourly analyses as one line in their own token, the day's value as the
+       file stands as a rule across the plot, and a column of hypothetical
+       rungs at the right. The rungs are hatched, say Yes or No and nothing
+       else, and link to nothing, because there is no book behind them. */
+    function plot(host, L, hours, res, entry, running) {
       const Vv = V(), hv = Vv.hourly;
       const NS = 'http://www.w3.org/2000/svg';
       const E = (n, a) => { const e = document.createElementNS(NS, n); for (const k in (a || {})) if (a[k] != null) e.setAttribute(k, a[k]); return e; };
@@ -936,29 +961,20 @@ window.WXAnalysis = (() => {
       pat.appendChild(E('rect', { x: 0, y: 0, width: 2, height: 5, fill: 'var(--panel)', 'fill-opacity': .55 }));
       defs.appendChild(pat);
       svg2.appendChild(defs);
-      /* A running sum for precipitation, because the day resolves on the
-         sum and the rule across the plot is where the curve should end. The
-         hourlies are summed as the file carries them, never rounded on the
-         way (a sum of hundredths ran a hundredth past the day's own total),
-         and once the day is complete the last point is the summary's exact
-         total, which is the figure the day resolved on. */
-      const series = p => {
-        let acc = 0, last = -1;
-        const pts = hours.map((hr, k) => {
-          const v = (hr[p] || {})[hv];
-          if (v == null) return { k, v: null };
-          last = k;
-          if (Vv.running) { acc += v; return { k, v: acc }; }
-          return { k, v };
-        });
-        // pinned once the day's own count is whole: the analyses for a
-        // temperature or a wind, the hourly files for precipitation
-        const ep = entry && entry[p], ev = ep && ep[S.var];
-        const whole = ev && (Vv.running ? ev.hours === hoursInDay(ep) : ep.complete);
-        const ex = whole ? ev.exact : null;
-        if (Vv.running && last >= 0 && ex != null) pts[last].v = Number(ex);
-        return pts;
-      };
+      /* For precipitation the line is the day's running total, because the
+         day resolves on the total and the rule across the plot is where the
+         line should end. Each point is the lane's own running total at that
+         hour, exact, from the code that resolves the day, so the last counted
+         hour sits on the day's total. The page adds nothing up, since a sum
+         of the file's cut hourly figures runs short of the total and a sum of
+         rounded ones can land either side of it. A file written before the
+         running totals existed has no line for precipitation. */
+      const series = p => hours.map((hr, k) => {
+        const c = hr[p] || null;
+        if (!Vv.running) return { k, v: c && c[hv] != null ? c[hv] : null };
+        const r = running && c && c.precip != null && !c.pcpLate && c.run && c.run.precip;
+        return { k, v: r ? Number(r.exact) : null };
+      });
       const rt = series(PRODUCT);
       const vs = rt.map(p => p.v).filter(v => v != null);
       if (res && res.value != null) vs.push(res.value);
@@ -1080,38 +1096,9 @@ window.WXAnalysis = (() => {
     function rungsFor(res) {
       if (!res || res.value == null) return [];
       const Vv = V(), v = res.value;
-      const strikes = Vv.rungs ? Vv.rungs.slice() : [-3, -2, -1, 0, 1, 2, 3].map(d => Math.round(v) + d);
+      // the whole-unit values arrive whole from the lane, so the rungs sit at it and a unit either side
+      const strikes = Vv.rungs ? Vv.rungs.slice() : [-3, -2, -1, 0, 1, 2, 3].map(d => v + d);
       return strikes.map(s => ({ strike: s, yes: Vv.yes === 'below' ? v <= s : v >= s })).sort((a, b) => b.strike - a.strike);
-    }
-
-    function hourTable(hours, L) {
-      const wrap = h('div', { class: 'anatab' });
-      const t = h('table', { class: 'anahours' });
-      const thead = h('thead');
-      thead.appendChild(h('tr', {}, ['Local', 'UTC', 'Temperature', 'Wind', 'Gust', 'Precipitation']
-        .map((s, i) => h('th', { class: i > 1 ? 'num' : '', text: s }))));
-      t.appendChild(thead);
-      const tbody = h('tbody');
-      // an hour whose file came after the day resolved is shown, dimmed, and
-      // not counted (owner's decision 2026-09-29)
-      const cell = (o, k, dec) => {
-        const v = (o || {})[k], late = !!(o && (k === 'precip' ? o.pcpLate : o.late));
-        const td = h('td', { class: 'num' + (v == null || late ? ' dim' : '') + (late ? ' late' : ''), text: v == null ? '·' : Number(v).toFixed(dec) });
-        if (late) td.title = 'arrived after the day resolved; not counted';
-        return td;
-      };
-      hours.forEach(hr => {
-        const tr = h('tr', {}, [h('td', { text: hr.local + ':00' }), h('td', { text: hr.t.slice(5, 16).replace('T', ' ') })]);
-        ['temp', 'wind', 'gust', 'precip'].forEach(k => tr.appendChild(cell(hr[PRODUCT], k, hourlyDec(k))));
-        tbody.appendChild(tr);
-      });
-      t.appendChild(tbody);
-      wrap.appendChild(t);
-      const anyLate = hours.some(hr => hr[PRODUCT] && (hr[PRODUCT].late || hr[PRODUCT].pcpLate));
-      wrap.appendChild(h('p', { class: 'cap', text: 'Temperature in °F and wind and gust in mph to a thousandth, cut rather than rounded; precipitation in inches to a ten-thousandth over the hour that starts at the stamp, which NOAA files under the hour it ends. '
-        + 'Each temperature, wind and gust is the ' + PRODUCT_NAME + ' analysis at the top of that hour in ' + L.tz + '.'
-        + (anyLate ? ' A dimmed value came after the day resolved and is not counted.' : '') }));
-      return wrap;
     }
 
     // ---- the method note, from the index's own conventions

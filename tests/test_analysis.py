@@ -16,6 +16,7 @@ dependence on pipeline/grib2.py being present except in the cell geometry
 tests at the end, which run the real Lambert and Albers maths of
 scripts/build_analysis_grid.py for one place."""
 import contextlib
+import csv
 from decimal import Decimal
 import datetime as dt
 import gzip
@@ -249,6 +250,77 @@ def wexp_window_value(k):
 QUIET = {"user_agent": "test", "pass_budget_seconds": 120}
 
 
+def values_of(cell):
+    """The four hourly values of a place file's row, without the fields
+    beside them (the shown values, the running values, the file times)."""
+    return None if cell is None else {k: cell.get(k) for k in ("temp", "wind", "gust", "precip")}
+
+
+def raw_product_hours(raw_rows):
+    """day_summary's input for one place-day, made afresh from the day's raw
+    CSV rows (the archive's own numbers, which the lane writes beside every
+    place file) rather than taken from the lane: each value converted exactly,
+    the millimetres kept, the publication times as published."""
+    out = {}
+    for r in raw_rows:
+        num = lambda c: float(r[c]) if r[c] != "" else None            # noqa: E731
+        out[r["valid_utc"]] = {
+            "temp": analysis.exact("temp", num("temp_k")), "wind": analysis.exact("wind", num("wind_ms")),
+            "gust": analysis.exact("gust", num("gust_ms")), "precip": analysis.exact("precip", num("precip_mm")),
+            "mm": num("precip_mm"), "anl": r["analysis_source"] != "",
+            "pub": r.get("analysis_published") or None, "pcpPub": r.get("precip_published") or None}
+    return out
+
+
+def check_running(case, loc_doc, raw_rows):
+    """Every hour of one place file against a fresh resolution of the hours
+    so far: its running values equal day_summary over the raw rows up to it,
+    its shown values are its own exact values rounded once, and the day's last
+    counted hour (the last analysis and the last accumulation that count)
+    carries the day's own summary. Returns how many rows were checked."""
+    tz, day, now = loc_doc["tz"], loc_doc["day"], analysis._parse_iso(loc_doc["written"])
+    ph = raw_product_hours(raw_rows)
+    summary = loc_doc["summary"]["rtma"]
+    case.assertEqual(loc_doc.get("rowShape"), analysis.ROW_SHAPE, (loc_doc["id"], day))
+    last_anl = last_pcp = None
+    checked = 0
+    for row in loc_doc["hours"]:
+        cell, where = row["rtma"], (loc_doc["id"], day, row["t"])
+        if cell is None:
+            case.assertNotIn(row["t"], ph, where)
+            continue
+        rec = ph[row["t"]]
+        fresh = analysis.day_summary({k: v for k, v in ph.items() if k <= row["t"]}, tz, day, now)
+        run = cell["run"]
+        case.assertEqual(run["hours"], fresh["hours"], where)
+        for k in ("high", "low", "gust", "wind"):
+            case.assertEqual(run[k], fresh[k], where + (k,))
+        p = fresh["precip"] or {}
+        case.assertEqual(run["precip"], None if p.get("value") is None
+                         else {"value": p["value"], "exact": p["exact"], "hours": p["hours"]}, where + ("precip",))
+        for var in analysis.HOURLY_VARS:
+            case.assertEqual(cell["show"][var], analysis.half_up(rec[var], analysis.HOUR_UNIT[var]), where + (var,))
+        if rec["anl"] and not cell.get("late"):
+            last_anl = run
+        if rec["precip"] is not None and not cell.get("pcpLate"):
+            last_pcp = run
+        checked += 1
+    if last_anl is not None:
+        case.assertEqual([last_anl[k] for k in ("hours", "high", "low", "gust", "wind")],
+                         [summary[k] for k in ("hours", "high", "low", "gust", "wind")], (loc_doc["id"], day))
+    if last_pcp is not None:
+        sp = summary["precip"]
+        case.assertEqual(last_pcp["precip"], {"value": sp["value"], "exact": sp["exact"], "hours": sp["hours"]},
+                         (loc_doc["id"], day))
+    return checked
+
+
+def raw_rows_of(raw_csv_text, lid):
+    """One place's rows of a raw CSV file, in hour order."""
+    rows = [r for r in csv.DictReader(io.StringIO(raw_csv_text)) if r["location"] == lid]
+    return sorted(rows, key=lambda r: r["valid_utc"])
+
+
 def hours_of(temps, wind=5.0, gust=8.0, precip=0.0, day="2026-09-26", tz="America/New_York"):
     """product_hours for day_summary: the first len(temps) labelled hours of
     the day, exact values in the archive's units."""
@@ -474,6 +546,72 @@ class Rules(unittest.TestCase):
         self.assertEqual(s["hours"], 2)
         self.assertEqual(s["high"]["exact"], 60.0)
 
+    def test_the_three_half_ties_show_the_way_the_contracts_round_them(self):
+        # each value the file holds is converted exactly and rounded once,
+        # half away from zero, never in binary floating point and never by a
+        # rounding that sends a negative half toward zero (JavaScript's
+        # Math.round makes -8.5 a -8)
+        ties = [("temp", 280.65, Decimal("45.5"), 46), ("temp", 250.65, Decimal("-8.5"), -9),
+                ("precip", 15.875, Decimal("0.625"), 0.63)]
+        for var, raw, exact, shown in ties:
+            self.assertEqual(analysis.exact(var, raw), exact, (var, raw))
+            self.assertEqual(analysis.half_up(analysis.exact(var, raw), analysis.HOUR_UNIT[var]), shown, (var, raw))
+        # the binary conversion lands a hair inside the negative half
+        self.assertGreater(analysis.k_to_f(250.65), -8.5)
+        # and the day of one such hour resolves the same way
+        for raw, high in ((280.65, 46), (250.65, -9)):
+            ph = {iso(analysis.local_day_hours("2026-01-10", "America/New_York")[0]): {
+                "temp": analysis.exact("temp", raw), "wind": Decimal(0), "gust": Decimal(0), "precip": None}}
+            s = analysis.day_summary(ph, "America/New_York", "2026-01-10", NOW)
+            self.assertEqual((s["high"]["value"], s["low"]["value"]), (high, high))
+
+    def test_a_split_precipitation_total_is_summed_in_millimetres_and_converted_once(self):
+        # 15.875 mm is exactly 0.625 in and resolves 0.63; in three hours of
+        # 0.015625, 2.546875 and 13.3125 mm the hours' inches, each a division
+        # Decimal stops at its 28th digit, add to 0.62499999...9, which
+        # resolved 0.62 before the millimetres were summed first. 2.54 mm is
+        # 0.1000 in, and three hours of it showed an exact figure of 0.0999
+        hs = analysis.local_day_hours("2026-09-26", "America/New_York")
+        for parts, value, exact in (((0.015625, 2.546875, 13.3125), 0.63, 0.625), ((0.064, 0.253, 2.223), 0.1, 0.1)):
+            ph = {iso(h): {"temp": Decimal(60), "wind": Decimal(5), "gust": Decimal(8),
+                           "precip": analysis.exact("precip", mm), "mm": mm} for h, mm in zip(hs, parts)}
+            by_hours = sum(rec["precip"] for rec in ph.values())
+            self.assertLess(by_hours, Decimal(str(exact)))          # the sum of the hours' inches falls short
+            s = analysis.day_summary(ph, "America/New_York", "2026-09-26", NOW)
+            self.assertEqual((s["precip"]["value"], s["precip"]["exact"], s["precip"]["hours"]), (value, exact, 3))
+            # the running total of the last hour is the day's, by the same code
+            run = analysis.running(ph, "America/New_York", "2026-09-26", NOW, hs[2])
+            self.assertEqual(run["precip"], {"value": value, "exact": exact, "hours": 3})
+
+    def test_the_running_values_are_the_days_resolution_of_the_hours_so_far(self):
+        # a day with an hour on neither server and an hour published after the
+        # cut-off: each hour's running values are day_summary over the hours up
+        # to it, so the missing hour leaves the values on the hours there are,
+        # the late file never counts, and the last counted hour is the day
+        tz, day = "America/New_York", "2026-09-26"
+        hs = analysis.local_day_hours(day, tz)
+        cut = analysis.day_cutoff(day, tz)
+        ph = hours_of([60.0 + (i % 7) for i in range(24)], precip=0.01)
+        for h in hs:
+            ph[iso(h)].update({"pub": iso(h + dt.timedelta(minutes=48)), "pcpPub": iso(h + dt.timedelta(minutes=78))})
+        del ph[iso(hs[5])]
+        ph[iso(hs[23])].update({"temp": 99.0, "pub": iso(cut + dt.timedelta(hours=2)),
+                                "pcpPub": iso(cut + dt.timedelta(hours=2))})
+        later = cut + dt.timedelta(hours=3)
+        s = analysis.day_summary(ph, tz, day, later)
+        for k, h in enumerate(hs):
+            run = analysis.running(ph, tz, day, later, h)
+            fresh = analysis.day_summary({i: r for i, r in ph.items() if i <= iso(h)}, tz, day, later)
+            self.assertEqual([run[x] for x in ("hours", "high", "low", "gust", "wind")],
+                             [fresh[x] for x in ("hours", "high", "low", "gust", "wind")], k)
+        self.assertEqual(analysis.running(ph, tz, day, later, hs[4])["hours"], 5)
+        self.assertEqual(analysis.running(ph, tz, day, later, hs[5]), analysis.running(ph, tz, day, later, hs[4]))
+        last = analysis.running(ph, tz, day, later, hs[22])
+        self.assertEqual((last["hours"], last["high"], last["precip"]["value"]), (s["hours"], s["high"], s["precip"]["value"]))
+        self.assertEqual(analysis.running(ph, tz, day, later, hs[23]), last)        # the late hour adds nothing
+        self.assertEqual((s["hours"], s["high"]["value"], s["precip"]["value"]), (22, 66, 0.22))
+        self.assertIsNone(analysis.running({}, tz, day, later, hs[3]))
+
 
 class LocalDay(unittest.TestCase):
     def test_a_chicago_day_spans_two_utc_directories(self):
@@ -666,11 +804,21 @@ class Job(unittest.TestCase):
         self.assertEqual(len(loc["hours"]), 24)
         row = next(r for r in loc["hours"] if r["t"] == "2026-09-26T19:00:00Z")
         self.assertEqual(row["local"], "15")
-        self.assertEqual(row["rtma"], {"temp": 80.6, "wind": 11.184, "gust": 17.895, "precip": None})
+        self.assertEqual(values_of(row["rtma"]), {"temp": 80.6, "wind": 11.184, "gust": 17.895, "precip": None})
         self.assertEqual(sorted(row), ["local", "rtma", "t"])
+        # each row also carries its values as the contracts show them, the
+        # day's values so far and where its file came from (the fake sends no
+        # Last-Modified, so no publication time)
+        self.assertEqual(loc["rowShape"], analysis.ROW_SHAPE)
+        self.assertEqual(row["rtma"]["show"], {"temp": 81, "wind": 11, "gust": 18, "precip": None})
+        self.assertEqual(row["rtma"]["run"]["high"], ny["rtma"]["high"])
+        self.assertEqual(row["rtma"]["run"]["hours"], 1)
+        self.assertEqual((row["rtma"]["src"], "pub" in row["rtma"]), ("nodd", False))
         # the accumulation NOAA files under 19Z is the rain of the hour that starts at 18Z
         before = next(r for r in loc["hours"] if r["t"] == "2026-09-26T18:00:00Z")
-        self.assertEqual(before["rtma"], {"temp": None, "wind": None, "gust": None, "precip": 0.1})
+        self.assertEqual(values_of(before["rtma"]), {"temp": None, "wind": None, "gust": None, "precip": 0.1})
+        self.assertEqual(before["rtma"]["run"], {"hours": 0, "high": None, "low": None, "gust": None, "wind": None,
+                                                 "precip": {"value": 0.1, "exact": 0.1, "hours": 1}})
         self.assertEqual(loc["summary"], ny)
         # the state and the index, which is the last write
         state = self.state()
@@ -808,8 +956,10 @@ class Job(unittest.TestCase):
         self.fx.values[("rtma", "precip", iso(t))] = lambda k: 1.0      # 1 mm is 0.03937 in
         self.assertEqual(self.run_pass(), 0)
         rows = {r["t"]: r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]}
-        self.assertEqual(rows[iso(t - dt.timedelta(hours=1))]["rtma"], {"temp": None, "wind": None, "gust": None, "precip": 0.0393})
-        self.assertEqual(rows[iso(t)]["rtma"], {"temp": 68.0, "wind": 11.184, "gust": 17.895, "precip": None})
+        self.assertEqual(values_of(rows[iso(t - dt.timedelta(hours=1))]["rtma"]), {"temp": None, "wind": None, "gust": None, "precip": 0.0393})
+        self.assertEqual(values_of(rows[iso(t)]["rtma"]), {"temp": 68.0, "wind": 11.184, "gust": 17.895, "precip": None})
+        # the row's precipitation as the contract shows it, a hundredth of an inch
+        self.assertEqual(rows[iso(t - dt.timedelta(hours=1))]["rtma"]["show"]["precip"], 0.04)
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual(ny["precip"], {"value": 0.04, "exact": 0.0393, "hours": 1, "resolved": False, "resolvedAt": None})
         self.assertEqual(ny["hours"], 1)
@@ -843,7 +993,7 @@ class Job(unittest.TestCase):
         # the accumulation filed under 19Z is the 18Z row's
         row = next(r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]
                    if r["t"] == iso(t - dt.timedelta(hours=1)))
-        self.assertEqual(row["rtma"], {"temp": None, "wind": None, "gust": None, "precip": 0.1})
+        self.assertEqual(values_of(row["rtma"]), {"temp": None, "wind": None, "gust": None, "precip": 0.1})
         fr = self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z"))
         self.assertIsNotNone(fr)
         # the gap is retried for its analysis, and the whole precipitation is not fetched again
@@ -1565,6 +1715,213 @@ class Job(unittest.TestCase):
         self.assertIsNone(analysis.check_message(msg, "precip", G184, hour(2026, 9, 26, 12)))
         why = analysis.check_message(msg, "precip", G184, hour(2026, 9, 26, 13))
         self.assertIn("valid", why or "")
+
+    # ---- the settlement display's figures (2026-11-03): every row of a place
+    #      file carries its values as the contracts show them and the day's
+    #      values so far, each made by the code that resolves the day
+    def archive(self, hours, read_now, gone=()):
+        """Read and archive each hour through the lane's own read_hour and
+        write_hour, as the passes do; an hour in `gone` has its precipitation
+        stored without an analysis."""
+        cache, gi = {}, {}
+        for t in hours:
+            res = analysis.read_hour("rtma", t, LOCS, {"wexp": [], "g184": []}, frames=False, now=read_now)
+            if res.status == "ok":
+                analysis.write_hour(self.st, "rtma", t, res, gi, cache, read_now)
+            else:
+                self.assertIn(t, gone)
+                analysis.write_precip_only(self.st, "rtma", t, res, gi, cache, read_now)
+        return cache
+
+    def check_store(self, pairs):
+        """check_running over the place files of the (place, day) pairs, with
+        each day's raw CSV as the fresh source. Returns the rows checked."""
+        n = 0
+        for lid, day in sorted(pairs):
+            doc = self.read(analysis.LOC_KEY.format(loc=lid, day=day))
+            raw = self.st.get(analysis.CSV_RAW_KEY.format(day=day)).decode()
+            n += check_running(self, doc, raw_rows_of(raw, lid))
+        return n
+
+    def test_the_half_ties_reach_the_place_file_as_the_contracts_show_them(self):
+        # New York on 2026-01-10 (EST): 280.65 K at 00:00 local is 45.5 F and
+        # shows 46, 250.65 K at 01:00 is -8.5 F and shows -9, and the 15.875 mm
+        # of the hour from 00:00 is exactly 0.625 in and shows 0.63
+        h0, h1 = hour(2026, 1, 10, 5), hour(2026, 1, 10, 6)
+        for t, k in ((h0, 280.65), (h1, 250.65)):
+            self.fx.add_hour("rtma", t)
+            self.fx.values[("rtma", "temp", iso(t))] = lambda c, k=k: k if c == NY_K else 280.0
+        self.fx.values[("rtma", "precip", iso(h1))] = lambda c: 15.875 if c == NY_K184 else 0.0
+        now = hour(2026, 1, 11, 6)
+        self.archive([h0, h1], now)
+        analysis.rebuild_days(self.st, {("new-york-ny", "2026-01-10")}, LOCS, {}, now, analysis.new_state())
+        rows = {r["t"]: r["rtma"] for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-01-10"))["hours"]}
+        self.assertEqual((rows[iso(h0)]["temp"], rows[iso(h0)]["show"]["temp"]), (45.5, 46))
+        self.assertEqual((rows[iso(h1)]["temp"], rows[iso(h1)]["show"]["temp"]), (-8.5, -9))
+        self.assertEqual((rows[iso(h0)]["precip"], rows[iso(h0)]["show"]["precip"]), (0.625, 0.63))
+        self.assertEqual(rows[iso(h0)]["run"]["high"], {"value": 46, "exact": 45.5, "at": iso(h0)})
+        self.assertEqual(rows[iso(h1)]["run"]["low"], {"value": -9, "exact": -8.5, "at": iso(h1)})
+        self.assertEqual(rows[iso(h0)]["run"]["precip"], {"value": 0.63, "exact": 0.625, "hours": 1})
+        ny = self.read(analysis.DAY_KEY.format(day="2026-01-10"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["high"]["value"], ny["low"]["value"], ny["precip"]["value"]), (46, -9, 0.63))
+
+    def test_every_hour_of_every_place_day_built_from_fixtures_runs_on_the_days_resolution(self):
+        # Three places over 2026-09-26 and into the next day, read through the
+        # lane: an analysis on neither server whose precipitation landed, an
+        # analysis published after New York's and Chicago's cut-off but before
+        # Los Angeles's, an accumulation published after New York's cut-off
+        # only, the two temperature halves and a split 0.625 in at New York;
+        # then the fall-back day of 2026-11-01, 25 hours at New York. Every
+        # row of every place file must carry what a fresh resolution of the
+        # hours up to it gives, and the last counted hour the day's summary.
+        CHI = next(l for l in LOCS if l["id"] == "chicago-il")
+        chi184 = CHI["cell"]["g184"][2]
+        gone, late_anl, late_pcp = hour(2026, 9, 26, 16), hour(2026, 9, 26, 20), hour(2026, 9, 26, 23)
+        rain = {hour(2026, 9, 26, 10): 0.015625, hour(2026, 9, 26, 11): 2.546875, hour(2026, 9, 26, 12): 13.3125}
+
+        def plant(i, t):
+            if t == gone:
+                self.fx.add_precip("rtma", t)
+            else:
+                self.fx.add_hour("rtma", t)
+            self.fx.published[analysis.anl_url("rtma", t)] = iso(t + dt.timedelta(minutes=48))
+            self.fx.published[analysis.pcp_url("rtma", t)] = iso(t + dt.timedelta(minutes=17))
+            ties = {hour(2026, 9, 26, 12): 280.65, hour(2026, 9, 26, 13): 250.65}
+            self.fx.values[("rtma", "temp", iso(t))] = (
+                lambda c, i=i, t=t: ties[t] if (c == NY_K and t in ties) else 270.0 + ((i * 53 + c % 97) % 4000) / 100.0)
+            self.fx.values[("rtma", "wind", iso(t))] = lambda c, i=i: ((i * 7 + c) % 900) / 100.0
+            self.fx.values[("rtma", "gust", iso(t))] = lambda c, i=i: ((i * 7 + c) % 900) / 100.0 + ((i * 3 + c) % 500) / 100.0
+            self.fx.values[("rtma", "precip", iso(t))] = (
+                lambda c, i=i, t=t: rain.get(t, 0.0) if c == NY_K184 else ((i % 5) * 0.015625 if c == chi184 else 0.0))
+
+        hours = [hour(2026, 9, 26, 4) + dt.timedelta(hours=n) for n in range(28)]
+        for i, t in enumerate(hours):
+            plant(i, t)
+        self.fx.published[analysis.anl_url("rtma", late_anl)] = "2026-09-27T06:00:00Z"
+        self.fx.published[analysis.pcp_url("rtma", late_pcp)] = "2026-09-27T05:30:00Z"
+        now = hour(2026, 9, 27, 9)
+        self.archive(hours, now, gone=(gone,))
+        pairs = {(l["id"], d) for l in LOCS for d in ("2026-09-26", "2026-09-27")}
+        analysis.rebuild_days(self.st, pairs, LOCS, {}, now, analysis.new_state())
+        self.assertGreater(self.check_store(pairs), 3 * 24)
+        rows = {r["t"]: r["rtma"] for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]}
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["final"], ny["hours"], ny["precip"]["value"], ny["precip"]["exact"]), (True, 22, 0.63, 0.625))
+        self.assertEqual((ny["low"]["value"], ny["low"]["exact"]), (-9, -8.5))
+        # the hour whose analysis never landed adds its rain and no analysis
+        before, at = rows[iso(gone - dt.timedelta(hours=1))]["run"], rows[iso(gone)]["run"]
+        self.assertEqual((rows[iso(gone)]["temp"], rows[iso(gone)]["show"]["temp"]), (None, None))
+        self.assertEqual((at["hours"], at["high"], at["precip"]["hours"]), (before["hours"], before["high"], before["precip"]["hours"] + 1))
+        self.assertTrue(rows[iso(late_anl)]["late"])
+        self.assertEqual(rows[iso(late_anl)]["run"]["hours"], rows[iso(late_anl - dt.timedelta(hours=1))]["run"]["hours"])
+        self.assertTrue(rows[iso(late_pcp - dt.timedelta(hours=1))]["pcpLate"])
+        self.assertEqual(rows[iso(hour(2026, 9, 26, 12))]["show"]["temp"], 46)
+        self.assertEqual(rows[iso(hour(2026, 9, 26, 12))]["pub"], "2026-09-26T12:48:00Z")
+        self.assertEqual(rows[iso(hour(2026, 9, 26, 11))]["pcpPub"], "2026-09-26T12:17:00Z")
+        la = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["los-angeles-ca"]["rtma"]
+        chi = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["chicago-il"]["rtma"]
+        self.assertEqual((la["hours"], chi["hours"], chi["precip"]["hours"], ny["precip"]["hours"]), (23, 22, 24, 23))
+        # the fall-back day: 25 rows at New York, the second 01:00 labelled 01*
+        fall = [hour(2026, 11, 1, 4) + dt.timedelta(hours=n) for n in range(26)]
+        for i, t in enumerate(fall):
+            plant(i, t)
+        now = hour(2026, 11, 2, 10)
+        self.archive(fall, now)
+        pairs = {(l["id"], "2026-11-01") for l in LOCS}
+        analysis.rebuild_days(self.st, pairs, LOCS, {}, now, analysis.new_state())
+        self.assertGreater(self.check_store(pairs), 25)
+        doc = self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-11-01"))
+        self.assertEqual((len(doc["hours"]), doc["hours"][2]["local"], doc["hours"][-1]["rtma"]["run"]["hours"]),
+                         (25, "01*", 25))
+
+    def test_older_place_files_without_the_running_values_still_load_and_are_rewritten_a_few_a_pass(self):
+        # place files written before 2026-11-03 carry no rowShape, show, run
+        # or publication times. They stay readable where they are, the lane
+        # reads nothing from them, and the LAYOUT change rewrites the listed
+        # days newest first, REFRESH_DAYS_PER_PASS a pass, inside the pass's
+        # deadline like any other refresh
+        keep = analysis.REFRESH_DAYS_PER_PASS
+        analysis.REFRESH_DAYS_PER_PASS = 1
+        self.addCleanup(lambda: setattr(analysis, "REFRESH_DAYS_PER_PASS", keep))
+        days = ("2026-09-24", "2026-09-25", "2026-09-26")
+        hours = [hour(2026, 9, 24, 4) + dt.timedelta(hours=n) for n in range(3 * 24 + 4)]
+        for t in hours:
+            self.fx.add_hour("rtma", t)
+        now = hour(2026, 9, 27, 9)
+        self.archive(hours, now)
+        state = analysis.new_state()
+        pairs = {(l["id"], d) for l in LOCS for d in days}
+        analysis.rebuild_days(self.st, pairs, LOCS, {}, now, state)
+        # strip what this layout added, as the files of the layout before it were
+        for lid, d in pairs:
+            key = analysis.LOC_KEY.format(loc=lid, day=d)
+            doc = self.read(key)
+            doc.pop("rowShape")
+            for r in doc["hours"]:
+                for k in ("show", "run", "pub", "pcpPub", "src", "pcpSrc"):
+                    (r["rtma"] or {}).pop(k, None)
+            self.st.put(key, analysis._dump(doc), "application/json")
+        old = {d: self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=d)) for d in days}
+        for d in days:
+            self.assertNotIn("rowShape", old[d])
+            self.assertEqual(sorted(old[d]["hours"][0]["rtma"]), ["gust", "precip", "temp", "wind"])
+        state["layout"] = "cutoff-2026-10-14"
+        status = {"errors": [], "failed": 0}
+        for n, left in ((1, 2), (2, 1), (3, 0)):
+            analysis.refresh_days(self.st, state, LOCS, {}, now, archive.Deadline(600), status)
+            self.assertEqual(status["refreshed"], {"days": 1, "left": left})
+            shaped = [d for d in days if self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=d)).get("rowShape")]
+            self.assertEqual(shaped, list(days[-n:]))          # newest first
+            # a day not yet rewritten is the old file, unchanged and still read whole
+            for d in days[:-n]:
+                self.assertEqual(self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=d)), old[d])
+        self.assertNotIn("relayout", state)
+        self.assertEqual(state["layout"], analysis.LAYOUT)
+        # rewritten, each carries the running values the display steps through
+        self.check_store(pairs)
+        for d in days:
+            doc = self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=d))
+            self.assertEqual([values_of(r["rtma"]) for r in doc["hours"]], [values_of(r["rtma"]) for r in old[d]["hours"]])
+        # a refresh that runs out of time leaves the rest for the next pass
+        state["layout"] = "cutoff-2026-10-14"
+        analysis.refresh_days(self.st, state, LOCS, {}, now, archive.Deadline(1), status)
+        self.assertEqual(status["refreshed"]["days"], 0)
+        self.assertEqual(sorted(state["relayout"]), list(days))
+
+
+class Samples(unittest.TestCase):
+    """The checked-in samples (samples/snapshots/analysis2), which the page
+    renders offline and scripts/verify.py drives: rebuilt with the lane's own
+    code, so every place file carries the running values, and each must equal
+    a fresh resolution of its raw CSV."""
+    SNAP = os.path.join(ROOT, "samples", "snapshots", "analysis2")
+
+    def test_every_hour_of_every_sample_place_day_runs_on_the_days_resolution(self):
+        with open(os.path.join(self.SNAP, "index.json")) as fh:
+            index = json.load(fh)
+        raws, files, rows = {}, 0, 0
+        for d in index["days"]:
+            with open(os.path.join(self.SNAP, "csv", d + "-raw.csv")) as fh:
+                raws[d] = fh.read()
+        for loc in index["locations"]:
+            for d in index["days"]:
+                path = os.path.join(self.SNAP, "loc", loc["id"], d + ".json")
+                with open(path) as fh:
+                    doc = json.load(fh)
+                rows += check_running(self, doc, raw_rows_of(raws[d], loc["id"]))
+                files += 1
+        self.assertEqual(files, 67 * 6)
+        self.assertGreater(rows, 67 * 5 * 24)
+
+    def test_the_wet_boston_day_resolves_on_its_total_not_on_its_rounded_hours(self):
+        # Boston on 2026-09-28: the hours as shown add to 0.83 in and the day
+        # resolved on 0.84, summed from the files' own numbers and rounded once
+        with open(os.path.join(self.SNAP, "loc", "boston-ma", "2026-09-28.json")) as fh:
+            doc = json.load(fh)
+        shown = sum(Decimal(str(r["rtma"]["show"]["precip"])) for r in doc["hours"])
+        self.assertEqual(shown, Decimal("0.83"))
+        self.assertEqual((doc["summary"]["rtma"]["precip"]["value"], doc["hours"][-1]["rtma"]["run"]["precip"]["value"]),
+                         (0.84, 0.84))
 
 
 class RangeFetch(unittest.TestCase):

@@ -10,6 +10,9 @@
    Every result is {data, source: 'live'|'cache'|'none', asof, ageMin, stale}.
    `get(key, cadenceMin, {store: false})` fetches without saving the copy: for
    a file too large to be worth a slot in the browser's storage.
+   `{bust: stamp}` adds the stamp to the address as a query string, so a file
+   a live page asks for again is fetched afresh rather than from the
+   browser's cache; the copy saved for an outage keeps the plain key.
    The browser never calls a government endpoint; it reads only these files. */
 window.WXD = (() => {
   const base = () => ((window.WX && window.WX.dataBaseUrl) || 'data').replace(/\/$/, '');
@@ -24,7 +27,7 @@ window.WXD = (() => {
   async function get(key, cadenceMin, opts) {
     cadenceMin = cadenceMin || cadences()[key.split('/')[0]] || 10;
     const store = !(opts && opts.store === false);
-    const url = `${base()}/snapshots/${key}`;
+    const url = `${base()}/snapshots/${key}` + (opts && opts.bust ? '?b=' + encodeURIComponent(opts.bust) : '');
     const ck = 'wx:' + key;
     try {
       // No cache mode: the snapshots carry max-age=60 with stale-while-revalidate,

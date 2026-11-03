@@ -17,15 +17,18 @@
 mean wind and precipitation at sixty-seven settlement locations, each the 2.5 km grid cell that holds a main
 city&rsquo;s City Hall, resolved on NOAA&rsquo;s hourly RTMA analysis (within the hour, precipitation from radar)
 instead of a station&rsquo;s reports. Values are rounded once, half up, away from zero, and a value equal to the
-strike resolves Yes. The exchange&rsquo;s current daily contracts still resolve strictly above or below a strike.</p>
+strike resolves Yes. The exchange&rsquo;s current daily contracts still resolve strictly above or below a strike.
+Each value is shown the way its contract rounds it, and a day fills in as NOAA publishes each hour.</p>
 <div class="bar" id="anaBar"><span id="pageStatus"></span></div>
-<div id="anaMap" class="card"></div>
 <div id="locPanel" hidden></div>
+<p class="cap anapick" id="anaPick">Pick a place on the map or from the place list to follow its day as it resolves, hour by hour.</p>
+<div id="anaMap" class="card"></div>
 <div class="prose" id="anaMethod"></div>
 <p class="cap" id="foot"></p>
 </div>
 <script src="js/common.js"></script>
 <script src="js/data.js"></script>
+<script src="js/analysis-settle.js"></script>
 <script src="js/analysis.js"></script>
 <script>WXAnalysis.init();</script>
 </body>

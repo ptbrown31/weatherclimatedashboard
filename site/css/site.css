@@ -14,7 +14,7 @@
   --viewer:#404040; --viewer-line:#2E2E2E;
   /* the working paper's five groups on the accuracy page, the palette of the brief at its top */
   --g-mos:#1B7D3A; --g-blend:#12A4B6; --g-human:#E8850C; --g-ai:#7B3294; --g-raw:#B79E70;
-  --ana-rtma:#B8722C; --cell-line:#111111;
+  --ana-rtma:#B8722C; --cell-line:#111111; --ana-rain-soft:#D6E4F3;
   --t-extra:#9AA3AD;
   /* a live storm's cards, shaded by what each column of the vendor's is: LiveCyc looks forward from
      its cycle, Metryc counts the highest gust over the whole storm (owner, 2026-10-12) */
@@ -30,7 +30,7 @@
     --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
     --tip-bg:#E4E9F0; --tip-ink:#0F141A;
     --g-mos:#5FBF7A; --g-blend:#3FC4D4; --g-human:#F0A04A; --g-ai:#B98AE0; --g-raw:#A8957A;
-    --ana-rtma:#E8A85C; --cell-line:#0B0F14;
+    --ana-rtma:#E8A85C; --cell-line:#0B0F14; --ana-rain-soft:#1E3550;
     --t-extra:#8C97A3;
     --ph-fwd:rgba(127,176,234,.13); --ph-cum:rgba(232,170,80,.15); --ph-cum-ink:#E8AA50;
   }
@@ -44,7 +44,7 @@
   --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
   --tip-bg:#E4E9F0; --tip-ink:#0F141A;
   --g-mos:#5FBF7A; --g-blend:#3FC4D4; --g-human:#F0A04A; --g-ai:#B98AE0; --g-raw:#A8957A;
-  --ana-rtma:#E8A85C; --cell-line:#0B0F14;
+  --ana-rtma:#E8A85C; --cell-line:#0B0F14; --ana-rain-soft:#1E3550;
   --t-extra:#8C97A3;
   --ph-fwd:rgba(127,176,234,.13); --ph-cum:rgba(232,170,80,.15); --ph-cum-ink:#E8AA50;
 }
@@ -881,6 +881,64 @@ table.anahours tr:nth-child(odd) td{box-shadow:inset 0 0 0 9999px rgba(127,127,1
 .anadl dt{font-weight:600;color:var(--navy)}
 .anadl dd{margin:0;line-height:1.55;color:var(--ink)}
 @media (max-width:640px){.anadl{grid-template-columns:1fr}.anadl dd{margin-bottom:6px}}
+/* The settlement display (owner's approved design of 2026-11-03): the picked
+   place-day above the map, its state, the clock and countdowns, the five
+   values, three charts on one time axis and every hour. Colours are the
+   site's tokens, so it reads in both themes; the rain bars take the one token
+   added for it, --ana-rain-soft. */
+.anapick{margin:2px 2px 12px}
+#anaSettle{display:grid;gap:12px;margin:8px 0 6px}
+#anaSettle [hidden]{display:none !important}
+.anastatus{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13.5px}
+.anastatus .anapill{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;padding:2px 9px;margin:0}
+.anapill.prov{background:var(--warn-soft);color:var(--warn)}
+.anapill.final{background:var(--ok-soft);color:var(--ok)}
+.anapill.review,.anapill.closed{background:var(--bad-soft);color:var(--bad)}
+.anaclock{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 14px;display:grid;gap:10px}
+.anaclkrow{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:center}
+.anawhen{white-space:nowrap;font-variant-numeric:tabular-nums}
+.anawhen b{font-size:17px}
+.anawhen span{color:var(--muted);margin-left:6px;font-size:12.5px}
+#anaT{width:100%;accent-color:var(--accent)}
+.anabtns{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
+.anabtns button{padding:5px 11px;font-weight:600}
+.anabtns button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.anatoggle{display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
+.anaest{font-size:12px;color:var(--warn);max-width:60ch}
+.ananext{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
+.anadue{border:1px solid var(--line);border-radius:8px;padding:8px 12px;display:grid;gap:2px;background:var(--ground)}
+.anadue .what{font-size:12.5px;color:var(--muted)}
+.anadue .main{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
+.anadue .cd{font:700 20px/1.1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.anadue .cd.late{color:var(--warn)}
+.anadue .ananote{font-size:12px;color:var(--muted)}
+.anaold{margin:0}
+#anaSettle .anacards{margin:0}
+.anacard .ae.anaexact{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.anachart{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px 8px;min-width:0}
+.anachart h3{margin:0;font-size:14px;color:var(--navy);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline}
+.analeg{display:inline-flex;gap:12px;flex-wrap:wrap;font-size:12px;font-weight:400;color:var(--muted)}
+.analeg i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+.anachart .cap{margin:2px 0 6px;max-width:80ch}
+.anaplot svg{display:block;width:100%;height:auto;overflow:visible}
+svg.anasvg text{font-size:11px;fill:var(--muted)}
+svg.anasvg text.lab{fill:var(--ink);font-weight:600}
+svg.anasvg text.duelab{fill:var(--accent)}
+svg.anasvg .grid{stroke:var(--line);stroke-width:1}
+svg.anasvg .axis{stroke:var(--rule);stroke-width:1}
+svg.anasvg .future{fill:var(--shade)}
+svg.anasvg .now{stroke:var(--ink);stroke-width:1.5}
+svg.anasvg .duemark{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 3}
+.anahrs{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px 8px;min-width:0}
+.anahrs h3{margin:0 0 8px;font-size:14px;color:var(--navy)}
+.anahrs .anatab{margin:0}
+table.anahours tr.pending td{color:var(--muted)}
+table.anahours td.hi{color:var(--warm);font-weight:700}
+table.anahours td.lo{color:var(--cool);font-weight:700}
+table.anahours td.pk{color:var(--vbar);font-weight:700}
+table.anahours td.arr{color:var(--muted)}
+table.anahours th.num,table.anahours td.num{text-align:right}
+@media (max-width:560px){.anaclkrow{grid-template-columns:1fr}.anawhen{white-space:normal}.anawhen span{display:block;margin:2px 0 0}}
 
 /* the landing map's legend: what a dot's number, color and size mean, and the NWS color scale under them */
 .maplegend{display:flex;flex-direction:column;gap:8px;margin:10px 2px 12px;font-size:12px;color:var(--muted)}

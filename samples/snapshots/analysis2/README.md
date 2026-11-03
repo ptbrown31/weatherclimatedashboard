@@ -43,3 +43,21 @@ entries and rows and each precipitation total its `revised` field, the CSV files
 `product` column, the index lost `sources.urma`, and the four URMA frames per variable left the
 tree with their `grid/index.json` entries. Every RTMA value of the 2,077 place-days of the run is
 unchanged.
+
+On 2026-11-03 the place files gained each hour's value as the contract shows it, the day's values so
+far and the files' publication times, for the settlement display. The run's archive is not in this
+repository, so it was rebuilt from what is: the six days' raw CSV files carry every place and hour in
+the archive's own stored numbers (kelvin, metres per second and millimetres, with their sources), and
+those were written back as archive hours and precipitation keys in a scratch local store. The lane's own
+`refresh_days` then rewrote the six listed days there, as a pass does after a `LAYOUT` change, and
+`write_index` wrote the index, both at the run's time of 2026-09-29 20:20 UTC, and the rewritten `days/`,
+`loc/` and `csv/` files and `index.json` replaced these; `grid/` is unchanged. A second rebuild from the
+rewritten CSV files changes no file. No value changed: every high, low, gust, wind and precipitation
+figure, exact figure, hour and count of the 402 place-days is the same. The days did take on the layout
+of 2026-10-14, which they had never been rewritten in: a final day's `finalAt` and its precipitation's
+`resolvedAt` are now its cut-off, every entry carries `review`, the raw CSV files carry the two
+publication-time columns (empty, since these files were read before 2026-10-14), and the index carries
+the current conventions and `review` counts. The files predate the publication times, so the page
+replays these days at the usual lags, marked ≈, and its live features run on them only under a fixed
+clock, which is how `scripts/verify.py` drives them (2026-09-29 is the live day, its hours read to 19
+UTC).
