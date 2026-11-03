@@ -200,8 +200,13 @@ phase_site() {
   # papers/ holds the copy of the working paper the site served before the paper
   # moved to EarthArXiv. The CDN forwards its URL to the DOI (IndexRewrite in
   # template.yaml) and never reaches the object, and the sync leaves it in place.
-  say "uploading the standalone site to s3://$bucket/ (data/, embed/ and papers/ are never touched by this sync)"
-  upload_target "$ROOT/dist/standalone" "s3://$bucket" --exclude "data/*" --exclude "embed/*" --exclude "papers/*"
+  #
+  # ndfd/ is the NDFD version of the site, which its own script publishes into
+  # this bucket. This build never contains it, so without the exclusion the
+  # sync's --delete would remove all of it. The owner's decision of 3 November
+  # 2026 keeps the exclusion, and tests/test_deploy.py fails if it goes.
+  say "uploading the standalone site to s3://$bucket/ (data/, embed/, papers/ and ndfd/ are never touched by this sync)"
+  upload_target "$ROOT/dist/standalone" "s3://$bucket" --exclude "data/*" --exclude "embed/*" --exclude "papers/*" --exclude "ndfd/*"
   say "uploading the embed to s3://$bucket/embed/"
   upload_target "$ROOT/dist/embed" "s3://$bucket/embed"
   say "invalidating the CDN cache"
