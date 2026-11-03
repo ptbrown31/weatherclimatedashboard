@@ -525,7 +525,7 @@ window.WXAlloc = (() => {
   };
 
   function compute() {
-    const fee = (window.WXM && WXM.feeCents ? WXM.feeCents() : 0.5) / 100;
+    const fee = (window.WXM && WXM.feeCents ? WXM.feeCents() : 1) / 100;
     const all = instruments(S.ladder, fee);
     const mu = S.value, band = Math.max(S.band, 1e-9);
     all.forEach(i => {
@@ -553,9 +553,9 @@ window.WXAlloc = (() => {
   // ------------------------------------------------------------------- svg
   /* Whole cents on the chips, the note and the figure labels; the exact
      tenth-cent figures live in the hovers. Line spends step in tenths of a
-     cent (whole-cent price plus the half-cent fee), so a line holding an odd
-     number of contracts ends in a half cent, and the hover is where those
-     lines have to re-add to their total exactly. */
+     cent (a whole-cent price plus the fee, which config sets and which can be
+     a fraction of a cent), so a line can end in a fraction of a cent, and the
+     hover is where those lines have to re-add to their total exactly. */
   const fm$ = v => '$' + (Math.round(v * 100) / 100).toFixed(2);
   const fmE$ = v => {
     const r = Math.round(v * 1000) / 1000;
@@ -565,7 +565,7 @@ window.WXAlloc = (() => {
   const fmS = v => (v < 0 ? '−' : '+') + fm$(Math.abs(v)).slice(1);   // signed, for net outcomes
   const fmES = v => (v < 0 ? '−' : '+') + fmE$(Math.abs(v)).slice(1);
   const fmc = v => {
-    const c = Math.round(v * 1000) / 10;                  // costs carry the half-cent fee
+    const c = Math.round(v * 1000) / 10;                  // costs carry the fee, which can be a fraction of a cent
     return (c % 1 ? c.toFixed(1) : String(c)) + '¢';
   };
   const fmp = v => (v >= 0.995 ? '>99' : v <= 0.005 ? '<1' : Math.round(v * 100)) + '%';

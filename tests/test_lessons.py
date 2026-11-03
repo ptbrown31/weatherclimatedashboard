@@ -105,6 +105,14 @@ class Language(unittest.TestCase):
         self.assertNotIn("our fair value", self.words)
         self.assertIn("no forecast of its own", self.words)
 
+    def test_the_two_sides_are_never_said_to_make_a_dollar(self):
+        """The owner's rule of 16 October 2026 for every page. A Yes bid and a No
+        bid trade when they make a dollar, but the standing bids rarely do, so the
+        course never says the two sides sum to one."""
+        for bad in ("sum to one dollar", "sum to a dollar", "sums to one dollar", "sums to a dollar",
+                    "add up to a dollar", "add up to one dollar"):
+            self.assertNotIn(bad, self.words, bad)
+
 
 if __name__ == "__main__":
     unittest.main()

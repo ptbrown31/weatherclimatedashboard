@@ -5271,6 +5271,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 page.wait_for_timeout(900)
                 markers = page.locator("#panels svg circle, #panels svg path[stroke-width='1']").count()
                 chk.add(f"{scheme} climate: contract markers drawn from the quote snapshot", markers >= 5, f"markers={markers}")
+                # AMOC Weakening lists Below strikes, so its key reads the other way
+                keys = page.eval_on_selector_all("#panels .panel",
+                    "e=>e.map(p=>({t:(p.firstElementChild||{}).textContent||'', "
+                    "k:[...p.querySelectorAll('svg text')].map(x=>x.textContent).filter(s=>s.startsWith('Yes price'))}))")
+                amoc = [p for p in keys if p["t"].startswith("AMOC")]
+                chk.add(f"{scheme} climate: the AMOC key says Yes pays below the strike, every other key above",
+                        len(amoc) == 1 and amoc[0]["k"] == ["Yes price: the market’s chance it ends below the strike"]
+                        and all(k == "Yes price: the market’s chance it ends above the strike"
+                                for p in keys if not p["t"].startswith("AMOC") for k in p["k"]),
+                        str(keys)[:300])
                 page.locator("#panels svg circle[r='8']").first.hover(force=True); page.wait_for_timeout(120)
                 t_mk = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: climate marker shows settlement and the book", "Settles" in t_mk and "Yes" in t_mk, t_mk[:80])

@@ -163,10 +163,10 @@ window.WXM = (() => {
 
   // What a dollar of payout costs, net of the execution fee: buying Yes at `c`
   // cents costs c + fee and returns 100, so the multiple is 100 / (c + fee).
-  // The fee is config (exchange.fee_per_side) because the exchange's FAQ and the
-  // owner's published convention word it differently; every figure that shows a
-  // multiple also names the fee it used, so the assumption travels with it.
-  const feeCents = () => Math.round(((cfg().feePerSide != null ? cfg().feePerSide : 0.005)) * 1000) / 10;
+  // The fee is config (exchange.fee_per_side), the exchange's published cent a
+  // contract on each side; every figure that shows a multiple also names the fee
+  // it used, so the assumption travels with it.
+  const feeCents = () => Math.round(((cfg().feePerSide != null ? cfg().feePerSide : 0.01)) * 1000) / 10;
   function payout(c) {
     if (c == null) return null;
     const cost = c + feeCents();

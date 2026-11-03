@@ -9,7 +9,8 @@ window.WXClimate = (() => {
   /* Price as color: red at nothing, green at a dollar.
 
      A marker's color is the Yes price, which on these contracts is the market's
-     probability that the series ends above that strike. So the scale runs from
+     probability that the series ends above that strike, or below it on a
+     product that lists "Below" strikes. So the scale runs from
      red at no chance to green at a certainty, which is the same green and red
      the Yes and No language uses everywhere else on the site.
 
@@ -406,7 +407,10 @@ window.WXClimate = (() => {
                                    stroke: 'var(--line)', 'stroke-width': .5 }));
       svg.appendChild(txt('0¢', { x: kx - 5, y: ky + kh, 'text-anchor': 'end', class: 'ax' }));
       svg.appendChild(txt('100¢', { x: kx + kw + 5, y: ky + kh, class: 'ax' }));
-      svg.appendChild(txt('Yes price: the market’s chance it ends above the strike',
+      // AMOC Weakening lists "Below" strikes, whose Yes pays when the record ends
+      // under the line, so the key reads the direction off the product's labels
+      const below = cs.every(c => /^below\b/i.test(c.label || ''));
+      svg.appendChild(txt('Yes price: the market’s chance it ends ' + (below ? 'below' : 'above') + ' the strike',
                           { x: kx - 5, y: ky - 4, 'text-anchor': 'end', class: 'ax' }));
     }
 
