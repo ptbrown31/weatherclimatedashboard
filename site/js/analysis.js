@@ -22,7 +22,12 @@
    owner's approved design of 2026-11-03) above the map: the day's state, the
    countdowns to the next files, the five values, the hours on three charts
    and in a table, and a replay. The map, its frames, stepper and cell mode,
-   the CSV links, the hypothetical ladder and the method follow it. */
+   the CSV links, the hypothetical ladder and the method follow it.
+
+   The controls follow the owner's request of 2026-11-03. The day is a button
+   that opens a month calendar of the listed days, the place a button that
+   opens a small map of the places with a box to type a name, and the
+   variable a switch on the map, since the display shows all five at once. */
 window.WXAnalysis = (() => {
   const { el, txt, h, $ } = WXC;
   const STATEMENT = 'A proposed settlement framework. No contract settles on it.';
@@ -215,45 +220,373 @@ window.WXAnalysis = (() => {
     if (foot) foot.textContent = 'Analyses are NOAA’s Real-Time Mesoscale Analysis (RTMA), read from NOAA Open Data on AWS, or from NCEP’s NOMADS server for a file NOAA Open Data lacks. '
       + 'Times are analysis valid times, never fetch times. ' + STATEMENT;
 
-    // ---- controls: variable, day, place
+    // ---- The controls are the day and the place, each a button that opens
+    //      a popover, and Zoom to the cell. The variable is switched on the map.
     const bar = $('#anaBar');
-    const varBtns = h('span', { class: 'anagrp' });
-    Object.keys(VARS).forEach(k => {
-      const b = h('button', { text: VARS[k].label, 'data-var': k });
-      b.onclick = () => { if (S.var !== k) { S.var = k; changed('var'); } };
-      varBtns.appendChild(b);
-    });
-    const daySel = h('select', { id: 'anaDay', title: 'day. The page opens on the newest day every place has resolved.' });
-    // a day short of every place resolving is marked, so the reader sees why
-    // the page opened where it did
+    /* A day's state from the index's dayStatus. A day is final once every
+       place has resolved, in event review when every place still open is in
+       review, closed on a file written before the cut-off rule of 14
+       October, and provisional otherwise; an index without the field gives
+       no state. The calendar marks each listed day with it, and the day
+       button names any state but final, so the reader sees why the page
+       opened where it did. */
     const status = S.index.dayStatus || {};
-    const dayMark = d => {
+    const dayKind = d => {
       const st = status[d];
-      if (!st || !st.places || st.resolved === st.places) return '';
-      if ((st.review || 0) && st.resolved + (st.review || 0) >= st.places) return ' · event review';
-      return st.resolved + (st.closed || 0) + (st.review || 0) >= st.places ? ' · closed' : ' · provisional';
+      if (!st || !st.places) return null;
+      if (st.resolved === st.places) return 'final';
+      if ((st.review || 0) && st.resolved + (st.review || 0) >= st.places) return 'review';
+      return st.resolved + (st.closed || 0) + (st.review || 0) >= st.places ? 'closed' : 'provisional';
     };
-    days.slice().reverse().forEach(d => daySel.appendChild(h('option', { value: d, text: dayLabel(d) + dayMark(d) })));
-    daySel.onchange = () => { S.day = daySel.value; changed('day'); };
-    // a place select beside the day: the reliable way to a panel where the
-    // dots overlap or on a phone, and the keyboard's way in
-    const locSel = h('select', { id: 'anaLoc', title: 'place' });
-    locSel.appendChild(h('option', { value: '', text: 'Place' }));
-    (S.index.locations || []).slice().sort((a, b) => a.name.localeCompare(b.name) || a.state.localeCompare(b.state))
-      .forEach(L => locSel.appendChild(h('option', { value: L.id, text: L.name + ', ' + L.state })));
-    locSel.onchange = () => {
-      S.loc = locSel.value || null;
-      writeUrl();
-      if (S.loc) openLoc(true); else closeLoc();
+    const KIND = { final: 'final', provisional: 'provisional', review: 'event review', closed: 'closed' };
+    const dayMark = d => { const k = dayKind(d); return k && k !== 'final' ? ' · ' + KIND[k] : ''; };
+
+    /* The two popovers work alike. Each opens under its button, which says
+       whether it is open. Escape closes it and puts focus back on the button,
+       as a pick does, and a click outside it or focus moving out of it closes
+       it. Only one is open at a time. It is kept inside the page at any
+       width, moved left as far as it has to go, so a phone never scrolls
+       sideways. `draw` fills it, `focus` places the focus once it is in
+       place, `fit` follows a resize and `close` tidies up. */
+    let openPop = null;
+    function popover(btn, panel, opts) {
+      const wrap = h('span', { class: 'anapop' }, [btn, panel]);
+      const P = { node: wrap, isOpen: () => !panel.hidden };
+      const outside = ev => { if (!wrap.contains(ev.target)) P.close(false); };
+      // Escape is heard on the whole document while the panel is open, so it
+      // still closes it when the focus has fallen to the page, as it does
+      // when a focused button turns disabled
+      const esc = ev => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); P.close(true); } };
+      const fit = () => {
+        const W = document.documentElement.clientWidth;
+        panel.style.left = '';
+        panel.style.maxWidth = (W - 16) + 'px';
+        const r = panel.getBoundingClientRect(), over = r.right - (W - 8);
+        if (over > 0) panel.style.left = -Math.min(over, Math.max(0, r.left - 8)) + 'px';
+        if (opts.fit) opts.fit();
+      };
+      P.open = how => {
+        if (openPop && openPop !== P) openPop.close(false);
+        openPop = P;
+        panel.hidden = false;
+        btn.setAttribute('aria-expanded', 'true');
+        opts.draw();
+        fit();
+        document.addEventListener('pointerdown', outside, true);
+        document.addEventListener('keydown', esc, true);
+        window.addEventListener('resize', fit);
+        opts.focus(how);
+      };
+      P.close = refocus => {
+        if (panel.hidden) return;
+        panel.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+        if (openPop === P) openPop = null;
+        document.removeEventListener('pointerdown', outside, true);
+        document.removeEventListener('keydown', esc, true);
+        window.removeEventListener('resize', fit);
+        if (opts.close) opts.close();
+        if (refocus) btn.focus({ preventScroll: true });
+      };
+      // a touch opens without raising a phone's keyboard; a click or a key
+      // puts the focus straight into the panel
+      let pointer = '';
+      btn.addEventListener('pointerdown', ev => { pointer = ev.pointerType || ''; });
+      btn.addEventListener('click', ev => {
+        const how = ev.detail > 0 && pointer === 'touch' ? 'touch' : 'other';
+        pointer = '';
+        if (P.isOpen()) P.close(true); else P.open(how);
+      });
+      wrap.addEventListener('focusout', ev => {
+        const to = ev.relatedTarget;
+        if (to && !wrap.contains(to)) P.close(false);
+      });
+      return P;
+    }
+
+    /* ---- The day is a button that shows it and opens a month calendar on
+       which only the listed days can be picked. The arrows move between listed
+       days, a week at a time up and down, Page Up and Page Down move a month
+       among the months that hold listed days, Home and End go to the first
+       and last listed day of the month on view, and Enter picks. */
+    const listed = new Set(days);
+    const months = Array.from(new Set(days.map(d => d.slice(0, 7)))).sort();
+    const longDate = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    const monthName = ym => new Date(ym + '-15T12:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const addDays = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+    const WEEK = [['Su', 'Sunday'], ['Mo', 'Monday'], ['Tu', 'Tuesday'], ['We', 'Wednesday'], ['Th', 'Thursday'], ['Fr', 'Friday'], ['Sa', 'Saturday']];
+    const dayV = h('span', { class: 'v' });
+    const dayBtn = h('button', { type: 'button', class: 'anapopbtn', id: 'anaDayBtn', 'aria-haspopup': 'dialog', 'aria-expanded': 'false',
+      'aria-controls': 'anaCal', title: 'Pick a day. The page opens on the newest day every place has resolved.' },
+      [h('span', { class: 'k', text: 'Day' }), ' ', dayV]);
+    const calTitle = h('span', { class: 'anacalttl', id: 'anaCalTitle', 'aria-live': 'polite' });
+    const calPrev = h('button', { type: 'button', class: 'anacalnav', id: 'anaCalPrev', text: '◀' });
+    const calNext = h('button', { type: 'button', class: 'anacalnav', id: 'anaCalNext', text: '▶' });
+    const calGrid = h('table', { class: 'anacalgrid', id: 'anaCalGrid', role: 'grid', 'aria-labelledby': 'anaCalTitle' });
+    const calKey = h('div', { class: 'anacalkey', id: 'anaCalKey' });
+    const cal = h('div', { class: 'anapanel anacal', id: 'anaCal', role: 'dialog', 'aria-label': 'Pick a day', tabindex: '-1', hidden: '' },
+      [h('div', { class: 'anacalhead' }, [calPrev, calTitle, calNext]), calGrid, calKey]);
+    ['final', 'provisional', 'review', 'closed'].filter(k => k !== 'closed' || days.some(d => dayKind(d) === 'closed'))
+      .forEach(k => calKey.appendChild(h('span', {}, [h('i', { class: 'mk ' + k, 'aria-hidden': 'true' }), KIND[k]])));
+    calKey.appendChild(h('span', { class: 'off', text: 'Days in grey are not on file and cannot be picked.' }));
+    let calMonth = null, calFocus = null;
+    function drawMonth(ym) {
+      calMonth = ym;
+      const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+      const lead = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(), n = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      calTitle.textContent = monthName(ym);
+      const i = months.indexOf(ym);
+      calPrev.disabled = i <= 0;
+      calNext.disabled = i < 0 || i >= months.length - 1;
+      calPrev.setAttribute('aria-label', i > 0 ? 'Earlier month, ' + monthName(months[i - 1]) : 'No earlier month on file');
+      calNext.setAttribute('aria-label', i >= 0 && i < months.length - 1 ? 'Later month, ' + monthName(months[i + 1]) : 'No later month on file');
+      // the grid's one tab stop is the day that had it when that day is on
+      // view, else the picked day, else the month's first listed day
+      if (!calFocus || calFocus.slice(0, 7) !== ym) calFocus = S.day && S.day.slice(0, 7) === ym ? S.day : days.find(d => d.slice(0, 7) === ym) || null;
+      calGrid.textContent = '';
+      const head = h('tr');
+      WEEK.forEach(w => head.appendChild(h('th', { scope: 'col', abbr: w[1], text: w[0] })));
+      calGrid.appendChild(h('thead', {}, [head]));
+      const body = h('tbody');
+      let row = h('tr');
+      for (let k = 0; k < lead; k++) row.appendChild(h('td', { class: 'pad' }));
+      for (let k = 1; k <= n; k++) {
+        const d = ym + '-' + String(k).padStart(2, '0');
+        const td = h('td', { 'data-day': d }, [h('span', { class: 'n', text: String(k) })]);
+        if (listed.has(d)) {
+          const kd = dayKind(d);
+          td.className = 'on';
+          td.setAttribute('data-status', kd || 'none');
+          td.setAttribute('aria-selected', d === S.day ? 'true' : 'false');
+          td.setAttribute('aria-label', longDate(d) + (kd ? ', ' + KIND[kd] : ''));
+          td.tabIndex = d === calFocus ? 0 : -1;
+          if (kd) td.appendChild(h('i', { class: 'mk ' + kd, 'aria-hidden': 'true' }));
+        } else {
+          td.className = 'off';
+          td.setAttribute('aria-disabled', 'true');
+          td.setAttribute('aria-label', longDate(d) + ', not on file');
+        }
+        row.appendChild(td);
+        if ((lead + k) % 7 === 0) { body.appendChild(row); row = h('tr'); }
+      }
+      if (row.children.length) {
+        while (row.children.length < 7) row.appendChild(h('td', { class: 'pad' }));
+        body.appendChild(row);
+      }
+      calGrid.appendChild(body);
+    }
+    function focusDay(d) {
+      if (!d) return;
+      calFocus = d;
+      if (d.slice(0, 7) !== calMonth) drawMonth(d.slice(0, 7));
+      else calGrid.querySelectorAll('td.on').forEach(td => { td.tabIndex = td.dataset.day === d ? 0 : -1; });
+      const td = calGrid.querySelector('td[data-day="' + d + '"]');
+      if (td) td.focus();
+    }
+    const stepDay = (d, dir) => { const i = days.indexOf(d) + dir; return i >= 0 && i < days.length ? days[i] : null; };
+    // a week up or down; past the listed days' edge, the nearest listed day
+    // in that direction
+    function weekDay(d, dir) {
+      const t = addDays(d, 7 * dir);
+      if (listed.has(t)) return t;
+      if (dir < 0) { const c = days.filter(x => x <= t); return c.length ? c[c.length - 1] : (days[0] < d ? days[0] : null); }
+      const c = days.filter(x => x >= t);
+      return c.length ? c[0] : (days[days.length - 1] > d ? days[days.length - 1] : null);
+    }
+    // the same date in the next or the last month that holds listed days, or
+    // the listed day nearest it there
+    function monthDay(d, dir) {
+      const i = months.indexOf(d.slice(0, 7)) + dir;
+      if (i < 0 || i >= months.length) return null;
+      const ym = months[i], inMonth = days.filter(x => x.slice(0, 7) === ym);
+      const last = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).getUTCDate();
+      const t = Date.parse(ym + '-' + String(Math.min(+d.slice(8, 10), last)).padStart(2, '0'));
+      return inMonth.reduce((b, x) => (Math.abs(Date.parse(x) - t) < Math.abs(Date.parse(b) - t) ? x : b), inMonth[0]);
+    }
+    const pickDay = d => {
+      if (!listed.has(d)) return;
+      dayPop.close(true);
+      if (d !== S.day) { S.day = d; changed('day'); }
     };
-    // Zoom to the cell beside the place select, live once a place is picked
+    calGrid.addEventListener('click', ev => {
+      const td = ev.target.closest && ev.target.closest('td.on');
+      if (td) pickDay(td.dataset.day);
+    });
+    calGrid.addEventListener('keydown', ev => {
+      const td = ev.target.closest && ev.target.closest('td.on');
+      if (!td) return;
+      const d = td.dataset.day, onView = days.filter(x => x.slice(0, 7) === calMonth);
+      let to = null;
+      switch (ev.key) {
+        case 'ArrowLeft': to = stepDay(d, -1); break;
+        case 'ArrowRight': to = stepDay(d, 1); break;
+        case 'ArrowUp': to = weekDay(d, -1); break;
+        case 'ArrowDown': to = weekDay(d, 1); break;
+        case 'PageUp': to = monthDay(d, -1); break;
+        case 'PageDown': to = monthDay(d, 1); break;
+        case 'Home': to = onView[0]; break;
+        case 'End': to = onView[onView.length - 1]; break;
+        case 'Enter': case ' ': ev.preventDefault(); pickDay(d); return;
+        default: return;
+      }
+      ev.preventDefault();
+      if (to) focusDay(to);
+    });
+    // a month arrow that turns disabled under the focus hands it to the
+    // grid, so the keyboard is never left on nothing
+    const monthStep = (dir, from) => {
+      const i = months.indexOf(calMonth) + dir;
+      if (i < 0 || i >= months.length) return;
+      calFocus = null;
+      drawMonth(months[i]);
+      if (from && from.disabled) focusDay(calFocus);
+    };
+    calPrev.onclick = () => monthStep(-1, calPrev);
+    calNext.onclick = () => monthStep(1, calNext);
+    const dayPop = popover(dayBtn, cal, {
+      draw: () => { calFocus = S.day; drawMonth((S.day || days[days.length - 1]).slice(0, 7)); },
+      focus: () => focusDay(calFocus),
+    });
+    const syncDay = () => {
+      dayV.textContent = S.day ? dayLabel(S.day) + dayMark(S.day) : '';
+      dayBtn.setAttribute('data-day', S.day || '');
+    };
+
+    /* ---- The place is a button that shows the open place and opens a small
+       map of the places with a box to type a name. The map is for the
+       pointer. The box is for the keyboard, a screen reader and a phone, so
+       the map is hidden from assistive technology and every place can be
+       reached from the box. Typing filters the list, the arrows move through
+       it, and Enter picks the highlighted place, the first match unless the
+       arrows moved on. The map is the page's own projection and outlines. */
+    const locV = h('span', { class: 'v' });
+    const locBtn = h('button', { type: 'button', class: 'anapopbtn', id: 'anaLocBtn', 'aria-haspopup': 'dialog', 'aria-expanded': 'false',
+      'aria-controls': 'anaPlaces', title: 'Pick a place on a map of the places, or type its name' },
+      [h('span', { class: 'k', text: 'Place' }), ' ', locV]);
+    const plQ = h('input', { type: 'text', id: 'anaPlaceQ', role: 'combobox', 'aria-autocomplete': 'list', 'aria-expanded': 'false',
+      'aria-controls': 'anaPlaceList', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', enterkeyhint: 'go', placeholder: 'Type a name' });
+    const plCount = h('p', { class: 'cap anaplcount', id: 'anaPlaceCount', 'aria-live': 'polite' });
+    const plMap = el('svg', { viewBox: '0 0 960 600', class: 'anamini', id: 'anaPlaceMap', 'aria-hidden': 'true', focusable: 'false' });
+    // the list is reached through the box, so it is no tab stop of its own,
+    // which a scrolling list otherwise becomes in Chromium
+    const plList = h('ul', { class: 'anapllist', id: 'anaPlaceList', role: 'listbox', 'aria-label': 'Places', tabindex: '-1' });
+    const plBody = h('div', { class: 'anaplbody' }, [plMap, plList]);
+    const pl = h('div', { class: 'anapanel anaplaces', id: 'anaPlaces', role: 'dialog', 'aria-label': 'Pick a place', tabindex: '-1', hidden: '' },
+      [h('div', { class: 'anaplrow' }, [h('label', { for: 'anaPlaceQ', text: 'Find a place' }), plQ]), plCount, plBody]);
+    const byName = (a, b) => a.name.localeCompare(b.name) || a.state.localeCompare(b.state);
+    const places = (S.index.locations || []).slice().sort(byName);
+    plMap.appendChild(el('path', { d: base.statePaths, fill: 'var(--map-land)' }));
+    plMap.appendChild(el('path', { d: base.statePaths, class: 'state', 'vector-effect': 'non-scaling-stroke' }));
+    plMap.appendChild(el('path', { d: base.statePaths, class: 'state2', 'vector-effect': 'non-scaling-stroke' }));
+    const plDots = el('g', { class: 'pds' });
+    // smallest first, as on the main map, so a larger place is drawn on top
+    (S.index.locations || []).slice().reverse().forEach(L => {
+      const g = el('g', { class: 'pd', 'data-loc': L.id });
+      g.appendChild(el('circle', { cx: L.px, cy: L.py, r: 17, class: 'ring' }));
+      g.appendChild(el('circle', { cx: L.px, cy: L.py, r: 8, class: 'pt' }));
+      plDots.appendChild(g);
+    });
+    plMap.appendChild(plDots);
+    // the place nearest the pointer, within twelve screen pixels, so a dot a
+    // few pixels across on a phone is still easy to hit
+    function plNear(ev) {
+      const m = plMap.getScreenCTM(), w = plMap.getBoundingClientRect().width;
+      if (!m || !w) return null;
+      const pt = plMap.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const p = pt.matrixTransform(m.inverse());
+      let best = null, bd = 12 * VB.w / w;
+      places.forEach(L => { const dd = Math.hypot(L.px - p.x, L.py - p.y); if (dd < bd) { bd = dd; best = L; } });
+      return best;
+    }
+    const plHl = id => {
+      plDots.querySelectorAll('g.pd.hl').forEach(g => g.classList.remove('hl'));
+      const g = id && plDots.querySelector('g.pd[data-loc="' + id + '"]');
+      if (g) { g.classList.add('hl'); plDots.appendChild(g); }
+    };
+    const norm = s => String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    // a name that starts with the text first, then a word in it that does,
+    // then anything else that holds it, such as the state
+    const plRank = (L, s) => {
+      const n = norm(L.name);
+      if (n.startsWith(s)) return 0;
+      if (n.split(/[\s.-]+/).some(w => w.startsWith(s))) return 1;
+      return (n + ', ' + norm(L.state)).includes(s) ? 2 : -1;
+    };
+    let plMatches = places.slice(), plActive = -1;
+    function plSetActive(i) {
+      plActive = i;
+      Array.from(plList.children).forEach((li, k) => { li.classList.toggle('act', k === i); li.setAttribute('aria-selected', k === i ? 'true' : 'false'); });
+      const li = plList.children[i];
+      if (li) {
+        plQ.setAttribute('aria-activedescendant', li.id);
+        // the list scrolls itself, never the page
+        const top = li.offsetTop, bot = top + li.offsetHeight;
+        if (top < plList.scrollTop) plList.scrollTop = top;
+        else if (bot > plList.scrollTop + plList.clientHeight) plList.scrollTop = bot - plList.clientHeight;
+      } else plQ.removeAttribute('aria-activedescendant');
+      plHl(li ? li.dataset.loc : null);
+    }
+    function plFilter() {
+      const typed = plQ.value.trim(), s = norm(typed);
+      plMatches = s ? places.map(L => [plRank(L, s), L]).filter(x => x[0] >= 0).sort((a, b) => a[0] - b[0] || byName(a[1], b[1])).map(x => x[1])
+        : places.slice();
+      plList.textContent = '';
+      plMatches.forEach(L => {
+        const li = h('li', { role: 'option', id: 'anaPlace-' + L.id, 'data-loc': L.id, 'aria-selected': 'false' }, [L.name + ', ' + L.state]);
+        if (L.id === S.loc) { li.classList.add('cur'); li.appendChild(h('span', { class: 'cur', text: ' · open' })); }
+        li.addEventListener('click', () => pickPlace(L));
+        li.addEventListener('pointerenter', () => plHl(L.id));
+        plList.appendChild(li);
+      });
+      const hit = new Set(plMatches.map(L => L.id));
+      plDots.querySelectorAll('g.pd').forEach(g => g.classList.toggle('dim', !!s && !hit.has(g.dataset.loc)));
+      plQ.setAttribute('aria-expanded', plMatches.length ? 'true' : 'false');
+      plCount.textContent = !s ? places.length + ' places. Type to narrow the list, or click one on the map.'
+        : plMatches.length ? plMatches.length + (plMatches.length === 1 ? ' place matches.' : ' places match.') + ' Enter opens the highlighted one.'
+          : 'No place matches ' + typed + '.';
+      plSetActive(s && plMatches.length ? 0 : -1);
+    }
+    plQ.addEventListener('input', plFilter);
+    plQ.addEventListener('keydown', ev => {
+      const n = plMatches.length;
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); if (n) plSetActive(plActive < 0 ? 0 : Math.min(n - 1, plActive + 1)); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); if (n) plSetActive(Math.max(0, plActive - 1)); }
+      else if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const L = plActive >= 0 ? plMatches[plActive] : (plQ.value.trim() ? plMatches[0] : null);
+        if (L) pickPlace(L);
+      }
+    });
+    plMap.addEventListener('pointermove', ev => {
+      const L = plNear(ev);
+      plMap.classList.toggle('hot', !!L);
+      plHl(L ? L.id : (plMatches[plActive] || {}).id);
+      if (L) tip.show(ev, tip.rows(L.name + ', ' + L.state, [], 'click to open the place')); else tip.hide();
+    });
+    plMap.addEventListener('pointerleave', () => { tip.hide(); plHl((plMatches[plActive] || {}).id); });
+    plMap.addEventListener('click', ev => { const L = plNear(ev); if (L) pickPlace(L); });
+    const pickPlace = L => { locPop.close(true); openPlace(L); };
+    const locPop = popover(locBtn, pl, {
+      draw: () => { plQ.value = ''; plFilter(); plList.scrollTop = 0; },
+      // side by side, the list is as tall as the map beside it
+      fit: () => { plList.style.maxHeight = getComputedStyle(plBody).flexDirection === 'column' ? '' : Math.max(160, Math.round(plMap.getBoundingClientRect().height)) + 'px'; },
+      focus: how => { if (how === 'touch') pl.focus({ preventScroll: true }); else plQ.focus(); },
+      close: () => tip.hide(),
+    });
+    const syncPlace = () => {
+      const L = S.loc ? locOf(S.loc) : null;
+      locV.textContent = L ? L.name + ', ' + L.state : 'none picked';
+      locBtn.setAttribute('data-loc', L ? L.id : '');
+      plDots.querySelectorAll('g.pd').forEach(g => g.classList.toggle('cur', !!L && g.dataset.loc === L.id));
+    };
+
+    // Zoom to the cell beside the place button, live once a place is picked
     // and its index entry carries the cell geometry
     const zoomCellB = h('button', { text: 'Zoom to the cell', id: 'anaZoomCell', title: 'zoom the map to the picked place’s resolving cell' });
     zoomCellB.onclick = () => { if (S.loc) zoomToCell(locOf(S.loc)); };
-    const syncPick = () => { locSel.value = S.loc || ''; zoomCellB.disabled = !(S.loc && cellGeom(locOf(S.loc))); };
-    bar.insertBefore(varBtns, strip);
-    bar.insertBefore(daySel, strip);
-    bar.insertBefore(locSel, strip);
+    const syncPick = () => { syncPlace(); zoomCellB.disabled = !(S.loc && cellGeom(locOf(S.loc))); };
+    bar.insertBefore(dayPop.node, strip);
+    bar.insertBefore(locPop.node, strip);
     bar.insertBefore(zoomCellB, strip);
     // the day's values as CSV, raw (the files' own units, every hour and
     // place) and processed (the day's values as they resolve), rewritten by
@@ -715,6 +1048,35 @@ window.WXAnalysis = (() => {
     }
 
     const zoomBar = h('div', { class: 'bar', id: 'anaZoom' });
+    /* The variable switch has been on the map since 2026-11-03, at the
+       owner's request, because the settlement display shows every variable
+       at once and the top bar lost its five buttons. It sets what the map
+       shades, the ladder under the display, the highlighted card and `var=`
+       in the address, and a card click sets it in turn. It is a radio group,
+       so it is one tab stop and the arrows move the choice. */
+    const SHORT = { high: 'High', low: 'Low', gust: 'Gust', wind: 'Wind', precip: 'Precip' };
+    const setVar = k => { if (VARS[k] && S.var !== k) { S.var = k; changed('var'); } };
+    const varSw = h('div', { class: 'anaseg', id: 'anaVar', role: 'radiogroup', 'aria-label': 'Variable shaded on the map' });
+    Object.keys(VARS).forEach(k => {
+      const b = h('button', { type: 'button', role: 'radio', 'data-var': k, 'aria-checked': 'false', 'aria-label': VARS[k].label,
+                              title: VARS[k].label, text: SHORT[k] || VARS[k].label });
+      b.onclick = () => setVar(k);
+      varSw.appendChild(b);
+    });
+    varSw.addEventListener('keydown', ev => {
+      const keys = Object.keys(VARS), i = keys.indexOf(S.var);
+      let j = null;
+      if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') j = (i + 1) % keys.length;
+      else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') j = (i - 1 + keys.length) % keys.length;
+      else if (ev.key === 'Home') j = 0;
+      else if (ev.key === 'End') j = keys.length - 1;
+      if (j == null) return;
+      ev.preventDefault();
+      setVar(keys[j]);
+      const b = varSw.querySelector('[data-var="' + keys[j] + '"]');
+      if (b) b.focus();
+    });
+    zoomBar.appendChild(varSw);
     const mk = (label, title, fn) => { const b = h('button', { text: label, title }); b.onclick = fn; zoomBar.appendChild(b); };
     mk('−', 'zoom out', () => zoomAbout(1 / 1.5, view.x + view.w / 2, view.y + view.h / 2));
     mk('+', 'zoom in', () => zoomAbout(1.5, view.x + view.w / 2, view.y + view.h / 2));
@@ -819,8 +1181,12 @@ window.WXAnalysis = (() => {
       drawDots();
     }
     function pressed() {
-      Array.from(varBtns.children).forEach(b => b.classList.toggle('on', b.dataset.var === S.var));
-      daySel.value = S.day;
+      Array.from(varSw.children).forEach(b => {
+        const on = b.dataset.var === S.var;
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+        b.tabIndex = on ? 0 : -1;
+      });
+      syncDay();
       syncPick();
     }
 
@@ -916,7 +1282,7 @@ window.WXAnalysis = (() => {
       // Kept across redraws of the same place-day, so a replay holds its time
       if (!settle) {
         settle = WXSettle.create({ product: PRODUCT, productName: PRODUCT_NAME,
-          onVar: k => { if (S.var !== k) { S.var = k; changed('var'); } },
+          onVar: setVar,
           refetch: () => (S.loc ? refetchDay(locOf(S.loc), S.day) : null) });
       }
       panel.appendChild(settle.node);

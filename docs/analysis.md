@@ -582,11 +582,33 @@ Scripts: common, data, `js/analysis-settle.js` (the settlement display, `WXSettl
 `js/analysis.js`; `WXAnalysis.init()`. The panel sits above the map since the settlement display
 went in (owner's approval of 2026-11-03), so a picked place opens its day first.
 
-**Controls.** Variable buttons High · Low · Peak gust · Mean wind · Precipitation; a day
-`<select>` over `index.days` (newest first, labelled with the
-weekday, and a day short of every place resolving marked `provisional`, `event review` when its
-unresolved places are all in event review, or `closed` on a file written before 2026-10-14); an hour stepper under the map (◀ ▶ Play, the valid hour in UTC and in the selected
-location's zone when one is picked). State lives in the URL: `?var=high&day=2026-09-26&hour=16&loc=new-york-ny`
+**Controls.** The top bar holds a day button, a place button, **Zoom to the cell** and the day's
+CSV links. They replaced the five variable buttons and the day and place selects on 2026-11-03, at
+the owner's request, since the settlement display shows every variable at once; the variable is
+switched on the map (below). The day button (`#anaDayBtn`) shows the day, labelled with the
+weekday and with its state when it is not final, and opens a month calendar (`#anaCal`, a
+non-modal dialog holding a `role="grid"` table). Only the days in `index.days` can be picked, and
+every other day is greyed, `aria-disabled` and out of the tab order. Each listed day carries a mark
+for its state from `index.dayStatus`, by the rule the day select used: final once every place has
+resolved (a solid dot), provisional (a ring), event review when its unresolved places are all in
+event review (a diamond), or closed on a file written before 2026-10-14 (a square). An index without
+the field gives no mark. The month arrows, and Page Up and Page Down, step only among the months
+that hold listed days. The arrow keys move between listed days, a week at a time up and down, Home
+and End go to the first and last listed day of the month on view, Enter picks, and Escape closes the
+calendar and returns the focus to the button, as a pick does. A click outside it or the focus
+moving out of it closes it too. The place button (`#anaLocBtn`) shows the open place's name and
+opens a small map of the sixty-seven places (`#anaPlaces`), drawn on the page's own projection and
+`basemap.json` outlines, with a box to type a name. A click on a dot, or within 12 screen pixels of
+one, opens that place. The box is a combobox over an alphabetical listbox of the places: typing
+narrows the list and dims the other dots (a name that starts with the text first, then a word in it
+that does, then any name or state that holds it), the arrows move through the matches, Enter opens
+the highlighted match, which is the first until the arrows move on, and Escape closes the popover
+and returns the focus to the button. The small map is hidden from assistive technology, since the
+box reaches every place. Both popovers open under their buttons and move left as far as they must to
+stay inside the page, so a 390 px phone never scrolls sideways, and only one is open at a time. The
+main map's dots still open a place, and Zoom to the cell sits beside the place button. An hour
+stepper sits under the map (◀ ▶ Play, the valid hour in UTC and in the selected location's zone when
+one is picked). State lives in the URL: `?var=high&day=2026-09-26&hour=16&loc=new-york-ny`
 (an address from before 2026-09-30 with `product=` opens on RTMA and loses the parameter).
 With no `day` in the address the page opens on `index.lastResolvedDay` (owner's request
 2026-09-28), the newest local date on which every one of the sixty-seven places has its RTMA
@@ -604,7 +626,12 @@ yet; hover
 reads the cell under the pointer from the frame and the dot's daily value; click opens the
 location panel. Zoom and pan as in `varmap.js`. Ramps are pinned: temperature −20 to 110 °F
 on the site's nine-stop ramp, gust 0 to 60 mph, wind 0 to 30 mph, precipitation 0 to 2 in
-with zero transparent. A legend under the map states the ramp and the subsample.
+with zero transparent. A legend under the map states the ramp and the subsample. The map's own
+bar carries the variable switch beside the zoom buttons (`#anaVar`, since 2026-11-03), a radio group
+of High, Low, Gust, Wind and Precip with one tab stop, whose arrow keys, Home and End move the
+choice. It sets the variable, which is what the map shades, the hypothetical ladder under the
+settlement display, the highlighted card and `var=`. A click on a card in the settlement display sets
+it as well, so the switch, the cards and `var=` stay in step.
 
 **Cell mode.** Once the zoom makes a resolving cell at least 12 screen pixels wide, the map
 changes what it draws: the lattice raster is hidden (a 3 px lattice block would be a flat
@@ -627,7 +654,7 @@ whose index entry has no cell geometry keeps its plain dot and value in cell mod
 the cell disabled. Below that zoom the dots draw as before, with the value text in `--ink` (it
 was `--muted`, faint on the dark theme). The zoom range is raised so
 the cell reaches about 40 px (`MAXZ = 96`), and a **Zoom to the cell** button in the panel and
-beside the place select sets the view so the picked cell is about 30 px wide and centred; the
+beside the place button sets the view so the picked cell is about 30 px wide and centred; the
 URL carries the view when zoomed (`?z=<factor>&cx=<x>&cy=<y>` in viewBox units) so a zoomed cell
 can be linked.
 
@@ -666,7 +693,8 @@ averages or rounds a value, and its only sums are of times and pixels. In order:
 - five value cards, High, Low, Peak gust, Mean wind and Precipitation, each the lane's running
   value at the last counted hour in (`run`), with the hour of the extreme or the hours counted,
   "so far" until the day is final, and the exact figure under the toggle; a place in event
-  review shows no value and says no hour was published by the 12:45 AM cut-off;
+  review shows no value and says no hour was published by the 12:45 AM cut-off. The card of the
+  variable the map shows is highlighted, and a click on a card sets that variable;
 - three charts on one time axis, local midnight to midnight: temperature with the High and Low
   marked, sustained wind and gust with the running mean as a dashed line and the peak gust
   marked, and hourly precipitation bars with the running total as a step line. Each shades the
@@ -744,9 +772,9 @@ report conventions have no analogue here.
   day's summary; place files without the new fields stay readable and are rewritten newest
   first, a few a pass, inside the deadline; and Boston's 2026-09-28 resolves on 0.84 while its
   rounded hours add to 0.83.
-- `scripts/verify.py`: the page in the `pages` sweep; checks that the variable buttons change
+- `scripts/verify.py`: the page in the `pages` sweep; checks that the map's variable switch changes
   the legend and the frame, the page offers no product choice and never says URMA (an old
-  `product=urma` address opens on RTMA), the day select and hour stepper change the caption,
+  `product=urma` address opens on RTMA), the day calendar and hour stepper change the caption,
   a dot click opens the panel with the hour rows, five cards and one hourly line, the
   hypothetical rungs are hatched and carry no `data-contract-url`, the status line says
   provisional with the count when `rtma` is incomplete, the chart rule says resolved on a final
