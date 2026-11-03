@@ -546,6 +546,40 @@ Resources:
         RoleArn: !GetAtt SchedulerRole.Arn
         Input: '{"job": "analysis"}'
         RetryPolicy: { MaximumRetryAttempts: 0, MaximumEventAgeInSeconds: 300 }
+  # The HRRR lane has its own schedule too (pipeline/hrrr.py). A run's files
+  # land over the hour or two after its cycle, so a pass every fifteen minutes
+  # reads its hours as they arrive. A pass caps itself at 780 s
+  # (PASS_CAP_SECONDS), under the quarter hour, so two never overlap, and its
+  # minutes miss the observation (:00), quote (:03), half-hourly (:05) and
+  # analysis (:08) lanes.
+  ScheduleHrrr:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-hrrr"
+      ScheduleExpression: cron(12/15 * * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "hrrr"}'
+        RetryPolicy: { MaximumRetryAttempts: 0, MaximumEventAgeInSeconds: 300 }
+
+  # NDFD's daytime high and overnight low for the landing map: NDFD writes a new
+  # CONUS issuance about ten minutes before each hour, so a pass at :56 finds it
+  # and the one at :26 catches a late write
+  ScheduleNdfd:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-ndfd"
+      ScheduleExpression: cron(26/30 * * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "ndfd"}'
+        RetryPolicy: { MaximumRetryAttempts: 0, MaximumEventAgeInSeconds: 300 }
 
   # ------------------------------------------------------------------ alarms
   AlarmTopic:

@@ -15,93 +15,77 @@
 window.WXAcc = (() => {
   const { el, txt, h, $ } = WXC;
 
-  // ------------------------------------------------------------- naming
-  // docs/accuracy.md section 2. Every file uses these ids; the reader sees
-  // the names.
-  const NAME = {
-    FX: 'ForecastEx',
-    NDFD: 'National Weather Service', NBM: 'National Blend of Models', LAMP: 'Aviation Forecast',
-    ECMWF: 'European Model', GFS: 'American Model', MOSMIX: 'German Statistical Model',
-    ICON: 'German Model', GEM: 'Canadian Model', UKMO: 'UK Model', MF: 'French Model', JMA: 'Japanese Model',
-    AIFS: 'European AI Ensemble Mean', ECMWF_IFS: 'European Ensemble Mean',
-    GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
-    HRRR: 'HRRR',
-    GEFS: 'American Ensemble', GEM_ENS: 'Canadian Ensemble', ICON_ENS: 'German Ensemble',
+  // ------------------------------------------------------------- series
+  /* Every series the files score, in the paper's order with the market first, read from meta.series
+     at init (docs/accuracy.md section 2). A series is one forecast system scored against one standard.
+     Five systems are scored twice, as in the paper: the three station MOS products on the daytime
+     maximum they issue, against the climate report, and on their hourly rows, against the METAR
+     settle; and the National Weather Service forecast and the National Blend of Models against URMA
+     as well as against their own standards. */
+  let ORDER = [];
+  let GROUP_LIST = [];
+  const INFO = {};
+  const MARKET_NAME = 'ForecastEx prediction market';
+  // the names the paper's Table 3 gives the series of a system scored twice (its 'issued max' written out)
+  const TABLE_NAME = {
+    NBS_MOS: 'NBM station MOS, issued maximum', NBS_MOS_ROW: 'NBM station MOS, hourly rows',
+    GFS_MOS: 'GFS MOS, issued maximum', GFS_MOS_ROW: 'GFS MOS, hourly rows',
+    NAM_MOS: 'NAM MOS, issued maximum', NAM_MOS_ROW: 'NAM MOS, hourly rows',
+    NBM: 'National Blend of Models, METAR', NBM_URMA: 'National Blend of Models, URMA',
+    NDFD: 'National Weather Service, climate report', NDFD_URMA: 'National Weather Service, URMA',
   };
-  // a shorter name for a legend or a column head, where the full one wraps
-  const SHORT = {
-    FX: 'ForecastEx', NDFD: 'NWS', NBM: 'Blend', LAMP: 'Aviation', ECMWF: 'European', GFS: 'American',
-    MOSMIX: 'German Stat.', ICON: 'German', GEM: 'Canadian', UKMO: 'UK', MF: 'French', JMA: 'Japanese',
-    AIFS: 'Euro. AI', ECMWF_IFS: 'Euro. Ens.', GFS_MOS: 'GFS MOS', NAM_MOS: 'NAM MOS', NBS_MOS: 'Blend MOS',
-    HRRR: 'HRRR', GEFS: 'Amer. Ens.', GEM_ENS: 'Can. Ens.', ICON_ENS: 'Ger. Ens.',
-  };
-  /* The alternative forecast systems, every system beside the ForecastEx
-     prediction market. This order fixes each one's color; a figure that lists
-     systems row by row takes its grouping and order from the registry
-     through systemGroups. */
-  const TOOLS = ['NDFD', 'NBM', 'LAMP', 'ECMWF', 'GFS', 'MOSMIX', 'ICON', 'GEM', 'UKMO', 'MF', 'JMA',
-                 'AIFS', 'ECMWF_IFS', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS', 'HRRR'];
-  const ORDER = ['FX'].concat(TOOLS);
-  /* The systems that publish a spread. The European AI ensemble mean is one
-     of the systems above; the other three are rows of their own wherever the
-     page scores them, under the ids the registry gives them. Each ensemble
-     draws in the hue of its model family, the American ensemble in the
-     American model's, and a dash tells it from the single run beside it. */
-  const ENS_DASH = { AIFS: null, GEFS: '5 3', GEM_ENS: '2 2', ICON_ENS: '7 3 2 3' };
-  const FAMILY = { GEFS: 'GFS', GEM_ENS: 'GEM', ICON_ENS: 'ICON' };
-  const ensDash = id => ENS_DASH[id] || null;
-  /* The page id of an ensemble the builder keys by its family (GEM, ICON),
-     read off the registry row that names it, so GEM's ensemble is never
-     mistaken for GEM's single run. */
-  function ensId(key) {
-    const reg = (window.WX && window.WX.forecastSystems && window.WX.forecastSystems.groups) || [];
-    for (const g of reg) {
-      for (const r of (g.systems || [])) if (r.ens === key) return r.id || r.key;
-    }
-    return { GEM: 'GEM_ENS', ICON: 'ICON_ENS' }[key] || key;
+  function setSeries(meta) {
+    ORDER = [];
+    ((meta && meta.series) || []).forEach(s => { INFO[s.id] = s; ORDER.push(s.id); });
+    GROUP_LIST = (meta && meta.groups) || [];
   }
-
-  /* The grouping and order of the forecast systems. One registry,
-     config/forecast_systems.json, carried in config.js: the build renders the
-     forecast systems table at the foot of the page from it, and a figure that
-     lists systems row by row takes its groups and order from here, so a
-     change to either the grouping or the order in that file moves both.
-     Returns [{key, title, note, ids}] holding only the ids asked for, in
-     registry order, with any id the registry does not name gathered in a last
-     group so nothing a file carries is ever dropped from view. */
+  /* The groups of the paper's Table 1 holding the ids asked for, in its order: [{key, title, ids}].
+     Anything the groups do not name is gathered last, so nothing a file carries drops from view. */
   function systemGroups(ids) {
     const want = new Set(ids || []);
-    const reg = (window.WX && window.WX.forecastSystems && window.WX.forecastSystems.groups) || [];
     const seen = new Set();
     const out = [];
-    reg.forEach(g => {
-      // an ensemble with no system row of its own is known by its registry key
-      const got = (g.systems || []).map(r => r.id || r.key).filter(id => id && want.has(id) && !seen.has(id));
+    GROUP_LIST.forEach(g => {
+      const got = (g.series || []).filter(id => want.has(id) && !seen.has(id));
       got.forEach(id => seen.add(id));
-      if (got.length) out.push({ key: g.key, title: g.title, note: g.note || '', ids: got });
+      if (got.length) out.push({ key: g.title, title: g.title, ids: got });
     });
-    const rest = (ids || []).filter(id => !seen.has(id));
-    if (rest.length) out.push({ key: 'other', title: 'Other systems', note: '', ids: rest });
+    const rest = (ids || []).filter(id => id !== 'FX' && !seen.has(id));
+    if (rest.length) out.push({ key: 'other', title: 'Other series', ids: rest });
     return out;
   }
 
   // ------------------------------------------------------------- palette
-  // The exchange keeps the site accent so it is the line a reader finds
-  // first. Every alternative forecast system takes one hue of a muted ramp
-  // (--t1 to --t18 in site.css), in the reader's order, so they read as a
-  // family behind the ForecastEx prediction market rather than as seventeen
-  // competing colors.
+  /* The market keeps the site accent so it is the line a reader finds first. Every other series takes
+     its group's hue, as in the paper's figures and the brief at the top of the page: station MOS
+     green, the Blend teal, the National Weather Service orange, the AI model purple and the raw models
+     tan. LAMP, the station product whose target is closest to the market's, is drawn heavier, and a
+     system's second series is dashed. */
+  const GROUP_TOKEN = {
+    'Station MOS': '--g-mos', 'Blend': '--g-blend', 'Human-edited': '--g-human',
+    'Artificial intelligence': '--g-ai', 'Raw numerical weather prediction': '--g-raw',
+  };
   function color(id) {
     if (id === 'FX') return 'var(--accent)';
-    if (FAMILY[id]) return color(FAMILY[id]);
-    const i = TOOLS.indexOf(id);
-    return i >= 0 ? 'var(--t' + (i + 1) + ')' : 'var(--t-extra)';
+    const g = INFO[id] && INFO[id].group;
+    return 'var(' + (GROUP_TOKEN[g] || '--t-extra') + ')';
   }
-  // the ForecastEx prediction market line is heavier than an alternative forecast system line, for the same reason
-  const width = id => (id === 'FX' ? 2.6 : 1.5);
-  const name = id => NAME[id] || id;
-  const short = id => SHORT[id] || id;
+  const width = id => (id === 'FX' ? 2.6 : id === 'LAMP' ? 2.3 : 1.3);
+  const dashOf = id => (INFO[id] && INFO[id].second ? '5 3' : null);
+  const name = id => (id === 'FX' ? MARKET_NAME : TABLE_NAME[id] || (INFO[id] && INFO[id].name) || id);
+  // the compact names a hover table uses, where the full ones would not fit the box
+  const SHORT_NAME = {
+    NBS_MOS: 'NBM MOS, issued max', NBS_MOS_ROW: 'NBM MOS, hourly rows', GFS_MOS: 'GFS MOS, issued max',
+    GFS_MOS_ROW: 'GFS MOS, hourly rows', NAM_MOS: 'NAM MOS, issued max', NAM_MOS_ROW: 'NAM MOS, hourly rows',
+    NBM: 'Blend, METAR', NBM_URMA: 'Blend, URMA', NDFD: 'NWS, climate report', NDFD_URMA: 'NWS, URMA',
+    AIFS: 'AIFS ens. mean', ECMWF_IFS: 'IFS ens. mean', ECMWF: 'ECMWF IFS', GEFS: 'GEFS median',
+    ICON_ENS: 'ICON-EPS median', GEM_ENS: 'GEPS median', MOSMIX: 'MOSMIX', MF: 'ARPEGE', UKMO: 'Met Office UM',
+  };
+  const short = id => (id === 'FX' ? 'ForecastEx' : SHORT_NAME[id] || name(id));
+  // the paper's qualifier: the daily value a series is scored on, whether it is corrected, and its standard
+  const qual = id => (id === 'FX' ? 'central value, as quoted, vs. METARs' : (INFO[id] && INFO[id].qual) || '');
   const swatch = id => '<span class="sw" style="background:' + color(id) + '"></span>' + name(id);
+  const swatchShort = id => '<span class="sw" style="background:' + color(id) + '"></span>' + short(id);
 
   // ------------------------------------------------------------- formats
   const dash = '—';
@@ -122,11 +106,14 @@ window.WXAcc = (() => {
   // the meta the contract requires (schema, asof, conventions).
   const FILES = { lead: 'lead-curve', cal: 'calibration', map: 'map', grid: 'grid' };
   const CADENCE = 1440;
-  const valid = d => !!(d && d.meta && d.meta.schema != null && d.meta.asof && d.meta.conventions);
-  async function load(name, loose) {
+  /* The page reads schema 2, the paper's methods. A file of the earlier schema is one the builder is
+     about to replace, so the figures say they are being rebuilt rather than misreading it. */
+  const SCHEMA = 'accuracy-figures/2';
+  const valid = d => !!(d && d.meta && d.meta.schema === SCHEMA && d.meta.asof && d.meta.conventions);
+  const older = d => !!(d && d.meta && d.meta.schema && d.meta.schema !== SCHEMA);
+  async function load(name) {
     const r = await WXD.get('accuracy/' + name + '.json', CADENCE);
-    const ok = r.data && (loose ? !!r.data.meta : valid(r.data));
-    return { data: ok ? r.data : null, r };
+    return { data: r.data && valid(r.data) ? r.data : null, older: older(r.data), r };
   }
 
   // ------------------------------------------------------------- status
@@ -165,7 +152,11 @@ window.WXAcc = (() => {
   function statusEl(D) {
     const meta = newestMeta(D);
     const n = Object.keys(FILES).filter(k => D[k]).length;
-    if (!meta) return h('span', { class: 'status none', text: 'No data available. The accuracy record has not been published yet.' });
+    if (!meta) {
+      return h('span', { class: 'status none', text: D.rebuilding
+        ? 'The figures are being rebuilt on the methods of the working paper and return with the next daily update.'
+        : 'No data available. The accuracy record has not been published yet.' });
+    }
     const built = Date.parse(meta.built || '');
     const mins = isNaN(built) ? null : (Date.now() - built) / 6e4;
     const cached = Object.keys(FILES).some(k => D.results[k] && D.results[k].source === 'cache');
@@ -173,7 +164,7 @@ window.WXAcc = (() => {
     const when = isNaN(built) ? 'unknown time' : WXC.clockFull(built, Intl.DateTimeFormat().resolvedOptions().timeZone);
     // the days the ForecastEx record is scored on, which is the span the
     // working paper quotes, rather than the wider window the builder reads
-    const fx = ((meta.systems || {}).FX || {}).scored || {};
+    const fx = (INFO.FX || {}).scored || {};
     const w = fx.start && fx.end ? { from: fx.start, to: fx.end } : (meta.window || {});
     let text = 'Data as of ' + when + (mins == null ? '' : ' (' + ago(mins) + ')')
       + (w.from && w.to ? ' · target days ' + mdyY(w.from) + ' to ' + mdyY(w.to) : '')
@@ -219,11 +210,9 @@ window.WXAcc = (() => {
   // ------------------------------------------------------------- record spans
   /* How far back each record goes.
 
-     The systems on this page do not share a span, so every figure says which
-     days it used. The builder ships the scored span of every system under
-     meta.systems, whole and per metric: the days a system was actually
-     scored on, after thin books, short captures and gaps in the observation
-     record were excluded. */
+     The series on this page do not share a span, so every figure says which days it used. The
+     builder ships each series' scored span under meta.series, whole and per metric: the days it was
+     actually scored on, its bias-correction warm-up left out. */
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   // '2026-02-11' as 'Feb 11', and with the year where a caption needs it
   function mdy(iso) {
@@ -232,32 +221,13 @@ window.WXAcc = (() => {
     return p.length < 3 ? String(iso) : MON[+p[1] - 1] + ' ' + (+p[2]);
   }
   const mdyY = iso => (iso ? mdy(iso) + ' ' + String(iso).slice(0, 4) : '');
-  /* The span of one system: {start, end, days}. With a metric it is that
-     metric's own span, which is what a figure showing highs or lows alone
-     should print. A system with no scored span falls back to its start. */
+  /* The span of one series: {start, end, days}, on one metric's record when a figure shows one. */
   function span(meta, id, metric) {
-    const sy = meta && meta.systems && meta.systems[id];
-    if (!sy) return ensSpan(id, metric);
+    const sy = INFO[id];
+    if (!sy) return null;
     const s = (metric && sy.byMetric && sy.byMetric[metric]) || sy.scored;
-    if (s && s.start) return s;
-    return sy.start ? { start: sy.start, end: null, days: null } : null;
+    return s && s.start ? s : null;
   }
-  /* The span of an ensemble's probabilities, from the calibration file, which
-     is where the builder dates them. Filled once at init; an ensemble with a
-     system row of its own (the European AI) keeps that row's span in span(). */
-  const ENS_SPANS = {};
-  const calEnsembles = (cal, met) => {
-    const m = cal && cal.metric && cal.metric[met];
-    return (m && m.cohorts && m.cohorts.own && m.cohorts.own.ensembles) || {};
-  };
-  function ensSpans(cal) {
-    Object.keys((cal && cal.metric) || {}).forEach(met => {
-      const e = calEnsembles(cal, met);
-      ENS_SPANS[met] = {};
-      Object.keys(e).forEach(k => { if (e[k].span && e[k].span.start) ENS_SPANS[met][ensId(k)] = e[k].span; });
-    });
-  }
-  const ensSpan = (id, metric) => ((ENS_SPANS[metric || 'high'] || {})[id]) || null;
   // 'since Feb 11' for a legend entry or a column head
   function since(meta, id, metric) {
     const s = span(meta, id, metric);
@@ -288,16 +258,17 @@ window.WXAcc = (() => {
   /* The sentence saying which days a figure drew, for either set of days,
      on one metric's record when the figure shows one. */
   function cohortSpanLine(meta, cohort, metric) {
-    if (cohort === 'own') {
+    if (cohort === 'all') {
       const fx = span(meta, 'FX', metric);
       return 'The ForecastEx prediction market\u2019s record runs'
         + (fx && fx.start ? ' from ' + mdyY(fx.start) + ' to ' + mdyY(fx.end || meta.asof) : ' over the whole window')
-        + '. Each system is scored on the part of it that its own record covers, and each comparison between two systems on the days the two share.';
+        + '. Each series is scored on the part of it that its own record covers, and each comparison between the market and a series on the days the two share.';
     }
-    const c = meta && meta.cohorts && meta.cohorts[cohort];
-    if (!c || !c.from) return '';
-    return 'Scored from ' + mdyY(c.from) + ' to ' + mdyY(meta.asof)
-      + ' on the days the ForecastEx prediction market priced at every hour from 30 to 0.';
+    const c = meta && meta.cohorts && meta.cohorts.balanced;
+    const from = c && c['from_' + (metric || 'high')];
+    if (!from) return '';
+    return 'Scored from ' + mdyY(from) + ' to ' + mdyY(meta.asof)
+      + ' on the balanced sample, the location-days on which every series holds a value at every lead from 1 to 30 hours before the end of the day.';
   }
 
   // ------------------------------------------------------------- key
@@ -308,7 +279,7 @@ window.WXAcc = (() => {
     ids.forEach(id => {
       const e = h('span', { 'data-id': id });
       e.appendChild(h('i', { style: 'border-color:' + color(id) + (id === 'FX' ? ';border-top-width:3px' : '')
-                                    + (ensDash(id) && opts.dashes ? ';border-top-style:dashed' : '') }));
+                                    + (dashOf(id) && opts.dashes ? ';border-top-style:dashed' : '') }));
       e.appendChild(document.createTextNode(opts.short ? short(id) : name(id)));
       if (opts.since) {
         const sn = opts.since(id);
@@ -544,8 +515,9 @@ window.WXAcc = (() => {
      new forecast arrives.
      Bins above 30 h are hatched because the sample there is partial.
 
-     spec = { H, hs, series: [{ id, v, lo?, hi?, smooth?, dash?, lastLiveH? }],
-              ymax? (fixed top) | floor (least top), fmt, label,
+     spec = { H, hs, series: [{ id, v, lo?, hi?, smooth?, dash?, opacity?, width? }],
+              floor (least top), fmt, label, secondary?: { v, label } (a share on the right),
+              dayLine?, hatch?, steps? (false draws plain lines),
               strips?: { n: [per h], beats: [per h {k, of}], ofLabel? },
               tip: (i, h) => html, name? (label the market's line), empty? }
      Returns { g, x, y }, or null when nothing was drawable. */
@@ -563,12 +535,9 @@ window.WXAcc = (() => {
     // a second axis on the right takes room from the frame for its labels
     const g = frame(H, Object.assign({ L: 70, T: 24, B: strips ? H - 118 : H - 58 }, sec ? { R: 884 } : {}));
     const x = scale(hmax + 0.5, hmin - 0.5, g.L, g.R);
-    let top = spec.ymax;
-    if (top == null) {
-      top = 0;
-      spec.series.forEach(s => (s.v || []).concat(s.hi || []).forEach(v => { if (fin(v) && v > top) top = v; }));
-      top = Math.max(spec.floor || 0, top * 1.08);
-    }
+    let top = 0;
+    spec.series.forEach(s => (s.v || []).concat(s.hi || []).forEach(v => { if (fin(v) && v > top) top = v; }));
+    top = Math.max(spec.floor || 0, top * 1.08);
     const step = niceStep(top, 5);
     const y = scale(0, top, g.B, g.T);
     clear(svg, H);
@@ -596,7 +565,7 @@ window.WXAcc = (() => {
     };
     const cx = hs.map(hh => x(hh));
     const smooth = spec.series.filter(s => s.smooth);
-    smooth.forEach(s => { if (s.lo && s.hi) band(svg, cx, px(s.lo, y), px(s.hi, y), color(s.id)); });
+    smooth.forEach(s => { if (s.lo && s.hi && !fin(s.opacity)) band(svg, cx, px(s.lo, y), px(s.hi, y), color(s.id)); });
     /* An alternative is drawn as one step per bin where the bin is a clock
        hour, because its value holds until the next forecast is issued. Where
        the axis is not clock time (lead counted back from the extreme, which
@@ -604,16 +573,14 @@ window.WXAcc = (() => {
        the data does not have, so those series are drawn as plain lines. */
     spec.series.filter(s => !s.smooth).forEach(s => {
       const attrs = Object.assign({ stroke: color(s.id), 'stroke-width': s.width || width(s.id) },
-                                  s.dash ? { 'stroke-dasharray': s.dash } : {});
+                                  s.dash ? { 'stroke-dasharray': s.dash } : {},
+                                  fin(s.opacity) ? { 'stroke-opacity': s.opacity } : {});
       if (spec.steps === false) lineSeries(svg, cx, px(s.v || [], y), attrs);
       else stepLineAt(s.v || [], attrs);
-      if (fin(s.lastLiveH)) {
-        const i = hs.indexOf(s.lastLiveH);
-        if (i >= 0 && fin(s.v[i])) svg.appendChild(el('circle', { cx: x(s.lastLiveH - 0.5), cy: y(s.v[i]), r: 3.2, fill: color(s.id),
-                                                                  stroke: 'var(--panel)', 'stroke-width': 1.2, 'pointer-events': 'none' }));
-      }
     });
-    smooth.forEach(s => lineSeries(svg, cx, px(s.v, y), { stroke: color(s.id), 'stroke-width': width(s.id) }));
+    smooth.forEach(s => lineSeries(svg, cx, px(s.v, y), Object.assign({ stroke: color(s.id), 'stroke-width': s.width || width(s.id) },
+                                                                    s.dash ? { 'stroke-dasharray': s.dash } : {},
+                                                                    fin(s.opacity) ? { 'stroke-opacity': s.opacity } : {})));
     /* The second axis: a share from 0 to 100 percent on the right, drawn as a
        dashed ink line so it is never taken for a system. It carries context for
        the error curves (how much of the sample the observations had already
@@ -632,7 +599,7 @@ window.WXAcc = (() => {
     }
     if (spec.name && smooth.length) {
       const s = smooth[0], i0 = (s.v || []).findIndex(fin);
-      if (i0 >= 0) label(svg, x(hs[i0]) + 4, y(s.v[i0]) + 14, name(s.id), color(s.id));
+      if (i0 >= 0) label(svg, x(hs[i0]) + 4, y(s.v[i0]) + 14, short(s.id), color(s.id));
     }
     let bottom = g.B;
     if (strips) {
@@ -703,6 +670,8 @@ window.WXAcc = (() => {
   const leadTitle = hh => (hh === 0 ? 'The hour the day ends' : hh + ' hour' + (hh === 1 ? '' : 's') + ' before the day ends');
 
   const NOT_PUBLISHED = 'This figure has not been published yet.';
+  const REBUILDING = 'This figure is being rebuilt on the methods of the working paper and returns with the next daily update.';
+  const unpublished = D => (D && D.rebuilding ? REBUILDING : NOT_PUBLISHED);
 
   // ------------------------------------------------------------- init
   const MODULES = [['WXAccLead', 'lead'], ['WXAccProb', 'prob'], ['WXAccMap', 'map'], ['WXAccGrid', 'grid']];
@@ -717,22 +686,14 @@ window.WXAcc = (() => {
     });
   }
 
-  /* The record column of the forecast-systems table at the foot of the page.
-     A row names the system it describes by id; an ensemble row names the
-     calibration file's entry, whose span is the days its probabilities were
-     scored on. The AI model is both, so its cell carries the two. */
+  /* The record column of the forecast-systems table at the foot of the page: each row names its
+     series by id, and its cell gives the span that series is scored over. */
   function fillRecords(D) {
     const meta = D.meta;
-    const ens = calEnsembles(D.cal, 'high');
     const fmt = sp => mdyY(sp.start) + (fin(sp.days) ? ', ' + int(sp.days) + ' days' : '');
     document.querySelectorAll('table.acc-sources td.rec').forEach(td => {
-      const id = td.getAttribute('data-id'), eid = td.getAttribute('data-ens');
-      const own = id ? span(meta, id) : null;
-      const e = eid && ens[eid] && ens[eid].span && ens[eid].span.start ? ens[eid].span : null;
-      let text = '';
-      if (own && own.start) text = 'From ' + fmt(own);
-      if (e) text += (text ? '. Spread scored from ' + mdyY(e.start) : 'From ' + fmt(e));
-      if (text) td.textContent = text;
+      const own = span(meta, td.getAttribute('data-id'));
+      if (own && own.start) td.textContent = 'From ' + fmt(own);
     });
   }
 
@@ -744,8 +705,9 @@ window.WXAcc = (() => {
     // the bundle every figure draws from
     const D = { results: {} };
     keys.forEach((k, i) => { D[k] = got[i].data; D.results[k] = got[i].r; });
+    D.rebuilding = got.some(g => g.older);
     D.meta = newestMeta(D);
-    ensSpans(D.cal);
+    setSeries(D.meta);
     const st = $('#pageStatus');
     if (st) { st.innerHTML = ''; st.appendChild(statusEl(D)); }
     fillRecords(D);
@@ -758,11 +720,11 @@ window.WXAcc = (() => {
   }
 
   return {
-    init, NAME, TOOLS, ORDER, systemGroups, color, name, short, swatch, ensId, ensDash,
+    init, ORDER: () => ORDER, INFO, systemGroups, color, width, dashOf, name, short, qual, swatch, swatchShort,
     f1, f2, f3, deg1, pct, pct1, int, iv, dash, windowAndBuilt,
     tabs, metricTabs, key, methodNote, tooltip, hover,
     mdy, mdyY, span, since, spanLine, cohortSpanLine,
     W, clear, scale, leadChart, rankTip, leadTitle, lineSeries, dots,
-    notYet, NOT_PUBLISHED,
+    notYet, NOT_PUBLISHED, unpublished, setSeries,
   };
 })();

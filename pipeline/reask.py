@@ -47,7 +47,6 @@ import urllib.request
 from typing import Callable, Optional
 
 from . import archive as arch
-from . import exchange as ex
 from . import gov_weather as gw
 from .snapshots import SNAP_CACHE, _iso
 from .storage import Storage
@@ -63,6 +62,9 @@ ATTRIBUTION = "Powered by Reask"
 # Caps follow the internal desk's: the most recent LiveCyc cycles, and the sites
 # that have actually signalled, so a long-lived storm cannot grow without bound.
 MAX_STEPS = 48
+SLIM_DAYS = 14                  # days after its final that a storm's index entry keeps only its stamps
+# the most cycles one pass files for one storm; the rest follow on later passes
+MAX_NEW_CYCLES = 8
 MAX_SITES = 60
 
 
@@ -286,7 +288,8 @@ def absorb_ledger(store: Storage, name: str, year, into: str, log: Callable) -> 
         "schema": SCHEMA, "name": into, "year": year, "attribution": ATTRIBUTION,
         "thresholds": src.get("thresholds") or [], "steps": [], "sites": {}, "final": None}
     have = {st.get("id") for st in dst.get("steps") or []}
-    added = [st for st in src.get("steps") or [] if st.get("id") not in have]
+    # each folded delivery keeps the name it came under
+    added = [dict(st, **{"as": st.get("as") or name}) for st in src.get("steps") or [] if st.get("id") not in have]
     steps = (dst.get("steps") or []) + added
     steps.sort(key=lambda x: (x.get("kind") == "final", x.get("kind") == "interim", x.get("id") or ""))
     dst["steps"] = steps
@@ -335,6 +338,97 @@ def absorbed_storms() -> dict:
         for nm in ov.get("absorbs") or []:
             out["%s_%s" % (nm, ov.get("year"))] = "%s_%s" % (ov.get("storm"), ov.get("year"))
     return out
+
+
+# A depression is named by its number, and on naming the vendor's files start
+# arriving under the storm's name: Five became Edouard, Nine became Isaias. The
+# two are one storm, so the number's deliveries are folded into the named
+# storm's ledger and any cycle the vendor still files under the number goes
+# there too, which keeps one series across the rename (owner's decision
+# 2026-10-07). The join is the ATCF number the word spells, read from NHC's
+# roster or this season's best tracks, so it needs no ruling; once made it is
+# kept in the index and outlives the storm's time on the roster. Atlantic only,
+# as the best tracks this site reads are. The figures are the vendor's as
+# delivered, and each step keeps the name it was delivered under.
+NUMWORDS = ("One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+            "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen",
+            "Nineteen", "Twenty", "Twenty-One", "Twenty-Two", "Twenty-Three", "Twenty-Four", "Twenty-Five",
+            "Twenty-Six", "Twenty-Seven", "Twenty-Eight", "Twenty-Nine", "Thirty")
+# a number-word storm whose newest cycle is older than this is not joined to a
+# storm named since: it is some other depression's record
+RENAME_FRESH_DAYS = 14
+
+
+def number_of(name) -> Optional[int]:
+    """The depression number a vendor stem spells, 'Nine' -> 9, or None."""
+    low = str(name or "").strip().lower()
+    for i, w in enumerate(NUMWORDS, start=1):
+        if low == w.lower():
+            return i
+    return None
+
+
+def named_by_number(store: Storage, year) -> dict:
+    """{9: 'Isaias'}: this year's Atlantic storms that carry a name, by ATCF
+    number, from NHC's roster and, once a storm has left it, the season's best
+    tracks (both in snapshots/hurricane.json)."""
+    raw = store.get("snapshots/hurricane.json")
+    try:
+        h = json.loads(raw) if raw else {}
+    except ValueError:
+        h = {}
+    rows = list(h.get("storms") or []) + list(((h.get("season") or {}).get("events") or {}).get("named") or [])
+    out = {}
+    for r in rows:
+        m = re.match(r"^al(\d{2})(\d{4})$", str(r.get("id") or "").strip(), re.I)
+        nm = str(r.get("name") or "").strip()
+        if not m or int(m.group(2)) != int(year) or not nm or nm.startswith("#") or number_of(nm) is not None:
+            continue
+        out.setdefault(int(m.group(1)), nm)
+    return out
+
+
+def renamed_storms(prev: dict, vendor: dict, by_num: dict, year, now: dt.datetime) -> dict:
+    """{'Nine_2026': 'Isaias_2026'}: the renames already made, kept, and any new
+    one for a number-word storm whose number NHC has since named. vendor maps a
+    storm the vendor or the index carries to its newest cycle time."""
+    out = dict(prev.get("renamed") or {})
+    for name, ft in vendor.items():
+        key = "%s_%s" % (name, year)
+        n = number_of(name)
+        if key in out or n is None or n not in by_num:
+            continue
+        try:
+            t = dt.datetime.fromisoformat(str(ft).replace("Z", "+00:00")) if ft else None
+        except ValueError:
+            t = None
+        nw = now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc)
+        if t is not None and (nw - (t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc))).days > RENAME_FRESH_DAYS:
+            continue
+        out[key] = "%s_%s" % (by_num[n], year)
+    return out
+
+
+def _carry_entry(storms: dict, old: dict, new_key: str, new_name: str) -> None:
+    """Move a renamed storm's index entry onto its successor's, keeping the
+    newest cycle of the two and noting the name each file came under."""
+    def relabel(part):
+        if not part:
+            return part
+        part = dict(part)
+        part.setdefault("vendorName", old.get("name"))
+        return part
+    cur = storms.get(new_key)
+    if cur is None:
+        storms[new_key] = {**old, "name": new_name, "livecyc": relabel(old.get("livecyc")),
+                           "interim": relabel(old.get("interim")), "final": relabel(old.get("final"))}
+        return
+    a, b = (cur.get("livecyc") or {}), (old.get("livecyc") or {})
+    if (b.get("forecastTime") or "") > (a.get("forecastTime") or ""):
+        cur["livecyc"] = relabel(b)
+    for kind in ("interim", "final"):
+        if not cur.get(kind) and old.get(kind):
+            cur[kind] = relabel(old.get(kind))
 
 
 def _prune_interim(step: dict, known) -> None:
@@ -401,7 +495,14 @@ def l_prices(store: Storage, storm: str, sids) -> dict:
     """{site: {threshold: cents}} — the exchange's Yes price for this storm's
     per-location gust contracts at this moment, recorded with the delivery it
     arrived alongside. Without it a reader scrubbing back through the deliveries
-    would see an old ladder against today's price, which is not a comparison."""
+    would see an old ladder against today's price, which is not a comparison.
+
+    A storm's contracts are found by the exchange's product name, which carries
+    the storm's, as the pages find them: the symbol's two storm letters are not
+    always the first two of its name (Nolo's went up as LNL), and matching on
+    those recorded no price for Nolo at all. A book whose two sides both stand
+    at the minimum is empty, and its fifty-cent midpoint is no price
+    (WXM.realMid), so it is not recorded."""
     raw = store.get("snapshots/market/hurricane.json")
     if not raw:
         return {}
@@ -409,15 +510,15 @@ def l_prices(store: Storage, storm: str, sids) -> dict:
         doc = json.loads(raw)
     except ValueError:
         return {}
-    code = ex.storm_code(storm)
-    if not code:
+    name = str(storm or "").strip().lower()
+    if not name:
         return {}
-    pre, out = "L" + code, {}
+    out = {}
     for m in doc.get("markets") or []:
         sym = str(m.get("symbol") or "")
-        if not sym.startswith(pre) or len(sym) != len(pre) + 2:
+        if not re.fullmatch(r"L[A-Z]{4}", sym) or sym.startswith("LHL") or name not in str(m.get("name") or "").lower():
             continue
-        site = sym[len(pre):]
+        site = sym[3:]
         if sids and site not in sids:
             continue
         row = {}
@@ -426,11 +527,61 @@ def l_prices(store: Storage, storm: str, sids) -> dict:
                 t = int(float(c.get("strike")))
             except (TypeError, ValueError):
                 continue
+            bid, ask = c.get("bid"), c.get("ask")
+            if bid is not None and ask is not None and bid <= 0.011 and ask >= 0.989:
+                continue
             if c.get("mid") is not None:
                 row[str(t)] = round(float(c["mid"]) * 100, 1)
         if row:
             out[site] = row
     return out
+
+
+def newest_delivery(steps: list) -> Optional[dict]:
+    """The delivery standing now, ordered as the page orders them: by arrival,
+    with the cycles in cycle order among the places cycles hold, so a cycle filed
+    late (a backfill) is not taken for the newest."""
+    live = [s for s in steps or [] if s.get("kind") != "final"]
+    if not live:
+        return None
+    out = [live[i] for i in sorted(range(len(live)), key=lambda i: (live[i].get("ts") or "~", i))]
+    slots = [k for k, s in enumerate(out) if s.get("kind") == "livecyc"]
+    for k, s in zip(slots, sorted((out[k] for k in slots), key=lambda s: s.get("id") or "")):
+        out[k] = s
+    return out[-1]
+
+
+def mark_end_prices(store: Storage, name: str, year: int, now: dt.datetime, log: Callable) -> bool:
+    """Keep the exchange's prices on the newest delivery as they stand now, each pass.
+
+    The reading taken as a file lands comes before the market maker has moved to
+    it, and the reading taken as the next file lands can come after the market
+    maker has already moved to that one: Isaias's 06Z cycle of 9 October was
+    priced nine minutes after the vendor published it, before this lane filed it.
+    The last reading a delivery gets while it is the newest is the market's answer
+    to it and to nothing later, so the page pairs each file with that
+    (owner, 2026-10-09). Only the newest delivery is touched; once the next one is
+    filed, the earlier one keeps the reading it had. A storm under the owner's
+    ruling carries the ruling's figures, and a settled storm has no market to read."""
+    if price_override(name, year):
+        return False
+    key = STORM_KEY.format(name=name, year=year)
+    raw = store.get(key)
+    if not raw:
+        return False
+    doc = json.loads(raw)
+    if doc.get("final"):
+        return False
+    st = newest_delivery(doc.get("steps") or [])
+    if not st:
+        return False
+    prices = l_prices(store, name, set(doc.get("sites") or {}))
+    if not prices or prices == st.get("pricesEnd"):
+        return False
+    st["pricesEnd"], st["pricesEndTs"] = prices, _iso(now)
+    store.put(key, json.dumps(doc, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+    log(kind="reask", storm=name, step=st.get("id"), pricesEnd=len(prices))
+    return True
 
 
 def _step(lad: dict, kind: str, sid: str, at, ts: str, prices: Optional[dict] = None) -> dict:
@@ -459,6 +610,20 @@ def _stamp(s: str) -> str:
     return digits[:10] if len(digits) >= 10 else digits
 
 
+def slim_entry(entry: dict) -> dict:
+    """A settled storm's index entry with its files' site tables left out: the
+    stamps that say what was fetched and when stay, with a count of the sites
+    each file carried, so the lane does not fetch a file again and the page can
+    say how many locations it covered."""
+    out = dict(entry)
+    for kind in ("livecyc", "interim", "final"):
+        f = out.get(kind)
+        if isinstance(f, dict) and ("sites" in f or "rows" in f):
+            out[kind] = {k: v for k, v in f.items() if k not in ("sites", "rows")}
+            out[kind]["n"] = len(f.get("sites") or {})
+    return out
+
+
 def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch: Optional[Callable] = None) -> dict:
     rcfg = cfg.get("reask") or {}
     enabled = bool((cfg.get("sources") or {}).get("reask"))
@@ -477,46 +642,111 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
     fetch = fetch or (lambda path, params=None: _get(base, path, api_key, params))
     year = now.year
     errors = []
-    # a storm absorbed into another by a ruling is not a storm of its own here
-    absorbed = absorbed_storms()
-    storms = {s["name"] + "_" + str(s["year"]): s for s in prev.get("storms") or []
-              if s["name"] + "_" + str(s["year"]) not in absorbed}
     fetched = 0
+    # storms this pass did not bring up to date with the vendor's listing: their
+    # newest delivery may not be the vendor's newest, so its end price is not read
+    behind = set()
 
     def current(listing: dict) -> list:
         return [s for s in (listing or {}).get("storms") or [] if str(s.get("storm_year")) == str(year)]
 
-    # ---- LiveCyc: the latest forecast cycle per current-year storm
     try:
         live = json.loads(fetch("/livecyc/tcwind/list").decode())
     except Exception as e:  # noqa: BLE001
         errors.append(f"livecyc list: {type(e).__name__}: {e}")
         live = None
+
+    # ---- one storm across a rename: the owner's rulings (absorbed_storms) and
+    # every depression NHC has since named, its ledger folded into the named
+    # storm's before anything is filed, so the series reads from its first file
+    absorbed = absorbed_storms()
+    seen = {s.get("name"): (s.get("livecyc") or {}).get("forecastTime") for s in prev.get("storms") or []}
+    for s in current(live) if live else []:
+        fcs = s.get("forecasts") or []
+        if s.get("storm_name") and fcs:
+            seen[s["storm_name"]] = max(f.get("forecast_datetime") or "" for f in fcs)
+    auto = renamed_storms(prev, {k: v for k, v in seen.items() if k}, named_by_number(store, year), year, now)
+    renamed = {**auto, **absorbed}
+    for old_key, new_key in sorted(renamed.items()):
+        old_name, new_name = old_key.rsplit("_", 1)[0], new_key.rsplit("_", 1)[0]
+        if store.get(STORM_KEY.format(name=old_name, year=year)):
+            try:
+                absorb_ledger(store, old_name, year, new_name, log)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"fold {old_name} into {new_name}: {type(e).__name__}: {e}")
+    storms = {}
+    for s in prev.get("storms") or []:
+        k = s["name"] + "_" + str(s["year"])
+        if k not in renamed:
+            storms[k] = s
+    for s in prev.get("storms") or []:
+        k = s["name"] + "_" + str(s["year"])
+        if k in renamed:
+            _carry_entry(storms, s, renamed[k], renamed[k].rsplit("_", 1)[0])
+
+    def shown_as(name: str):
+        """The index key and display name a vendor storm is filed under."""
+        key = renamed.get(f"{name}_{year}", f"{name}_{year}")
+        return key, key.rsplit("_", 1)[0]
+
+    # ---- LiveCyc: every listed cycle the storm's ledger lacks, oldest first.
+    # The vendor can publish two cycles at once: Isaias's first files were the
+    # 00Z and 06Z cycles of 7 October, landing together, and a lane that took
+    # only the newest left the 00Z out of the series. So each pass files every
+    # cycle of the storm's newest MAX_STEPS that is not yet in its ledger (no
+    # more than MAX_NEW_CYCLES of them, so a storm first seen late is caught up
+    # over a few passes), and fetches the newest again when the vendor reissues
+    # it. A cycle in the ledger under the depression's number is fetched again
+    # under the storm's name, whose copy stands.
     for s in current(live) if live else []:
         name, fcs = s.get("storm_name"), s.get("forecasts") or []
         if not name or not fcs:
             continue
-        latest = max(fcs, key=lambda f: f.get("forecast_datetime") or "")
-        ft = latest.get("forecast_datetime")
-        key = f"{name}_{year}"
-        if key in absorbed:
-            continue
-        entry = storms.setdefault(key, {"name": name, "year": year, "livecyc": None, "interim": None, "final": None})
-        if (entry.get("livecyc") or {}).get("forecastTime") == ft and (entry.get("livecyc") or {}).get("lastModified") == latest.get("last_modified"):
-            continue
-        akey = f"archive/reask/{name}_{year}/livecyc_{_stamp(ft)}.csv.gz"
-        try:
-            body = fetch("/livecyc/tcwind/probabilities", {"storm_name": name, "storm_year": year, "forecast_start_time": ft, "format": "csv"})
-            store.put(akey, gzip.compress(body), "application/gzip")        # a re-delivered cycle replaces its file
-            lad = parse_ladder_csv(body.decode("utf-8", "replace"))
-            entry["livecyc"] = {"forecastTime": ft, "lastModified": latest.get("last_modified"), "fetched": _iso(now),
-                                "cycles": len(fcs), **lad}
-            entry["ledger"] = append_step(store, name, year,
-                                          _step(lad, "livecyc", _stamp(ft) or ft, ft, _iso(now),
-                                                l_prices(store, name, set((lad.get("sites") or {}).keys()))), log)
-            fetched += 1
-        except Exception as e:  # noqa: BLE001
-            errors.append(f"livecyc {name} {ft}: {type(e).__name__}: {e}")
+        ordered = sorted(fcs, key=lambda f: f.get("forecast_datetime") or "")[-MAX_STEPS:]
+        latest = ordered[-1]
+        key, shown = shown_as(name)
+        under_number = name.lower() != shown.lower()
+        entry = storms.setdefault(key, {"name": shown, "year": year, "livecyc": None, "interim": None, "final": None})
+        raw_led = store.get(STORM_KEY.format(name=shown, year=year))
+        held = {}
+        for st in (json.loads(raw_led).get("steps") or []) if raw_led else []:
+            held[st.get("id")] = str(st.get("as") or shown)
+        cid = lambda f: _stamp(f.get("forecast_datetime")) or f.get("forecast_datetime")
+        todo = [f for f in ordered
+                if cid(f) not in held or (not under_number and held[cid(f)].lower() != shown.lower())]
+        todo = todo[-MAX_NEW_CYCLES:]
+        cur = entry.get("livecyc") or {}
+        if (latest not in todo and cur.get("forecastTime") == latest.get("forecast_datetime")
+                and str(cur.get("vendorName") or shown).lower() == name.lower()
+                and cur.get("lastModified") != latest.get("last_modified")):
+            todo.append(latest)                         # the vendor reissued its newest cycle
+        got = set(held)
+        for f in todo:
+            ft = f.get("forecast_datetime")
+            akey = f"archive/reask/{name}_{year}/livecyc_{_stamp(ft)}.csv.gz"   # filed under the name it came with
+            try:
+                body = fetch("/livecyc/tcwind/probabilities", {"storm_name": name, "storm_year": year, "forecast_start_time": ft, "format": "csv"})
+                store.put(akey, gzip.compress(body), "application/gzip")        # a re-delivered cycle replaces its file
+                lad = parse_ladder_csv(body.decode("utf-8", "replace"))
+                step = _step(lad, "livecyc", cid(f), ft, _iso(now),
+                             l_prices(store, shown, set((lad.get("sites") or {}).keys())))
+                if under_number:
+                    step["as"] = name
+                entry["ledger"] = append_step(store, shown, year, step, log)
+                cur = entry.get("livecyc") or {}
+                if (ft or "") >= (cur.get("forecastTime") or ""):
+                    # the index shows the newest cycle the storm has, whichever name it came under
+                    entry["livecyc"] = {"forecastTime": ft, "lastModified": f.get("last_modified"), "fetched": _iso(now),
+                                        "cycles": len(fcs), **lad}
+                    if under_number:
+                        entry["livecyc"]["vendorName"] = name
+                fetched += 1
+                got.add(cid(f))
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"livecyc {name} {ft}: {type(e).__name__}: {e}")
+                behind.add(shown)
+        if cid(latest) not in got:
+            behind.add(shown)
 
     # ---- Metryc interim and final, refetched when the listing says they changed
     for kind, lpath, ppath in (("interim", "/metryc/interim/tcwind/list", "/metryc/interim/tcwind/probabilities"),
@@ -530,40 +760,52 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             name = s.get("storm_name")
             if not name:
                 continue
-            key = f"{name}_{year}"
-            if key in absorbed:
-                continue
-            entry = storms.setdefault(key, {"name": name, "year": year, "livecyc": None, "interim": None, "final": None})
+            key, shown = shown_as(name)
+            under_number = name.lower() != shown.lower()
+            entry = storms.setdefault(key, {"name": shown, "year": year, "livecyc": None, "interim": None, "final": None})
             lm = s.get("last_modified")
-            if (entry.get(kind) or {}).get("lastModified") == lm and entry.get(kind):
+            cur = entry.get(kind) or {}
+            cur_from = str(cur.get("vendorName") or shown)
+            if cur and under_number and cur_from.lower() != name.lower():
+                continue        # the file under the storm's name stands over one under its number
+            if cur and cur.get("lastModified") == lm and cur_from.lower() == name.lower():
                 continue
             akey = f"archive/reask/{name}_{year}/{kind}_{_stamp(lm) or 'latest'}.csv.gz"
             try:
                 body = fetch(ppath, {"storm_name": name, "storm_year": year, "format": "csv"})
                 store.put(akey, gzip.compress(body), "application/gzip")
                 text = body.decode("utf-8", "replace")
+                came = {"vendorName": name} if under_number else {}
                 if kind == "interim":
                     # the covered zeros are figures here; the ledger keeps the
                     # ones for its own sites and the index carries those same rows
                     parsed = parse_ladder_csv(text, keep_zero=True)
                     st = _step(parsed, "interim", "INT", lm, _iso(now),
-                               l_prices(store, name, set((parsed.get("sites") or {}).keys())))
-                    entry["ledger"] = append_step(store, name, year, st, log)
+                               l_prices(store, shown, set((parsed.get("sites") or {}).keys())))
+                    if under_number:
+                        st["as"] = name
+                    entry["ledger"] = append_step(store, shown, year, st, log)
                     kept = set(entry["ledger"].get("kept") or [])
-                    entry[kind] = {"lastModified": lm, "fetched": _iso(now), **parsed,
+                    entry[kind] = {"lastModified": lm, "fetched": _iso(now), **parsed, **came,
                                    "sites": {k: v for k, v in (parsed.get("sites") or {}).items() if k in kept}}
                 else:
                     parsed = parse_final_csv(text)
-                    entry[kind] = {"lastModified": lm, "fetched": _iso(now), "sites": parsed}
-                    entry["ledger"] = append_step(store, name, year,
-                                                  {"id": "FINAL", "kind": "final", "at": lm, "ts": _iso(now),
-                                                   "sites": {}, "siteMeta": {}, "thresholds": None,
-                                                   "final": {k: v.get("peakGustMph") for k, v in parsed.items()}}, log)
+                    entry[kind] = {"lastModified": lm, "fetched": _iso(now), "sites": parsed, **came}
+                    fin = {"id": "FINAL", "kind": "final", "at": lm, "ts": _iso(now), "sites": {}, "siteMeta": {},
+                           "thresholds": None, "final": {k: v.get("peakGustMph") for k, v in parsed.items()}}
+                    if under_number:
+                        fin["as"] = name
+                    entry["ledger"] = append_step(store, shown, year, fin, log)
                 fetched += 1
             except Exception as e:  # noqa: BLE001
                 errors.append(f"{kind} {name}: {type(e).__name__}: {e}")
+                behind.add(shown)
 
-    # storms with a final older than two weeks leave the snapshot
+    # Every storm stays: a settled storm can be stepped through on the hurricane
+    # page for good (owner, 2026-10-20), where it used to leave the snapshot two
+    # weeks after its final. From then on its entry keeps only its stamps; the page
+    # draws a settled storm from its ledger, which holds every file's figures, so
+    # the files' site tables here would only add about twenty kilobytes a storm.
     keep = []
     for s in storms.values():
         f = s.get("final") or {}
@@ -572,8 +814,8 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
                 age = (now - dt.datetime.fromisoformat(f["fetched"].replace("Z", "+00:00"))).days
             except ValueError:
                 age = 0
-            if age > 14:
-                continue
+            if age > SLIM_DAYS:
+                s = slim_entry(s)
         keep.append(s)
     # the pool's figure is not the site's to compute: it is the desk's, and it
     # reaches the exchange through the market maker. A storm the owner has
@@ -607,11 +849,21 @@ def reask_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, fetch:
             lc.pop("pwin", None)
             lc.pop("pwinMethod", None)
             lc.pop("pwinMeta", None)
+    # the market's standing answer to each storm's newest delivery, read every pass
+    # while the vendor's listing shows nothing newer than what is filed
+    if live is not None:
+        for s2 in keep:
+            if s2.get("name") in behind or not s2.get("livecyc"):
+                continue
+            try:
+                mark_end_prices(store, s2.get("name"), s2.get("year"), now, log)
+            except Exception as e:  # noqa: BLE001 - a missed reading is not a failed pass
+                errors.append(f"end prices {s2.get('name')}: {type(e).__name__}: {e}")
     asof = max([(s.get("livecyc") or {}).get("forecastTime") or "" for s in keep] + [prev.get("asof") or ""]) or None
     ok = live is not None
     snap = {"schema": SCHEMA, "enabled": True, "attribution": ATTRIBUTION, "asof": asof, "written": _iso(now),
             "polled": _iso(now) if ok else prev.get("polled"), "year": year, "storms": keep, "fetched": fetched, "errors": errors,
-            "ledgerKey": STORM_KEY}
+            "ledgerKey": STORM_KEY, "renamed": auto}
     store.put(KEY, json.dumps(snap, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     log(kind="reask", enabled=True, storms=len(keep), fetched=fetched, errors=errors)
     return {"enabled": True, "attempted": True, "ok": ok, "storms": len(keep), "fetched": fetched, "errors": errors}

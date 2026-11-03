@@ -78,7 +78,7 @@ window.WXC = (() => {
                  ['accuracy.html', 'Accuracy'], ['faq.html', 'FAQ'], ['about.html', 'About']];
     const nav = cfg.nav || { l1: [], categories: [] };
     const ADOPT = { 'city.html': 'index.html', 'scorecard.html': 'index.html',
-                    'hurricane.html': 'tropical-cyclone-markets.html' };
+                    'hurricane.html': 'tropical-cyclone-markets.html', 'climate-gdp.html': 'climate.html' };
     const cats = nav.categories || [];
     const pageOf = c => (c.page || '').split('?')[0];
     const paramOf = c => { const q = (c.page || '').split('?')[1]; return q ? new URLSearchParams(q).get('c') : null; };
@@ -92,8 +92,9 @@ window.WXC = (() => {
       || (byProduct ? cats.find(c => c.slug === byProduct) : null)
       || cats.find(c => !paramOf(c) && pageOf(c) === active)
       // a page that belongs to a category without being the page that category
-      // opens: the city chart and the scorecard are the map's, and the basin
-      // view is the cyclone area's, which opens on the two-ocean page instead
+      // opens: the city chart and the scorecard are the map's, the basin
+      // view is the cyclone area's, which opens on the two-ocean page instead,
+      // and the world GDP contract's article is the climate series page's
       || (ADOPT[active] ? cats.find(c => pageOf(c) === ADOPT[active]) : null);
     // a branch page names its branch directly and belongs to no one category
     const bySection = q.get('s');
@@ -266,19 +267,27 @@ window.WXC = (() => {
 
          These are the prices to BUY each side: the Yes ask, and one dollar less
          the Yes bid for the No. There are no sellers on this exchange, only bids
-         to buy one side or the other, and the two sum to a dollar. */
-      price(yesBuy, noBuy, yesSub, noSub) {
+         to buy one side or the other. */
+      price(yesBuy, noBuy, yesSub, noSub, url) {
         const c = v => (v == null ? '—' : Math.round(v * 100) + '¢');
         const sub = t => (t ? '<span class="tps">' + t + '</span>' : '');
-        return '<div class="tprice">'
-          + '<div class="tp yes"><span class="tpl">Buy Yes</span><span class="tpv">' + c(yesBuy) + '</span>'
-          + sub(yesSub) + '</div>'
-          + '<div class="tp no"><span class="tpl">Buy No</span><span class="tpv">' + c(noBuy) + '</span>'
-          + sub(noSub) + '</div>'
-          + '</div>';
+        // Given the contract's address, each side is a link to it, which a reader can
+        // follow once the box is pinned: a box that follows the pointer cannot be clicked.
+        // The exchange's page for a strike carries both sides, so both lead there.
+        const href = url ? String(url).replace(/&/g, '&amp;').replace(/"/g, '&quot;') : '';
+        const box = (cls, label, v, s) => (url
+          ? '<a class="tp ' + cls + '" href="' + href + '" target="_blank" rel="noopener" title="' + label + ' on IBKR">'
+          : '<div class="tp ' + cls + '">')
+          + '<span class="tpl">' + label + '</span><span class="tpv">' + c(v) + '</span>' + sub(s)
+          + (url ? '</a>' : '</div>');
+        return '<div class="tprice">' + box('yes', 'Buy Yes', yesBuy, yesSub) + box('no', 'Buy No', noBuy, noSub) + '</div>';
       },
+      // a pair may carry a third entry, a class for both its cells ('gs' opens a group)
       rows(title, pairs, foot) {
-        const body = pairs.filter(p => p && p[1] != null && p[1] !== '').map(p => '<span class="tk">' + p[0] + '</span><span class="tv">' + p[1] + '</span>').join('');
+        const body = pairs.filter(p => p && p[1] != null && p[1] !== '').map(p => {
+          const c = p[2] ? ' ' + p[2] : '';
+          return '<span class="tk' + c + '">' + p[0] + '</span><span class="tv' + c + '">' + p[1] + '</span>';
+        }).join('');
         return (title ? '<b>' + title + '</b>' : '') + (body ? '<div class="tg">' + body + '</div>' : '') + (foot ? '<div class="tf">' + foot + '</div>' : '');
       },
     };
@@ -315,10 +324,11 @@ window.WXC = (() => {
 
   /* The roster minus the stations that carry no temperature contract.
 
-     Nine of them: six shore stations that hold no ForecastEx product at all,
+     Twelve of them: nine shore stations that hold no ForecastEx product at all,
      and three whose only contract is MG wind. They belong on the wind map,
      which is why they are carried, and nowhere that implies a temperature
-     market: the front map, the city page's two pickers, the article map. One
+     market: the front map, the city page's two pickers, the article map, the
+     scorecard's figures. One
      definition of that rule lives here so a surface added later cannot
      quietly include them; the roster row carries `windOnly` and
      pipeline/cities.py names the set. */
@@ -335,6 +345,135 @@ window.WXC = (() => {
     return isFinite(d) ? d.toLocaleDateString(undefined, { weekday: 'long', timeZone: 'UTC' }) : '';
   }
 
+  /* A storm vendor's probability as every page prints it: to the whole
+     percent (owner, 2026-10-08). A figure under half a percent reads as under
+     one rather than as a zero the vendor did not publish, and one just short of
+     certain as over 99 rather than as a certainty; a published zero is a zero.
+     Plain text: a caller building HTML escapes it. */
+  function vendorPct(v) {
+    if (v == null || !isFinite(v)) return null;
+    if (v > 0 && v < 0.5) return '<1%';
+    if (v >= 99.5 && v < 100) return '>99%';
+    return Math.round(v) + '%';
+  }
+
+  /* A Metryc gust as the Live Hurricane wind contracts resolve it: in whole
+     miles an hour, rounded half up (owner, 2026-10-12). The vendor publishes a
+     float and the exchange's terms report the settlement value to one decimal
+     place; every page prints this figure and marks a strike settled against it,
+     so a final of 69.6 mph reads 70 and clears a 70 mph strike. */
+  const settleMph = v => (v == null || !isFinite(v) ? null : Math.round(v));
+
+  /* A satellite loop, as the hurricane page draws one per storm and the landing
+     page one of the lower 48: frames pipeline/floater.py copies into this site's
+     bucket every half hour (owner, 2026-10-10). The newest frame shows at once and
+     the loop plays while the card is on screen, its frames fetched only then and
+     each shown once it has arrived. A reader who asks for reduced motion, or whose
+     browser asks to save data, gets the newest frame and the buttons.
+
+     A loop whose newest frame is more than two hours old is not drawn (loopFresh):
+     its labels carry no date, and that age means the half-hourly pass or STAR has
+     stopped for a while.
+
+     opts: frames [{t, src}], head, sub, credit, alt, width and height (the frame's
+     own size), crop [x, y, w, h] as fractions of the frame to show only that part,
+     dated to put the date in each frame's label, cls and attrs for the card.
+     Returns {card, stop}. */
+  const LOOP_MAX_AGE = 2 * 36e5;
+  // `maxAge` for a product with its own cadence: WPC's analyses come every three
+  // hours and reach its server about two hours after their time
+  const loopFresh = (frames, maxAge) => !!(frames && frames.length)
+    && Date.now() - Date.parse(frames[frames.length - 1].t) <= (maxAge || LOOP_MAX_AGE);
+  function satLoop(o) {
+    const frames = o.frames, n = frames.length, tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let k = n - 1, timer = null, held = false, loaded = false, io = null;
+    const ready = frames.map((f, i) => i === n - 1);
+    const img = h('img', { class: 'loopimg', src: frames[n - 1].src, width: o.width, height: o.height, decoding: 'async', alt: o.alt || '' });
+    let view = img;
+    if (o.crop) {
+      // the frame is drawn larger than the box and moved so the box shows only the crop
+      const [x, y, w, hh] = o.crop;
+      img.style.cssText = 'width:' + (100 / w).toFixed(3) + '%;height:' + (100 / hh).toFixed(3) + '%;left:'
+        + (-100 * x / w).toFixed(3) + '%;top:' + (-100 * y / hh).toFixed(3) + '%';
+      view = h('div', { class: 'loopcrop', style: 'aspect-ratio:' + (w * o.width).toFixed(1) + ' / ' + (hh * o.height).toFixed(1) }, [img]);
+    }
+    const when = h('span', { class: 'looptime' });
+    // `dated` for a loop that spans more than a day, so the same clock time twice is told apart
+    const label = i => { const ms = Date.parse(frames[i].t);
+      return new Date(ms).toISOString().slice(11, 16) + 'Z (' + clockFull(ms, tz) + (o.dated ? ' ' + dateShort(ms, tz) : '') + ')'
+        + (i === n - 1 ? ' · latest' : ''); };
+    const show = i => { k = (i + n) % n; img.src = frames[k].src; when.textContent = label(k); };
+    const preload = () => {
+      if (loaded) return; loaded = true;
+      frames.forEach((f, i) => { if (ready[i]) return; const im = new Image(); im.onload = () => { ready[i] = true; }; im.src = f.src; });
+    };
+    const next = () => { for (let j = 1; j < n; j++) { const i = (k + j) % n; if (ready[i]) return i; } return k; };
+    const play = h('button', { class: 'loopbtn', text: 'Play', title: 'play the loop' });
+    const halt = () => { clearTimeout(timer); timer = null; play.textContent = 'Play'; };
+    const step = () => { show(next()); timer = setTimeout(step, k === n - 1 ? 1400 : 180); };
+    const start = () => { if (timer || n < 2) return; preload(); play.textContent = 'Pause'; timer = setTimeout(step, 400); };
+    play.onclick = () => { if (timer) { halt(); held = true; } else { held = false; start(); } };
+    const back = h('button', { class: 'loopbtn', text: '◀', title: 'the frame before' });
+    const fwd = h('button', { class: 'loopbtn', text: '▶', title: 'the frame after' });
+    back.onclick = () => { halt(); held = true; preload(); show(k - 1); };
+    fwd.onclick = () => { halt(); held = true; preload(); show(k + 1); };
+    when.textContent = label(k);
+    const card = h('div', Object.assign({ class: 'card loopcard' + (o.cls ? ' ' + o.cls : '') }, o.attrs || {}), [
+      o.head ? h('div', { class: 'lhd', text: o.head }) : null,
+      o.sub ? h('div', { class: 'lsub', text: o.sub }) : null,
+      view,
+      h('div', { class: 'lbar' }, [back, play, fwd, when]),
+      o.credit ? h('div', { class: 'lsrc', text: o.credit }) : null].filter(Boolean));
+    const still = (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)
+      || !!(navigator.connection && navigator.connection.saveData);
+    if ('IntersectionObserver' in window) {
+      io = new IntersectionObserver(es => es.forEach(e => {
+        if (e.isIntersecting) { if (!still && !held) start(); } else if (timer) halt();
+      }), { threshold: 0.35 });
+      io.observe(card);
+    }
+    return { card, stop: () => { if (io) io.disconnect(); halt(); } };
+  }
+  // the loop's subtitle: the satellite, the hours the frames span, and their spacing
+  function loopSub(satellite, frames) {
+    const hours = Math.round((Date.parse(frames[frames.length - 1].t) - Date.parse(frames[0].t)) / 36e5);
+    return satellite + ' GeoColor, ' + (hours >= 1 ? 'the last ' + hours + ' hour' + (hours === 1 ? '' : 's') : 'the newest frames')
+      + ', a frame every ten minutes';
+  }
+
+  /* A cycle stamp in any of the forms the snapshots carry ('20261016T0600Z',
+     '20261016T062634Z', '2026-10-16T17:00:00Z') as milliseconds, NaN for none. */
+  function parseStamp(sid) {
+    if (!sid) return NaN;
+    const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?Z?$/.exec(sid);
+    return Date.parse(m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] || '00'}Z` : sid);
+  }
+  /* When a run was issued, in the least ink that still answers the question:
+     the hour, a or p, and T or Y for whether that hour fell on the contract day
+     being shown (dayIso) or the day before it (ydayIso), else the short date.
+     The city chart's level labels and the landing map's hover both name runs
+     this way, so a run reads the same in both places. */
+  const MON3 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function issuedTag(ms, tz, dayIso, ydayIso) {
+    if (ms == null || isNaN(ms)) return '';
+    const h = hourOf(ms, tz);
+    const on = new Date(ms).toLocaleDateString('en-CA', { timeZone: tz });
+    const d = on === dayIso ? 'T' : (on === ydayIso ? 'Y' : MON3[+on.slice(5, 7) - 1] + ' ' + (+on.slice(8, 10)));
+    return (h % 12 || 12) + (h < 12 ? 'a' : 'p') + ' ' + d;
+  }
+
+  /* A forecast's line in miniature, for a hover box: its color, solid for a
+     model's newest run and dotted for a run a newer one superseded, the same
+     two styles the charts draw (owner, 2026-10-16). A grey halo under it keeps
+     a dark color readable on the dark box and a light one on the light box. */
+  function lineSwatch(col, dotted) {
+    const d = dotted ? ' stroke-dasharray="2 3"' : '';
+    return '<svg class="swl" width="16" height="6" viewBox="0 0 16 6" aria-hidden="true">'
+      + '<line x1="1" y1="3" x2="15" y2="3" stroke="rgba(128,128,128,.7)" stroke-width="4.2"' + d + '/>'
+      + '<line x1="1" y1="3" x2="15" y2="3" stroke="' + col + '" stroke-width="2.4"' + d + '/></svg>';
+  }
+
   return {
-    asset, compass, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref, tempCities, weekdayOf };
+    asset, compass, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref, tempCities, weekdayOf, vendorPct,
+    settleMph, satLoop, loopFresh, loopSub, lineSwatch, parseStamp, issuedTag };
 })();

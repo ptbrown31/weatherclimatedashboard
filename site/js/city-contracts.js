@@ -62,6 +62,7 @@ window.WXCityContracts = (() => {
       const panel = h('div', { class: 'ctr' });
       wrap.appendChild(panel);
       fill(panel);
+      WXM.tradeNote(panel, panel.querySelector('.card'));
       panel.appendChild(h('p', { class: 'cap' }, [h('a', { href: more }, 'Contract details →')]));
       const card = panel.querySelector('.card');
       if (card) {
@@ -96,6 +97,7 @@ window.WXCityContracts = (() => {
         panel.textContent = '';
         Array.from(bar.querySelectorAll('button')).forEach(function (b, j) { b.classList.toggle('on', j === i); });
         WXK.wind(panel, city, obs, fc, days.length ? days[i][0] : wind);
+        WXM.tradeNote(panel, panel.querySelector('.card'));
         // the two columns are the same two whatever day is drawn, so the note
         // sits under the panel rather than inside the chart that changes
         panel.appendChild(note);

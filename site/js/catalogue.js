@@ -268,6 +268,8 @@ window.WXCat = (() => {
     // hurricane boards use. A plain list of strikes is the fallback, not the
     // default: it appears only when the exchange has quoted nothing at all.
     ladder($('#cBody'), p, priced, pr);
+    const lads = $('#cBody').querySelectorAll('.ladder');
+    if (lads.length) WXM.tradeNote($('#cBody'), lads[lads.length - 1]);
   }
 
   // The ladder, in the same Yes-green No-red language the temperature and
@@ -309,15 +311,14 @@ window.WXCat = (() => {
           ['Buy Yes now at', q && q.ask != null ? Math.round(q.ask * 100) + '¢' : null],
           ['Settles', expDate(c.expiration)],
 
-        ], 'Yes and No bids sum to $1; there are no sellers · not fee adjusted'
-           + (pr && pr.asof ? ' · quoted ' + pr.asof.slice(11, 16) + 'Z' : '')));
+        ], 'not fee adjusted' + (pr && pr.asof ? ' · quoted ' + pr.asof.slice(11, 16) + 'Z' : '')));
         if (u) WXM.linkTo(bar.querySelector('.lv'), u, 'Open ' + (c.label || c.strike) + ' on IBKR');
         div.appendChild(bar);
       });
       host.appendChild(div);
     });
     host.appendChild(h('p', { class: 'cap', text: 'Strikes and settlement dates are read from the exchange once a day and '
-      + 'prices every half hour. Yes green, No red; the two sides of a contract sum to a dollar and there are no sellers. '
+      + 'prices every half hour. Yes green, No red. '
       + (unquoted ? 'This contract has not come round on the price rotation yet, so no prices are shown for it; '
                     + 'that is not the same as it having no bids. '
                   : (anyBids ? '' : 'Nothing in this ladder has a bid on either side at the moment. '))

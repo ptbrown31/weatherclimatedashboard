@@ -1,5 +1,5 @@
 {
- "_about": "The one list of forecast systems and how they are grouped. scripts/build.py renders the forecast systems table on the accuracy page from it and ships it in config.js, where the scorecard grid takes its row groups and row order from the same list. Change the grouping or the order here and both follow. `id` is the system's id in the accuracy files; `ens` is its entry in calibration.json's ensembles; a row may carry either or both.",
+ "_about": "The one list of forecast systems and how they are grouped, in the working paper's five groups. scripts/build.py renders the forecast systems table on the accuracy page from it. `id` is the series' id in the accuracy files; a system scored twice has a row for each series.",
  "groups": [
   {
    "key": "market",
@@ -8,9 +8,9 @@
    "systems": [
     {
      "key": "FX",
-     "name": "ForecastEx",
+     "name": "ForecastEx prediction market",
      "url": "https://forecastex.com/",
-     "what": "Daily contracts on each city’s high and low temperature. The ladder of Yes prices across strikes is a probability distribution for the settle.",
+     "what": "Daily contracts on each city’s high and low temperature. The ladder of Yes prices across strikes is a probability distribution for the settle, and its central value, where the ladder crosses fifty cents, is scored as one value.",
      "kind": "Probabilistic",
      "grid": "The settlement station",
      "step": "The station-local day",
@@ -20,13 +20,196 @@
    ]
   },
   {
-   "key": "nwp",
-   "title": "Raw numerical weather prediction models",
-   "note": "Physics models that step the atmosphere forward in time. Their output applies to a grid box rather than the exact point where a station sits.",
+   "key": "mos",
+   "title": "Station MOS",
+   "note": "Statistical guidance fitted at the settlement station itself, from model output corrected against what the models got wrong there in the past. These are left as issued by the bias correction. GFS MOS, NAM MOS and the NBM station guidance appear twice, on the daytime maximum each issues and on its hourly temperature rows.",
    "systems": [
     {
+     "key": "LAMP",
+     "name": "LAMP",
+     "url": "https://vlab.noaa.gov/web/mdl/lamp",
+     "what": "LAMP, statistical guidance refreshed with the latest observations.",
+     "kind": "Deterministic",
+     "grid": "The settlement station itself",
+     "step": "Hourly, to about 38 h",
+     "updates": "Every hour",
+     "id": "LAMP"
+    },
+    {
+     "key": "NBS_MOS",
+     "name": "NBM station MOS, issued maximum",
+     "url": "https://vlab.noaa.gov/web/mdl/nbm",
+     "what": "The station text bulletin of the National Blend of Models, read on its own daytime maximum, the highest temperature its TXN row expects from 7 AM to 7 PM local standard time, and scored against the National Weather Service climate report on the location-days whose report puts the maximum inside that window.",
+     "kind": "Deterministic",
+     "grid": "The settlement station itself",
+     "step": "3-hourly, to 72 h",
+     "updates": "Every 6 hours",
+     "id": "NBS_MOS"
+    },
+    {
+     "key": "NBS_MOS_ROW",
+     "name": "NBM station MOS, hourly rows",
+     "url": "https://vlab.noaa.gov/web/mdl/nbm",
+     "what": "The same bulletin read on its hourly temperature rows, the extreme of the hours left in the day, and scored against the METAR settle.",
+     "kind": "Deterministic",
+     "grid": "The settlement station itself",
+     "step": "3-hourly, to 72 h",
+     "updates": "Every 6 hours",
+     "id": "NBS_MOS_ROW"
+    },
+    {
+     "key": "GFS_MOS",
+     "name": "GFS MOS, issued maximum",
+     "url": "https://vlab.noaa.gov/web/mdl/gfs-mos",
+     "what": "Statistical guidance built on the GFS alone, with no forecaster editing, read on its own daytime maximum, the X/N row’s highest temperature from 7 AM to 7 PM local standard time, and scored against the climate report on the location-days whose report puts the maximum inside that window.",
+     "kind": "Deterministic",
+     "grid": "The settlement station itself",
+     "step": "3-hourly, to 72 h",
+     "updates": "Every 6 hours",
+     "id": "GFS_MOS"
+    },
+    {
+     "key": "GFS_MOS_ROW",
+     "name": "GFS MOS, hourly rows",
+     "url": "https://vlab.noaa.gov/web/mdl/gfs-mos",
+     "what": "The same bulletin read on its hourly temperature rows, the extreme of the hours left in the day, and scored against the METAR settle.",
+     "kind": "Deterministic",
+     "grid": "The settlement station itself",
+     "step": "3-hourly, to 72 h",
+     "updates": "Every 6 hours",
+     "id": "GFS_MOS_ROW"
+    },
+    {
+     "key": "NAM_MOS",
+     "name": "NAM MOS, issued maximum",
+     "url": "https://vlab.noaa.gov/web/mdl/nam-mos",
+     "what": "Statistical guidance built on NOAA’s North American Mesoscale model, read on its own daytime maximum, the X/N row’s highest temperature from 7 AM to 7 PM local standard time, and scored against the climate report on the location-days whose report puts the maximum inside that window. NCEP retired the model and this guidance at 1200 UTC on 3 November 2026 (service change notice 26-47), so the series ends with 2 November, the last day it covered whole. The Rapid Refresh Forecast System that replaces the model issues no station bulletin, so no successor carries the record on.",
+     "kind": "Deterministic",
+     "grid": "The settlement station itself",
+     "step": "3-hourly, to 72 h",
+     "updates": "Every 12 hours, until 3 November 2026",
+     "id": "NAM_MOS"
+    },
+    {
+     "key": "NAM_MOS_ROW",
+     "name": "NAM MOS, hourly rows",
+     "url": "https://vlab.noaa.gov/web/mdl/nam-mos",
+     "what": "The same bulletin read on its hourly temperature rows, the extreme of the hours left in the day, and scored against the METAR settle. NCEP retired the model and this guidance at 1200 UTC on 3 November 2026 (service change notice 26-47), so the series ends with 2 November, the last day it covered whole. The Rapid Refresh Forecast System that replaces the model issues no station bulletin, so no successor carries the record on.",
+     "kind": "Deterministic",
+     "grid": "The settlement station itself",
+     "step": "3-hourly, to 72 h",
+     "updates": "Every 12 hours, until 3 November 2026",
+     "id": "NAM_MOS_ROW"
+    },
+    {
+     "key": "MOSMIX",
+     "name": "DWD MOSMIX",
+     "url": "https://www.dwd.de/EN/ourservices/met_application_mosmix/met_application_mosmix.html",
+     "what": "MOSMIX, which combines and corrects the German and European models station by station.",
+     "kind": "Deterministic",
+     "grid": "The settlement airport’s station in DWD’s list, which lacks Buckley Field, Houston Hobby and Chicago Midway",
+     "step": "Hourly, to 240 h",
+     "updates": "Every 6 hours",
+     "id": "MOSMIX"
+    }
+   ]
+  },
+  {
+   "key": "blend",
+   "title": "Blend",
+   "note": "A calibrated blend of many models on a fine grid.",
+   "systems": [
+    {
+     "key": "NBM",
+     "name": "National Blend of Models, METAR",
+     "url": "https://vlab.noaa.gov/web/mdl/nbm",
+     "what": "NOAA’s calibrated blend of many models, the starting point for the Weather Service’s own forecast.",
+     "kind": "Deterministic",
+     "grid": "2.5 km",
+     "step": "Hourly, 3-hourly after 36 h",
+     "updates": "Every hour",
+     "id": "NBM"
+    },
+    {
+     "key": "NBM_URMA",
+     "name": "National Blend of Models, URMA",
+     "url": "https://vlab.noaa.gov/web/mdl/nbm",
+     "what": "The same Blend scored a second time, as issued, against URMA, the Weather Service’s gridded analysis, at the grid box holding the station, its daily value against the largest analysis over the station-local day. Highs only.",
+     "kind": "Deterministic",
+     "grid": "2.5 km",
+     "step": "Hourly, 3-hourly after 36 h",
+     "updates": "Every hour",
+     "id": "NBM_URMA"
+    }
+   ]
+  },
+  {
+   "key": "human",
+   "title": "Human-edited",
+   "note": "Forecasters editing model guidance with their own judgment.",
+   "systems": [
+    {
+     "key": "NDFD",
+     "name": "National Weather Service, climate report",
+     "url": "https://vlab.noaa.gov/web/mdl/ndfd",
+     "what": "The official public forecast from the National Digital Forecast Database, which forecasters edit starting from the National Blend of Models. Its high is a daytime maximum for 7 AM to 7 PM local standard time and its low an overnight minimum for 7 PM to 8 AM, assigned to the morning the night ends, while the contracts settle on the calendar day.",
+     "kind": "Deterministic",
+     "grid": "2.5 km",
+     "step": "Hourly for the first 36 h",
+     "updates": "About twice a day, amended as needed",
+     "id": "NDFD"
+    },
+    {
+     "key": "NDFD_URMA",
+     "name": "National Weather Service, URMA",
+     "url": "https://vlab.noaa.gov/web/mdl/ndfd",
+     "what": "The same forecast scored a second time, as issued, against URMA, the Weather Service’s gridded analysis, at the grid box holding the station, its daytime maximum against the largest analysis over 7 AM to 7 PM local standard time. Highs only.",
+     "kind": "Deterministic",
+     "grid": "2.5 km",
+     "step": "Hourly for the first 36 h",
+     "updates": "About twice a day, amended as needed",
+     "id": "NDFD_URMA"
+    }
+   ]
+  },
+  {
+   "key": "ai",
+   "title": "Artificial intelligence",
+   "note": "Models trained on decades of past weather rather than stepping physical equations forward.",
+   "systems": [
+    {
+     "key": "AIFS",
+     "name": "ECMWF AIFS ens. mean",
+     "url": "https://www.ecmwf.int/en/forecasts/dataset/aifs-machine-learning-data",
+     "what": "AIFS, ECMWF’s machine-learning forecasting system. Live, it is the 51-member ensemble. Its single value is the extreme of the ensemble’s hourly means over the hours left in the day, the median of its distribution, and the members’ spread gives the distribution. Before live capture began the forecast archive holds its single deterministic run.",
+     "kind": "Probabilistic",
+     "grid": "0.25°, about 25 km",
+     "step": "6-hourly",
+     "updates": "Every 6 hours",
+     "id": "AIFS",
+     "ens": "AIFS"
+    }
+   ]
+  },
+  {
+   "key": "nwp",
+   "title": "Raw numerical weather prediction",
+   "note": "Physics models that step the atmosphere forward in time. Their output applies to a grid box rather than the exact point where a station sits, which the bias correction addresses.",
+   "systems": [
+    {
+     "key": "HRRR",
+     "name": "NOAA HRRR",
+     "url": "https://rapidrefresh.noaa.gov/hrrr/",
+     "what": "NOAA’s High-Resolution Rapid Refresh, covering the contiguous United States.",
+     "kind": "Deterministic",
+     "grid": "3 km",
+     "step": "Hourly",
+     "updates": "Every hour",
+     "id": "HRRR"
+    },
+    {
      "key": "ECMWF",
-     "name": "European Model",
+     "name": "ECMWF IFS",
      "url": "https://www.ecmwf.int/en/forecasts/documentation-and-support/medium-range-forecasts",
      "what": "ECMWF’s global model, the IFS, as one deterministic run. Before live capture began the record uses ECMWF’s 0.25° open data from the forecast archive, and from then on a data provider’s high-resolution series, whose grid spacing could not be confirmed.",
      "kind": "Deterministic",
@@ -37,7 +220,7 @@
     },
     {
      "key": "ECMWF_IFS",
-     "name": "European Ensemble Mean",
+     "name": "ECMWF IFS ens. mean",
      "url": "https://www.ecmwf.int/en/forecasts/documentation-and-support/medium-range-forecasts",
      "what": "Described by the data provider as the average of ECMWF’s 51-member ensemble, which could not be independently confirmed. Only its mean is used here.",
      "kind": "Ensemble mean",
@@ -48,7 +231,7 @@
     },
     {
      "key": "GFS",
-     "name": "American Model",
+     "name": "NOAA GFS",
      "url": "https://www.emc.ncep.noaa.gov/emc/pages/numerical_forecast_systems/gfs.php",
      "what": "NOAA’s Global Forecast System. Before live capture began the record comes from a forecast archive that returns HRRR within 48 hours of the run.",
      "kind": "Deterministic",
@@ -59,18 +242,19 @@
     },
     {
      "key": "GEFS",
-     "name": "American Ensemble",
+     "name": "NOAA GEFS median",
      "url": "https://www.emc.ncep.noaa.gov/emc/pages/numerical_forecast_systems/gefs.php",
-     "what": "NOAA’s Global Ensemble Forecast System, 31 members.",
+     "what": "NOAA’s Global Ensemble Forecast System, 31 members. Its median, the extreme of the hourly ensemble means over the hours left in the day, is scored as one value beside the systems, and its spread as a distribution.",
      "kind": "Probabilistic",
      "grid": "0.25°, about 25 km",
      "step": "3-hourly",
      "updates": "Every 6 hours",
+     "id": "GEFS",
      "ens": "GEFS"
     },
     {
      "key": "ICON",
-     "name": "German Model",
+     "name": "DWD ICON",
      "url": "https://www.dwd.de/EN/research/weatherforecasting/num_modelling/01_num_weather_prediction_modells/icon_description.html",
      "what": "ICON, the global model of Germany’s weather service.",
      "kind": "Deterministic",
@@ -81,18 +265,19 @@
     },
     {
      "key": "ICON_ENS",
-     "name": "German Ensemble",
+     "name": "DWD ICON-EPS median",
      "url": "https://www.dwd.de/EN/research/weatherforecasting/num_modelling/01_num_weather_prediction_modells/icon_description.html",
-     "what": "ICON’s global ensemble, 40 members.",
+     "what": "ICON’s global ensemble, 40 members. Its median is scored as one value beside the systems, and its spread as a distribution.",
      "kind": "Probabilistic",
      "grid": "26 km",
      "step": "Hourly",
      "updates": "Every 12 hours",
+     "id": "ICON_ENS",
      "ens": "ICON"
     },
     {
      "key": "GEM",
-     "name": "Canadian Model",
+     "name": "ECCC GEM",
      "url": "https://weather.gc.ca/model_forecast/model_e.html",
      "what": "GEM, the model of Environment and Climate Change Canada, as a seamless series that uses its regional and high-resolution configurations at US stations.",
      "kind": "Deterministic",
@@ -103,18 +288,19 @@
     },
     {
      "key": "GEM_ENS",
-     "name": "Canadian Ensemble",
+     "name": "ECCC GEPS median",
      "url": "https://weather.gc.ca/ensemble/index_e.html",
-     "what": "Canada’s global ensemble, 21 members.",
+     "what": "Canada’s global ensemble, 21 members. Its median is scored as one value beside the systems, and its spread as a distribution.",
      "kind": "Probabilistic",
      "grid": "0.25°, about 25 km",
      "step": "3-hourly",
      "updates": "Every 12 hours",
+     "id": "GEM_ENS",
      "ens": "GEM"
     },
     {
      "key": "UKMO",
-     "name": "UK Model",
+     "name": "Met Office UM",
      "url": "https://www.metoffice.gov.uk/research/approach/modelling-systems/unified-model",
      "what": "The Met Office Unified Model, run globally.",
      "kind": "Deterministic",
@@ -125,7 +311,7 @@
     },
     {
      "key": "MF",
-     "name": "French Model",
+     "name": "Météo-France ARPEGE",
      "url": "https://open-meteo.com/en/docs/meteofrance-api",
      "what": "ARPEGE, the global model of Météo-France.",
      "kind": "Deterministic",
@@ -136,7 +322,7 @@
     },
     {
      "key": "JMA",
-     "name": "Japanese Model",
+     "name": "JMA GSM",
      "url": "https://www.jma.go.jp/jma/en/Activities/nwp.html",
      "what": "The Global Spectral Model of the Japan Meteorological Agency.",
      "kind": "Deterministic",
@@ -144,127 +330,6 @@
      "step": "6-hourly",
      "updates": "Every 6 hours",
      "id": "JMA"
-    },
-    {
-     "key": "HRRR",
-     "name": "HRRR",
-     "url": "https://rapidrefresh.noaa.gov/hrrr/",
-     "what": "NOAA’s High-Resolution Rapid Refresh, covering the contiguous United States.",
-     "kind": "Deterministic",
-     "grid": "3 km",
-     "step": "Hourly",
-     "updates": "Every hour",
-     "id": "HRRR"
-    }
-   ]
-  },
-  {
-   "key": "mos",
-   "title": "Numerical weather prediction with model output statistics",
-   "note": "Physics model output corrected station by station against what the models got wrong in the past.",
-   "systems": [
-    {
-     "key": "NBM",
-     "name": "National Blend of Models",
-     "url": "https://vlab.noaa.gov/web/mdl/nbm",
-     "what": "NOAA’s calibrated blend of many models, the starting point for the Weather Service’s own forecast.",
-     "kind": "Deterministic",
-     "grid": "2.5 km",
-     "step": "Hourly, 3-hourly after 36 h",
-     "updates": "Every hour",
-     "id": "NBM"
-    },
-    {
-     "key": "NBS_MOS",
-     "name": "Blend MOS",
-     "url": "https://vlab.noaa.gov/web/mdl/nbm",
-     "what": "The station text bulletin of the National Blend of Models.",
-     "kind": "Deterministic",
-     "grid": "The settlement station itself",
-     "step": "3-hourly, to 72 h",
-     "updates": "Every 6 hours",
-     "id": "NBS_MOS"
-    },
-    {
-     "key": "LAMP",
-     "name": "Aviation Forecast",
-     "url": "https://vlab.noaa.gov/web/mdl/lamp",
-     "what": "LAMP, statistical guidance refreshed with the latest observations.",
-     "kind": "Deterministic",
-     "grid": "The settlement station itself",
-     "step": "Hourly, to about 38 h",
-     "updates": "Every hour",
-     "id": "LAMP"
-    },
-    {
-     "key": "GFS_MOS",
-     "name": "GFS MOS",
-     "url": "https://vlab.noaa.gov/web/mdl/gfs-mos",
-     "what": "Statistical guidance built on the American Model alone, with no forecaster editing.",
-     "kind": "Deterministic",
-     "grid": "The settlement station itself",
-     "step": "3-hourly, to 72 h",
-     "updates": "Every 6 hours",
-     "id": "GFS_MOS"
-    },
-    {
-     "key": "NAM_MOS",
-     "name": "NAM MOS",
-     "url": "https://vlab.noaa.gov/web/mdl/nam-mos",
-     "what": "Statistical guidance built on NOAA’s North American Mesoscale model.",
-     "kind": "Deterministic",
-     "grid": "The settlement station itself",
-     "step": "3-hourly, to 72 h",
-     "updates": "Every 12 hours",
-     "id": "NAM_MOS"
-    },
-    {
-     "key": "MOSMIX",
-     "name": "German Statistical Model",
-     "url": "https://www.dwd.de/EN/ourservices/met_application_mosmix/met_application_mosmix.html",
-     "what": "MOSMIX, which combines and corrects the German and European models.",
-     "kind": "Deterministic",
-     "grid": "The settlement airport’s station in DWD’s list, which lacks Buckley Field, Houston Hobby and Chicago Midway",
-     "step": "Hourly, to 240 h",
-     "updates": "Every 6 hours",
-     "id": "MOSMIX"
-    }
-   ]
-  },
-  {
-   "key": "human",
-   "title": "Human forecasting systems",
-   "note": "Forecasters editing model guidance with their own judgment.",
-   "systems": [
-    {
-     "key": "NDFD",
-     "name": "National Weather Service",
-     "url": "https://vlab.noaa.gov/web/mdl/ndfd",
-     "what": "The official public forecast from the National Digital Forecast Database, which forecasters edit starting from the National Blend of Models. Its high is a daytime maximum for 7 AM to 7 PM local standard time and its low an overnight minimum for 7 PM to 8 AM, assigned to the morning the night ends, while the contracts settle on the calendar day.",
-     "kind": "Deterministic",
-     "grid": "2.5 km",
-     "step": "Hourly for the first 36 h",
-     "updates": "About twice a day, amended as needed",
-     "id": "NDFD"
-    }
-   ]
-  },
-  {
-   "key": "ai",
-   "title": "AI systems",
-   "note": "Models trained on decades of past weather rather than stepping physical equations forward.",
-   "systems": [
-    {
-     "key": "AIFS",
-     "name": "European AI Ensemble Mean",
-     "url": "https://www.ecmwf.int/en/forecasts/dataset/aifs-machine-learning-data",
-     "what": "AIFS, ECMWF’s machine-learning forecasting system. Live, it is the 51-member ensemble, whose mean is scored as one value and whose members’ spread as a distribution. Before live capture began the forecast archive holds its single deterministic run.",
-     "kind": "Probabilistic",
-     "grid": "0.25°, about 25 km",
-     "step": "6-hourly",
-     "updates": "Every 6 hours",
-     "id": "AIFS",
-     "ens": "AIFS"
     }
    ]
   }

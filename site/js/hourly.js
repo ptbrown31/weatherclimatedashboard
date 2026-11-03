@@ -73,6 +73,8 @@ window.WXHourly = (() => {
       if (board && board.listed) WXK.hours(sec, c, board, obs, fc);
       else sec.appendChild(h('p', { class: 'cap' }, WXM.live() ? 'No hours on the board.' : 'Live quotes are off in this build.'));
     }
+    // one line for the board, above the first city, not one under each
+    WXM.tradeNote(root, root.querySelector('section.prod'), true);
     if (pending.length) {
       root.appendChild(h('p', { class: 'cap', style: 'margin-top:14px' },
         'Not opened at ' + pending.map(cityOf).sort().join(', ') + '.'));

@@ -82,7 +82,16 @@ lane, which runs on its own rather than in a chain because a pass may spend its 
 the thirty-day backfill (`docs/analysis.md`). It reads RTMA from NOAA Open Data
 (`noaa-rtma-pds`; public, no credential), and from NCEP's NOMADS server a file NOAA Open Data
 lacks, and writes `data/snapshots/analysis2/` and `data/archive/analysis2/`. The page it feeds, `analysis-resolution.html`, is unlisted and
-`noindex`. `ReaskApiKey` is an optional parameter for the vendor lane (section 10). Outputs:
+`noindex`. It also creates the `hrrr` schedule (`cron(12/15 * * * ? *)`, every fifteen minutes at
+:12, no retry) for the HRRR lane (`pipeline/hrrr.py`), which reads each run's six station fields from
+NOAA Open Data (`noaa-hrrr-bdp-pds`; public, no credential) as the hours land and writes
+`data/archive/hrrr/run_*.json.gz`, one file per run; the forecast job reads them into the city
+snapshots. The `ndfd` schedule (`cron(26/30 * * * ? *)`, at :26 and :56, no retry) runs the NDFD lane
+(`pipeline/ndfd.py`), which reads each new CONUS issuance of NDFD's daytime high and overnight low from
+NOAA Open Data (`noaa-ndfd-pds`; public, no credential), keeps it sampled at the landing map's cells in
+`data/archive/ndfd/` for three days, and writes `data/snapshots/ndfd/<view>.json`. The floater job, on
+its half-hourly schedule, copies the WPC analysis/satellite composite into `data/snapshots/wpcsfc/`.
+`ReaskApiKey` is an optional parameter for the vendor lane (section 10). Outputs:
 
     aws cloudformation describe-stacks --stack-name weather-tools-site \
         --query "Stacks[0].Outputs" --output table
@@ -341,6 +350,26 @@ reaches the preprint. The CDN makes the redirect, in the `IndexRewrite` function
 one-day browser cache, so a changed target reaches a returning reader within a day. The copy last
 uploaded there is still in the bucket and is never served, and the site sync in section 6 still
 excludes `papers/`, so a deploy leaves it in place.
+
+## 12b. The world GDP contract's model files
+
+`climate-gdp.html` re-runs the contract's model in the browser from files the El Niño refresh writes
+once a month, outside this repository. They go to `data/snapshots/elnino/` in the bucket, which the
+CDN serves with the snapshots' behaviour (the origin's Cache-Control, compressed, no index function).
+Neither the pipeline nor the site sync in section 6 touches that prefix, and `samples/snapshots/elnino/`
+is a frozen copy for local mode only.
+
+- `model.json` and `article.json`: `Content-Type: application/json`,
+  `Cache-Control: public, max-age=300, stale-while-revalidate=3600, stale-if-error=86400`.
+- The `.bin` files: `Content-Type: application/octet-stream`. `model.json` names each one, so a name that
+  carries its content hash (`paths.<hash>.bin`) can take `public, max-age=31536000, immutable`. A file
+  kept under a fixed name takes the JSON files' header instead.
+- Upload the `.bin` files before `model.json`, and keep the previous month's for a day, because a reader
+  holding the old `model.json` still asks for them. No invalidation is needed.
+
+`article.json` carries the draft's file name and dates only, never its Drive id. Once the exchange lists
+the contract, set `gdp_contract.product` in `config/site.json`, add the product to `config/contracts.json`
+(`scripts/build_contracts.py`) and deploy the site.
 
 ## Cloudflare alternative
 

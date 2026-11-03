@@ -16,8 +16,7 @@ is visible as an ageing as-of even while the job keeps running.
   forecast  every 30 min   after the archive job: reads the newest NWS, NBM,
                            LAMP and MAV cycles per station from the archive,
                            plus the as-issued cycles for today and yesterday,
-                           and writes snapshots/forecast/{STATION}.json and
-                           snapshots/field.json
+                           and writes snapshots/forecast/{STATION}.json
   (hurricane lives in hurricane.py)
 
 Day bucketing is always through the station's IANA zone. api.weather.gov
@@ -27,8 +26,8 @@ around a DST transition. Joins between series go through UTC instants.
 
 The contract day is the local calendar day in progress at the station. The
 window a city chart shows runs from noon the day before to the end of the
-contract day. "As issued" means, per source, the latest archived cycle at
-or before local midnight; the level FOR the day (NWS official high and low,
+contract day. "As issued" means, per source, the latest archived cycle issued
+before local midnight; the level FOR the day (NWS official high and low,
 NBM TXN, MAV N/X) is picked per extreme from the newest pre-day cycle that
 carries it, because a source's last pre-midnight run often carries the
 day's maximum but not its minimum (the 12Z column belongs to the previous
@@ -51,6 +50,7 @@ import gzip
 import json
 import math
 import os
+import re
 import time
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
@@ -58,6 +58,7 @@ from zoneinfo import ZoneInfo
 from . import gov_weather as gw
 from . import archive as arch
 from . import basemap
+from . import hrrr as hr
 from .cities import CITIES
 from .storage import Storage
 
@@ -87,9 +88,9 @@ def _stamp_of(key: str) -> str:
 def _norm_stamp(stamp: str) -> str:
     """Stamps come in two widths: NWS issuances carry seconds (YYYYMMDDTHHMMSSZ)
     while bulletin cycles carry minutes (YYYYMMDDTHHMMZ). Compared as strings
-    the shorter one sorts AFTER a cutoff at the same instant ('Z' > '0'), which
-    would exclude a cycle issued exactly at local midnight. Pad to seconds
-    before any comparison."""
+    the shorter one sorts AFTER a cutoff at the same instant ('Z' > '0'), so a
+    cycle would land on the wrong side of a cutoff in its own minute. Pad to
+    seconds before any comparison."""
     return stamp if len(stamp) >= 16 else stamp[:13] + "00Z"
 
 
@@ -574,8 +575,10 @@ def _as_issued_key(store: Storage, sid: str, kind: str, cutoff_stamp: str, keys:
     return (pre[-1], True) if pre else (keys[0], False)
 
 
-def _cutoff(iso_utc: str) -> str:
-    return _parse_iso(iso_utc).astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+def _cutoff_before(iso_utc: str) -> str:
+    """A cutoff one second before an instant, so an at-or-before test against
+    it admits only what was issued strictly before the instant."""
+    return (_parse_iso(iso_utc) - dt.timedelta(seconds=1)).astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
 def _nws_hourly_rows(body: dict, unit: str = "F") -> list:
@@ -721,18 +724,6 @@ def _running_today(level, rest, seen, pick):
     return seen if rest is None else pick(rest, seen)
 
 
-def _obs_today(store: Storage, sid: str, day: Optional[str]) -> dict:
-    """{"high", "low"} the station has recorded so far on `day`, in its own
-    unit. Empty when there is no obs snapshot or it refers to another day."""
-    raw = store.get(f"snapshots/obs/{sid}.json")
-    if not raw:
-        return {}
-    t = (json.loads(raw) or {}).get("today") or {}
-    if not day or t.get("date") != day:
-        return {}
-    return {"high": (t.get("high") or {}).get("v"), "low": (t.get("low") or {}).get("v")}
-
-
 def _u(v, unit: str):
     """A Fahrenheit level in the station's native unit. International
     contracts quote Celsius, and their pages show Celsius directly rather
@@ -820,13 +811,37 @@ def _trace_rows(store: Storage, kind: str, key: str, unit: str) -> list:
     return _hourly_rows(gw.parse_hourly_block(raw.decode("ascii", "replace")), unit)
 
 
-def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
+HRRR_ROW_FIELDS = ("tempF", "wspd", "gust")
+
+
+def _hrrr_units(rows: list, unit: str) -> list:
+    """HRRR rows in the shape the other sources' rows take, Celsius beside
+    Fahrenheit for a Celsius station."""
+    return [dict(r, tempC=None if r.get("tempF") is None else round((r["tempF"] - 32) * 5 / 9, 1)) for r in rows]
+
+
+def _nbs_ext(store: Storage, keys: list, cutoff_stamp: str, rows: list, unit: str) -> list:
+    """The blend's 3-hourly rows past the end of its hourly bulletin, from the
+    newest NBS cycle at or before the cutoff, so a day the 25-hour bulletin
+    does not reach is still drawn and read in the blend's own rows."""
+    key, pre = _as_issued_key(store, None, "nbs", cutoff_stamp, keys)
+    if not key or not pre:
+        return []
+    try:
+        nbs = gw.parse_nbs_block(_read_gz(store, key).decode("ascii", "replace"))
+    except (ValueError, AttributeError, OSError):
+        return []
+    end = rows[-1]["t"] if rows else ""
+    return [r for r in _hourly_rows(nbs, unit) if r["t"] > end]
+
+
+def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime, hrrr_keys: Optional[list] = None) -> dict:
     sid, tz, unit = c["station"], ZoneInfo(c["tz"]), c["unit"]
     mk = day_markers(c, now)
     by_kind = {kind: list_recent(store, sid, kind, now) for kind in ("hourly", "daily", "nbh", "nbs", "lamp", "mav")}
     snap = {"schema": SCHEMA, "station": sid, "city": c["city"], "unit": unit, "tz": c["tz"],
             "asof": _iso(now), "written": _iso(now), "markers": mk,
-            "nws": None, "nbm": None, "lamp": None, "mav": None, "asIssued": {}, "yesterday": {}}
+            "nws": None, "nbm": None, "lamp": None, "mav": None, "hrrr": None, "asIssued": {}, "yesterday": {}}
     day, tmw = mk["day"], mk["tomorrow"]
 
     # ---- NWS: the standing hourly forecast and the official day/night highs and lows
@@ -855,6 +870,10 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
             nbs = gw.parse_nbs_block(_read_gz(store, by_kind["nbs"][-1]).decode("ascii", "replace"))
             nbm["nbsCycle"] = _iso(nbs["cycle"])
             nbm["txn"] = _levels_by_day(_extremes_by_day(nbs, tz), unit)
+            # the 3-hourly rows past the hourly bulletin's 25 hours, so the page
+            # can draw and read the blend's own rows to the end of tomorrow
+            end = rows[-1]["t"] if rows else ""
+            nbm["ext"] = [r for r in _hourly_rows(nbs, unit) if r["t"] > end]
         h, l = _max_min_in_day(rows, tz, day)
         t = nbm["txn"].get(day, {})
         nbm["highToday"] = t.get("max", _u(h, unit)); nbm["highTodayFrom"] = "txn" if "max" in t else "hourly"
@@ -885,27 +904,160 @@ def build_forecast_snapshot(store: Storage, c: dict, now: dt.datetime) -> dict:
                        "highToday": nx.get(day, {}).get("max"), "lowToday": nx.get(day, {}).get("min"),
                        "highTomorrow": nx.get(tmw, {}).get("max"), "lowTomorrow": nx.get(tmw, {}).get("min"),
                        "highRest": _u(rest_h, unit), "lowRest": _u(rest_l, unit)}
+    # ---- HRRR: the newest run at the station's grid point, carried on by the
+    #      newest 48-hour runs (pipeline/hrrr.py); none off the grid
+    hk = hrrr_keys if hrrr_keys is not None else hr.recent_keys(store, now)
+    hs = hr.station_series(store, sid, hk, fields=HRRR_ROW_FIELDS)
+    if hs:
+        snap["hrrr"] = {"cycle": hs["cycle"], "hourly": _hrrr_units(hs["rows"], unit), "extCycle": hs["extCycle"],
+                        "ext": _hrrr_units(hs["ext"], unit)}
     # ---- as issued before the day began: the hourly trace from each source's
-    #      last pre-day cycle, and the level for the day picked per extreme
-    cut, ycut = _cutoff(mk["dayStart"]), _cutoff(mk["ydayStart"])
+    #      last pre-day cycle, and the level for the day picked per extreme.
+    #      The trace is the run the city chart pins its level lines to and draws
+    #      as the one standing when the day began, and that is the last run
+    #      issued BEFORE local midnight (owner, 2026-10-16): a run issued at
+    #      midnight, like the blend's and the HRRR's midnight runs, publishes an
+    #      hour or more into the day and belongs to it. With no run on file from
+    #      before the day, the first run of the day stands in, marked preDay
+    #      false. The day's issued levels (pick_levels), which the maps and the
+    #      picker read, take the same cutoff (owner, 2026-10-16), so "issued"
+    #      means one run across the site's daily views. The scorecards keep
+    #      their own anchor at six the evening before.
+    rcut, rycut = _cutoff_before(mk["dayStart"]), _cutoff_before(mk["ydayStart"])
     for label, kind, level_kind in SOURCES:
         ks = by_kind.get(kind, [])
-        key, pre = _as_issued_key(store, sid, kind, cut, ks)
+        key, pre = _as_issued_key(store, sid, kind, rcut, ks)
         if key:
             entry = {"cycle": _stamp_of(key), "preDay": pre, "rows": _trace_rows(store, kind, key, unit)}
-            entry.update(pick_levels(store, level_kind or kind, by_kind.get(level_kind or kind, []), cut, c, tz, day, max_lead_h=None))
+            entry.update(pick_levels(store, level_kind or kind, by_kind.get(level_kind or kind, []), rcut, c, tz, day, max_lead_h=None))
+            if label == "nbm" and pre:
+                entry["ext"] = _nbs_ext(store, by_kind.get("nbs", []), rcut, entry["rows"], unit)
             snap["asIssued"][label] = entry
-        ykey, ypre = _as_issued_key(store, sid, kind, ycut, ks)
+        ykey, ypre = _as_issued_key(store, sid, kind, rycut, ks)
         if ykey and ypre:
             yentry = {"cycle": _stamp_of(ykey), "rows": _trace_rows(store, kind, ykey, unit)}
-            lv = pick_levels(store, level_kind or kind, by_kind.get(level_kind or kind, []), ycut, c, tz, mk["yesterday"])
+            if label == "nbm":
+                yentry["ext"] = _nbs_ext(store, by_kind.get("nbs", []), rycut, yentry["rows"], unit)
+            lv = pick_levels(store, level_kind or kind, by_kind.get(level_kind or kind, []), rycut, c, tz, mk["yesterday"])
             yentry.update({"high": lv["highToday"], "low": lv["lowToday"], "levelCycleHigh": lv["levelCycleHigh"],
                            "levelCycleLow": lv["levelCycleLow"], "levelPreDay": lv["levelPreDay"]})
             snap["yesterday"][label] = yentry
+    # the HRRR run issued before each day began, and the day before; with none
+    # on file from before today, the first run of the day, as for the others
+    for cutoff, slot in ((rcut, "asIssued"), (rycut, "yesterday")):
+        his = hr.station_series(store, sid, hk, cut=cutoff, fields=HRRR_ROW_FIELDS)
+        pre = his is not None
+        if his is None and slot == "asIssued":
+            later = [k for k in hk if hr._stamp_of(k) > cutoff[:11] + "00Z"]
+            if later:
+                his = hr.station_series(store, sid, hk, cut=hr._stamp_of(later[0]), fields=HRRR_ROW_FIELDS)
+        if his:
+            snap[slot]["hrrr"] = {"cycle": his["cycle"], "preDay": pre, "rows": _hrrr_units(his["rows"], unit),
+                                  "extCycle": his["extCycle"], "ext": _hrrr_units(his["ext"], unit)}
     return snap
 
 
-def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Optional[dict]:
+# ---------------------------------------------------------------- the chart's levels, for the map
+CHART_MODELS = ("nws", "nbm", "lamp", "mav", "hrrr")
+
+
+def _cycle_time(stamp: Optional[str]) -> Optional[dt.datetime]:
+    """A cycle stamp in any of the forms the snapshots carry ('20261016T0600Z',
+    '20261016T062634Z', '2026-10-16T17:00:00Z'), as the page's parseStamp reads it."""
+    if not stamp:
+        return None
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?Z?$", stamp)
+    if m:
+        return dt.datetime(int(m[1]), int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6] or 0),
+                           tzinfo=dt.timezone.utc)
+    try:
+        return _parse_iso(stamp)
+    except ValueError:
+        return None
+
+
+def _run_parts(main, cycle, ext=None, ext_cycle=None) -> list:
+    """A run's rows in the parts that issued them, as the chart's partsOf splits
+    them: rows that carry the run on past its end under their own cycle when it
+    differs, else folded into the run."""
+    out = [[cycle, list(main or [])]]
+    if ext:
+        if ext_cycle and _cycle_time(ext_cycle) != _cycle_time(cycle):
+            out.append([ext_cycle, list(ext)])
+        else:
+            out[0][1] += list(ext)
+    return out
+
+
+def _row_value(r: dict, unit: str):
+    if unit == "F":
+        return r.get("tempF")
+    if r.get("tempC") is not None:
+        return r["tempC"]
+    return None if r.get("tempF") is None else (r["tempF"] - 32) * 5 / 9
+
+
+def _run_extremes(parts: list, lo_t: dt.datetime, hi_t: dt.datetime, unit: str) -> Optional[list]:
+    """[high, low, cycle of the high, cycle of the low]: the highest and lowest
+    row inside [lo_t, hi_t), the earliest of equal rows, as the chart reads them."""
+    rows = []
+    for cycle, rs in parts:
+        for r in rs:
+            v = _row_value(r, unit)
+            if v is None or not r.get("t"):
+                continue
+            t = _parse_iso(r["t"])
+            if lo_t <= t < hi_t:
+                rows.append((t, v, cycle))
+    if not rows:
+        return None
+    rows.sort(key=lambda z: z[0])
+    hi = lo = rows[0]
+    for z in rows[1:]:
+        if z[1] > hi[1]:
+            hi = z
+        if z[1] < lo[1]:
+            lo = z
+    return [hi[1], lo[1], hi[2], lo[2]]
+
+
+def chart_levels(snap: dict, unit: str) -> dict:
+    """The level lines the city chart draws, for the map's hover to show the
+    same numbers (owner, 2026-10-20): today each model's run issued before the
+    day began, tomorrow its newest run, read over the day's rows by the rule in
+    site/js/chart-city.js (the highest and lowest row inside the day, the cycle
+    of the run holding each). {"today"|"tomorrow": {model: [high, low, cycle
+    of the high, cycle of the low]}}; scripts/verify.py holds the two to the
+    same numbers."""
+    mk = snap.get("markers") or {}
+    if not (mk.get("dayStart") and mk.get("dayEnd")):
+        return {}
+    d0, d1 = _parse_iso(mk["dayStart"]), _parse_iso(mk["dayEnd"])
+    newest = {
+        "nws": lambda f: _run_parts(f.get("hourly"), f.get("cycle")),
+        "lamp": lambda f: _run_parts(f.get("hourly"), f.get("cycle")),
+        "mav": lambda f: _run_parts(f.get("rows"), f.get("cycle")),
+        "nbm": lambda f: _run_parts(f.get("hourly"), f.get("cycle"), f.get("ext"), f.get("nbsCycle")),
+        "hrrr": lambda f: _run_parts(f.get("hourly"), f.get("cycle"), f.get("ext"), f.get("extCycle")),
+    }
+    out: dict = {"today": {}, "tomorrow": {}}
+    ai = snap.get("asIssued") or {}
+    for k in CHART_MODELS:
+        a = ai.get(k)
+        if a:
+            lv = _run_extremes(_run_parts(a.get("rows"), a.get("cycle"), a.get("ext"), a.get("extCycle")), d0, d1, unit)
+            if lv:
+                out["today"][k] = lv
+        f = snap.get(k)
+        if f:
+            # the chart's day-ahead view runs exactly a day past today's end
+            lv = _run_extremes(newest[k](f), d1, d1 + dt.timedelta(days=1), unit)
+            if lv:
+                out["tomorrow"][k] = lv
+    return out
+
+
+def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime, hrrr_keys: Optional[list] = None) -> Optional[dict]:
     """The upstream-of-temperature elements, tool by tool, for the advanced
     panels on the city page: dewpoint, sky cover, wind direction and speed,
     hourly, from the same archived bulletins the temperature lanes read.
@@ -927,6 +1079,7 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
     anchor = (dt.datetime.combine(yday, dt.time(0), tzinfo=tz)
               - dt.timedelta(hours=6)).astimezone(dt.timezone.utc)
     by_kind = {k: list_recent(store, sid, k, now) for k in ("hourly", "nbh", "nbs", "lamp", "mav")}
+    hk = hrrr_keys if hrrr_keys is not None else hr.recent_keys(store, now)
 
     def nws(key: str) -> Optional[dict]:
         """The NWS hourly forecast's elements. Wind arrives as '8 mph' with a
@@ -984,9 +1137,16 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
                     "rows": hour["rows"] + [r for r in three["rows"] if r["t"] > end]}
         return base
 
+    def hrrr(cut: Optional[dt.datetime] = None) -> Optional[dict]:
+        hs = hr.station_series(store, sid, hk, cut=None if cut is None else cut.strftime("%Y%m%dT%H%M%SZ"),
+                               fields=("tempF", "dewF", "sky", "wdir", "wspd", "gust"))
+        if not hs:
+            return None
+        return {"cycle": hs["cycle"], "extCycle": hs["extCycle"], "rows": hs["rows"] + hs["ext"]}
+
     def reading(cut: Optional[dt.datetime] = None) -> dict:
         return {"nws": newest("hourly", cut), "nbm": nbm(cut),
-                "lamp": newest("lamp", cut), "mav": newest("mav", cut)}
+                "lamp": newest("lamp", cut), "mav": newest("mav", cut), "hrrr": hrrr(cut)}
 
     cur, yd = reading(), reading(anchor)
     if not any(cur.values()) and not any(yd.values()):
@@ -995,14 +1155,20 @@ def build_advanced_snapshot(store: Storage, c: dict, now: dt.datetime) -> Option
             "asof": _iso(now), "written": _iso(now), "markers": mk,
             "anchor": _iso(anchor), "current": cur, "yesterday": yd,
             "coverPct": gw.CLD_PCT,
-            "source": "NBM, LAMP and GFS MOS bulletins from this site's own archive"}
+            "source": "NBM, LAMP and GFS MOS bulletins from this site's own archive, and the HRRR at the station's grid point"}
 
 
 def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline=None) -> dict:
     roster = basemap.load_roster()
-    grid = basemap.load_field_grid()
     written = kept = skipped = 0
     summary_fc = {}
+    # the HRRR runs are listed once a pass and read once each, for every station
+    hr.reset_cache()
+    try:
+        hrrr_keys = hr.recent_keys(store, now)
+    except Exception as e:  # noqa: BLE001
+        log(kind="hrrr", error=f"{type(e).__name__}: {e}")
+        hrrr_keys = []
     for c in roster:
         sid = c["station"]
         key = f"snapshots/forecast/{sid}.json"
@@ -1010,7 +1176,7 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
             skipped += 1
             continue
         try:
-            snap = build_forecast_snapshot(store, c, now)
+            snap = build_forecast_snapshot(store, c, now, hrrr_keys=hrrr_keys)
         except Exception as e:
             # keep the previous good snapshot rather than publishing a partial one
             log(station=sid, kind="forecast", error=f"{type(e).__name__}: {e}")
@@ -1027,7 +1193,7 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
         # the advanced panels' elements, from the same listings; a failure
         # costs the advanced view a cycle, never the chart
         try:
-            adv = build_advanced_snapshot(store, c, now)
+            adv = build_advanced_snapshot(store, c, now, hrrr_keys=hrrr_keys)
             if adv:
                 store.put(f"snapshots/advanced/{sid}.json",
                           json.dumps(adv, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
@@ -1048,46 +1214,6 @@ def forecast_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, dea
         log(kind="forecast", warning=f"deadline: {skipped} stations not rebuilt")
 
     # ---- the shading field for the national map, from the NWS highs and lows.
-    # Both days are interpolated, not only the day ahead: the current-day views
-    # are the ones open through the trading session and were carrying no
-    # shading at all.
-    if written:
-        field = None
-        for when, hi_key, lo_key, date_key in (("tomorrow", "highTomorrow", "lowTomorrow", "tomorrow"),
-                                               ("today", "highToday", "lowToday", "day")):
-            pts, for_dates = [], {}
-            for c in roster:
-                f = summary_fc.get(c["station"], {})
-                n = f.get("nws") or {}
-                hi, lo = n.get(hi_key), n.get(lo_key)
-                if when == "today":
-                    # the shading has to agree with the dots drawn over it, and
-                    # both are the day's extreme rather than the rest of it
-                    seen = _obs_today(store, c["station"], f.get("day"))
-                    if "highRest" in n:
-                        hi = _running_today(hi, n["highRest"], seen.get("high"), max)
-                    if "lowRest" in n:
-                        lo = _running_today(lo, n["lowRest"], seen.get("low"), min)
-                pts.append({**c, "hi": hi, "lo": lo})
-                if f.get(date_key):
-                    for_dates[c["station"]] = f[date_key]
-            one = basemap.idw_field(grid, pts, "hi", "lo")
-            if field is None:
-                # the grid geometry is shared; only the two value columns differ
-                field = {"schema": SCHEMA, "asof": _iso(now), "step": one["step"], "domain": one["domain"],
-                         "stations": one.get("stations"), "for": "both", "cells": one["cells"],
-                         "forDates": for_dates,
-                         "note": "derived: inverse-distance interpolation of the listed stations' NWS forecasts, "
-                                 "not the NDFD grid"}
-            else:
-                # append today's high and low to each cell, so one file carries
-                # both days and a page picks the pair it needs
-                for i, cell in enumerate(field["cells"]):
-                    src = one["cells"][i]
-                    cell.append(src[2])
-                    cell.append(src[3])
-                field["forDatesToday"] = for_dates
-        store.put("snapshots/field.json", json.dumps(field, separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
     log(kind="forecast-snapshots", written=written, keptPrevious=kept, skipped=skipped)
     return {"forecast": summary_fc, "written": written, "kept": kept, "skipped": skipped}
 
@@ -1175,6 +1301,8 @@ def summary_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, obs:
             row[f"{k}IssuedPreDay"] = ai.get("levelPreDay") if fc_same else None
             row[f"{k}IssuedCycle"] = ai.get("levelCycleHigh") or ai.get("levelCycleLow")
             row[f"{k}IssuedFromHourly"] = ai.get("fromHourly")
+        # the numbers the city chart's level lines carry, for the map's hover
+        row["levels"] = chart_levels(f, c["unit"]) if fc_same else None
         rows.append(row)
     raw_health = store.get(arch.HEALTH_KEY)
     health = json.loads(raw_health) if raw_health else {}

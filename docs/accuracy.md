@@ -7,6 +7,13 @@ conventions in section 1 and shipped in the files of section 3. The site's own
 job (`pipeline/accuracy.py`) validates those files and copies them into
 `snapshots/accuracy/`; it computes nothing of its own.
 
+The conventions are the working paper's, *Improvement of Daily Temperature
+Forecasts from a Prediction Market* (Brown, 2026, EarthArXiv preprint,
+doi 10.31223/X5522D), and every estimator the page draws is a port of the
+paper's own analysis code, so a number on the page can be traced to the paper's.
+The page goes beyond the paper in one place: the paper scores the daily maximum,
+and the page carries the minimum too, scored with the same methods.
+
 The builder is not in this repository because it names the capture system and
 its host. Its code is kept beside this site's other private extractor.
 
@@ -17,61 +24,59 @@ contracts on. IANA zones come from `config/cities.json`. Colorado Springs was a
 test station that the exchange never listed and appears nowhere. Honolulu and
 the international stations are outside this page's scope.
 
-**Clock.** One clock everywhere. For a city-day `i` with station-local date `D`,
-`T_i` is the station-local midnight that ends `D`, in UTC through the zone.
-Lead `h = (T_i - t) / 3600` in hours. An alternative forecast system's timestamp `t` is the moment its
-value was captured, which is an upper bound on its availability; the
-ForecastEx prediction market's timestamp is the ladder snapshot's own time.
+**Two clocks.** For a city-day `i` with station-local date `D`, `T_i` is the
+station-local midnight that ends `D`, in UTC through the zone. Absolute lead is
+`h = (T_i - t) / 3600` in hours, binned hourly from 36 to 0. Relative lead counts
+back from the last METAR report of the day that reached the settle value: an
+instant `t` before that report enters bin `k = ceil((t_last - t) / 1 h)`, kept
+for `k` from 30 to 1. An alternative's timestamp is the moment its value was
+captured, or for a reconstructed run its publication time; the market's is the
+ladder snapshot's own time.
 
-**Truth.** The ForecastEx prediction market pays on the station's METAR settle: the day's extreme
-over hourly and special reports, rounded half up to a whole degree Fahrenheit,
-over the station-local clock day. Highs pay when `settle > strike` strictly;
-lows when `settle < strike` strictly. The ForecastEx prediction market is always scored against the
-settle. By default each alternative forecast system is scored against the observation its daily
-value is built to predict, the own-target frame (owner's decision 2026-09-21). For the
-alternatives that issue values at fixed hours that is the settle, since the daily value is the
-extreme of those hours over the calendar day, which predicts the extreme of the hourly reports.
-Four are the exception, each issuing a daily extreme of its own, a daytime maximum for 07 to 19
-local standard time and an overnight minimum for 19 to 08: the National Weather Service forecast
-and the station guidance of the GFS, the NAM and the National Blend of Models (`C.OWN_MAX_SYSTEMS`),
-the last three read from the bulletin's own X/N and TXN rows rather than the maximum of its
-temperature row. They are scored against the climate report on the city-days whose report puts the
-extreme inside that window (for a low, 00 to 08, the part of the window the report's calendar day
-covers; `C.NWS_WINDOW_LST`), and not on the other city-days, where they were not predicting the
-day's extreme. Two toggles remain. The METAR
-settle frame scores every alternative against the settle, that forecast included. The
-climate-report frame scores every alternative against the National Weather Service climate report
-for the same date, which is a different definition of the day's extreme (a rounded five-minute
-mean over the standard-time day) and runs about a degree warmer on highs. Denver's climate report
-stands in for Buckley Field, so Buckley is excluded from the climate-report frame and, for those
-four, from the own-target frame.
+**Series and their standards.** The market is always scored against the METAR
+settle its contracts pay on, the day's extreme over hourly and special reports,
+rounded half up to a whole degree Fahrenheit over the station-local clock day;
+highs pay when `settle > strike` strictly, lows when `settle < strike`. Every
+alternative is scored against the observation it is built to predict, and five
+systems are scored twice, which gives 25 series across 20 systems
+(section 2):
+
+- The three station MOS products that issue a daily extreme of their own, GFS
+  MOS, NAM MOS and the NBM station bulletin, are scored on that issued value, a
+  daytime maximum for 07 to 19 local standard time (the X/N and TXN rows of the
+  bulletin), against the National Weather Service climate report, and on their
+  hourly rows, the extreme of the hours left in the day, against the settle.
+- The National Weather Service forecast's daytime maximum is scored against the
+  climate report. The issued-maximum series are scored only on the city-days
+  whose final report times the extreme inside the window (for a low, 00 to 08
+  local standard time, the part of the overnight window the report's calendar
+  day covers). A final report without a time takes it from the latest earlier
+  report, interim or final, that gives the same extreme.
+- The forecast and the National Blend of Models are also scored against URMA,
+  the Service's gridded analysis, at the 2.5 km grid box holding the station:
+  the forecast's daytime maximum against the largest hourly analysis over 07 to
+  19 local standard time (all 13 present), and the Blend's daily value against
+  the largest over the station-local day (every hour present), each rounded half
+  up. The URMA series score the maximum only.
+- Every other alternative is scored against the settle.
+
+Buckley Field has no climate report of its own (Denver's stands in), so the
+series scored against the report have no value there.
 
 **Market value.** For each ladder snapshot the Yes price per strike is the
 midpoint of the Yes bid and one dollar less the No bid when both are quoted.
 With one side quoted it is the midpoint against the empty side at its limit, a
 missing Yes bid counting as one cent and a missing No bid as a ninety-nine-cent
-ask (from 2026-09-15; before, the one quoted side was read as the price, which
-on a contract nobody bids Yes is the cost to buy Yes, not a midpoint). A strike
-with no bid on either side is unquoted, and so is a two-sided book bidding one
-cent against ninety-nine or a lone side sitting at that limit.
-
-**Probabilities scored alike.** Wherever a probability is scored (CRPS, the
-Brier score, the reliability diagrams), a contract the observations already
-settled is scored at 100 cents for every system, the market included, and
-every other probability is held to the exchange's range of 1 to 99 cents
-(`PRICE_MIN`, `PRICE_MAX`), so no system is credited with a certainty a quote
-cannot express. The probabilistic section draws every line on the city-day
-hours at which the market and all four ensembles hold a value.
-The ladder is made monotone in the strike by pooling adjacent violators. The
+ask. A strike with no bid on either side is unquoted, and so is a two-sided book
+bidding one cent against ninety-nine or a lone side sitting at that limit. The
+ladder is made monotone in the strike by pooling adjacent violators. The
 crossing `x` is the linear interpolation of the 0.5 level between the two
 bracketing quoted strikes; a ladder that never crosses has no central value at
-that snapshot and is counted as missing, and so does one whose bracketing
-quoted strikes have two or more listed strikes with no price between them
-(`MEDIAN_MAX_UNQUOTED_RUN`, from 2026-09-15). Late in the day a ladder often
-quotes only its far strikes, 68 at 3 cents and 76 at 98 cents with nothing
-between, and a straight line across that run would put the median at 72 when
-the prices say only that it lies between 68 and 76. The whole-degree value is `ceil(x)` for
-highs and `floor(x)` for lows, because settlement is strict.
+that snapshot, and neither does one whose bracketing quoted strikes have two or
+more listed strikes with no price between them. The whole-degree central value
+is `ceil(x)` for highs and `floor(x)` for lows, because settlement is strict.
+The market's value at an instant is its last ladder at or before it, if under an
+hour old, and it is used as quoted, never held at the observed extreme.
 
 **Market sources.** The ladder is reconstructed from two records. The first is
 the desk's own quote capture, which holds both sides of the book at every
@@ -102,12 +107,12 @@ archived run already published at the instant, which is the one-day run for an
 hour within a day of it and the two-day run beyond. A run counts as published at
 its initialization plus the delay Open-Meteo's own availability metadata reports
 for that model (`om_backfill.PUBLISH_DELAY_H`), from 1.6 hours for the HRRR
-values the American Model's series returns within a day to 9.55 hours for the
-Japanese Model, so a reading is never credited with a run a reader could not
+values the NOAA GFS's series returns within a day to 9.55 hours for the
+JMA GSM, so a reading is never credited with a run a reader could not
 yet have had. Until 2026-09-16 archived runs were credited at initialization,
 which let a reading use a run up to about ten hours before it was out and
 lowered those systems' 30-hour errors by up to 0.12 degrees. That makes the reconstruction a
-remaining-window source, scored the way the Aviation Forecast and the Blend
+remaining-window source, scored the way LAMP and the National Blend of Models
 already are, with the observation bank supplying what already happened. It
 also makes it stale against a live capture by up to a run cycle, because the
 archive has no finer step than a day.
@@ -118,21 +123,21 @@ mean absolute error less the capture's, in degrees:
 
 | system | highs 30 h | 18 h | 12 h | 6 h | lows 30 h | 18 h | 12 h | 6 h |
 |---|---|---|---|---|---|---|---|---|
-| European AI Ensemble Mean | −0.21 | −0.16 | −0.13 | +0.06 | +0.05 | +0.02 | +0.02 | +0.02 |
-| European Model | +0.38 | +0.47 | +0.55 | +0.05 | +0.06 | +0.08 | +0.02 | +0.06 |
-| American Model | −0.06 | +0.02 | +0.24 | +0.04 | +0.49 | +0.91 | +0.26 | +0.33 |
-| German Model | −0.09 | −0.03 | +0.04 | +0.02 | +0.02 | +0.16 | +0.02 | +0.03 |
-| Canadian Model | −0.10 | +0.06 | +0.13 | +0.02 | +0.18 | +0.32 | +0.04 | +0.06 |
-| UK Model | +0.03 | +0.05 | +0.18 | +0.10 | −0.12 | +0.03 | −0.00 | +0.00 |
-| French Model | −0.08 | +0.08 | +0.24 | +0.06 | −0.08 | +0.09 | +0.01 | +0.01 |
-| Japanese Model | −0.49 | −0.18 | −0.06 | +0.01 | −0.11 | +0.04 | +0.01 | +0.02 |
+| ECMWF AIFS | −0.21 | −0.16 | −0.13 | +0.06 | +0.05 | +0.02 | +0.02 | +0.02 |
+| ECMWF IFS | +0.38 | +0.47 | +0.55 | +0.05 | +0.06 | +0.08 | +0.02 | +0.06 |
+| NOAA GFS | −0.06 | +0.02 | +0.24 | +0.04 | +0.49 | +0.91 | +0.26 | +0.33 |
+| DWD ICON | −0.09 | −0.03 | +0.04 | +0.02 | +0.02 | +0.16 | +0.02 | +0.03 |
+| ECCC GEM | −0.10 | +0.06 | +0.13 | +0.02 | +0.18 | +0.32 | +0.04 | +0.06 |
+| Met Office UM | +0.03 | +0.05 | +0.18 | +0.10 | −0.12 | +0.03 | −0.00 | +0.00 |
+| Météo-France ARPEGE | −0.08 | +0.08 | +0.24 | +0.06 | −0.08 | +0.09 | +0.01 | +0.01 |
+| JMA GSM | −0.49 | −0.18 | −0.06 | +0.01 | −0.11 | +0.04 | +0.01 | +0.02 |
 
 A positive number is a handicap against the reconstructed source. Most cells
 are a tenth of a degree or less against errors of about two degrees, and the
 median of the two values themselves is identical to a tenth. Two cells are
-large enough to matter: the European model's highs, where
+large enough to matter: the ECMWF IFS highs, where
 the reconstruction is about half a degree worse in the middle of the day, and
-the American model's lows, where it is nine tenths worse at 18 hours. The
+the NOAA GFS lows, where it is nine tenths worse at 18 hours. The
 measurement is rebuilt with the record by `om_measure.py` beside the builder,
 and the table was measured while archived runs were still credited at
 initialization.
@@ -143,8 +148,8 @@ forecast hours. That lane needs no allowance for staleness: the bulletin
 standing at an instant is the last one issued before it, exactly as in life.
 What the archive does not carry is the moment a bulletin reached a reader, so
 a reconstructed bulletin is timed to its cycle plus the median lag the capture
-itself measures for that source, 1.3 hours for the Aviation Forecast, 5.3 for
-GFS MOS, 3.3 for NAM MOS and 2.2 for Blend MOS. Measured the same way on the
+itself measures for that source, 1.3 hours for LAMP, 5.3 for
+GFS MOS, 3.3 for NAM MOS and 2.2 for the NBM station bulletin. Measured the same way on the
 months both records cover, that lane's readings are identical to the capture's
 to a tenth of a degree at the median, and its worst mean absolute error
 difference at any lead is two tenths. `mos_measure.py` rebuilds it.
@@ -161,37 +166,84 @@ distinguishes them by request rather than by column. Over the 600 United States
 city-days from 2026-02-11 to 2026-03-07 the archive alone reproduces the
 published settle exactly, on highs and on lows.
 
-**Standing value.** At any instant `t` a system's raw value is its last record
-available at or before `t` for that target date, forward filled within the
-target date and seeded by the earliest record for that date; nothing later is
-ever read. The default value is what a reader held at that minute: for highs
-`max(raw, bank_high(t))`, for lows `min(raw, bank_low(t))`, where the bank is
+**Standing value.** At any instant `t` an alternative's raw value is its last
+record available at or before `t` for that target date; nothing later is ever
+read. The value scored is what a reader held at that minute, for highs
+`max(raw, bank_high(t))` and for lows `min(raw, bank_low(t))`, where the bank is
 the running settle-rounded extreme of the station's reports up to that exact
-instant. The bank is applied to the ForecastEx prediction market's central value as well. The
-forecast-only value is the raw value, undefined after the system's last live
-update for the target day. Carry-forward of earlier bulletins is not a page
-rule.
+instant, so an alternative is never charged for a forecast the observations had
+already falsified. The market is not held.
 
-**Which days.** Two bases, both about days and neither a grouping of systems.
-`own` scores each system on the city-days its own record covers and the
-ForecastEx prediction market priced, which is the default everywhere. `fixed30`
-restricts those days to the ones the ForecastEx prediction market priced at
-every hour from 30 down to 0, so a curve drawn across those hours is drawn on
-one set of days and its slope cannot be an artefact of the sample changing
-underneath it. Every comparison between two systems, the skill score and the
-percent improvement alike, is computed on the days the pair share, so a
-system's own span never has to match another's.
+**Bias correction.** The fifteen grid-box series, the raw models, the three
+ensemble medians, the AI model, the National Blend of Models scored against the
+settle and the National Weather Service forecast, carry a trailing station bias
+correction (the paper's T14 with T16's set). For each series, station, metric
+and lead, the mean of its own scored error over the trailing 30 target dates is
+subtracted from the held value, and the result is held at the observed extreme
+again. Only dates whose day had ended, and whose standard had been published, at
+the forecast instant count (`d-30` to `d-k`, `k = max(1, ceil((h + lag)/24))`,
+with `lag` 10 hours for the series scored against the climate report or URMA and
+0 for the settle, a day further back where the 23-hour spring day would let
+`d-k` end after the instant, and a climate report first published later than
+the rule leaves the windows of the instants before it), and at least ten such
+dates are needed. A row with no offset yet, the warm-up, is not scored for that
+series. The relative clock uses each instant's absolute-lead offset. The market,
+the station MOS series and the two URMA series are left as issued. Every figure
+carries the values as issued beside the corrected ones.
 
-**Exclusions.** A city-day is scored unless it cannot be built (owner's
-decision 2026-09-25): it is dropped only when it has no settlement value, which
-includes a settle set aside after review, or when the market has no median at
-any lead, that is when the ladder never crossed 50 cents inside its listed
-strikes. The rules that used to exclude a city-day are still computed and
-reported, never applied: a thin book at both anchors, a thin date, too few
-price snapshots, an empty local hour in the report record, and a day of other
-than 24 hours at the daylight saving changes. Two notes are printed beside
-them, also never silent: backfilled forecast rows, and European-ensemble rows
-captured under five hours after their nominal run.
+**Ensembles.** Four systems publish ensemble members: the ECMWF AIFS, NOAA
+GEFS, ECCC GEPS and DWD ICON-EPS. Each one's distribution for the day's extreme
+is built from every remaining hour's ensemble mean and member spread, each hour a
+normal distribution, with the hourly errors taken as perfectly correlated: a high
+exceeds strike `k` with probability `1 - Phi(min_h (k + 0.5 - m_h) / s_h)`, the
+Fréchet bound, and a low is the mirror. The median of that distribution, the
+highest remaining hourly mean held at the observed extreme, is each ensemble's
+central value (`GEFS`, `GEM_ENS`, `ICON_ENS`; the AIFS row is its ensemble-mean
+series). An instant with no hour left has no value.
+
+**EMOS.** The ensembles' distributions are calibrated by ensemble model output
+statistics (the paper's T14, refit in T17). For each ensemble, station, metric
+and lead window (36 to 25, 24 to 13 and 12 to 1 hours), a normal whose mean is
+`a + b mu` and whose variance is `c + d sd^2` is fitted by minimising the CRPS of
+the forecast held at the observed extreme against the settle, on the instants of
+the trailing 30 days that had ended with reports still to come, at least ten
+days and twenty rows; `mu` and `sd` are the highest remaining hourly mean and its
+spread. The fit is applied to every remaining hour. A fit with `b` outside 0.2
+to 2 or `|a|` over 50 is set aside, the latest fit carries forward, and before
+the first fit the raw ensemble stands. A low is fitted on the negated centre,
+outcome and running minimum, the mirror of the maximum.
+
+**Probabilities.** CRPS is summed over every whole degree across the market's
+strikes, the market's ladder closed at its end strikes, highs `F(k) = 1 - P(k)`
+and lows `F(k - 1) = P(k)`. The market's prices are used as quoted, held to the
+exchange's range of 1 to 99 cents; an ensemble's chance for a contract the
+observations already settled is 100 cents, and any other is held to the same
+range. The CRPS figures draw every line on the contracts and city-day hours the
+market and all four ensembles share. The reliability diagrams take each strike's
+last price in its hour on the city-days all four ensembles cover, in two windows,
+lead in (12, 24] before the end of the day and in (6, 18] before the extreme,
+pooled in ten price bins; each system's summary is the count-weighted mean
+absolute difference between price and payout share and the slope of a logistic
+regression of outcomes on the log-odds of the price.
+
+**Which days.** Two bases. `all` scores each series on the city-days its own
+record covers and the market priced, which is the default everywhere, and every
+comparison between the market and a series is computed on the days the two
+share. `balanced` restricts the days to those on which every series holds a
+corrected value at every lead from 1 to 30 hours before the end of the day (the
+paper's balanced sample; no hour is left for the ensembles at 0).
+
+**Exclusions.** A city-day is scored unless it cannot be built: it is dropped
+when it has no settlement value, when the market has no central value at any
+lead, or when its recorded settle carries an ingest error. The last are the
+Buckley Field days of the paper's `settle_exclusions_t16.csv`, kept beside the
+builder (`settle_exclusions.csv`), where the day's top report was stored rounded
+to a half degree and rounded again or a valid report was dropped by a quality
+guard; they leave both metrics. An instant whose ladder never crosses one half
+is unpaired for every series, since a comparison needs the market's value. The
+retired rules (a thin book, a thin date, too few price snapshots, an hour with
+no report, a day of other than 24 hours) are still computed and reported, never
+applied.
 
 **Capped captures.** The forecast feed returns at most 5,000 rows per request,
 so a capture that reached the limit came back cut at a valid time and stored a
@@ -200,404 +252,221 @@ the reading is replaced by the full-day value rebuilt from the rows the feed
 held at that capture's instant (`ACC_WETHR_REPL`); anything that differs for
 another reason is left as captured.
 
-**Uncertainty.** Bootstrap over target dates, 1,000 draws, seed 20260910, 95
-percent percentile intervals. A drawn bin needs 30 city-days. Paired
-differences (ForecastEx prediction market minus a system) are resampled under the same draws.
+**Uncertainty.** Every interval is a 95 percent percentile interval over 1,000
+resamples of seven-day blocks of target dates, drawn circularly (seed 20260911),
+which keeps a week of weather together. A drawn bin needs 30 city-days. The
+market is better than a series at a lead when their paired difference in error
+is below zero at the 5 percent level after Holm's adjustment across the series
+compared there (on the map, across the series at that station), the p-value from
+the normal approximation to the bootstrap distribution of the mean difference. A
+system counts as beaten only when every series of it is beaten, so the counts
+are over the 20 systems.
 
 **Language.** Yes bid, No bid, Yes price. Never ask, offer, sell, fair value,
 or a model probability of the site's own.
 
 ## 2. Naming
 
-| id | Reader name | Source |
-|---|---|---|
-| FX | ForecastEx | the ladder capture, every 10 minutes |
-| NDFD | National Weather Service | NWS point forecast, captured hourly |
-| NBM | National Blend of Models | captured hourly |
-| LAMP | Aviation Forecast | LAMP, captured hourly |
-| ECMWF | European Model | ECMWF HRES, captured hourly |
-| GFS | American Model | GFS raw, captured hourly |
-| MOSMIX | German Statistical Model | four captures a day |
-| ICON | German Model | four captures a day |
-| GEM | Canadian Model | four captures a day |
-| UKMO | UK Model | four captures a day |
-| MF | French Model | four captures a day |
-| JMA | Japanese Model | four captures a day |
-| AIFS | European AI Ensemble Mean | alternative forecast system |
-| ECMWF_IFS | European Ensemble Mean | alternative forecast system |
-| GFS_MOS | GFS MOS | alternative forecast system |
-| NAM_MOS | NAM MOS | alternative forecast system |
-| NBS_MOS | Blend MOS | alternative forecast system |
-| HRRR | HRRR | alternative forecast system |
+Every file uses these ids, and `meta.series` carries each one's name, its
+qualifier (the daily value it is scored on, whether it is corrected, and its
+standard), its system, its group and its scored span. The names are the paper's
+Table 3; the page writes "issued max" out as "issued maximum", and names the AI
+model's series an ensemble mean, the day's largest hourly ensemble mean, where
+the paper's Table 3 calls it a median.
 
-One HRRR is carried. The desk captures it directly with a real model cycle
-but only out to 18 hours, which cannot be drawn across this page's whole lead
-range, so the Open-Meteo rendering of the same model is the one kept and is
-named simply HRRR.
+| id | Series | Group | Standard | Offset |
+|---|---|---|---|---|
+| FX | ForecastEx prediction market | | METARs | as quoted |
+| LAMP | LAMP | Station MOS | METARs | as issued |
+| NBS_MOS | NBM station MOS, issued maximum | Station MOS | NWS CLI | as issued |
+| NBS_MOS_ROW | NBM station MOS, hourly rows | Station MOS | METARs | as issued |
+| GFS_MOS | GFS MOS, issued maximum | Station MOS | NWS CLI | as issued |
+| GFS_MOS_ROW | GFS MOS, hourly rows | Station MOS | METARs | as issued |
+| NAM_MOS | NAM MOS, issued maximum | Station MOS | NWS CLI | as issued |
+| NAM_MOS_ROW | NAM MOS, hourly rows | Station MOS | METARs | as issued |
+| MOSMIX | DWD MOSMIX | Station MOS | METARs | as issued |
+| NBM | National Blend of Models, METAR | Blend | METARs | corrected |
+| NBM_URMA | National Blend of Models, URMA | Blend | URMA | as issued |
+| NDFD | National Weather Service, climate report | Human-edited | NWS CLI | corrected |
+| NDFD_URMA | National Weather Service, URMA | Human-edited | URMA | as issued |
+| AIFS | ECMWF AIFS ens. mean | Artificial intelligence | METARs | corrected |
+| HRRR | NOAA HRRR | Raw numerical weather prediction | METARs | corrected |
+| ECMWF | ECMWF IFS | Raw numerical weather prediction | METARs | corrected |
+| ECMWF_IFS | ECMWF IFS ens. mean | Raw numerical weather prediction | METARs | corrected |
+| GFS | NOAA GFS | Raw numerical weather prediction | METARs | corrected |
+| GEFS | NOAA GEFS median | Raw numerical weather prediction | METARs | corrected |
+| ICON | DWD ICON | Raw numerical weather prediction | METARs | corrected |
+| ICON_ENS | DWD ICON-EPS median | Raw numerical weather prediction | METARs | corrected |
+| GEM | ECCC GEM | Raw numerical weather prediction | METARs | corrected |
+| GEM_ENS | ECCC GEPS median | Raw numerical weather prediction | METARs | corrected |
+| UKMO | Met Office UM | Raw numerical weather prediction | METARs | corrected |
+| MF | Météo-France ARPEGE | Raw numerical weather prediction | METARs | corrected |
+| JMA | JMA GSM | Raw numerical weather prediction | METARs | corrected |
 
-The three ensembles with no single-run row of their own are `GEFS` (American
-Ensemble), `GEM_ENS` (Canadian Ensemble) and `ICON_ENS` (German Ensemble);
-the calibration file keys them `GEFS`, `GEM` and `ICON`.
-
-Every file uses these ids. Every system beside the ForecastEx prediction
-market is an alternative forecast system. The page groups them into families
-only through `config/forecast_systems.json`, which orders the systems table
-and the scorecard grid alike.
-
-AIFS is ECMWF's AI forecasting system, captured directly as the hourly
-ensemble mean at eight runs a day, so its daily
-extreme is taken here as the maximum and minimum of the captured hours over
-the station-local day, from each capture that covers the whole of it.
+One HRRR is carried, the Open-Meteo rendering, since the desk's direct capture
+reaches only 18 hours. AIFS is ECMWF's AI forecasting system, captured as the
+hourly ensemble mean. The probabilistic files key the four ensembles `AIFS`,
+`GEFS`, `GEM` and `ICON`. `config/forecast_systems.json` lists every series in
+the paper's groups for the systems table at the foot of the page.
 
 ## 3. Files
 
 All files sit under `snapshots/accuracy/`. Every file carries
 
 ```
-meta: { schema, asof, built, window: {from, to}, roster: [ids], conventions: "v1",
-        cohorts: {own: {from, cities, n_high, n_low}, fixed30: {...}},
-        exclusions: [{reason, dates, count}],
-        systems: {id: {name, start, kind,
-                       scored: {start, end, days},
-                       byMetric: {high: {start, end, days}, low: {...}}}} }
+meta: { schema: "accuracy-figures/2", asof, built, window: {from, to}, roster: [ids], conventions: "v2",
+        series: [{id, name, qual, system, group, standard, corrected, second, kind,
+                  scored: {start, end, days}, byMetric: {high: {start, end, days}, low: {...}}}],
+        groups: [{title, series: [ids]}], twenty: [system ids],
+        cohorts: {all: {from, cities, n_high, n_low}, balanced: {n_high, n_low, from_high, from_low}},
+        waterfall: {high: {listed, no_settlement, no_market_median, settle_ingest_error, scored, ...}, low: {...}},
+        exclusions: [{reason, dates, count}], settleExcluded: [{city, date}],
+        inference: {draws, blockDays, seed, holmAlpha, minDays},
+        correction: {windowDays, minDates, publishLagH},
+        leads: {six: {abs: [30, 18, 12], rel: [18, 12, 6]}, relMax, partialH},
+        notes: {urma: {hours, first, last}, emos: {fits, implausible, fitted_share}} }
 ```
 
-`start` is the first target date on which at least twenty stations hold a raw
-value at any grid hour, so it is when the source entered the capture. `scored`
-is narrower: the first and last target date the system was actually scored on
-and how many such dates there are, after exclusions. `byMetric` splits that by
-high and low, which the ForecastEx prediction market needs, since its highs
-and lows do not share a span. The page prints the scored span, not the raw
-one. `cohorts.own` counts the ForecastEx prediction market's own eligible
-city-days and `cohorts.fixed30` the fixed sample; `exclusions` is one entry
-per reason, `dates` its distinct dates and `count` what the builder counted
-for it, summed over highs and lows.
+`series` is in the paper's order, the market first. `scored` is the span a
+series is actually scored over, its warm-up left out, whole and per metric.
+`asof` is the newest resolved target date; `built` the build time. Numbers are
+rounded to four decimals, so a value printed to two rounds once, as in the
+paper's tables; counts are integers; a missing value is `null`.
 
-`schema` is the string `accuracy-figures/1`. `asof` is the newest resolved
-target date; `built` the build time. Numbers are rounded to three decimals;
-counts are integers; a missing value is `null`.
+A **series block** is `{mae, lo, hi, n}` per bin, and for an alternative also
+`{pi, piLo, piHi, better, worse}`: its mean absolute error (or CRPS) with the 95
+percent interval and its own count, and the market's percent improvement over
+it on the city-days both hold, `100 (1 - sum e_FX / sum e_s)`, with its interval
+and the Holm verdicts. A **beats** entry per bin is `{k, of, notBeaten}`, the
+systems compared, those the market is better than, and the rest.
 
 ### lead-curve.json
 
 ```
-{ meta, metric: {high: BLOCK, low: BLOCK} }
-BLOCK = { h: [36..0],
-          cohorts: { own: SERIES, fixed30: SERIES },
-          crps: CRPS,
-          converge: CONVERGE,
-          relative: RELATIVE
-        }
-CRPS = { h: [36..0],
-         cohorts: { own: { metar: CV, cli: CV }, fixed30: { metar: CV, cli: CV } },
-         shared: { own: { start, end, days }, fixed30: {...} } }
-CV = { systems: { FX|AIFS|GEFS|GEM|ICON: { crps: [per h], lo: [per h], hi: [per h], n: [per h] } },
-       beats: [per h: {k: int, of: int, ids: [ensemble keys beaten]}] }
-SERIES = { n: [per h], systems: { id: { mae: [per h], lo: [per h], hi: [per h],
-                                       maeRaw: [per h], loRaw, hiRaw,          // forecast-only view
-                                       maeCli: [per h], loCli, hiCli,          // climate-report frame
-                                       n: [per h], nRaw, nCli,                 // the system's own city-days per view
-                                       maeTarget, loTarget, hiTarget, nTarget, // own-target frame, NDFD only
-                                       maeRawTarget, loRawTarget, hiRawTarget, nRawTarget,
-                                       lastLiveH: int|null } },                // where the raw line ends
-           beats: [per h: {k: int, of: int, ids: [ids beaten]}],
-           beatsRaw: [per h: ...],
-           beatsCli: [per h: ...],
-           beatsTarget: [per h: ...], beatsRawTarget: [per h: ...],     // own-target frame
-           binNote: [per h: {dates: [from, to], zones: {tz: count}} | null],
-           observed: [per h: share 0..1 | null] }                  // extreme already observed
-RELATIVE = { anchor: "last", k: [1..K],
-             cohorts: { own|fixed30: { systems: { id: { mae, lo, hi, n, maeRaw, loRaw, hiRaw, nRaw,   // per k
-                                                        maeTarget ... nRawTarget } },   // NDFD only
-                                       beats: [per k], beatsRaw: [per k], beatsTarget: [per k], beatsRawTarget: [per k],
-                                       n: [per k], nDays: int,
-                                       share: [per k], tieShare: [per k] } } }
-```
-In the climate-report frame each alternative forecast system is scored against
-the National Weather Service report for the same date while the market keeps
-the settle it pays on, so the market's `maeCli` equals its `mae` and Buckley
-Field drops out of the frame.
-
-In the own-target frame only the National Weather Service forecast (`NDFD`) is scored against
-anything but the settle, so only its entry carries the `...Target` series; every other system's
-own-target series is its METAR series, and a page reads a missing `maeTarget` as `mae` (and a
-missing `maeRawTarget` as `maeRaw`). `beatsTarget` and `beatsRawTarget` are the market's paired
-comparisons in that frame. The forecast-only view has an own-target version (`maeRawTarget`);
-the climate-report frame has none, so its forecast-only view is the METAR one.
-
-`SERIES.n` is the ForecastEx prediction market's count of city-days per bin,
-which the page prints in its strip; each system's own `n`, `nRaw` and `nCli`
-count the city-days behind its value in each view. A system's bin with fewer
-than 30 carries `null` values. `h` above 30 is present only where the cohort
-has members.
-
-`observed[i]` is the share of the market's scored city-days at `h[i]` whose
-extreme had already been observed, some METAR report at or before that
-instant having reached the settle value. It is zero above 24 h, before the
-target day begins, and the page draws it on a second axis under the error
-curve.
-
-`relative` is the same error curve with lead counted back from the report that
-set the day's extreme, using only the instants before that report, so every
-value scored is a forecast made before the extreme happened. The extreme's time
-is the last report of the day that reached the settle value
-(`C.EXTREME_ANCHOR = "last"`; temperatures are whole degrees, so the value often
-recurs, and the last report keeps the most hours). Bin `k` holds the instants
-between `k - 1` and `k` hours before it. Each system keeps its own rows and its
-held value (and the forecast-only value in `maeRaw`), in the METAR frame and, for the National
-Weather Service forecast, in the own-target frame, which the page draws. `n` is
-the market's count per bin and `nDays` its city-days in the cohort, `share` is
-`n / nDays`, the share of its city-days holding a forecast that far ahead, and
-`tieShare` the share of the bin's market instants at which an earlier report had
-already reached the settle value. `k` runs to the last bin where any system has
-30 city-days in the own cohort.
-
-`crps` is the CRPS by lead that the probabilistic section draws. The market is
-scored on its own standing ladder at each whole hour, and each ensemble at the
-same instant on the same strikes, from a normal curve on its own centre and
-spread over the hours left in the day, every probability scored alike (section
-1), so the two are one measurement on one grid. The ladders are the ones the
-market priced at that hour (restricted to the fixed sample in `fixed30`) at
-which every ensemble also holds a reading, so every line is drawn on the same
-ladders (`shared`). Ensembles are keyed by
-their calibration key; the page maps GEM and ICON to the registry rows
-`GEM_ENS` and `ICON_ENS` so they are never confused with the single runs. In
-the climate-report frame an ensemble is held to the National Weather Service
-report and the market keeps the settle, both on the city-days that hold a
-report. There is no forecast-only CRPS.
-
-`converge` is time to converge, drawn under the error curve:
-
-```
-CONVERGE = { h: [36..0],
-            tol1: { own|fixed30: { target|metar|cli: { systems: { id: { share: [per h], median, never } } } } },
-            tol2: { ... } }
+{ meta, metric: { high|low: { cohorts: { all|balanced: { clocks: { abs|rel: {
+    bins: [36..0] | [30..1], share: [per bin],
+    corrected: { series: {id: series block}, beats: [per bin], lowest: [per bin] },
+    issued: { ... }                                   (cohort all only) } } } } } } }
 ```
 
-`share[i]` is the share of a system's city-days whose held value was within
-the tolerance (1 or 2 degrees) of the truth at every hour from `h[i]` to the end
-of the day at which it held a value. An hour with no value, a gap in the
-market's book or a crossing outside its ladder, is no evidence either way and
-does not break the run; the days are the ones the system held a value on at
-any lead. `median` is the lead at which half the days had converged,
-interpolated between whole hours, and `never` the share that had not by the
-end of the day. It is on the held value only: a raw record stops at a
-forecast's last update, after which every later hour would pass for want of a
-value. The frames and day bases are the lead curve's. The standalone
-`dynamics.json` (changes per hour, the event strip and the traced city-day)
-and the per-date `trace/` files were retired on 2026-09-15; the site's job
-prunes the published traces once a manifest stops listing them.
+`share` is the right-hand axis, on the absolute clock the share of eligible
+city-days whose extreme had already been observed (strictly after the last
+report at the settle) and on the relative clock the share still holding a market
+price that far ahead. `lowest` marks the bins where the market's error is below
+every system's best series. `corrected` scores the grid-box series with the
+correction, `issued` scores every series without it.
 
 ### calibration.json
 
 ```
-{ meta,
-  bins: { edges: [0,0.1,...,1.0] },
-  metric: { high: { cohorts: { own: COHORT, fixed30: COHORT } }, low: {...} } }
-COHORT = { price: { mid: PRICEBLOCK, twoSided: PRICEBLOCK }, ensembles: { id: { name, span } },
-           shared: { start, end, days } }     // the days every system holds a value on
-PRICEBLOCK = { leadBins: [[36,24],[24,12],[12,6]],
-               reliability: [ per lead bin: CELL ],
-               ensembles: { id: { metar: [ per lead bin: CELL ], cli: [...] } },
-               brier: BRIER }
-CELL = { n, nCityDays, x: [10], y: [10], count: [10], lo: [10], hi: [10], hist: [10] }
-BRIER = { h: [36..0],
-          strikes: { all: BF, nearMoney: BF } }        // BF = { metar: BSET, cli: BSET }
-BSET = { systems: { FX|AIFS|GEFS|GEM|ICON: { rms: [per h], lo, hi, brier: [per h], n: [contracts], days: [city-days] } },
-         beats: [per h: {k, of, ids}] }
+{ meta, ensembles: {AIFS|GEFS|GEM|ICON: {name, series}},
+  metric: { high|low: {
+    crps: { span: {start, end, days}, clocks: { abs|rel: { bins,
+            calibrated: {series: {FX|AIFS|GEFS|GEM|ICON: series block}, beats},
+            issued: {...} } } },
+    reliability: { abs|rel: { window: [lo, hi],
+            calibrated: {FX|AIFS|...: {summary: {n, mad, slope, slopeLo, slopeHi}, bins: [[price, share, count]]}},
+            issued: {AIFS|...: {...}} } } } } }
 ```
 
-A diagram cell is the decile curve and its sample; the Brier score, reliability
-and resolution numbers it carried until 2026-09-15 are gone, since nothing drew
-them. The last lead bin (6 to 0 hours) was dropped on
-2026-09-15, since by then most contracts are settled or priced at a cent.
-
-`brier` is the Brier score by whole hour of lead, the mean over contracts of
-(p - y)^2, and `rms` its square root in probability units, which the page draws
-in cents: the typical gap between a contract's price and what it paid. Summed
-over every one-degree strike of a ladder the Brier score is CRPS, so it is
-averaged per contract here and reads in probability rather than degrees. The contracts are the market's own under the price rule at hours when all four
-ensembles hold a reading, and every system is scored on exactly those contract
-rows (city, day, hour and strike), so every line is drawn on the same contracts
-and the same days (`shared`). Every probability is scored alike (section 1). `all` is every
-quoted strike; `nearMoney` is the middle listed strike of the day's ladder and
-the strike on either side (`NEAR_MONEY_OFFSET`, the desk's own convention),
-fixed by the listing before any lead is scored. In `cli` the market keeps the
-settle and both are restricted to the city-days holding a report. `lo` and
-`hi` are the square roots of the date-bootstrap interval of the
-contract-weighted mean; `beats` is the paired difference of per-city-day means
-at each hour. A lead under 30 city-days carries nulls. The reliability and
-resolution series by lead that stood here from 2026-09-15 were replaced by
-this block the same day.
-
-`own` scores every eligible city-day and `fixed30` the city-days the market
-priced at every hour from 30 to 0, the lead curve's two day bases. The Yes-bid
-price rule was dropped from the file on 2026-09-15.
-
-Shapes the builder settled where the text above was loose: grid cells carry `nLow` beside `n`;
-map cells are nested tool id then city id.
-
-Four of the alternative forecast systems publish the spread of their ensemble
-members as well as a centre, so they are scored on the same contracts. Their
-diagram cells sit under each price rule (`price.<rule>.ensembles`), on that
-rule's contracts, and `cohorts.<c>.ensembles.<id>` keeps the name and the span
-of days the system's probabilities could be scored on, for the systems table.
-
-The climate-report frame recomputes the contract's own outcome against the
-National Weather Service report for the same date, so a station whose report
-stands in for another drops out of it. The market keeps the settle its
-contracts pay on in either frame, since that is what they pay on.
-
-The reading is taken over the hours of the day still to come, from the
-standing capture (the builder's `ens_standing` and `ens_hours` frames). At a
-standing instant the distribution of the day's extreme is built from every one
-of the capture's station-local hours from that instant to the end of the day,
-with the hourly errors taken as perfectly correlated (owner's decision
-2026-09-25): the extreme is above a strike exactly when one of those hours is,
-so a high pays with chance one less the normal probability at the smallest of
-(strike + 0.5 - mean) / spread over those hours, and a low is the mirror. The
-centre of that distribution is the extreme of the hourly means, the same value
-the scorecard row carries. The day's extreme is the larger (for a low, the
-smaller) of that and the observed extreme so far. So a strike the observations
-already cleared is paid, any other pays only if the hours left reach it, and at
-the end of the day, with no hours left, nothing more can. A high pays when
-the unrounded extreme reaches half a degree past the strike and a low when it
-falls half a degree under, which is how settlement rounds. Nothing is fitted
-and no bias is removed. Read over the whole day instead, a 4 pm peak kept its
-spread at 11 pm and gave a real chance to strikes the day could no longer
-reach. The scorecard's ensemble rows take the same centre, held at the observed
-extreme.
-
-Two limits belong with these lines and are stated on the page: a system
-publishes a spread for each hour rather than for the extreme of several hours,
-and taking the hourly errors as perfectly correlated stands in for the members
-it does not publish, which widens the distribution slightly; and the level bias
-in each ensemble's centre, which the scorecard's mean error shows, passes
-straight into its probability.
+`calibrated` is EMOS, `issued` the raw ensembles; the market is the same in both.
 
 ### map.json
 
 ```
-{ meta, cities: [ { id, name, px, py, tz } ],
-  windows: { morning: "6 AM to noon local", eve: "6 PM local the day before" },
-  metric: { high: { window: { morning: CELLS, eve: CELLS } }, low: {...} } }
-CELLS = { frame: { target: { sysId: { cityId: {...} } },        // own-target frame, the four that issue one
-                   metar: { toolId: { cityId: { fx: {mae}, tool: {mae}, pi, lo, hi, matched } } },
-                   cli:   { ... } },
-          median: { target: { sysId: {...} }, metar: { toolId: {pi, lo, hi, cities, colored} }, cli: { ... } } }
+{ meta, cities: [{id, name, px, py, tz}], leads: [{key, clock, lead}],
+  cellFields: ["pi", "lo", "hi", "n", "marketMae", "seriesMae", "sig"],
+  metric: { high|low: { abs_30|abs_18|rel_18|rel_12: { id: {
+      cells: {station: [pi, lo, hi, n, marketMae, seriesMae, sig]},
+      median: {pi, lo, hi, cities} } } } } }
 ```
-The own-target frame holds the four systems that issue a daily extreme of their own, against the
-climate report on the city-days it puts the maximum (minimum) inside their window; every other
-tool's own-target cells are its METAR cells, and the page reads them from there.
-A city-day's value in a window is the mean of the held value at each whole
-hour of it (h 18 to 12 for the morning, h 30 for the evening before), and
-counts only when every hour holds one. `pi` is 100 (1 - MAE_fx / MAE_tool)
-on the matched city-days, with its interval from the ratio under the shared
-draws. A city with fewer than 30 matched city-days carries `null` values. The
-median runs over every city with a value (`cities`), its interval from the
-per-draw median, and `colored` counts the cities whose own interval clears
-zero. The newsletter window and the change counts were removed on 2026-09-15.
+
+The four leads are the paper's Fig 8. A cell is scored on the city-days the
+market and the series both hold a value at that lead, bias-corrected; `sig` is 1
+where the market is better after Holm across the series at that station, -1
+where the series is, 0 otherwise. A station under 30 matched city-days keeps
+its count with no value, and a station with none has no cell. The median is over
+the stations with a value, and its interval is the spread of the per-draw
+medians.
 
 ### grid.json
 
 ```
-{ meta,
-  h: [30, 18, 12],
-  cohorts: { own: ROWS, fixed30: ROWS },
-  frames: ["target", "metar", "cli"] }
-ROWS = [ { id, start, frame: { target: CELLS, metar: CELLS, cli: CELLS } } ]
-CELLS = { h: { "30": { maeHigh, maeLow, meHigh, meLow, n, nLow, ssHigh, ssLo, ssHi,
-                       crps, crpsLow } ... } }   // crps keys only on rows with a distribution
+{ meta, six: [{clock, lead}],
+  metric: { high|low: { cohorts: { all|balanced: {
+      series: {id: {mae: [6], lo: [6], hi: [6], pi: [6], better: [6], n: [6], me18}},
+      groups: [{title, series: [ids by 18 h error], mean: [6], meanSeries: [6]}],
+      issued: {...},                                    (cohort all only)
+      crps: {series: {FX|AIFS|GEFS|GEM|ICON: {...}}, order: [ids by 18 h]}  (cohort all only) } } } } }
 ```
-`ssHigh` is the skill score on the high, 100 (1 - MAE_s / MAE_NWS) on the
-city-days the row shares with the National Weather Service row; `ssLo` and
-`ssHi` are `null` when its interval covered zero. In the own-target frame the National Weather
-Service row, and every skill score against it, uses that forecast's own target. A distribution's
-CRPS in that frame is its METAR-frame score, since its own target is the settle. The 6 h column and the
-newsletter ranking were removed on 2026-09-14, and the hour-one column on
-2026-09-15.
 
-The rows are every system in order, then the ensembles with no single-run row
-of their own, under their registry ids `GEFS`, `GEM_ENS` and `ICON_ENS`. An
-ensemble row scores its centre held at the running observed extreme, on the
-city-days the market priced. `crps` and `crpsLow` are present on the market's
-row, on the European AI row (the same product as its ensemble), and on the
-three ensemble rows; they are the mean CRPS over the cell's city-days that the
-distribution covers, `null` under 30 of them. The Canadian and German single
-runs never carry their ensemble's CRPS.
-
-The page draws the grid with the mean absolute error and then the mean error
-under each lead, each on the high and the low. It does not order the rows by
-score: it groups and orders them from `config/forecast_systems.json`, the same
-registry the forecast systems table at the foot of the page is rendered from
-at build time, so a change to the grouping or the order there moves both.
-
-The standalone `availability.json` was retired on 2026-09-15; nothing drew it.
+The paper's Tables 3 and 4 at the six leads. A group's `mean` is over its
+systems, each on its first series, the paper's group rows; `meanSeries` counts
+every series. The groups are in the order of their 18 h mean.
 
 ## 4. Transport
 
 The builder writes the files above to a private prefix under the archive,
 `data/archive/accuracy/latest/`, with a `manifest.json` of the form
-`{schema, built, asof, files: [{name, size, sha256}]}` listing every file by
-its path under `latest/`. The site's `accuracy` job, in the half-hourly chain, reads
+`{schema, built, asof, files: [{name, size, sha256}]}` listing every file by its
+path under `latest/`. The site's `accuracy` job, in the half-hourly chain, reads
 the manifest, and when its `built` differs from the one last published, copies
 each file to `snapshots/accuracy/` after checking that it parses and carries
-`meta.schema`, `meta.asof` and `meta.conventions`. The pages read only
-`snapshots/accuracy/`.
+`meta.schema` equal to `accuracy-figures/2`, `meta.asof` and `meta.conventions`
+equal to `v2`. A file of an earlier schema is skipped and reported, so the page
+never reads a shape it does not draw. A build none of whose files passes is not
+published, so the files in place and their record stay and the pass reports a
+failure. A record that wrote no file never counts as the build being published,
+so a build that arrives before the code that reads its schema is published once
+that code is deployed. The pages read only `snapshots/accuracy/`. The standalone
+`dynamics.json` and the per-date `trace/` files were retired on 2026-09-15; a
+`trace/` file a manifest still lists is checked on its own stamps (`meta.date`
+and `meta.built`), and the job prunes the published traces once a manifest stops
+listing them.
 
-**Keeping it running.** The daily service on the machine that holds the
-capture does four things in order: fetch the exchange's published archive,
-build the record, push the figure files here, and back up everything
-irreplaceable to `data/archive/accuracy/backup/` on the same bucket, which is
-not served. Nothing in that chain involves a laptop. The site's own account
-copies the files into place every half hour and, past three days without a new
-build, mails a health alarm: a stale archive and a healthy pass look identical
-from this side, so nothing else would notice.
+**Keeping it running.** The daily service on the machine that holds the capture
+does six things in order: fetch the exchange's published archive, extend the
+Iowa State MOS archive for the record's stations (a chunk is fetched again until
+it was written after its last day was complete), extend the URMA archive by the
+hours published since the last run (`urma.py`; URMA lands about seven hours
+after its hour, so the newest day of the two URMA series is completed by the
+next day's run), build the record, push the figure files here, and back up
+everything irreplaceable to `data/archive/accuracy/backup/` on the same bucket,
+which is not served. Nothing in that chain involves a laptop. The site's own
+account copies the files into place every half hour and, past three days without
+a new build, mails a health alarm.
 
 ## 5. The page
 
-Two kinds of chart against lead, a city map, the scorecard grid and
-reliability diagrams, each section with a method note carrying the estimator,
-the sampling rule and the conventions it depends on (the settle, the clock,
-the market's price and median, the exclusions, the bootstrap) behind a "Show
-details of calculation" button, and a status strip naming the window and the
-build time. The deterministic sections (error by lead, the map and the scorecard) open in the
-own-target frame, with the METAR settle and climate-report frames one toggle away; the
-probabilistic sections score the market and the ensembles against the settle, which is each one's
-own target. In order:
+Under the title the page opens on the research brief and the paper's first
+page. Then, each section with a method note carrying the estimator, the sampling
+rule and the conventions it depends on behind a "Show details of calculation"
+button, and a status strip naming the window and the build time:
 
-- **Deterministic skill.** One value per system, the ForecastEx prediction
-  market's being the median of its ladder: mean absolute error by lead, and
-  under it on the same axis time to converge (`lead-curve.json`).
-- **Probabilistic skill.** Every system that publishes a distribution, the
-  market's ladder and the four ensembles: CRPS by lead (`lead-curve.json`
-  `crps`) and the Brier score by lead (`calibration.json` `brier`), each as
-  wide as the error curve, then the reliability diagrams for the three lead
-  bins to six hours out.
-- **City map**, **scorecard grid** and the source tables. The coverage strip
-  and the conventions list were removed on 2026-09-15: the systems table
-  carries every record's span, and each method note carries the conventions
-  its section uses.
+- **Deterministic skill.** The paper's Fig 6: the mean absolute error of the
+  market and the 25 series by lead on either clock, coloured by the paper's
+  groups (station MOS green with LAMP heavier, the Blend teal, the National
+  Weather Service orange, the AI model purple, the raw models tan), a system's
+  second series dashed, the corrected series drawn faint as issued behind
+  their corrected lines, the right-hand axis of each clock, and strips counting
+  the market's city-days and the systems it beats (`lead-curve.json`).
+- **Probabilistic skill.** The paper's Fig 9: the CRPS of the market and the
+  four EMOS-calibrated ensembles by lead, the raw ensembles faint, then the
+  reliability diagrams of the two windows with each system's mean gap and slope
+  (`calibration.json`).
+- **City map.** The paper's Fig 8: the market's percent improvement over a
+  chosen series at each station at the four single leads, bold where Holm holds,
+  with the median over stations (`map.json`).
+- **Scorecard.** The paper's Tables 3 and 4 (`grid.json`), then the source
+  tables.
 
 Highs default, lows a tab on every figure. No commentary. Every chart against
-lead is drawn by one helper (`WXAcc.leadChart`), so the axis, the hatching of
-the partial bins above 30 hours, the market's band and the step drawing of a
-forecast look the same on all four.
+lead is drawn by one helper (`WXAcc.leadChart`). The convergence chart and the
+Brier score left the page with the paper's methods on 4 October 2026.
 
-**The source tables.** The foot of the page lists every forecast system,
-the ForecastEx prediction market first and then the alternative systems in four
-families: raw numerical weather prediction models, numerical weather prediction
-with model output statistics, human forecasting systems, and AI systems. Each
-row says whether the system is deterministic, an ensemble mean, or
-probabilistic; gives the provider's grid spacing, time step and update
-frequency; and links to its documentation. For
-the systems whose run times this record holds, the update frequency is the one
-measured from those run times. The record column is filled at load from each
-system's scored span in the files' meta, and for an ensemble from the days its
-probabilities were scored on. A second table lists the other data sources
-behind this page.
-
-**Spans are printed everywhere.** The systems do not share a record. The
-systems table dates every record. Every figure's method note carries a span
-line saying which days that view used, the deterministic legend carries the
-date each system's record starts, and the scorecard grid carries a `Record
-since` column in every cohort.
+**The source tables.** The foot of the page lists every series, the market
+first and then the paper's five groups. Each row says whether the system is
+deterministic, an ensemble mean, or probabilistic; gives the provider's grid
+spacing, time step and update frequency; and links to its documentation. The
+record column is filled at load from each series' scored span. A second table
+lists the other data sources behind this page.

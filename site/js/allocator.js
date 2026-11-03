@@ -24,7 +24,7 @@
    computed exactly on those intervals rather than on a sampled grid.
 
    Prices follow the exchange's structure: there are no sellers, only bids to
-   buy Yes or No that sum to a dollar. Buying Yes now costs one dollar less the
+   buy Yes or No. Buying Yes now costs one dollar less the
    No bid; buying No now costs one dollar less the Yes bid. The per-side fee is
    added to every cost here, so a "cost" on this page is what a buyer actually
    pays. A side with no resting bid opposite it cannot be bought now and is
@@ -1189,7 +1189,7 @@ window.WXAlloc = (() => {
       const imp = impDoc != null ? impDoc : impliedMedian(rows);
       setLadder({
         title: (doc.city || doc.station) + ' · daily ' + it.side + ', ' + it.day,
-        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '. Click a row to open that contract on IBKR.',
+        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '. ' + WXM.TRADE_NOTE + '.',
         unit: celsius ? '°C' : '°F', grain: 'integer', rows, synthetic: false,
         productConid: ((doc.symbols || {})[it.side] || {}).productConid,
         defaults: { value: imp, band: celsius ? 3 : 4 },
@@ -1220,7 +1220,7 @@ window.WXAlloc = (() => {
       const span = parsed.length ? parsed[parsed.length - 1].strike - parsed[0].strike : 4;
       setLadder({
         title: name + ' · ' + it.text.replace(/ \(\d+ strikes\)/, ''),
-        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '.' + (productConid ? ' Click a row to open that contract on IBKR.' : ''),
+        sub: 'Live prices from the exchange, as of ' + (doc.asof || 'recently') + '.' + (productConid ? ' ' + WXM.TRADE_NOTE + '.' : ''),
         unit: '', grain: isCount ? 'integer' : 'continuous', rows: parsed, synthetic: false, productConid,
         defaults: { value: imp, band: Math.max(span / 4, isCount ? 2 : 0.1) },
       });

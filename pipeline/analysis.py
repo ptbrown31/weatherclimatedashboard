@@ -28,11 +28,15 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     both analyses belong to the date). Precipitation is the one-hour
     accumulations that together cover the date from midnight to midnight: a
     day's row for the analysis at HH:00 carries the accumulation over the hour
-    that starts then, which NOAA files under the hour it ends. A day is final
-    once every hour's file is either read or known not published, and its value
-    is then the hours available (owner's decision 2026-09-29): a missing file
-    does not hold the day open. NOAA never revises an RTMA file and a final
-    value stands, so an hour that turns up later is shown and not counted.
+    that starts then, which NOAA files under the hour it ends. A place-day is
+    final at its cut-off, 12:45 AM local time on the day after (owner's ruling
+    2026-10-14, the draft terms), on the files published on NOAA Open Data or
+    NOMADS by then. A file's publication time is its Last-Modified time on the
+    server it was read from. A file published later is shown and never counted,
+    the first published version of a file counts, an hour missing at the
+    cut-off leaves the value on the hours available, and a place-day with no
+    hour by the cut-off goes to event review. Until 2026-10-14 a day was final
+    once every hour's file was read or known not published.
 
     Every stored value is in the file's own unit and is converted exactly, in
     decimal arithmetic, and the aggregate (the highest hourly temperature,
@@ -48,12 +52,12 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     part company by design.
 
     A file NOAA Open Data does not have half an hour after it usually lands is
-    read from NCEP's NOMADS server, which keeps fourteen days, and a file there
-    counts as published; a file on neither by then is not published. An
+    read from NCEP's NOMADS server, and a file there counts as published; a
+    precipitation file is looked for there 27 minutes after its hour ends, so
+    the day's last accumulation is looked for before the cut-off. An
     hour's precipitation is a separate file and is read even when its
     analysis is missing: it adds to the day's total and never to the count of
-    analyses read. A day that has not resolved 48 hours after its local end is
-    closed: its value stands on the hours read and it is never marked final.
+    analyses read.
 
 Reads   noaa-rtma-pds (and NOMADS for a file it lacks) through
         pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
@@ -160,6 +164,19 @@ NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com"}
 NOMADS_DEFAULT = {"rtma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod"}
 NOMADS_AFTER_MINUTES = 30
 NOMADS_KEEP_HOURS = 13 * 24
+# a file on neither NOAA Open Data nor NOMADS this long after its valid time
+# (a precipitation file, after its hour ends) is listed in the state as not
+# published and its refetching stops; since 2026-10-14 the cut-off below
+# decides what a day counts
+NOT_PUBLISHED_AFTER_HOURS = 6
+# the cut-off of the draft terms (owner's ruling 2026-10-14): a place-day is
+# final at 12:45 AM local time on the day after it, on the files published by
+# then, and a place-day with no hour by then goes to event review
+CUTOFF_AFTER_DAY = dt.timedelta(minutes=45)
+# a precipitation file NOAA Open Data does not have this long after its hour
+# ends is looked for on NOMADS, so the day's last accumulation, usually on the
+# bucket 17 minutes after midnight, is looked for there before the cut-off
+PCP_NOMADS_AFTER_MINUTES = 27
 # the product that resolves (owner's decision 2026-09-29): RTMA for every
 # variable, precipitation included
 SETTLE = "rtma"
@@ -169,8 +186,9 @@ PRODUCTS = {
 }
 # the layout of the published files; when it changes, every listed day is
 # rewritten, a few a pass, so no day keeps the old one (2026-09-30: URMA
-# dropped from the days, the place files and the CSV files)
-LAYOUT = "rtma-only-2026-09-30"
+# dropped from the days, the place files and the CSV files; 2026-10-14: the
+# cut-off rule, the review state and the publication times in the CSV files)
+LAYOUT = "cutoff-2026-10-14"
 # the three messages read from the analysis file, by the .idx sidecar's names
 MESSAGES = (("temp", "TMP", "2 m above ground"), ("wind", "WIND", "10 m above ground"),
             ("gust", "GUST", "10 m above ground"))
@@ -225,9 +243,8 @@ INDEX_DAYS = 60                 # index.json lists this many newest days; the da
 CLOSE_AFTER_HOURS = 48          # a day still incomplete this long after its local end is closed
 LIVE_HOURS_PER_PASS = 3         # new hours read per product per pass
 # a product-hour whose precipitation file is absent, refused, or short of a
-# location cell has that file refetched every pass until this long past the
-# analysis lag; after that the hour keeps whatever coverage it has
-PRECIP_WAIT_HOURS = 3
+# location cell has that file refetched every pass until NOT_PUBLISHED_AFTER_HOURS
+# after its hour ends (precip_due); after that the hour keeps whatever coverage it has
 # how often the pass looks, over the backfill's reach, for hours whose
 # analysis never landed and whose precipitation was never read
 PRECIP_SWEEP_HOURS = 24
@@ -258,8 +275,8 @@ CONVENTIONS = {
            "top-of-hour analysis whose local civil time falls on that date, 24 on an ordinary day, 23 on the "
            "spring-forward day (02:00 does not occur) and 25 on the fall-back day (both 01:00 analyses count). "
            "Precipitation uses the one-hour accumulations that together cover the date from midnight to "
-           "midnight, the same count. Complete means every analysis was read; the mean wind is over the hours "
-           "read. An hour whose analysis file never landed still adds its precipitation, which NOAA publishes "
+           "midnight, the same count. Complete means every analysis of the day counts; the mean wind is over the "
+           "hours that count. An hour whose analysis file never landed still adds its precipitation, which NOAA publishes "
            "as a separate file.",
     "high": "The highest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
             "Yes when the value is at or above the strike.",
@@ -278,16 +295,17 @@ CONVENTIONS = {
     "strike": "A value equal to the strike resolves Yes, at or above it for the high, gust, mean wind and "
               "precipitation and at or below it for the low (owner's decision 2026-09-28). The exchange's "
               "current daily temperature and wind contracts resolve a value equal to the strike No.",
-    "provisional": "RTMA resolves, precipitation included (owner's decision 2026-09-29). An RTMA day is final "
-                   "once every hour's analysis file is either in or not published, and its value is the hours "
-                   "available, so a missing file does not hold the day open; its precipitation resolves the same "
-                   "way, the last file being the accumulation that ends at midnight. NOAA never revises an RTMA "
-                   "file, so a final value never changes, and an hour that turns up later is shown and not counted.",
-    "closed": "A day that has not resolved 48 hours after its local end (its files never came) is closed. Its "
-              "value stands on the hours read, it is never marked final, and the count is shown.",
+    "provisional": "RTMA resolves, precipitation included (owner's decision 2026-09-29). A place-day is final at "
+                   "its cut-off, 12:45 AM local time on the day after (owner's ruling 2026-10-14), on the files "
+                   "published on NOAA Open Data or NOMADS by then, and provisional until then. A file published "
+                   "after the cut-off is shown and never counted, the first published version of a file counts, "
+                   "and an hour missing at the cut-off leaves the value on the hours available.",
+    "review": "A place-day with no hour published by its cut-off has no value and is marked for event review, "
+              "as the draft terms provide.",
     "missing": "A file NOAA Open Data does not have half an hour after the product usually lands is read from "
-               "NCEP's NOMADS server, which keeps fourteen days, and a file on NOMADS counts as published. A file "
-               "on neither by then is not published, and the day resolves on the hours available.",
+               "NCEP's NOMADS server, a precipitation file 27 minutes after its hour ends, and a file on NOMADS "
+               "counts as published. A file's publication time is its Last-Modified time on the server it was "
+               "read from.",
     "hourly": "Each row is the analysis at the top of the hour and the precipitation over the hour that starts "
               "then, which NOAA files under the hour it ends. Station report conventions (the last report in "
               "the hour, specials, the tenths group) have no analogue here.",
@@ -499,32 +517,54 @@ def local_day_of(t: dt.datetime, tz: str) -> str:
     return t.astimezone(ZoneInfo(tz)).date().isoformat()
 
 
+def review_entry(day_iso: str, tz: str) -> dict:
+    """The product-day of a place with no hour read by its cut-off: no value,
+    and marked for event review, the precipitation too."""
+    return {"hours": 0, "of": len(local_day_hours(day_iso, tz)), "complete": False, "high": None, "low": None,
+            "gust": None, "wind": None, "final": False, "finalAt": None, "review": True, "closed": False,
+            "precip": {"value": None, "exact": None, "hours": 0, "resolved": False, "resolvedAt": None,
+                       "review": True}}
+
+
+def day_cutoff(day_iso: str, tz: str) -> dt.datetime:
+    """A place-day's cut-off: 12:45 AM local time on the day after (owner's
+    ruling 2026-10-14, the draft terms). Clocks do not change between midnight
+    and 12:45 AM in the lane's zones, so it is the day's end plus 45 minutes."""
+    return day_end(day_iso, tz) + CUTOFF_AFTER_DAY
+
+
+def _in_time(published: Optional[str], cutoff_iso: str) -> bool:
+    """Whether a file published at `published` counts for a day with this
+    cut-off (both UTC ISO strings, which compare in time order). A document
+    read before 2026-10-14 carries no publication time and counts: its day
+    resolved under the earlier rule."""
+    return published is None or published <= cutoff_iso
+
+
 def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, prior: Optional[dict] = None,
                 missing: Optional[set] = None, pmissing: Optional[set] = None) -> Optional[dict]:
     """One product-day at a place, from its exact hourly values.
 
     product_hours maps the hour's UTC ISO string to {temp, wind, gust, precip}
-    exact values (None where the product had no value at that hour). An hour
-    is read when it has an entry, except that an entry with `anl` False is an
-    hour whose analysis file never landed: it carries only its precipitation
-    and adds to the day's total, never to the count of analyses read that
-    makes the day complete. The result is the contract's
-    product-day shape, or None when no hour of the day has been read.
-    `prior` is the summary published before, whose final values and
-    resolved precipitation stand once set.
+    exact values (None where the product had no value at that hour), with
+    `pub` and `pcpPub`, the publication times of the analysis and the
+    precipitation file. An entry with `anl` False is an hour whose analysis
+    file never landed: it carries only its precipitation. The result is the
+    contract's product-day shape, or None when no hour of the day has been
+    read (build_day gives such a place its review entry at the cut-off).
 
-    A day is final (owner's decision 2026-09-29)
-    once every hour's analysis is either read or known not published
-    (`missing`, the ISO hours of the day on neither NOAA Open Data nor
-    NOMADS once due), and its value is then the hours available: a missing
-    file does not hold the day open. Its precipitation resolves the same
-    way over the rows' accumulations (`pmissing`, the rows whose file is
-    not published; a row read with no value at the place counts as read).
-    Once final the published values stand, so an hour that turns up later
-    is shown and not counted. Without `missing` the day is final only when
-    complete, which is how a caller with no record of the absences is
-    treated."""
+    The day is final at its cut-off (owner's ruling 2026-10-14) on the hours
+    whose files were published by then: an analysis counts when its file was,
+    an accumulation when its file was and holds a value at the place. A file
+    published later never counts, so the summary comes out the same whenever
+    it is rebuilt. Before the cut-off the values run over the hours read. A
+    place-day with no analysis that counts at the cut-off has no value and
+    goes to event review (`review`), and one with no accumulation that counts
+    has `precip.review`. `prior`, `missing` and `pmissing` are accepted from
+    callers that still pass them and are no longer used."""
     hours = local_day_hours(day_iso, tz)
+    cut_iso = _iso(day_cutoff(day_iso, tz))
+    at_cutoff = now >= day_cutoff(day_iso, tz)
     read = []
     for h in hours:
         rec = product_hours.get(_iso(h))
@@ -532,12 +572,15 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
             read.append((h, rec))
     if not read:
         return None
-    n = sum(1 for _, rec in read if rec.get("anl", True))
+    anl_rows = [(h, rec) for h, rec in read if rec.get("anl", True) and _in_time(rec.get("pub"), cut_iso)]
+    pcp_rows = [(h, rec) for h, rec in read
+                if rec.get("precip") is not None and _in_time(rec.get("pcpPub"), cut_iso)]
+    n = len(anl_rows)
     expected = len(hours)
     complete = n == expected
 
     def series(var):
-        return [(h, _dec(rec[var])) for h, rec in read if rec.get(var) is not None]
+        return [(h, _dec(rec[var])) for h, rec in anl_rows if rec.get(var) is not None]
 
     def extreme(var, daily, pick):
         s = series(var)
@@ -552,7 +595,7 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
         return {"value": half_up(v, DAY_UNIT[daily]), "exact": cut(v, EXACT_UNIT[daily]), "at": _iso(at)}
 
     winds = series("wind")
-    precip = series("precip")
+    precip = [(h, _dec(rec["precip"])) for h, rec in pcp_rows]
     out: dict = {"hours": n, "of": expected, "complete": complete}
     out["high"] = extreme("temp", "high", max)
     out["low"] = extreme("temp", "low", min)
@@ -564,39 +607,21 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
         out["wind"] = {"value": half_up(mean, DAY_UNIT["wind"]), "exact": cut(mean, EXACT_UNIT["wind"])}
     else:
         out["wind"] = None
+    final = at_cutoff and n > 0
+    out["final"] = final
+    out["finalAt"] = cut_iso if final else None
+    out["review"] = at_cutoff and n == 0
+    # the closed state ended with the cut-off rule: every day is final or in review at its cut-off
+    out["closed"] = False
     if precip:
         total = sum(v for _, v in precip)
         out["precip"] = {"value": half_up(total, DAY_UNIT["precip"]), "exact": cut(total, EXACT_UNIT["precip"]),
-                         "hours": len(precip)}
+                         "hours": len(precip), "resolved": at_cutoff, "resolvedAt": cut_iso if at_cutoff else None}
+    elif at_cutoff:
+        out["precip"] = {"value": None, "exact": None, "hours": 0, "resolved": False, "resolvedAt": None,
+                         "review": True}
     else:
         out["precip"] = None
-    was = prior or {}
-    anl_read = {_iso(h) for h, rec in read if rec.get("anl", True)}
-    if missing is None:
-        settled = complete
-    else:
-        settled = all(_iso(h) in anl_read or _iso(h) in missing for h in hours)
-    if was.get("final"):
-        # final values stand: an hour that turned up after is not counted
-        for k in ("hours", "complete", "high", "low", "gust", "wind"):
-            out[k] = was.get(k)
-        out["final"], out["finalAt"] = True, was.get("finalAt")
-    else:
-        out["final"] = settled
-        out["finalAt"] = _iso(now) if settled else None
-    pcp_read = {_iso(h) for h, rec in read if rec.get("precip") is not None or rec.get("pcpRead")}
-    if pmissing is None:
-        pcp_settled = len(precip) == expected
-    else:
-        pcp_settled = all(_iso(h) in pcp_read or _iso(h) in pmissing for h in hours)
-    pw = was.get("precip") or {}
-    if pw.get("resolved"):
-        # NOAA never revises an RTMA precipitation file; the resolved total stands
-        out["precip"] = {k: v for k, v in pw.items() if k != "revised"}
-    elif out["precip"] is not None:
-        out["precip"].update({"resolved": pcp_settled, "resolvedAt": _iso(now) if pcp_settled else None})
-    # a day that never resolved: its last file did not come within CLOSE_AFTER_HOURS
-    out["closed"] = (not out["final"]) and now >= day_end(day_iso, tz) + dt.timedelta(hours=CLOSE_AFTER_HOURS)
     return out
 
 
@@ -695,8 +720,7 @@ def pcp_url(product: str, t: dt.datetime, nomads: bool = False) -> str:
 
 def settled_after(product: str, t: dt.datetime) -> dt.datetime:
     """Half an hour after hour t's file usually lands: from then a file NOAA
-    Open Data does not have is looked for on NOMADS, and a file on neither
-    is not published."""
+    Open Data does not have is looked for on NOMADS."""
     return t + dt.timedelta(minutes=PRODUCTS[product]["lagMinutes"] + NOMADS_AFTER_MINUTES)
 
 
@@ -706,17 +730,28 @@ def nomads_ok(product: str, t: dt.datetime, now: dt.datetime) -> bool:
     return settled_after(product, t) <= now <= t + dt.timedelta(hours=NOMADS_KEEP_HOURS)
 
 
+def nomads_ok_pcp(product: str, t: dt.datetime, now: dt.datetime) -> bool:
+    """Whether a precipitation file for the hour ending at t that NOAA Open
+    Data does not have is looked for on NOMADS: from PCP_NOMADS_AFTER_MINUTES
+    after the hour ends, so the day's last accumulation is looked for before
+    the cut-off, and while NOMADS still keeps it."""
+    return t + dt.timedelta(minutes=PCP_NOMADS_AFTER_MINUTES) <= now <= t + dt.timedelta(hours=NOMADS_KEEP_HOURS)
+
+
 def absence_final(product: str, t: dt.datetime, now: dt.datetime) -> bool:
     """Whether a file missing from NOAA Open Data (and from NOMADS, which was
     asked if it still keeps the hour) counts as not published, so the day
-    resolves without it (owner's decision 2026-09-29)."""
-    return now >= settled_after(product, t)
+    resolves without it (owner's decisions 2026-09-29 and 2026-10-13): six
+    hours after t, the analysis's valid time or the end of the precipitation
+    file's hour."""
+    return now >= t + dt.timedelta(hours=NOT_PUBLISHED_AFTER_HOURS)
 
 
 def precip_due(product: str, t: dt.datetime) -> dt.datetime:
     """When the lane stops refetching an hour's precipitation file and keeps
-    whatever coverage it has."""
-    return t + dt.timedelta(minutes=PRODUCTS[product]["lagMinutes"], hours=PRECIP_WAIT_HOURS)
+    whatever coverage it has: when a place's value still missing from it is
+    not published, six hours after the hour ends (the filed terms)."""
+    return t + dt.timedelta(hours=NOT_PUBLISHED_AFTER_HOURS)
 
 
 def check_message(msg: bytes, var: str, grid: dict, t: "Optional[dt.datetime]" = None) -> Optional[str]:
@@ -824,10 +859,13 @@ def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict
     grid_name = p["pcpGrid"]
     ks = [loc["cell"][grid_name][2] for loc in locs]
     source = "nodd"
+    meta: dict = {}
     try:
-        raw = gw.fetch_bytes(pcp_url(product, t), tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
-        if raw is None and nomads_ok(product, t, now):
-            raw = gw.fetch_bytes(pcp_url(product, t, nomads=True), tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+        raw = gw.fetch_bytes(pcp_url(product, t), tries=FETCH_TRIES, timeout=FETCH_TIMEOUT, meta=meta)
+        if raw is None and nomads_ok_pcp(product, t, now):
+            meta = {}
+            raw = gw.fetch_bytes(pcp_url(product, t, nomads=True), tries=FETCH_TRIES, timeout=FETCH_TIMEOUT,
+                                 meta=meta)
             source = "nomads"
         if raw is None:
             return HourResult("absent")
@@ -843,6 +881,8 @@ def read_precip(product: str, t: dt.datetime, locs: list, lattice: Optional[dict
     values = {loc["id"]: (None if v is None else round(float(v), RAW_DIGITS["precip"])) for loc, v in zip(locs, cells)}
     doc = precip_doc(product, t, values, now, read=True)
     doc["source"] = source
+    # when the server says the file was written: the cut-off is judged on it
+    doc["published"] = meta.get("lastModified")
     if lattice is None:
         return HourResult("ok", doc=doc)
     return HourResult("ok", doc=doc, frames={"precip": frame},
@@ -881,6 +921,7 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
     # serves the three messages
     wins = [window_indices(loc["cell"]["wexp"], _grid("wexp")) for loc in locs] if frames else None
     source = "nodd"
+    meta: dict = {}
     try:
         url = anl_url(product, t)
         idx_raw = gw.fetch_bytes(url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
@@ -903,7 +944,7 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
                 # the last message of the file: the sidecar cannot give its
                 # end, and fetch_range accepts the clamped 206 S3 answers
                 end = e["start"] + MAX_MESSAGE_BYTES
-            msg = gw.fetch_range(url, e["start"], end, tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+            msg = gw.fetch_range(url, e["start"], end, tries=FETCH_TRIES, timeout=FETCH_TIMEOUT, meta=meta)
             if msg is None:
                 return HourResult("error", error=f"{name} message missing")
             why = check_message(msg, var, _grid("wexp"), t)
@@ -924,7 +965,7 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
         out_frames["precip"] = (prec.frames or {}).get("precip") if prec.status == "ok" else None
         out_windows["precip"] = (prec.windows or {}).get("precip") if prec.status == "ok" else None
     doc = {"schema": SCHEMA, "product": product, "valid": _iso(t), "written": _iso(now), "source": source,
-           "values": values}
+           "published": meta.get("lastModified"), "values": values}
     return HourResult("ok", doc=doc, frames=out_frames if frames else None,
                       precip=prec.doc if prec.status == "ok" else None,
                       precip_error=prec.error if prec.status == "error" else None,
@@ -1005,6 +1046,14 @@ def merge_precip(old: Optional[dict], new: dict) -> dict:
     without a value take the new read's."""
     if old is None:
         return new
+    # the first published version of a file counts (owner's ruling
+    # 2026-10-14): a read of the same server's file written at another time
+    # is a replacement, and adds nothing beyond the note that it was seen
+    if (old.get("published") and new.get("published") and old.get("source") == new.get("source")
+            and new["published"] != old["published"]):
+        out = dict(old)
+        out["replaced"] = new["published"]
+        return out
     values = dict(old.get("values") or {})
     for lid, v in (new.get("values") or {}).items():
         if values.get(lid) is None and v is not None:
@@ -1022,7 +1071,8 @@ def write_precip(store: Storage, product: str, t: dt.datetime, pdoc: dict, cache
     document changed, which is when the days it touches need rebuilding."""
     old = get_precip(store, product, t, cache)
     merged = merge_precip(old, pdoc)
-    changed = old is None or merged.get("values") != old.get("values") or merged.get("read") != old.get("read")
+    changed = (old is None or merged.get("values") != old.get("values") or merged.get("read") != old.get("read")
+               or merged.get("replaced") != old.get("replaced"))
     if changed:
         store.put(precip_key(product, t), _gz(merged), "application/gzip")
     cache[("precip", product, _iso(t))] = merged
@@ -1114,8 +1164,6 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
     places in `only` (all of them when None), from the archive hours. With
     `raw`, the day's rows in the files' own units are appended to it for the
     raw CSV."""
-    prior = _read_json(store, DAY_KEY.format(day=day_iso)) or {}
-    prior_locs = prior.get("locations") or {}
     day_doc: dict = {"schema": SCHEMA, "day": day_iso, "asof": None, "written": _iso(now), "locations": {}}
     loc_docs: dict = {}
     asof = None
@@ -1124,16 +1172,10 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
         hours = local_day_hours(day_iso, tz)
         entry: dict = {}
         rows = [{"local": hour_label(h, tz), "t": _iso(h)} for h in hours]
+        cut_iso = _iso(day_cutoff(day_iso, tz))
         for product in PRODUCTS:
             product_hours = {}
             latest = expected_latest(product, now)
-            ps = (state.get("products") or {}).get(product) or {}
-            not_pub, pcp_not_pub = set(ps.get("missing") or []), set(ps.get("pmissing") or [])
-            day_missing = {_iso(h) for h in hours if _iso(h) in not_pub}
-            day_pmissing = {_iso(h) for h in hours if _iso(h + dt.timedelta(hours=1)) in pcp_not_pub}
-            was = (prior_locs.get(lid) or {}).get(product)
-            final_at = (was or {}).get("finalAt") if (was or {}).get("final") else None
-            pcp_at = ((was or {}).get("precip") or {}).get("resolvedAt") if ((was or {}).get("precip") or {}).get("resolved") else None
             for h, row in zip(hours, rows):
                 # each row is the analysis at the top of the hour and the
                 # precipitation over the hour that starts then, which NOAA
@@ -1154,23 +1196,26 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 rec["anl"] = va is not None
                 # the file was read and had no value at the place: read, not pending
                 rec["pcpRead"] = pre is not None
+                # when each file was published, which the day's cut-off is judged on
+                rec["pub"] = (anl or {}).get("published") if va is not None else None
+                rec["pcpPub"] = (pre or {}).get("published") if pre is not None else None
                 product_hours[_iso(h)] = rec
                 # the hourly values in the contract's units, cut to a
                 # thousandth (precipitation a ten-thousandth of an inch)
                 row[product] = {var: cut(rec[var], HOUR_SHOW[var]) for var in HOURLY_VARS}
-                # a file written after the day resolved is shown and not counted
-                if final_at and va is not None and (anl or {}).get("written", "") > final_at:
+                # a file published after the day's cut-off is shown and never counted
+                if va is not None and not _in_time(rec["pub"], cut_iso):
                     row[product]["late"] = True
-                if pcp_at and vp is not None and (pre or {}).get("written", "") > pcp_at:
+                if vp is not None and not _in_time(rec["pcpPub"], cut_iso):
                     row[product]["pcpLate"] = True
                 if raw is not None and product == SETTLE:
                     raw.append([day_iso, lid, hour_label(h, tz), _iso(h),
                                 (va or {}).get("temp"), (va or {}).get("wind"), (va or {}).get("gust"),
                                 vp, _iso(end), (anl or {}).get("source") if va is not None else None,
-                                (pre or {}).get("source") if pre is not None else None])
+                                (pre or {}).get("source") if pre is not None else None, rec["pub"], rec["pcpPub"]])
                 if asof is None or h > asof:
                     asof = h
-            s = day_summary(product_hours, tz, day_iso, now, prior=was, missing=day_missing, pmissing=day_pmissing)
+            s = day_summary(product_hours, tz, day_iso, now)
             if s is not None:
                 entry[product] = s
         if not entry:
@@ -1180,6 +1225,23 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
             loc_asof = max((r["t"] for r in rows if any(r.get(p) for p in PRODUCTS)), default=None)
             loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "asof": loc_asof,
                              "written": _iso(now), "hours": rows, "summary": entry}
+    # a place with no hour read by its cut-off goes to event review, on a day
+    # the lane has hours for at other places; a day with nothing read anywhere
+    # is not written at all
+    if day_doc["locations"]:
+        for loc in locs:
+            lid, tz = loc["id"], loc["tz"]
+            if lid in day_doc["locations"] or now < day_cutoff(day_iso, tz):
+                continue
+            entry = {product: review_entry(day_iso, tz) for product in PRODUCTS}
+            day_doc["locations"][lid] = entry
+            if only is None or lid in only:
+                rows = [{"local": hour_label(h, tz), "t": _iso(h)} for h in local_day_hours(day_iso, tz)]
+                for r in rows:
+                    for product in PRODUCTS:
+                        r[product] = None
+                loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "asof": None,
+                                 "written": _iso(now), "hours": rows, "summary": entry}
     day_doc["asof"] = _iso(asof) if asof else None
     return day_doc, loc_docs
 
@@ -1194,11 +1256,13 @@ def day_status(day_doc: dict, locs: list) -> dict:
     else, so a day is never called resolved on the places that happen to
     have landed."""
     entries = (day_doc or {}).get("locations") or {}
-    out = {"places": len(locs), "final": 0, "resolved": 0, "closed": 0}
+    out = {"places": len(locs), "final": 0, "resolved": 0, "closed": 0, "review": 0}
     for loc in locs:
         u = (entries.get(loc["id"]) or {}).get(SETTLE) or {}
         if u.get("closed"):
             out["closed"] += 1
+        if u.get("review"):
+            out["review"] += 1
         if u.get("final"):
             out["final"] += 1
             if (u.get("precip") or {}).get("resolved"):
@@ -1241,10 +1305,12 @@ def last_resolved_day(state: dict, days: list) -> Optional[str]:
 
 
 RAW_HEADER = ["date", "location", "local_hour", "valid_utc", "temp_k", "wind_ms", "gust_ms",
-              "precip_mm", "precip_file_utc", "analysis_source", "precip_source"]
+              "precip_mm", "precip_file_utc", "analysis_source", "precip_source", "analysis_published",
+              "precip_published"]
 DAY_HEADER = ["date", "location", "name", "state", "final", "final_at", "hours", "of",
               "high_f", "high_exact", "low_f", "low_exact", "gust_mph", "gust_exact", "wind_mph", "wind_exact",
-              "precip_in", "precip_exact", "precip_hours", "precip_resolved", "precip_resolved_at"]
+              "precip_in", "precip_exact", "precip_hours", "precip_resolved", "precip_resolved_at", "review",
+              "precip_review"]
 
 
 def _csv(rows: list, header: list) -> bytes:
@@ -1279,7 +1345,7 @@ def processed_csv(day_iso: str, day_doc: dict, locs: list) -> bytes:
                      e.get("hours"), e.get("of"), g("high", "value"), g("high", "exact"), g("low", "value"),
                      g("low", "exact"), g("gust", "value"), g("gust", "exact"), g("wind", "value"),
                      g("wind", "exact"), p.get("value"), p.get("exact"), p.get("hours"), p.get("resolved"),
-                     p.get("resolvedAt")])
+                     p.get("resolvedAt"), bool(e.get("review")), bool(p.get("review"))])
     return _csv(rows, DAY_HEADER)
 
 
@@ -1342,29 +1408,24 @@ def rebuild_days(store: Storage, touched: set, locs: list, cache: dict, now: dt.
     return written
 
 
-def days_to_close(store: Storage, locs: list, now: dt.datetime) -> set:
-    """(location, day) pairs of recent days that are still open on the page
-    but have passed their close time, so a day nobody adds an hour to still
-    gets marked closed."""
+def days_past_cutoff(store: Storage, locs: list, now: dt.datetime) -> set:
+    """(location, day) pairs of recent days whose cut-off has passed while
+    their published summary is still provisional, or absent, so a day nobody
+    adds an hour to still turns final, or goes to event review, at its
+    cut-off."""
     out = set()
-    zones = sorted({loc["tz"] for loc in locs})
     days = set()
-    for tz in zones:
-        for back in range(1, int(CLOSE_AFTER_HOURS // 24) + 3):
+    for tz in sorted({loc["tz"] for loc in locs}):
+        for back in range(0, 3):
             days.add(local_day_of(now - dt.timedelta(days=back), tz))
     for day_iso in sorted(days):
-        doc = _read_json(store, DAY_KEY.format(day=day_iso))
-        if not doc:
-            continue
-        for lid, entry in (doc.get("locations") or {}).items():
-            loc = next((l for l in locs if l["id"] == lid), None)
-            if loc is None:
+        entries = (_read_json(store, DAY_KEY.format(day=day_iso)) or {}).get("locations") or {}
+        for loc in locs:
+            if now < day_cutoff(day_iso, loc["tz"]):
                 continue
-            for product, s in entry.items():
-                if s.get("complete") or s.get("closed"):
-                    continue
-                if now >= day_end(day_iso, loc["tz"]) + dt.timedelta(hours=CLOSE_AFTER_HOURS):
-                    out.add((lid, day_iso))
+            s = (entries.get(loc["id"]) or {}).get(SETTLE)
+            if s is None or not (s.get("final") or s.get("review")):
+                out.add((loc["id"], day_iso))
     return out
 
 
@@ -2035,7 +2096,7 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"{product} live lane: {type(e).__name__}: {e}")
         try:
-            touched |= days_to_close(store, locs, now)
+            touched |= days_past_cutoff(store, locs, now)
         except Exception as e:  # noqa: BLE001
             _fail(status, f"days to close: {type(e).__name__}: {e}")
         status["days"] += rebuild_days(store, touched, locs, cache, now, state)

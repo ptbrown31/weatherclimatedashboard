@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Weather prediction markets, station by station</title>
-<meta name="description" content="Live ForecastEx weather prediction market prices at every listed US temperature station, each dot showing the market-implied median against the National Weather Service forecast for the day.">
+<meta name="description" content="Live ForecastEx weather prediction market prices at every listed US temperature station, each dot carrying the ForecastEx value for the day over the National Weather Service's forecast.">
 <!-- Search Console ownership, verified against the home page. The token is
      public by design, it is served to every visitor, and the property stays
      verified only while it is here. -->
@@ -17,8 +17,8 @@
 <div class="wrap">
 <h1 id="mapTitle">US daily temperature stations</h1>
 <p class="cap" style="margin:0 0 8px">Weather prediction markets on the daily high and low temperature at 37
-contract weather stations. Market-implied medians against the National Weather Service forecast, station
-observations and forecast accuracy.</p>
+contract weather stations. ForecastEx values over the National Weather Service forecast, station observations
+and forecast accuracy.</p>
 <div class="bar modegrid">
   <div class="mgcol"><span class="mgh">Today</span>
     <button id="m1">Highs</button>
@@ -31,8 +31,8 @@ observations and forecast accuracy.</p>
   <span id="pageStatus"></span>
 </div>
 <div class="card"><svg id="map" viewBox="0 0 960 600"></svg></div>
-<div class="key" id="legend"></div>
-<p class="cap" id="dotKey" style="margin:8px 0 10px"><span class="chip" style="background:var(--warm)"></span>running warmer <span class="chip" style="background:var(--cool)"></span>running cooler</p>
+<div class="maplegend" id="legend"><div class="lgrow" id="legendDots"></div><div class="lgfield" id="legendField"></div></div>
+<div id="conusLoop" hidden></div>
 <div class="pickttl" style="margin-top:14px">INTERNATIONAL STATIONS AND HONOLULU</div>
 <div class="card"><svg id="mapW" viewBox="0 60 960 320"></svg></div>
 <div class="secttl" style="margin-top:26px">FORECAST SCORECARD</div>

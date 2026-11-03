@@ -1,336 +1,169 @@
-/* The scorecard grid.
+/* The scorecard: the working paper's Tables 3 and 4.
 
-   One HTML table with a row per system, grouped and ordered as the forecast
-   systems table at the foot of the page is. Both take that grouping from the
-   one registry, config/forecast_systems.json, so a change there moves both.
+   Table 3 is one row per series, grouped as the paper groups them, at the six leads of its tables,
+   30, 18 and 12 hours before the end of the target day and 18, 12 and 6 hours before the report that
+   set the day's extreme. Each cell is the series' mean absolute error with the ForecastEx prediction
+   market's percent improvement over it in brackets, in bold where the improvement holds after Holm's
+   adjustment across the series. A group's row is the mean over its systems, each on its first series,
+   and the groups and the series inside them are ordered by error at 18 hours before the end of the day.
+   Table 4 is the CRPS of the market and the four calibrated ensembles on the contracts all five share.
 
-   Three leads, 30, 18 and 12 hours before the end of the target day. Under
-   each, the mean absolute error on the high and on the low, then the mean
-   error on the high and on the low, every value with its sample printed
-   small. Every system that publishes a distribution (the ForecastEx
-   prediction market's ladder and the four ensembles) carries its CRPS under
-   each error cell, footnoted, because a distribution says more than its
-   centre does. The three ensembles with no single-run row of their own are
-   rows here, scored on the centre of their ensemble over the hours left in
-   the day.
-
-   The shading on the high-error cell is the skill score against the National
-   Weather Service row on the same city-days, per lead, so a column is read on
-   its own scale. A cell whose interval covered zero, or whose sample is under
-   30 city-days, is left grey. Each pair is compared on the days the two
-   share, so a row's own span never has to match another's.
-
-   draw(D) receives the bundle WXAcc.init assembles and reads D.grid; a
-   caller passing the grid file itself as the first argument is accepted. */
+   draw(D) receives the bundle WXAcc.init assembles and reads D.grid. Nothing here is computed. */
 window.WXAccGrid = (() => {
   const { h, $ } = WXC;
   const A = () => window.WXAcc;
 
-  // the leads the builder scores, in the order they are read
-  const LEADS_DEFAULT = [30, 18, 12];
-  const MIN_N = 30;
-  // the four columns under each lead: the metric, the side, and the cell field
-  const COLS = [
-    { group: 'MAE', side: 'High', key: 'maeHigh', n: 'n', fmt: 'f2', title: 'Mean absolute error on the daily high, °F' },
-    { group: 'MAE', side: 'Low', key: 'maeLow', n: 'nLow', fmt: 'f2', title: 'Mean absolute error on the daily low, °F' },
-    { group: 'Mean error', side: 'High', key: 'meHigh', n: 'n', fmt: 'signed2', title: 'Mean error on the daily high, °F, positive when the system ran warm' },
-    { group: 'Mean error', side: 'Low', key: 'meLow', n: 'nLow', fmt: 'signed2', title: 'Mean error on the daily low, °F, positive when the system ran warm' },
-  ];
-
   const COHORTS = [
-    { key: 'own', label: 'Every day on record', title: 'Every city-day the ForecastEx prediction market priced at that hour, each system scored on the ones its own record covers' },
-    { key: 'fixed30', label: 'Fixed sample', title: 'Only the city-days the ForecastEx prediction market priced at every hour from 30 to 0' },
+    { key: 'all', label: 'Every day on record', title: 'Every city-day the ForecastEx prediction market priced at that hour, each series scored on the ones its own record covers' },
+    { key: 'balanced', label: 'Balanced sample', title: 'Only the city-days on which every series holds a value at every lead from 1 to 30 hours before the end of the day' },
   ];
-  // Own target is the default: each system against the observation it is built
-  // to predict, which differs from the settle only for the National Weather
-  // Service forecast (docs/accuracy.md)
-  const FRAMES = [
-    { key: 'target', label: 'Own target', title: 'Each system scored against the observation it is built to predict: the METAR settle for all but the National Weather Service forecast, which is scored against its climate report on the days the report puts the extreme inside the forecast’s window' },
-    { key: 'metar', label: 'METAR settle', title: 'Every system, the National Weather Service forecast included, scored against the station’s METAR settle, the truth the ForecastEx prediction market pays on' },
-    { key: 'cli', label: 'NWS climate report', title: 'Alternative forecast systems scored against the National Weather Service climate report for the same date; the ForecastEx prediction market keeps the settle it pays on' },
+  const VALUES = [
+    { key: 'corrected', label: 'Bias-corrected', title: 'The grid-box series with their trailing station offset removed' },
+    { key: 'issued', label: 'As issued', title: 'Every series as issued, without the station bias correction' },
   ];
-  /* Each exclusion the builder counts, as a reader reads it. The count is of
-     what the builder counted for that reason, and a ladder is one city-day on
-     one of highs or lows; a reason whose count is not a number of things
-     worth printing is given by its dates alone. */
-  // the systems that issue a daily extreme of their own and are scored against the climate report
-  const OWN_MAX = ['NDFD', 'GFS_MOS', 'NAM_MOS', 'NBS_MOS'];
+  const LEADS = ['30 h', '18 h', '12 h', '18 h', '12 h', '6 h'];
+  /* Each exclusion the builder counts, as a reader reads it. */
   const REASON = {
     backfill_rows: e => int(e.count) + ' forecast rows recorded after the fact rather than when they were available',
-    ecmwf_ifs_lag_rows: e => int(e.count) + ' European Ensemble Mean forecasts recorded under five hours after their run',
-    no_settlement: e => int(e.count) + ' city-days with no settlement value to score against',
-    no_market_median: e => int(e.count) + ' city-days whose ladder never crossed 50 cents inside its strikes, so the market has no median',
-    quarantined_settle: e => int(e.count) + ' settle' + (e.count === 1 ? '' : 's') + ' set aside after review',
+    ecmwf_ifs_lag_rows: e => int(e.count) + ' ECMWF ensemble-mean forecasts recorded under five hours after their run',
+    no_settlement: e => int(e.count) + ' city-days with no settlement value',
+    no_market_median: e => int(e.count) + ' city-days with no market central value at any lead',
+    settle_ingest_error: e => int(e.count) + ' city-days at Buckley Field whose recorded settle carries an ingest error',
   };
 
-  // ------------------------------------------------------------- formats
+  const state = { metric: 'high', cohort: 'all', values: 'corrected' };
+  let host = null, bar = null, keyEl = null, methodEl = null, grid = null, controlsBuilt = false, valuesGroup = null;
   const fin = v => v != null && isFinite(v);
-  const f2 = v => A().f2(v);
-  // a bias that rounds to zero prints as zero, never as a signed nothing
-  const signed2 = v => (!fin(v) ? A().dash : Math.abs(v) < 0.005 ? '0.00' : (v > 0 ? '+' : '−') + f2(Math.abs(v)));
-  const FMT = { f2, signed2 };
-  const int = v => A().int(v);
-  // a percent difference with its sign, one decimal, for the tooltip
-  const ssText = v => (!fin(v) ? A().dash : (v > 0 ? '+' : v < 0 ? '−' : '') + A().f1(Math.abs(v)) + '%');
+  const int = n => A().int(n);
 
-  // ------------------------------------------------------------- state
-  let host = null, bar = null, keyEl = null, methodEl = null;
-  let grid = null;
-  const state = { cohort: 'own', frame: 'target' };
-  let controlsBuilt = false;
-
-  // ------------------------------------------------------------- data access
-  const rowsOf = (cohort) => ((grid && grid.cohorts && grid.cohorts[cohort]) || []).filter(r => r && r.id);
-  const cellOf = (row, frame, lead) => {
-    const fr = row.frame && row.frame[frame];
-    return (fr && fr.h && fr.h[String(lead)]) || null;
-  };
-  const leads = () => (grid && Array.isArray(grid.h) && grid.h.length ? grid.h.map(Number) : LEADS_DEFAULT);
-  const metaOf = () => (grid && grid.meta) || {};
-
-  /* The rows in groups, in the registry's order: the same grouping and the
-     same order as the forecast systems table, from the same file. */
-  function groupedRows() {
-    const rows = rowsOf(state.cohort);
-    const byId = {};
-    rows.forEach(r => { byId[r.id] = r; });
-    return A().systemGroups(rows.map(r => r.id)).map(g => ({ title: g.title, rows: g.ids.map(id => byId[id]) }));
+  function cell(c, i, withPi) {
+    if (!c || !fin(c.mae[i])) return '<td class="na">' + A().dash + '</td>';
+    const pi = withPi && fin(c.pi && c.pi[i]) ? ' <span class="pi' + (c.better && c.better[i] ? ' sig' : '') + '">(' + Math.round(c.pi[i]) + '%)</span>' : '';
+    return '<td title="' + int(c.n[i]) + ' city-days">' + A().f2(c.mae[i]) + pi + '</td>';
   }
+  const signed = v => (fin(v) ? (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(2) : A().dash);
 
-  /* Shading. Per lead, the strongest colored cell in the column sets the
-     scale, so one very large difference does not wash out the rest of the
-     column. Positive is better than the National Weather Service row and
-     takes the site's ok token, negative its bad token; the interval rule and
-     the sample rule leave a cell grey. The builder ships the paired
-     difference for highs, so the shading sits on the high-error cell. */
-  function colorable(cell) {
-    return !!cell && fin(cell.ssHigh) && fin(cell.ssLo) && fin(cell.ssHi) && fin(cell.n) && cell.n >= MIN_N;
-  }
-  function columnScale(rows) {
-    const out = {};
-    leads().forEach(L => {
-      let m = 0;
-      rows.forEach(r => { const c = cellOf(r, state.frame, L); if (colorable(c)) m = Math.max(m, Math.abs(c.ssHigh)); });
-      out[L] = m;
-    });
-    return out;
-  }
-  function fillFor(cell, colMax) {
-    if (!colorable(cell)) return { token: 'var(--rule)', opacity: 0.28 };
-    const share = colMax > 0 ? Math.abs(cell.ssHigh) / colMax : 0;
-    return { token: cell.ssHigh >= 0 ? 'var(--ok)' : 'var(--bad)', opacity: 0.12 + 0.5 * share };
-  }
-
-  // a cell carries a CRPS only for a system with a distribution; the key is absent otherwise
-  const hasCrps = cell => !!cell && ('crps' in cell || 'crpsLow' in cell);
-  const CRPS_KEY = { maeHigh: 'crps', maeLow: 'crpsLow' };
-
-  // ------------------------------------------------------------- cells
-  function numCell(value, n, fmt, fill, extra) {
-    const td = h('td', { class: 'acc-grid-c' + (extra && extra.cls ? ' ' + extra.cls : '') });
-    if (fill) td.appendChild(h('span', { class: 'acc-grid-fill', style: 'background:' + fill.token + ';opacity:' + fill.opacity }));
-    td.appendChild(h('span', { class: 'acc-grid-v', text: fmt(value) + (extra && extra.mark ? extra.mark : '') }));
-    td.appendChild(h('span', { class: 'acc-grid-n', text: fin(n) ? 'n ' + int(n) : A().dash }));
-    if (extra && extra.sub) td.appendChild(h('span', { class: 'acc-grid-n', text: extra.sub }));
-    return td;
-  }
-
-  // the tooltip for every cell of one (row, lead) group
-  function tipFor(row, L, cell) {
-    const nm = A().name(row.id);
-    const frameName = state.frame === 'cli' && row.id !== 'FX' ? 'NWS climate report'
-      : state.frame === 'target' && OWN_MAX.includes(row.id) ? 'NWS climate report, inside the forecast’s window' : 'METAR settle';
-    const pairs = [
-      ['Days', COHORTS.find(c => c.key === state.cohort).label],
-      ['Truth', frameName],
-      ['MAE high', cell ? f2(cell.maeHigh) + '°F' : A().dash],
-      ['MAE low', cell ? f2(cell.maeLow) + '°F' : A().dash],
-      ['Mean error high', cell ? signed2(cell.meHigh) + '°F' : A().dash],
-      ['Mean error low', cell ? signed2(cell.meLow) + '°F' : A().dash],
-      ['City-days, highs', cell ? int(cell.n) : A().dash],
-      ['City-days, lows', cell ? int(cell.nLow) : A().dash],
-    ];
-    if (hasCrps(cell)) {
-      pairs.push(['CRPS high', f2(cell.crps) + (fin(cell.crps) ? '°F' : '')]);
-      pairs.push(['CRPS low', f2(cell.crpsLow) + (fin(cell.crpsLow) ? '°F' : '')]);
+  function table3(block, issued) {
+    const S = issued || block.series;
+    const fx = block.series.FX;
+    const head = '<thead><tr><th rowspan="2">Series</th><th colspan="3">Hours before the end of the day</th>'
+      + '<th colspan="3">Hours before the extreme</th><th rowspan="2" title="Mean error at 18 h before the end of the day, °F, positive when a series runs warm">ME 18 h</th>'
+      + '<th rowspan="2">Offset</th><th rowspan="2">Record since</th></tr><tr>' + LEADS.map(l => '<th>' + l + '</th>').join('') + '</tr></thead>';
+    let body = '';
+    if (fx) {
+      body += '<tr class="acc-g-fx"><td>' + A().swatch('FX') + '</td>' + [0, 1, 2, 3, 4, 5].map(i => cell(fx, i, false)).join('')
+        + '<td>' + signed(fx.me18) + '</td><td>as quoted</td><td>' + since('FX') + '</td></tr>';
     }
-    if (row.id !== 'NDFD' && cell) {
-      pairs.push(['Skill score on the high', ssText(cell.ssHigh)]);
-      pairs.push(['95 percent interval', fin(cell.ssLo) && fin(cell.ssHi)
-        ? ssText(cell.ssLo) + ' to ' + ssText(cell.ssHi)
-        : (cell.n >= MIN_N ? 'covers zero, not colored' : 'under ' + MIN_N + ' city-days')]);
-    }
-    const rs = A().span(metaOf(), row.id, 'high');
-    if (rs) pairs.push(['Record', A().mdyY(rs.start) + ' to ' + A().mdyY(rs.end) + (fin(rs.days) ? ', ' + int(rs.days) + ' days' : '')]);
-    return A().tooltip().rows(nm + ', ' + L + ' h before the day ends', pairs);
-  }
-
-  /* The first day a system was scored on. Every row carries it, in every
-     view, because the depth of a system's own record is not the same thing
-     as the days a sample could use. */
-  function recordSince(row) {
-    const sp = A().span(metaOf(), row.id, 'high');
-    if (!sp) return row.start || A().dash;
-    return A().mdy(sp.start) + (fin(sp.days) ? ' · ' + int(sp.days) + 'd' : '');
-  }
-
-  // ------------------------------------------------------------- table
-  function buildTable(groups) {
-    const L = leads();
-    const allRows = groups.flatMap(g => g.rows);
-    const scale = columnScale(allRows);
-    const width = 2 + L.length * COLS.length;
-    const table = h('table', { class: 'acc-grid-table' });
-    const thead = h('thead');
-    // three header rows: the lead, the metric over its two sides, the side
-    const r1 = h('tr'), r2 = h('tr'), r3 = h('tr');
-    r1.appendChild(h('th', { rowspan: 3, text: 'System' }));
-    r1.appendChild(h('th', { rowspan: 3, class: 'acc-grid-start', text: 'Record since',
-                             title: 'The first day this system was scored on. Systems started at different times, so the rows do not cover the same period.' }));
-    L.forEach(x => {
-      r1.appendChild(h('th', { class: 'acc-grid-g', colspan: COLS.length, text: x + ' h',
-                               title: x + ' hours before the station-local midnight that ends the target day' }));
-      const metrics = [];
-      COLS.forEach(c => { if (!metrics.includes(c.group)) metrics.push(c.group); });
-      metrics.forEach((m, k) => r2.appendChild(h('th', { class: 'acc-grid-m' + (k === 0 ? ' acc-grid-first' : ''),
-                                                       colspan: COLS.filter(c => c.group === m).length, text: m })));
-      COLS.forEach((c, i) => r3.appendChild(h('th', { class: 'num' + (i === 0 ? ' acc-grid-first' : '') + (c.side === 'High' && i > 0 ? ' acc-grid-mid' : ''),
-                                                    text: c.side, title: c.title })));
-    });
-    thead.appendChild(r1); thead.appendChild(r2); thead.appendChild(r3);
-    table.appendChild(thead);
-
-    const tbody = h('tbody');
-    groups.forEach(g => {
-      tbody.appendChild(h('tr', { class: 'acc-grid-grp' }, [h('th', { colspan: width, text: g.title })]));
-      g.rows.forEach(row => {
-        const tr = h('tr', { class: row.id === 'FX' ? 'acc-grid-fx' : (row.id === 'NDFD' ? 'acc-grid-ref' : '') });
-        const nameTd = h('td', { class: 'acc-grid-sys' });
-        nameTd.appendChild(h('span', { class: 'acc-grid-sw', style: 'background:' + A().color(row.id) }));
-        nameTd.appendChild(document.createTextNode(A().name(row.id)));
-        if (row.id === 'NDFD') nameTd.appendChild(h('span', { class: 'acc-grid-n', text: 'reference row' }));
-        tr.appendChild(nameTd);
-        tr.appendChild(h('td', { class: 'acc-grid-start', text: recordSince(row) }));
-        L.forEach(x => {
-          const cell = cellOf(row, state.frame, x);
-          COLS.forEach((c, i) => {
-            const ck = hasCrps(cell) ? CRPS_KEY[c.key] : null;
-            const td = numCell(cell && cell[c.key], cell && cell[c.n], FMT[c.fmt],
-              c.key === 'maeHigh' && row.id !== 'NDFD' ? fillFor(cell, scale[x]) : null,
-              { cls: i === 0 ? 'acc-grid-first' : (c.side === 'High' ? 'acc-grid-mid' : ''),
-                mark: ck ? '†' : '', sub: ck ? 'CRPS ' + f2(cell[ck]) : null });
-            A().hover(td, () => tipFor(row, x, cell));
-            tr.appendChild(td);
-          });
-        });
-        tbody.appendChild(tr);
+    // the groups, in the order the file gives them (by the 18 h mean of their systems)
+    (block.groups || []).forEach(g => {
+      body += '<tr class="acc-g-group"><td>' + g.title + '</td>' + g.mean.map(v => '<td>' + (fin(v) ? A().f2(v) : A().dash) + '</td>').join('')
+        + '<td colspan="3"></td></tr>';
+      g.series.forEach(id => {
+        const c = S[id];
+        if (!c) return;
+        const corrected = (A().INFO[id] || {}).corrected;
+        body += '<tr><td><span class="acc-g-name">' + A().swatch(id) + '</span><span class="acc-g-qual">' + A().qual(id) + '</span></td>'
+          + [0, 1, 2, 3, 4, 5].map(i => cell(c, i, true)).join('')
+          + '<td>' + signed(c.me18) + '</td><td>' + (issued ? 'as issued' : corrected ? 'corrected' : 'as issued') + '</td><td>' + since(id) + '</td></tr>';
       });
     });
-    table.appendChild(tbody);
-    return table;
+    return '<table class="acc-grid acc-t3">' + head + '<tbody>' + body + '</tbody></table>';
   }
 
-  // ------------------------------------------------------------- render
+  function table4(block) {
+    const cr = block.crps;
+    if (!cr || !cr.series || !cr.series.FX) return '';
+    const NAMES = { AIFS: 'ECMWF AIFS ensemble', GEFS: 'NOAA GEFS', GEM: 'ECCC GEPS', ICON: 'DWD ICON-EPS' };
+    const head = '<thead><tr><th rowspan="2">System</th><th colspan="3">Hours before the end of the day</th><th colspan="3">Hours before the extreme</th></tr><tr>'
+      + LEADS.map(l => '<th>' + l + '</th>').join('') + '</tr></thead>';
+    let body = '<tr class="acc-g-fx"><td>' + A().swatch('FX') + '</td>' + [0, 1, 2, 3, 4, 5].map(i => cell(cr.series.FX, i, false)).join('') + '</tr>';
+    (cr.order || []).forEach(k => {
+      const c = cr.series[k];
+      if (c) body += '<tr><td>' + NAMES[k] + '</td>' + [0, 1, 2, 3, 4, 5].map(i => cell(c, i, true)).join('') + '</tr>';
+    });
+    return '<div class="accsub">CRPS, °F, the ensembles calibrated by EMOS, on the contracts all five share</div>'
+      + '<table class="acc-grid acc-t4">' + head + '<tbody>' + body + '</tbody></table>';
+  }
+
+  function since(id) {
+    const sp = A().span(grid.meta, id, state.metric);
+    return sp && sp.start ? A().mdyY(sp.start) : A().dash;
+  }
+
   function render() {
-    if (!host) return;
-    host.innerHTML = '';
-    if (!grid) { A().notYet(host, A().NOT_PUBLISHED); return; }
-    const groups = groupedRows();
-    if (!groups.length) { A().notYet(host, 'The builder shipped no rows for this view.'); renderKey(); renderMethod(); return; }
-    host.appendChild(h('div', { class: 'acc-grid-foot acc-grid-top', text: 'Lead in hours before the station-local midnight that ends the target day. Each cell prints its value and its sample of city-days. Rows are grouped and ordered as in the forecast systems table at the foot of the page.' }));
-    host.appendChild(h('div', { class: 'acc-grid-scroll' }, [buildTable(groups)]));
-    const foot = ['† CRPS in degrees for every system that publishes a distribution, the ForecastEx prediction market’s ladder and each ensemble’s normal curve read at the same strikes at the same hour. It is scored against the same truth as the cell, on the cell’s city-days that the distribution covers.',
-                  'The American, Canadian and German ensemble rows score the ensemble’s centre, the highest (for a low, the lowest) hourly ensemble mean over the hours left in the day, held at the running observed extreme like every other value.'];
-    if (state.frame === 'target') foot.push('Each system is scored against the observation it is built to predict. That is the METAR settle for every row but the National Weather Service, whose forecast is a daytime high for 7 AM to 7 PM and an overnight low for 7 PM to 8 AM local standard time. It is scored against the Service’s climate report on the city-days whose report puts the extreme inside that window, and the skill scores are measured against it there.');
-    if (state.frame === 'cli') foot.push('In the climate-report frame every alternative forecast system is scored against the National Weather Service climate report for the same date and the ForecastEx prediction market keeps the settle it pays on. Buckley Field has no climate report of its own, only Denver’s, so it drops out of that frame.');
-    foot.forEach(t => host.appendChild(h('div', { class: 'acc-grid-foot', text: t })));
-    renderKey();
+    if (valuesGroup) valuesGroup.hidden = state.cohort !== 'all';
+    const met = grid.metric && grid.metric[state.metric];
+    const block = met && met.cohorts && met.cohorts[state.cohort];
+    if (!block || !block.series || !block.series.FX) {
+      A().notYet(host, 'This view is not in the published record.');
+      renderMethod();
+      return;
+    }
+    const issued = state.cohort === 'all' && state.values === 'issued' ? block.issued : null;
+    host.innerHTML = '<div class="accsub">Mean absolute error, °F, with the market’s improvement in brackets</div>'
+      + '<div class="acc-grid-wrap">' + table3(block, issued) + '</div>'
+      + (state.cohort === 'all' ? '<div class="acc-grid-wrap">' + table4(block) + '</div>' : '');
+    if (keyEl) {
+      keyEl.innerHTML = '';
+      keyEl.appendChild(h('span', { class: 'kn', text: 'An improvement in bold holds after Holm’s adjustment across the series. A group’s row is the mean over its systems, each on its first series. Hover a cell for its city-days.' }));
+    }
     renderMethod();
-  }
-
-  /* The sentence in the note saying which days the table drew. Each row's own
-     first scored day is in its Record since column. */
-  function spanFoot() {
-    return 'Record since is each system’s own first scored day, so the rows do not cover the same period. '
-      + A().cohortSpanLine(metaOf(), state.cohort);
-  }
-
-  function renderKey() {
-    if (!keyEl) return;
-    keyEl.innerHTML = '';
-    const item = (token, opacity, text) => {
-      const s = h('span');
-      s.appendChild(h('span', { class: 'acc-grid-sw', style: 'background:' + token + ';opacity:' + opacity }));
-      s.appendChild(document.createTextNode(text));
-      return s;
-    };
-    keyEl.appendChild(item('var(--ok)', 0.55, 'lower high error than the National Weather Service row'));
-    keyEl.appendChild(item('var(--bad)', 0.55, 'higher high error than the National Weather Service row'));
-    keyEl.appendChild(item('var(--rule)', 0.28, 'interval covers zero, or under ' + MIN_N + ' city-days'));
-    keyEl.appendChild(h('span', { class: 'kn', text: 'shading on the MAE high cell, scaled per lead column' }));
   }
 
   function renderMethod() {
     if (!methodEl) return;
-    const meta = metaOf();
-    const coh = (meta.cohorts || {})[state.cohort];
-    const excl = Array.isArray(meta.exclusions) ? meta.exclusions : [];
+    const meta = grid.meta || {};
+    const coh = (meta.cohorts || {})[state.cohort] || {};
+    const excl = Array.isArray(meta.exclusions) ? meta.exclusions.filter(e => REASON[e.reason]) : [];
     const exclText = excl.length
-      ? 'Excluded before scoring, ' + excl.map(e => (REASON[e.reason] ? REASON[e.reason](e) : int(e.count) + ' ' + String(e.reason).replace(/_/g, ' '))
-          + (e.reason !== 'capture_short' && fin(e.dates) ? ' (' + int(e.dates) + ' date' + (e.dates === 1 ? '' : 's') + ')' : '')).join('; ') + '.'
+      ? 'Excluded before scoring, ' + excl.map(e => REASON[e.reason](e) + (fin(e.dates) ? ' (' + int(e.dates) + ' date' + (e.dates === 1 ? '' : 's') + ')' : '')).join('; ') + '.'
       : null;
     const rules = [
-      'An alternative forecast system’s value at a lead is its most recent forecast at or before that moment, held at the running observed extreme. The ForecastEx prediction market’s value is its median, where its ladder of Yes prices crosses fifty cents, held the same way. The settle is the station’s highest or lowest METAR reading of the day rounded to the nearest whole degree. In the default own-target frame every system is scored against the settle except the National Weather Service forecast, which is scored against its climate report on the city-days whose report puts the extreme inside the forecast’s window. In the METAR settle frame every system is scored against the settle. In the climate-report frame an alternative forecast system is scored against the National Weather Service climate report for the same date instead, and the ForecastEx prediction market keeps the settle it pays on.',
-      'For CRPS the ForecastEx prediction market’s distribution is its ladder of Yes prices, forced monotone across strikes and closed at the end strikes. An ensemble’s is a normal curve centred on the highest (for a low, the lowest) of its hourly means over the hours left in the day, with the members’ spread at the hour that mean falls on and nothing fitted, read at the same strikes at the same hour. Every system’s probabilities are scored alike, a contract the observations already settled at 100 cents and every other held to the exchange’s range of 1 to 99 cents.',
-      'Two sets of days are available, every city-day the ForecastEx prediction market priced at that hour, or only the fixed sample of city-days it priced at every hour from 30 to 0.',
+      'An alternative forecast system’s value at a lead is its most recent forecast at or before that moment, held at the running observed extreme. The ForecastEx prediction market’s value is its median, where its ladder of Yes prices crosses fifty cents, left as quoted. The settle is the station’s highest or lowest METAR reading of the day rounded to the nearest whole degree.',
+      'Every series is scored against its own standard, as in the error chart above, and the market against the METAR settle. Each series is scored on the city-days its own record covers, and each improvement on the city-days the market and the series share.',
+      'The fifteen grid-box series carry the trailing station bias correction and the rest are scored as issued, as the Offset column marks. The As issued view scores every series without it.',
+      'Five systems contribute two series each, which gives 25 series across 20 systems. A group’s row is the mean over its systems, each on its first series, and the groups and the series inside them are ordered by error at 18 hours before the end of the day.',
+      'For CRPS the ForecastEx prediction market’s distribution is its ladder of Yes prices, as quoted, forced monotone across strikes and closed at the end strikes. Every ensemble is calibrated by EMOS and scored against the METAR settle, on the contracts and city-day hours the market and all four ensembles share.',
+      'An improvement is in bold when the paired difference in error is below zero at the 5 percent level after Holm’s adjustment across the series compared at that lead, over 1,000 resamples of seven-day blocks of target dates.',
     ];
     if (exclText) rules.push(exclText);
-    let n;
-    if (coh && (fin(coh.n_high) || fin(coh.n_low))) {
-      n = 'Sample ' + int(coh.n_high) + ' city-days on highs and ' + int(coh.n_low) + ' on lows in '
-        + (state.cohort === 'own' ? 'the ForecastEx prediction market’s record' : 'the fixed sample')
-        + (fin(coh.cities) ? ' over ' + int(coh.cities) + ' cities' : '') + (coh.from ? ' from ' + A().mdyY(coh.from) : '')
-        + ', and each system’s own sample at each lead printed in its cell.';
-    } else {
-      n = 'Sample varies by system and is printed in every cell.';
-    }
-    if (meta.window) n += ' ' + A().windowAndBuilt(meta) + '.';
+    const n = 'Sample ' + int(coh.n_high) + ' city-days on highs and ' + int(coh.n_low) + ' on lows'
+      + (state.cohort === 'all' ? ' on the ForecastEx prediction market’s record' : ' in the balanced sample')
+      + '. ' + A().windowAndBuilt(meta) + '.';
     A().methodNote(methodEl, {
       title: 'Scoring',
       body: [
-        'Mean absolute error and mean error are both in degrees Fahrenheit, on the daily high and the daily low. Mean error is signed, positive when a system runs warm.',
-        { tex: 'SS_s = 100\\left(1 - \\frac{MAE_s}{MAE_{NWS}}\\right)' },
-        'A positive skill score means a system’s mean absolute error on the high was below the National Weather Service’s on the same city-days. Its interval is a 95 percent bootstrap interval over 1,000 resamples of the target dates, both systems resampled under the same draws, and a cell is grey when that interval covers zero or the sample is under ' + MIN_N + ' city-days.',
+        'Mean absolute error and mean error are both in degrees Fahrenheit, on the daily high and the daily low. Mean error is signed, positive when a system runs warm, and is given at 18 hours before the end of the day.',
+        { tex: 'PI_s = 100 \\times \\left(1 - \\frac{MAE(\\text{ForecastEx vs. METAR})}{MAE(s \\text{ vs. its own standard})}\\right)' },
+        'A positive improvement means the market was closer to the observation it is judged on than the series was to the observation it is judged on.',
         { tex: 'CRPS = \\sum_{k} \\left(F(k) - \\mathbb{1}[\\text{settle} \\le k]\\right)^2' },
-        'On highs, $F(k) = 1 - P(k)$, on lows, $F(k-1) = P(k)$, where $P(k)$ is the probability the contract at strike $k$ pays, the Yes price for the ForecastEx prediction market and the normal curve for an ensemble. CRPS scores the whole distribution.',
+        'On highs, $F(k) = 1 - P(k)$, on lows, $F(k-1) = P(k)$, where $P(k)$ is the probability the contract at strike $k$ pays, the Yes price for the ForecastEx prediction market and the calibrated distribution for an ensemble. CRPS scores the whole distribution.',
+        'The paper scores the daily high. The lows are scored here with the same methods.',
       ],
-      rules, n, span: spanFoot(),
+      rules, n, span: A().cohortSpanLine(meta, state.cohort, state.metric),
     });
   }
 
-  // ------------------------------------------------------------- controls
   function buildControls() {
     if (controlsBuilt || !bar) return;
     controlsBuilt = true;
     bar.innerHTML = '';
+    A().metricTabs(bar, k => { state.metric = k; render(); }, state.metric);
     A().tabs(bar, COHORTS, k => { state.cohort = k; render(); }, { initial: state.cohort, label: 'Days' });
-    A().tabs(bar, FRAMES, k => { state.frame = k; render(); }, { initial: state.frame, label: 'Frame' });
+    A().tabs(bar, VALUES, k => { state.values = k; render(); }, { initial: state.values, label: 'Values' });
+    valuesGroup = bar.lastElementChild;
   }
 
-  // ------------------------------------------------------------- entry
   function draw(D) {
     host = $('#accGrid'); bar = $('#accGridBar'); keyEl = $('#accGridKey'); methodEl = $('#accGridMethod');
     if (!host) return;
-    // the bundle, or the grid file itself when a caller passes that
-    grid = D && D.cohorts && D.h ? D : (D && D.grid) || null;
-    if (grid && !(grid.cohorts && typeof grid.cohorts === 'object')) grid = null;
-    if (!grid) {
-      A().notYet(host, A().NOT_PUBLISHED);
+    grid = (D && D.grid) || null;
+    if (!grid || !grid.metric) {
+      A().notYet(host, A().unpublished(D));
       if (keyEl) keyEl.innerHTML = '';
       if (methodEl) methodEl.innerHTML = '';
       return;
     }
-    if (!grid.cohorts[state.cohort]) state.cohort = Object.keys(grid.cohorts)[0] || state.cohort;
     buildControls();
     render();
   }

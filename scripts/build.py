@@ -28,6 +28,7 @@ from pipeline import config    # noqa: E402
 
 SITE = os.path.join(ROOT, "site")
 DIST = os.path.join(ROOT, "dist")
+ALIASES = os.path.join(ROOT, "config", "category_aliases.json")
 
 SHARED = ["css/site.css", "js/theme.js", "js/common.js", "js/data.js", "js/market.js"]
 STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorecard.html", "climate.html",
@@ -48,8 +49,14 @@ STANDALONE = ["index.html", "city.html", "hurricane.html", "about.html", "scorec
               "analysis-resolution.html", "js/analysis.js",
               "tropical-cyclone-markets.html", "js/cyclones.js",
               "allocator.html", "js/allocator.js",
+              # the world GDP contract's article, its figures drawn by its own model in the browser
+              "climate-gdp.html", "css/climate-gdp.css", "js/climate-gdp.js", "js/elnino-model.js",
               "lessons.html", "js/lessons.js", "assets/lessons.json",
-              "assets/basemap.json", "assets/world.json", "assets/hurricane-geo.json"]
+              "assets/basemap.json", "assets/world.json", "assets/hurricane-geo.json",
+              # the hill shading under the hurricane map's land (scripts/build_relief.py)
+              "assets/relief-AL.json", "assets/relief-EP.json",
+              # the roads and city names on it (scripts/build_map_features.py)
+              "assets/features-AL.json", "assets/features-EP.json"]
 EMBED = ["embed/index.html", "js/chart-city.js"]
 # whole directories, copied as they are (see NOTICE for what each one is)
 VENDOR = ["vendor/katex"]
@@ -119,6 +126,9 @@ def config_js(cfg: dict, target: str, data_base: str) -> str:
         # listings the owner has said are coming but the exchange has not made:
         # the hurricane page draws them as pending on the matching basin view
         "expected": cfg.get("expected_listings") or {},
+        # the world GDP contract's product id once the exchange lists it; until then
+        # its page draws the proposed strikes, hatched, with no price
+        "gdpContract": {k: v for k, v in (cfg.get("gdp_contract") or {}).items() if not k.startswith("_")},
         # Every projected asset, with a short hash of its own content.
         #
         # The scripts are cached for an hour and the assets for a day, so a
@@ -480,6 +490,69 @@ def identity(out: str, cfg: dict) -> tuple:
     return n, len(cities)
 
 
+# ---- the exchange's category aliases
+#
+# The exchange's research button opens /<category id>.html (g137800.html and the
+# like) for the category a product sits in, and leaves where that lands to this
+# site (config/category_aliases.json). Each alias is a page of its own that moves
+# the reader on at once: a script, so any parameters the link carries go along
+# with the destination's own winning a clash, then a refresh and a plain link for
+# a browser without one. The pages ask not to be indexed and name the page they
+# lead to as canonical, and they are written after the sitemap, so a crawler
+# sees only the destination.
+ALIAS_ID = re.compile(r"^g[0-9]+$")
+
+
+def load_aliases(path: str = ALIASES) -> list:
+    with open(path) as fh:
+        return json.load(fh).get("aliases") or []
+
+
+def alias_page(to: str, label: str, base: str = "") -> str:
+    page = to.split("#", 1)[0].split("?", 1)[0]
+    canon = (base + "/" + ("" if page == "index.html" else page)) if base else page
+    href = html_escape(to, quote=True)
+    target = json.dumps(to).replace("<", "\\u003c")
+    return ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="robots" content="noindex">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            '<title>%s</title>\n<link rel="canonical" href="%s">\n'
+            '<script>(function () {\n'
+            '  var to = new URL(%s, location.href);\n'
+            '  new URLSearchParams(location.search).forEach(function (v, k) {\n'
+            '    if (!to.searchParams.has(k)) to.searchParams.set(k, v);\n'
+            '  });\n'
+            '  if (!to.hash && location.hash) to.hash = location.hash;\n'
+            '  location.replace(to.href);\n'
+            '})();</script>\n'
+            '<meta http-equiv="refresh" content="0; url=%s">\n'
+            '</head>\n<body><p><a href="%s">%s</a></p></body>\n</html>\n'
+            % (html_escape(label), html_escape(canon, quote=True), target, href, href, html_escape(label)))
+
+
+def write_aliases(out: str, cfg: dict, path: str = ALIASES) -> tuple:
+    """One page per alias. Returns (written, problems): a malformed or repeated
+    id, or a destination the build did not produce, is a problem, and its page is
+    not written, so that link falls through to the home page as an unknown one does."""
+    domain = (cfg.get("domain") or "").strip().rstrip("/")
+    base = "https://" + domain if domain else ""
+    seen, problems, n = set(), [], 0
+    for a in load_aliases(path):
+        cid, to = str(a.get("id") or ""), str(a.get("to") or "")
+        page = to.split("#", 1)[0].split("?", 1)[0]
+        if not ALIAS_ID.match(cid) or cid in seen:
+            problems.append("alias %s: malformed or repeated id" % (cid or "?"))
+            continue
+        seen.add(cid)
+        if not page or not os.path.exists(os.path.join(out, page)):
+            problems.append("alias %s: %s is not in the build" % (cid, to or "?"))
+            continue
+        with open(os.path.join(out, cid + ".html"), "w") as fh:
+            fh.write(alias_page(to, str(a.get("category") or cid), base))
+        n += 1
+    return n, problems
+
+
 def build(target: str, cfg: dict, data_mode: str) -> dict:
     out = os.path.join(DIST, target)
     if os.path.isdir(out):
@@ -509,6 +582,10 @@ def build(target: str, cfg: dict, data_mode: str) -> dict:
     if target == "standalone":
         pages, stations = identity(out, cfg)
     stamped = stamp_assets(out)
+    aliases = 0
+    if target == "standalone":
+        aliases, problems = write_aliases(out, cfg)
+        missing += problems
     bundled = 0
     if data_mode != "deploy":
         src = os.path.join(ROOT, "data" if data_mode == "live" else "samples", "snapshots")
@@ -516,7 +593,7 @@ def build(target: str, cfg: dict, data_mode: str) -> dict:
             shutil.copytree(src, os.path.join(out, "data", "snapshots"))
             bundled = sum(len(f) for _, _, f in os.walk(src))
     return {"target": target, "files": len(files) - len(missing), "missing": missing, "snapshots": bundled,
-            "dataBaseUrl": data_base, "stamped": stamped, "pages": pages, "stations": stations}
+            "dataBaseUrl": data_base, "stamped": stamped, "pages": pages, "stations": stations, "aliases": aliases}
 
 
 def main(argv=None) -> int:
@@ -531,6 +608,7 @@ def main(argv=None) -> int:
         r = build(target, cfg, mode)
         print(f"{target}: {r['files']} files, {r['snapshots']} snapshots bundled, data at {r['dataBaseUrl']!r}"
               + (f", {r['stations']} station pages" if r["stations"] else "")
+              + (f", {r['aliases']} category aliases" if r["aliases"] else "")
               + (f", missing {r['missing']}" if r["missing"] else ""))
     return 0
 

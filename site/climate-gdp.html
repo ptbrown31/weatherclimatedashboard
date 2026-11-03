@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>World GDP and climate change, a proposed contract</title>
+<meta name="description" content="A proposed ForecastEx contract on whether world GDP per person grows more than 1.1% a year from 2026 to 2031, a test of what global temperature shocks do to world output.">
+<link rel="stylesheet" href="vendor/katex/katex.min.css">
+<link rel="stylesheet" href="css/site.css">
+<link rel="stylesheet" href="css/climate-gdp.css">
+<script src="config.js"></script>
+<script src="js/theme.js"></script>
+</head>
+<body>
+<div class="wrap">
+<h1 id="gdpTitle">How detrimental will climate change be to society?</h1>
+<p class="sub" id="gdpSub"></p>
+<p class="gdp-byline" id="gdpByline"></p>
+<div class="bar"><span id="pageStatus"></span></div>
+
+<div class="secttl" id="contract">CONTRACT AND LADDER</div>
+<div class="gdp-q" id="gdpQuestion"></div>
+<div class="gdp-read" id="gdpRead"></div>
+<div class="card"><svg id="gdpMain" viewBox="0 0 960 470" role="img" aria-labelledby="gdpMainTitle"><title id="gdpMainTitle">World GDP per person under each view, with the contract's ladder</title></svg></div>
+<div class="key" id="gdpMainKey"></div>
+<p class="cap" id="gdpListing"></p>
+<div id="gdpMainMethod"></div>
+
+<div class="secttl" id="assumptions">CHANGE THE ASSUMPTIONS</div>
+<p class="cap" style="margin-top:0">Every control re-runs the contract in your browser, on the same 50,000 simulated paths as the published analysis, and every figure on the page follows. A small mark under each slider is the article&rsquo;s setting.</p>
+<div class="gdp-panel" id="gdpPanel"></div>
+<div class="gdp-panelbar" id="gdpPanelBar"></div>
+
+<div class="secttl" id="proposal">PROPOSAL</div>
+<article class="gdp-article" id="gdpArticle"></article>
+
+<div class="secttl" id="reproduce">DATA AND CODE</div>
+<div class="gdp-repro" id="gdpRepro"></div>
+</div>
+<div class="gdp-float" id="gdpFloat" hidden></div>
+<script src="js/common.js"></script>
+<script src="js/data.js"></script>
+<script src="js/market.js"></script>
+<script src="vendor/katex/katex.min.js"></script>
+<script src="js/elnino-model.js"></script>
+<script src="js/climate-gdp.js"></script>
+<script>WXC.chrome('climate-gdp.html'); WXGdp.init();</script>
+</body>
+</html>

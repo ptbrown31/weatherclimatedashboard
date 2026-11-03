@@ -1,0 +1,91 @@
+/* The world GDP contract's page: the two views' colors, the readout, the controls and the article.
+   The two colors are checked as a pair (dataviz validator: lightness band, colorblind separation,
+   contrast) against each mode's panel: blue for no temperature effect, orange for the paper. */
+:root{--gdp-null:#2166AC; --gdp-paper:#C2570C; --gdp-pend:rgba(94,107,122,.55)}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--gdp-null:#5A97DB; --gdp-paper:#D07C2C; --gdp-pend:rgba(152,164,179,.55)}
+}
+:root[data-theme="dark"]{--gdp-null:#5A97DB; --gdp-paper:#D07C2C; --gdp-pend:rgba(152,164,179,.55)}
+
+.gdp-byline{font-size:12.5px;color:var(--muted);margin:0 0 14px}
+.gdp-byline a{white-space:nowrap}
+.gdp-q{border:1px solid var(--line);border-left:4px solid var(--navy);border-radius:8px;background:var(--panel);
+  padding:10px 14px;margin:6px 0 12px;font-size:16px;font-weight:650;color:var(--navy);text-wrap:balance}
+.gdp-q .gdp-qnote{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:3px}
+
+/* the readout: what each view says about the contract at the current settings */
+.gdp-read{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 12px}
+.gdp-tile{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:9px 12px 10px;min-width:0}
+.gdp-tile .tl{font-size:12px;font-weight:700;color:var(--ink);line-height:1.3}
+.gdp-tile .tv{font-size:34px;font-weight:800;line-height:1.1;margin:3px 0 1px;font-variant-numeric:tabular-nums}
+.gdp-tile .ts{font-size:12px;color:var(--muted);line-height:1.4}
+.gdp-tile.null{border-top:4px solid var(--gdp-null)} .gdp-tile.null .tv{color:var(--gdp-null)}
+.gdp-tile.paper{border-top:4px solid var(--gdp-paper)} .gdp-tile.paper .tv{color:var(--gdp-paper)}
+.gdp-tile.cut{border-top:4px solid var(--ink)}
+@media (max-width:720px){.gdp-read{grid-template-columns:1fr}.gdp-tile .tv{font-size:28px}}
+
+/* the controls, grouped as on a simulator's dashboard; every one moves every figure on the page */
+.gdp-panel{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0 4px}
+@media (max-width:980px){.gdp-panel{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.gdp-panel{grid-template-columns:1fr}}
+.gdp-group{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 10px 6px;min-width:0}
+.gdp-gh{font-size:12px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:.04em;
+  border-bottom:1px solid var(--line);padding-bottom:5px;margin-bottom:6px}
+.gdp-ctl{display:block;margin:0 0 9px}
+.gdp-ctl[hidden]{display:none}
+.gdp-ctl .cl{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--ink);line-height:1.3;margin-bottom:3px}
+.gdp-ctl .cl b{font-variant-numeric:tabular-nums;white-space:nowrap}
+.gdp-ctl select{width:100%;font-size:12.5px;padding:4px 6px}
+.gdp-ctl .cs{font-size:11px;color:var(--muted);margin-top:1px}
+.gdp-ctl.off{opacity:.45}
+.gdp-ctl label.ck{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.35}
+.gdp-range{position:relative;height:22px}
+.gdp-range input{width:100%;margin:3px 0 0;accent-color:var(--navy)}
+/* the article's value, marked under the track as a simulator marks the status quo */
+.gdp-range .mk{position:absolute;bottom:-3px;width:2px;height:7px;margin-left:-1px;background:var(--muted);pointer-events:none}
+.gdp-panelbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:6px 2px 0}
+.gdp-panelbar .gdp-busy{color:var(--warn)}
+.gdp-mine{font-weight:700;color:var(--warn)}
+
+/* a figure's own line under it: whose settings it is drawn at */
+.gdp-figstate{font-size:11.5px;color:var(--muted);margin:6px 2px 0}
+.gdp-figstate button{font-size:11.5px;padding:1px 7px;margin-left:6px}
+.gdp-figstate.mine{color:var(--warn)}
+
+/* the floating bar that says the page is at someone's own settings, wherever they are on it */
+.gdp-float{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:50;display:flex;gap:10px;align-items:center;
+  background:var(--panel);border:1px solid var(--rule);border-radius:999px;padding:6px 8px 6px 14px;font-size:12.5px;
+  box-shadow:0 4px 18px rgba(0,0,0,.18);max-width:calc(100vw - 32px)}
+.gdp-float[hidden]{display:none}
+.gdp-float button{font-size:12px;padding:3px 10px;border-radius:999px}
+
+/* the article */
+.gdp-article{max-width:72ch;font-size:15px;line-height:1.62;margin:0 auto}
+.gdp-article h2{font-size:19px;margin:30px 0 8px;color:var(--navy)}
+.gdp-article h3{font-size:16px;margin:24px 0 6px;color:var(--navy)}
+.gdp-article h4{font-size:14.5px;margin:20px 0 4px;color:var(--navy)}
+.gdp-article p{margin:0 0 12px}
+.gdp-article .ind{margin-left:2.2em;color:var(--ink)}
+.gdp-article .callout{font-weight:700;font-style:italic;border-left:4px solid var(--navy);padding:4px 0 4px 12px;margin-left:1.2em}
+.gdp-article ol,.gdp-article ul{margin:0 0 12px;padding-left:2.2em}
+.gdp-article li{margin:0 0 6px}
+.gdp-article .gdp-fig{margin:16px -14ch 18px;max-width:none}
+@media (max-width:1100px){.gdp-article .gdp-fig{margin:16px 0 18px}}
+.gdp-article .gdp-fig figcaption{font-size:12.5px;color:var(--muted);line-height:1.5;margin:8px 2px 0}
+.gdp-article .gdp-fig figcaption b{color:var(--ink)}
+.gdp-article .gdp-pointer{border:1px dashed var(--rule);border-radius:8px;padding:10px 12px;font-size:13px;color:var(--muted);margin:14px 0}
+.gdp-tbl{border-collapse:collapse;width:100%;font-size:13px;line-height:1.4;margin:6px 0 14px}
+.gdp-tbl th,.gdp-tbl td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+.gdp-tbl th{font-weight:700;color:var(--navy);background:var(--shade)}
+.gdp-tblwrap{overflow-x:auto}
+.gdp-article a.figref{white-space:nowrap}
+
+/* reproduction */
+.gdp-repro{font-size:13px;line-height:1.55}
+.gdp-repro code{font-size:12px;background:var(--chip);padding:1px 5px;border-radius:4px}
+.gdp-repro pre{background:var(--chip);border-radius:8px;padding:10px 12px;font-size:12px;overflow-x:auto;margin:6px 0 12px}
+.gdp-files td:last-child{overflow-wrap:anywhere}
+/* on a phone a figure keeps a readable size and scrolls sideways inside its card */
+@media (max-width:720px){#gdpMain,.gdp-fig .card svg{min-width:680px}}
+.accnote .code{margin-top:6px;font-size:12px}
+.accnote .code a{white-space:nowrap}

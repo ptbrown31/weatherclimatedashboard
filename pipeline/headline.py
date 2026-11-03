@@ -50,7 +50,7 @@ HURRICANE_KEY = "snapshots/market/hurricane.json"
 
 ACCURACY_DAYS = 7               # a week of scored days, enough to rank without a stale day dominating
 SOURCES = ("nws", "nbm", "lamp", "mav")     # the forecast products, in the order the pages list them
-FX = "fx"                       # the exchange's implied median, carried on a scored day by the scorecard
+FX = "fx"                       # the exchange's whole-degree central value, carried on a scored day by the scorecard
 RANKED = SOURCES + (FX,)
 MAJOR_MONTHLY = "MHCMA"         # Atlantic major hurricanes, one contract per calendar month
 SEASON_COUNT = "HCAB"           # Atlantic hurricane count for the whole season
@@ -119,7 +119,7 @@ def scored_days(card: Optional[dict]) -> list:
 def accuracy(card: Optional[dict], days: list) -> Optional[dict]:
     """Mean absolute error on the daily high per source, pooled over the last
     ACCURACY_DAYS scored days and every Fahrenheit station, ranked best first.
-    The exchange's implied median is ranked alongside the forecast products
+    The exchange's whole-degree value is ranked alongside the forecast products
     here: at the top of the page the question is which number was closest, not
     which of them is a forecast product."""
     window = set(days[:ACCURACY_DAYS])

@@ -60,8 +60,8 @@ TRACE_DIR = "trace/"
 # the stamps every figure file must carry, from docs/accuracy.md section 3.
 # A trace file is one target date's raw record and carries meta.date and
 # meta.built instead.
-FILE_SCHEMA = "accuracy-figures/1"
-CONVENTIONS = "v1"
+FILE_SCHEMA = "accuracy-figures/2"
+CONVENTIONS = "v2"
 # a pass that cannot finish validating within this many seconds of the chain's
 # end leaves the published set alone; the next half-hour tries again
 NEED_SECONDS = 30.0
@@ -224,9 +224,11 @@ def _run(store: Storage, now: dt.datetime, deadline: arch.Deadline, status: dict
         return 1
     status["built"] = built
 
-    # the same build is already published; nothing to read and nothing to write
+    # the same build is already published; nothing to read and nothing to write. A record that wrote no
+    # file does not count: an earlier version of this job, meeting a build of a schema it did not read
+    # yet, skipped every file and still recorded the build, and the version that reads it must publish it
     published = _read_json(store, DST_MANIFEST) or {}
-    if published.get("built") == built:
+    if published.get("built") == built and published.get("files"):
         status["note"] = "already published"
         return 0
 
@@ -238,6 +240,11 @@ def _run(store: Storage, now: dt.datetime, deadline: arch.Deadline, status: dict
         return 0
     if v["failed"]:
         status["note"] = "build not published"
+        return 1
+    if not v["ok"]:
+        # every file failed the stamps (a build of a schema or conventions this page does not draw): the
+        # files in place stay, and so does the record of them, so the build is tried again on the next pass
+        status["note"] = "no file passed; build not published"
         return 1
 
     written: list = []

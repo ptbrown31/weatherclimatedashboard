@@ -5,19 +5,23 @@
    summary.json for the pickers. Everything is presentation from here on.
    Scales and axes are hand-rolled so the page has no dependencies.
 
-   Series: observed METARs (what settlement reads); the standing NWS hourly
-   forecast; NBM and LAMP hourly guidance; the as-issued lines from the
-   archive (each source's last cycle before local midnight), which cover the
-   elapsed part of the day where only observations exist otherwise; and the
-   optional show-yesterday overlay. Level lines are each source's forecast
-   high and low FOR the day, from those as-issued cycles. The market layer
-   (ladders, strike chips, price panels) is drawn only when WXM.on(). */
+   Series: observed METARs (what settlement reads), then each model in its
+   own color: its newest run solid, and dotted the runs it superseded, the
+   last one before local midnight and, under the lead-in hours, the one that
+   stood for yesterday; and the optional show-yesterday overlay. Level lines
+   are pinned to each model's run issued before the day began, its highest
+   and lowest row inside the day, drawn across exactly the hours those rows
+   cover. The market layer (ladders, strike chips, price panels) is drawn only
+   when WXM.on(). */
 window.WXCity = (() => {
   const { el, txt, h, $, clock, dateShort, hourTicks, P, deg } = WXC;
   let locIndex = null;
   const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
-  const COL = { obs: 'var(--obs)', nws: 'var(--nws)', nbm: 'var(--nbm)', lamp: 'var(--lamp)', mav: 'var(--mav)' };
-  const NAME = { nws: 'Weather Service', nbm: 'Blend of Models', lamp: 'LAMP', mav: 'GFS MOS' };
+  const COL = { obs: 'var(--obs)', nws: 'var(--nws)', nbm: 'var(--nbm)', lamp: 'var(--lamp)', mav: 'var(--mav)', hrrr: 'var(--hrrr)' };
+  const NAME = { nws: 'Weather Service', nbm: 'Blend of Models', lamp: 'LAMP', mav: 'GFS MOS', hrrr: 'HRRR' };
+  // the models in the order the crosshair lists them, and the short names it uses
+  const MODELS = ['nws', 'nbm', 'lamp', 'mav', 'hrrr'];
+  const SHORTNM = { nws: 'NWS', nbm: 'NBM', lamp: 'LAMP', mav: 'MOS', hrrr: 'HRRR' };
   // mid-luminance hues, readable as text on both the light and the dark panel
   const HP = ['#c0392b', '#e6550d', '#d6604d', '#b5651d', '#e07b6b'];
   const LP = ['#2b7bba', '#3690c0', '#4393c3', '#5f8fd6', '#2a9d8f'];
@@ -32,7 +36,8 @@ window.WXCity = (() => {
   let cur = null, checked = new Set(), showYday = false, dayMode = 'today', HV = null, tip = null;
   let summary = null, snaps = {}, svgId = 'chart', onSelect = null;
   const DESC = { nws: 'the official National Weather Service forecast', nbm: 'National Blend of Models guidance',
-                 lamp: 'LAMP, observation-updated same-day guidance', mav: 'GFS MOS, a single-model statistical forecast' };
+                 lamp: 'LAMP, observation-updated same-day guidance', mav: 'GFS MOS, a single-model statistical forecast',
+                 hrrr: 'the HRRR, NOAA\u2019s hourly-updated 3 km model, at the grid point nearest the station' };
   const SRC = { tgroup: 'remarks T-group, tenths of a degree', body: 'body group, whole degrees' };
 
   // '20260821T225639Z', '20260821T2030Z' or '2026-08-21T23:00:00Z' -> a local clock reading
@@ -53,21 +58,20 @@ window.WXCity = (() => {
      much of THAT day the forecast had already seen. It also keeps the label
      from changing meaning as the clock passes midnight, and reads the same
      on the day-ahead board. The hour is the one the cycle falls in, not a
-     rounding of it, and the full stamp is a hover away. */
-  const dayKeyOf = (ms, tz) => new Date(ms).toLocaleDateString('en-CA', { timeZone: tz });
-  function issuedTag(ms, tz, M) {
-    if (ms == null || isNaN(ms)) return '';
-    const h = WXC.hourOf(ms, tz);
-    const on = dayKeyOf(ms, tz);
-    const d = M && on === M.day ? 'T' : (M && on === M.yesterday ? 'Y' : '');
-    return (h % 12 || 12) + (h < 12 ? 'a' : 'p') + (d ? ' ' + d : '');
-  }
+     rounding of it, and the full stamp is a hover away. A run issued earlier
+     than the day before, such as the one that stood for yesterday, carries
+     its date instead. */
+  const issuedTag = (ms, tz, M) => WXC.issuedTag(ms, tz, M && M.day, M && M.yesterday);
   // a run's name: the tool, then when that run was issued
   const runName = (base, cyc, tz, M) => {
     const t = cyc ? issuedTag(parseStamp(cyc), tz, M) : '';
     return t ? base + ' ' + t : base;
   };
   const sw = col => '<span class="sw" style="background:' + col + '"></span>';
+  const swl = WXC.lineSwatch;
+  // the five minute stream's band in miniature, for the crosshair
+  const swb = col => '<svg class="swl" width="16" height="6" viewBox="0 0 16 6" aria-hidden="true">'
+    + '<rect x="1" y="0" width="14" height="6" fill="' + col + '" fill-opacity=".3"/></svg>';
   const cents = v => (v == null ? '—' : v + '¢');
   const size = n => (n ? ' ×' + Math.round(n) : '');
   const isoDate = d => { if (!d) return ''; const [y, m, dd] = d.split('-'); return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m - 1] + ' ' + (+dd) + (y ? ', ' + y : ''); };
@@ -93,7 +97,9 @@ window.WXCity = (() => {
 
        What is left is what you would act on: what it costs to take each side,
        what that pays if it comes in, what the contract is asking, and when it
-       settles. The book is one line at the foot for anyone who wants it. */
+       settles. Under that, the standing book in four rows that say where the
+       two prices come from, what the market's central value is and how wide
+       the spread is (owner, 2026-10-16). */
     const buyYes = L.noBid == null ? null : (100 - L.noBid) / 100;
     const buyNo = L.bid == null ? null : (100 - L.bid) / 100;
     const payYes = buyYes == null ? null : WXM.payoutText(Math.round(buyYes * 100));
@@ -102,21 +108,21 @@ window.WXCity = (() => {
                               : 'Settles Yes if the day\u2019s low is below ' + L.strike + '\u00b0' + unit;
     const head = '<b>' + (c.city || c.station) + ' \u2014 ' + (L.label || (cmp + L.strike + '\u00b0' + unit)) + '</b>';
     const mult = t => (t ? String(t).split(' ')[0] : null);
+    // the median in whole degrees like the strikes, rounded half away from zero
+    const wholeDeg = v => Math.sign(v) * Math.round(Math.abs(v)) + '\u00b0' + unit;
     const rows = [
       ['Settles', L.expiration ? isoDate(L.expiration.slice(0, 4) + '-' + L.expiration.slice(4, 6) + '-' + L.expiration.slice(6, 8)) : null],
-      ['Market\u2019s median for the day', im && im.value != null ? WXC.deg(im.value)
+      ['Market\u2019s median for the day', im && im.value != null ? wholeDeg(im.value)
         : (im && im.edge ? 'beyond the ladder (' + im.edge + ')' : null)],
     ];
-    const book = L.bid == null && L.noBid == null ? 'no bids on either side'
-      : 'Yes bid ' + (L.bid == null ? '\u2014' : cents(L.bid)) + ' \u00b7 No bid '
-        + (L.noBid == null ? '\u2014' : cents(L.noBid)) + ' \u00b7 they buy, they do not sell, and the two sum to a dollar';
     return head + '<div class="tsub">' + asks + '</div>'
       + tip.price(buyYes, buyNo, mult(payYes) ? 'pays ' + mult(payYes) : null,
                   mult(payNo) ? 'pays ' + mult(payNo) : null)
-      + tip.rows(null, rows,
-      book + ' \u00b7 payouts are net of the fee each side'
-      + (lad.asof ? ' \u00b7 quoted ' + WXC.clock(Date.parse(lad.asof), c.tz) : '')
-      + (url ? ' \u00b7 click to open the contract' : ''));
+      + tip.rows(null, rows)
+      + '<div class="tq">' + tip.rows(null, WXM.bookRows(L.bid, L.noBid),
+        'payouts are net of the fee each side'
+        + (lad.asof ? ' \u00b7 quoted ' + WXC.clock(Date.parse(lad.asof), c.tz) : '')
+        + (url ? ' \u00b7 click to open the contract' : '')) + '</div>';
   }
 
   const impliedState = m => ({ unavailable: 'quotes unavailable', unlisted: 'no market listed', day: 'quote summary is for another day',
@@ -299,9 +305,12 @@ window.WXCity = (() => {
         // the reports carry knots, which is the barb's own convention; the
         // numbers a reader is given are the ones the rest of the page uses
         const MPH = kt => Math.round(kt * 1.15078);
+        // the direction in degrees, or null for a calm or a variable wind: the
+        // nearby reports carry the METAR's own "VRB", which has no direction
+        const dirOf = n => (typeof n.wdir === 'number' && isFinite(n.wdir) ? n.wdir : null);
         const wind = n => (n.wspd == null ? null
-          : (n.wdir != null ? WXC.compass(n.wdir) + ' at ' : '') + MPH(n.wspd) + ' mph'
-            + (n.wgst ? ', gusting ' + MPH(n.wgst) : ''));
+          : (dirOf(n) != null ? WXC.compass(n.wdir) + ' at ' : (n.wdir === 'VRB' ? 'variable at ' : ''))
+            + MPH(n.wspd) + ' mph' + (n.wgst ? ', gusting ' + MPH(n.wgst) : ''));
         const COVER_FRAC = { CLR: 0, SKC: 0, CAVOK: 0, FEW: 0.25, SCT: 0.5, BKN: 0.75, OVC: 1, OVX: 1, VV: 1 };
         const COVER_NAME = { CLR: 'clear', SKC: 'clear', CAVOK: 'clear', FEW: 'few clouds', SCT: 'scattered',
                              BKN: 'broken', OVC: 'overcast', OVX: 'sky obscured', VV: 'sky obscured' };
@@ -344,7 +353,7 @@ window.WXCity = (() => {
           }
           if (n.wspd != null && n.wspd < 3) {
             g.appendChild(el('circle', { cx: x2, cy: y2, r: r + 2.5, fill: 'none', stroke: col, 'stroke-width': 1 }));
-          } else if (n.wspd != null && n.wdir != null) {
+          } else if (n.wspd != null && dirOf(n) != null) {
             /* The traditional barb, textbook proportions. The staff runs from
                the sky circle toward the direction the wind comes from; the
                feathers sit on the clockwise side at sixty degrees off the
@@ -354,7 +363,7 @@ window.WXCity = (() => {
                read as a full one. Every stroke is drawn twice, a pale halo
                under the ink, which is what keeps a barb legible over roads
                and contours. */
-            const rad = n.wdir * Math.PI / 180;
+            const rad = dirOf(n) * Math.PI / 180;
             const ux = Math.sin(rad), uy = -Math.cos(rad);          // toward where the wind is FROM
             const pxv = -uy, pyv = ux;                              // the clockwise side (NH convention)
             const L = big ? 30 : 24;
@@ -458,7 +467,7 @@ window.WXCity = (() => {
              there would cover the thing it is meant to explain. */
           const lbl = c.station + ' \u00b7 settlement station';
           const fs = 10.5, tw = lbl.length * fs * 0.6 + 12;
-          const wd = selfN.wdir, ws = selfN.wspd;
+          const wd = dirOf(selfN), ws = selfN.wspd;
           const barbDown = ws != null && ws >= 3 && wd != null && -Math.cos(wd * Math.PI / 180) > 0.2;
           const ly = barbDown ? H2 / 2 - 34 : H2 / 2 + 46;
           svg.appendChild(el('rect', { x: W2 / 2 - tw / 2, y: ly - fs, width: tw, height: fs + 6, rx: 5,
@@ -767,8 +776,10 @@ window.WXCity = (() => {
 
        The lead-in keeps the same shape it has on today's view, half a day
        before the contract day opens, so the two views are read the same way.
-       Sunrise and sunset are a day old and are dropped rather than drawn in
-       the wrong place. */
+       The snapshot carries today's sunrise and sunset; carried forward one day
+       they place tomorrow's within a minute or two at these latitudes, the same
+       approximation the both-days view draws for its second day, so tomorrow's
+       nights are shaded as today's are (owner, 2026-10-20). */
     const DAY = 24 * 3600 * 1000;
     const M = dayMode !== 'tomorrow' ? M0 : (() => {
       const ds = P(M0.dayEnd), de = ds + DAY;
@@ -777,7 +788,7 @@ window.WXCity = (() => {
         day: M0.tomorrow, yesterday: M0.day, tomorrow: null,
         dayStart: iso(ds), dayEnd: iso(de), ydayStart: M0.dayStart,
         winStart: iso(ds - (P(M0.dayStart) - P(M0.winStart))),
-        sunrise: null, sunset: null,
+        sunrise: M0.sunrise ? iso(P(M0.sunrise) + DAY) : null, sunset: M0.sunset ? iso(P(M0.sunset) + DAY) : null,
       });
     })();
     const w0 = P(M.winStart), d0 = P(M.dayStart);
@@ -790,78 +801,157 @@ window.WXCity = (() => {
     const inWin = a => a.filter(p => p.t >= w0 && p.t <= d1);
 
     const O = inWin(rows(ob && ob.rows));
-    const F = inWin(rows(fc && fc.nws && fc.nws.hourly));
-    const N = inWin(rows(fc && fc.nbm && fc.nbm.hourly));
-    const LA = inWin(rows(fc && fc.lamp && fc.lamp.hourly));
+    // a family's rows, carried on past their own end by the rows that extend them
+    // (the blend's 3-hourly bulletin, the HRRR's 48-hour runs)
+    const seq = (o, k) => ((o && o[k]) || []).concat((o && o.ext) || []);
     const AI = (fc && fc.asIssued) || {};
-    const A = inWin(rows(AI.nws && AI.nws.rows)), NA = inWin(rows(AI.nbm && AI.nbm.rows)), LAI = inWin(rows(AI.lamp && AI.lamp.rows));
     const YD = (fc && fc.yesterday) || {};
 
-    // ---- show-yesterday overlay, shifted exactly 24 h so the days line up by clock time
+    /* Every run on the chart, model by model (owner, 2026-10-16).
+
+       Each model's newest run is drawn solid in the model's color, and every
+       run it superseded is drawn dotted in the same color: the run that stood
+       before the day began, across the whole window, and the run that stood
+       for yesterday, under the lead-in hours. A run's rows keep the run that
+       issued them, so where the blend's 3-hourly bulletin or a 48-hour HRRR run
+       carries the newest run on past its end, a reading there is named for
+       the run it came from. A run the archive holds under two names, because
+       nothing newer has come in since midnight, is drawn once, as the newest. */
+    const partsOf = (main, mainCyc, ext, extCyc) => {
+      const out = [{ cycle: mainCyc, rows: main || [] }];
+      if (ext && ext.length) {
+        if (extCyc && parseStamp(extCyc) !== parseStamp(mainCyc)) out.push({ cycle: extCyc, rows: ext });
+        else out[0].rows = out[0].rows.concat(ext);
+      }
+      return out;
+    };
+    const NEWEST = {
+      nws: f => partsOf(f.hourly, f.cycle), lamp: f => partsOf(f.hourly, f.cycle), mav: f => partsOf(f.rows, f.cycle),
+      nbm: f => partsOf(f.hourly, f.cycle, f.ext, f.nbsCycle), hrrr: f => partsOf(f.hourly, f.cycle, f.ext, f.extCycle),
+    };
+    const runs = [];
+    MODELS.forEach(k => {
+      const seen = new Set();
+      const add = (parts, fresh, lead) => {
+        const ms = parseStamp(parts[0].cycle);
+        if (!isNaN(ms) && seen.has(ms)) return;
+        const ps = parts.map(p => ({ cycle: p.cycle, ms: parseStamp(p.cycle),
+                                     pts: inWin(rows(p.rows)).filter(q => !lead || q.t <= d0) }))
+          .filter(p => p.pts.length);
+        const pts = ps.reduce((a, p) => a.concat(p.pts), []);
+        if (pts.length < (lead ? 2 : 1)) return;
+        seen.add(ms);
+        runs.push({ k, ms, cycle: parts[0].cycle, fresh, lead, parts: ps, pts, src: parts });
+      };
+      const f = fc && fc[k], ai = AI[k], yd = YD[k];
+      if (f) add(NEWEST[k](f), true, false);
+      if (ai) add(partsOf(ai.rows, ai.cycle, ai.ext, ai.extCycle), false, false);
+      // the lead-in on today's view only: the day-ahead view's lead-in is
+      // today, which the runs above already carry
+      if (yd && yd.rows && dayMode !== 'tomorrow') add(partsOf(yd.rows, yd.cycle, yd.ext, yd.extCycle), false, true);
+    });
+
+    /* ---- the show-yesterday overlay, moved whole days so the days line up by clock time
+
+       Yesterday is the calendar's, the day before today, on every view (owner,
+       2026-10-20). Its window, the lead-in hours and the day, is moved one day on
+       to sit on today and two days on to sit on tomorrow. The both-days view
+       carries it twice, the same yesterday on each day: the whole window on
+       today, and the day alone on tomorrow, whose lead-in hours are today's day,
+       where yesterday already sits. A forecast run is cut at yesterday's end, so
+       the hours it forecast for today never stand in for yesterday on tomorrow.
+       Each copy is its own line, so the two never join across tomorrow's
+       midnight; the crosshair reads them as one series. */
     const ySeries = [];
     if (showYday) {
-      const yObs = rows(ob && ob.rows).filter(p => p.t >= w0 - DAY && p.t < d0).map(p => ({ t: p.t + DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1);
+      const T0 = P(M0.dayStart), YW = P(M0.winStart) - DAY;
+      const copies = dayMode === 'both' ? [[1, YW], [2, T0 - DAY]] : [[dayMode === 'tomorrow' ? 2 : 1, YW]];
+      const place = pts => copies.map(([k, from]) => pts.filter(p => p.t >= from && p.t < T0)
+        .map(p => ({ t: p.t + k * DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1)).filter(seg => seg.length);
       // asking for yesterday makes yesterday the subject: it comes in at full
       // strength in the sources' own colors and today drops back to a
-      // reference behind it, which is the comparison the button is for
-      if (yObs.length) ySeries.push({ nm: 'Yesterday observed', pts: yObs, col: COL.obs, w: 2.4, dash: null, op: 1 });
-      [['nws', 'Yesterday NWS', COL.nws], ['nbm', 'Yesterday NBM', COL.nbm],
-       ['lamp', 'Yesterday LAMP', COL.lamp]].forEach(([k, nm0, col]) => {
+      // reference behind it, which is the comparison the button is for. The
+      // forecasts are the runs that stood before yesterday began, dotted like
+      // every run a newer one superseded.
+      const yObs = place(rows(ob && ob.rows));
+      if (yObs.length) ySeries.push({ nm: 'Yesterday observed', segs: yObs, col: COL.obs, w: 2.4, dash: null, op: 1, fresh: true });
+      MODELS.forEach(k => {
         const y = YD[k]; if (!y) return;
-        const nm = runName(nm0, y.cycle, tz, M);
-        const pts = rows(y.rows).map(p => ({ t: p.t + DAY, v: p.v })).filter(p => p.t >= w0 && p.t <= d1);
-        if (pts.length) ySeries.push({ nm, pts, col, w: 2, dash: '6 3', op: 1 });
+        const segs = place(rows(seq(y, 'rows')));
+        if (segs.length) ySeries.push({ nm: runName('Yesterday ' + SHORTNM[k], y.cycle, tz, M), k, segs,
+                                        col: COL[k], w: 2, dash: '2 3', op: 1, fresh: false });
       });
+      ySeries.forEach(sr => { sr.pts = sr.segs.reduce((a, seg) => a.concat(seg), []); });
     }
 
-    // ---- levels for the day: each source's forecast high and low as issued
-    //      before the day began; the standing official NWS value where no
-    //      pre-day cycle exists yet (the archive is young for that source)
-    const levels = [];
-    const addLevel = (k, hi, lo, issued, meta) => {
-      // when a forecast was issued is what decides how much of the day it had
-      // already seen, so every label carries it, in the compact form
-      const tag = cyc => {
-        if (!issued) return '';
-        const t = issuedTag(parseStamp(cyc), tz, M);
-        return t ? ' (' + t + ')' : '';
-      };
-      if (hi != null) levels.push({ v: hi, nm: NAME[k] + tag(meta.cycleHigh), col: COL[k], k, kind: 'high', issued, cycle: meta.cycleHigh, fromHourly: meta.fromHourly });
-      if (lo != null) levels.push({ v: lo, nm: NAME[k] + tag(meta.cycleLow), col: COL[k], k, kind: 'low', issued, cycle: meta.cycleLow, fromHourly: meta.fromHourly });
-    };
-    ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
-      const f = fc && fc[k];
-      /* The day-ahead board takes each source's forecast for THAT day.
+    /* The levels on the right are pinned to the run each model issued before
+       the day began (owner, 2026-10-16), so the day's observations are read
+       against a forecast that holds still: the highest and lowest row that run
+       has inside the day, labelled with when the run holding that row was
+       issued. A run issued at midnight belongs to the day; the snapshot's
+       as-issued run is the last one before it. On the day-ahead view every
+       standing run was issued before that day begins, so the levels follow the
+       newest runs until midnight and then hold. Where the archive has no run
+       from before the day, the first run of the day stands in and its label
+       says when it was issued.
 
-         This drew the current day's levels on the day-ahead view, so the
-         lines and their labels described a day the chart was not showing:
-         at KSFO on 2026-08-26 the board read 79, which was today's high, with
-         tomorrow's 76 nowhere on it. Every standing cycle is pre-day for a
-         day that has not begun, so all of them carry the issued mark, and a
-         source whose horizon does not reach tomorrow simply has no line. */
-      if (dayMode === 'tomorrow') {
-        if (f && (f.highTomorrow != null || f.lowTomorrow != null)) {
-          addLevel(k, f.highTomorrow, f.lowTomorrow, true,
-                   { cycleHigh: f.cycle, cycleLow: f.cycle,
-                     fromHourly: k === 'nws' ? !f.officialHighTomorrow : false });
-        }
-        return;
-      }
+       Each level line runs across exactly the hours those rows cover, a row
+       standing for its own hour, or in a 3-hourly product for the hours to its
+       next row, so a run whose rows stop at noon has a level from midnight to
+       noon and says so by its length. Not the bulletins' separate daily
+       maximum and minimum (the blend's TXN line, GFS MOS's N/X line), nor the
+       NWS's day and night periods, none of which the lines draw. */
+    const levels = [];
+    const dayLo = P(M.dayStart), dayHi = P(M.dayEnd);
+    const HOUR = 3600000;
+    const pinned = MODELS.map(k => {
+      if (dayMode === 'tomorrow') { const f = fc && fc[k]; return f ? { k, parts: NEWEST[k](f), pre: true, newest: true } : null; }
       const ai = AI[k];
-      if (ai && (ai.highToday != null || ai.lowToday != null)) addLevel(k, ai.highToday, ai.lowToday, ai.preDay || ai.levelPreDay, { cycleHigh: ai.levelCycleHigh || ai.cycle, cycleLow: ai.levelCycleLow || ai.cycle, fromHourly: ai.fromHourly });
-      else if (f && (f.highToday != null || f.lowToday != null)) addLevel(k, f.highToday, f.lowToday, false, { cycleHigh: f.cycle, cycleLow: f.cycle, fromHourly: f.highTodayFrom === 'hourly' || f.partialDay });
+      return ai ? { k, parts: partsOf(ai.rows, ai.cycle, ai.ext, ai.extCycle), pre: !!ai.preDay, newest: false } : null;
+    }).filter(Boolean);
+    pinned.forEach(r => {
+      const inDay = [];
+      r.parts.forEach(p => {
+        const pr = rows(p.rows).filter(q => q.v != null && isFinite(q.t)).sort((a, b) => a.t - b.t);
+        pr.forEach((q, i) => {
+          const step = i + 1 < pr.length ? pr[i + 1].t - q.t : (i ? q.t - pr[i - 1].t : HOUR);
+          if (q.t >= dayLo && q.t < dayHi) inDay.push({ t: q.t, v: q.v, cycle: p.cycle, step: Math.min(Math.max(step, HOUR), 3 * HOUR) });
+        });
+      });
+      if (!inDay.length) return;
+      inDay.sort((a, b) => a.t - b.t);
+      const last = inDay[inDay.length - 1];
+      const t0 = inDay[0].t, t1 = Math.min(dayHi, last.t + last.step);
+      const n3 = inDay.filter(q => q.step > 1.5 * HOUR).length;
+      const cad = !n3 ? 'hourly' : (n3 === inDay.length ? '3-hourly' : 'hourly and 3-hourly');
+      // rows from the run that carries this one on past its end
+      const ms0 = parseStamp(r.parts[0].cycle);
+      const carried = inDay.filter(q => parseStamp(q.cycle) !== ms0);
+      const hiR = inDay.reduce((a, b) => (b.v > a.v ? b : a)), loR = inDay.reduce((a, b) => (b.v < a.v ? b : a));
+      [['high', hiR], ['low', loR]].forEach(([kind, q]) => {
+        const tag = issuedTag(parseStamp(q.cycle), tz, M);
+        levels.push({ v: q.v, k: r.k, kind, col: COL[r.k], cycle: q.cycle, t0, t1, n: inDay.length, cad,
+                      pre: r.pre, newest: r.newest,
+                      carried: carried.length ? { n: carried.length, cycle: carried[0].cycle } : null,
+                      nm: NAME[r.k] + (tag ? ' (' + tag + ')' : '') });
+      });
     });
     const levelTip = L => {
       // every source that sits at exactly this level shares the line, so the tooltip lists them all
       const same = levels.filter(x => x.kind === L.kind && x.v === L.v);
+      const at = t => (t === dayLo || t === dayHi ? 'midnight' : clock(t, tz));
       const rows = [['Value', WXC.deg(L.v)]];
       same.forEach(x => {
         const pre = same.length > 1 ? NAME[x.k] + ' · ' : '';
-        rows.push([pre + 'Cycle', stamp(x.cycle, tz)]);
-        rows.push([pre + 'Issued', x.issued
-          ? issuedTag(parseStamp(x.cycle), tz, M) + ' on the label, before the day began'
-          : 'standing forecast; no pre-day cycle in the archive yet']);
-        rows.push([pre + 'Derived from', x.fromHourly ? 'the hourly series (no day value in that cycle)' : (x.k === 'nws' ? 'the day/night product (official high or low)' : (x.k === 'mav' ? 'the N/X line' : (x.k === 'nbm' ? 'the NBS day max/min line' : 'the hourly series')))]);
+        const tag = issuedTag(parseStamp(x.cycle), tz, M);
+        const why = x.newest ? ', the newest run until the day begins'
+          : (x.pre ? ', before the day began' : ', the first run held for the day');
+        rows.push([pre + 'Run', (tag ? tag + ', ' : '') + 'issued ' + stamp(x.cycle, tz) + why]);
+        rows.push([pre + 'Hours', at(x.t0) + ' to ' + at(x.t1) + ' \u00b7 ' + x.n
+          + (x.cad === 'hourly' ? ' hourly rows' : (x.cad === '3-hourly' ? ' rows, 3-hourly' : ' rows, hourly then 3-hourly'))]);
+        rows.push([pre + 'Derived from', 'the ' + (x.kind === 'high' ? 'highest' : 'lowest') + ' of those rows'
+          + (x.carried ? ', the last ' + x.carried.n + ' from the ' + issuedTag(parseStamp(x.carried.cycle), tz, M) + ' run past this run’s end' : '')
+          + (x.k === 'hrrr' ? ', at the station’s grid point' : '')]);
       });
       return tip.rows(same.map(x => NAME[x.k]).join(', ') + ' — forecast ' + L.kind + ' for ' + isoDate(M.day), rows,
         same.map(x => DESC[x.k]).join('; ') + ' · click to pin');
@@ -873,12 +963,18 @@ window.WXCity = (() => {
     const normals = nm && nm.tmax != null ? [{ v: nm.tmax, nm: 'normal high' }, { v: nm.tmin, nm: 'normal low' }] : [];
 
     const lad = market ? WXM.ladder(c, levelsFor(c), dayMode === 'tomorrow' ? 'tomorrow' : undefined) : null;
-    const picked = market ? [...checked].map(k => { const [pfx, K] = k.split(':'); return { side: pfx, K: +K, col: skColor(pfx, +K, lad) }; }).sort((a, b) => b.K - a.K) : [];
+    /* The strikes drawn are the ones the board on screen lists. A strike chosen
+       on today's board is not a contract on tomorrow's, and the day-ahead view
+       drew today's strikes and today's prices under a board that was not yet
+       listed (owner, 2026-10-16). */
+    const onBoard = (pfx, K) => !lad || !lad.live || (lad[pfx === 'h' ? 'high' : 'low'] || []).some(L => L.strike === K);
+    const picked = market ? [...checked].map(k => { const [pfx, K] = k.split(':'); return { side: pfx, K: +K, col: skColor(pfx, +K, lad) }; })
+      .filter(pk => onBoard(pk.side, pk.K)).sort((a, b) => b.K - a.K) : [];
 
     // ---- scales
     const x = t => S.L + (t - w0) / (d1 - w0) * (S.R - S.L);
     const step = unit === 'F' ? 5 : 2;
-    const temps = [...O, ...F, ...N, ...LA, ...A, ...NA, ...LAI].map(p => p.v)
+    const temps = runs.reduce((a, r) => a.concat(r.pts), O.slice()).map(p => p.v)
       .concat(ySeries.flatMap(s => s.pts.map(p => p.v))).concat(levels.map(l => l.v)).concat(normals.map(n => n.v))
       .concat(lad ? lad.high.map(l => l.strike).concat(lad.low.map(l => l.strike)) : []);
     if (!temps.length) temps.push(unit === 'F' ? 70 : 20);
@@ -941,7 +1037,8 @@ window.WXCity = (() => {
        including the twelve that carry no contract of any kind. Removed on the
        owner's instruction, 25 September, rather than gated: the day boundary is
        already marked and the line under the panel says what settles. */
-    const MARK_NOTE = { midnight: 'the contract day begins (station local time)', sunrise: 'NOAA solar approximation for the station', sunset: 'NOAA solar approximation for the station',
+    const SOLAR = 'NOAA solar approximation for the station' + (dayMode === 'tomorrow' ? ', carried forward one day' : '');
+    const MARK_NOTE = { midnight: 'the contract day begins (station local time)', sunrise: SOLAR, sunset: SOLAR,
       'tomorrow’s midnight': 'the day-ahead contract day begins (station local time)',
       'tomorrow’s sunrise': 'the same solar approximation carried forward one day',
       'tomorrow’s sunset': 'the same solar approximation carried forward one day',
@@ -957,14 +1054,17 @@ window.WXCity = (() => {
 
     // ---- checked strikes: level lines across every panel
     picked.forEach(pk => {
-      g.appendChild(el('line', { x1: S.L, x2: rightEdge, y1: y(pk.K), y2: y(pk.K), stroke: pk.col, 'stroke-width': 1.3, opacity: .5, 'pointer-events': 'none' }));
+      g.appendChild(el('line', { class: 'pkline', x1: S.L, x2: rightEdge, y1: y(pk.K), y2: y(pk.K), stroke: pk.col, 'stroke-width': 1.3, opacity: .5, 'pointer-events': 'none' }));
       g.appendChild(txt((pk.side === 'h' ? '>' : '<') + pk.K + '°', { x: S.R - 6, y: y(pk.K) - 3, 'text-anchor': 'end', 'font-size': 9, 'font-weight': 700, fill: pk.col, opacity: .85 }));
     });
 
-    // ---- level lines across the contract day, values and names in the gutter
+    // ---- level lines across exactly the hours each was taken over, values and names in the gutter
     levels.forEach(L => {
-      g.appendChild(el('line', { x1: x(d0), x2: S.R, y1: y(L.v), y2: y(L.v), stroke: L.col, 'stroke-width': 1.25, opacity: .85, 'pointer-events': 'none' }));
-      g.appendChild(bind(el('line', { x1: x(d0), x2: S.R, y1: y(L.v), y2: y(L.v), stroke: 'transparent', 'stroke-width': 7, 'pointer-events': 'stroke' }), () => levelTip(L), true));
+      const xa = x(L.t0), xb = Math.max(x(L.t1), xa + 3), yy = y(L.v);
+      g.appendChild(el('line', { class: 'lvlline', x1: xa, x2: xb, y1: yy, y2: yy, stroke: L.col, 'stroke-width': 1.25, opacity: .85, 'pointer-events': 'none' }));
+      // a short upright at each end, so the line reads as a span of hours and not a rule across the day
+      [xa, xb].forEach(xe => g.appendChild(el('line', { x1: xe, x2: xe, y1: yy - 3, y2: yy + 3, stroke: L.col, 'stroke-width': 1, opacity: .85, 'pointer-events': 'none' })));
+      g.appendChild(bind(el('line', { x1: xa, x2: xb, y1: yy, y2: yy, stroke: 'transparent', 'stroke-width': 7, 'pointer-events': 'stroke' }), () => levelTip(L), true));
     });
     const srt = levels.slice().sort((a, b) => b.v - a.v);
     const gap = 13; let prev = -1e9;
@@ -973,13 +1073,10 @@ window.WXCity = (() => {
       g.appendChild(bind(txt(L.v.toFixed(unit === 'F' ? 0 : 1), { x: S.GV, y: y(L.v) + 3.5, class: 'lvlval', fill: L.col }), () => levelTip(L), true));
       g.appendChild(el('line', { x1: S.GL0, x2: S.GL1, y1: y(L.v), y2: labY[i], stroke: L.col, 'stroke-width': .7, opacity: .5 }));
       // the full view gives its width to two ladders, so the names shorten to
-      // the initials the key below already spells out rather than running into
-      // the strike labels
-      const SHORT = { 'Weather Service': 'NWS', 'Blend of Models': 'NBM', 'GFS MOS': 'MOS', 'LAMP': 'LAMP' };
-      const nm = S.full
-        ? (Object.keys(SHORT).reduce((a, k) => (String(L.nm).indexOf(k) === 0 ? SHORT[k] : a), null)
-           || String(L.nm).split(' ')[0]) + (String(L.nm).indexOf('issued') >= 0 ? ' (iss)' : '')
-        : L.nm;
+      // the initials the crosshair already uses, with the hour and day
+      // of the run, rather than running into the strike labels
+      const tg = /\((\d{1,2}[ap] [TY])\)$/.exec(L.nm);
+      const nm = S.full ? SHORTNM[L.k] + (tg ? ' ' + tg[1] : '') : L.nm;
       g.appendChild(bind(txt(nm, { x: S.GN, y: labY[i] + 3.5, class: 'lvlnm', fill: L.col }), () => levelTip(L), true));
     });
     if (levels.length) g.appendChild(el('line', { x1: S.R, x2: S.R, y1: S.T, y2: S.B, stroke: 'var(--rule)', 'stroke-width': .9 }));
@@ -995,7 +1092,7 @@ window.WXCity = (() => {
       g.appendChild(bind(el('line', { x1: S.L, x2: S.L + 90, y1: y(n.v), y2: y(n.v), stroke: 'transparent', 'stroke-width': 9, 'pointer-events': 'stroke' }), () => normalTip(n), true));
       g.appendChild(bind(txt(n.nm + ' ' + n.v.toFixed(0) + '°', { x: S.L + 17, y: y(n.v) + 3.5, class: 'mklab' }), () => normalTip(n), true));
     });
-    if (unit === 'C') g.appendChild(txt(N.length ? 'Non-US station: no NWS forecast; NBM guidance covers Canada.' : 'Non-US station: US government feeds carry observations only.',
+    if (unit === 'C') g.appendChild(txt(runs.some(r => r.k === 'nbm') ? 'Non-US station: no NWS forecast; NBM guidance covers Canada.' : 'Non-US station: US government feeds carry observations only.',
       { x: S.L + 8, y: S.T + 16, class: 'axl' }));
 
     // ---- series
@@ -1053,46 +1150,37 @@ window.WXCity = (() => {
     // steps back; without it, today is at full strength as usual
     const dim = showYday ? 0.3 : 1;
     const od = v => Math.round(v * dim * 100) / 100;
-    const drawYesterday = () => ySeries.forEach(sr => {
-      const a = { stroke: sr.col, 'stroke-width': sr.w, opacity: sr.op };
+    const drawYesterday = () => ySeries.forEach(sr => sr.segs.forEach(seg => {
+      const a = { stroke: sr.col, 'stroke-width': sr.w, opacity: sr.op, class: 'yday' };
       if (sr.dash) a['stroke-dasharray'] = sr.dash;
-      g.appendChild(line(sr.pts, a));
-    });
+      g.appendChild(line(seg, a));
+    }));
     if (showYday && !YD.nws && !YD.nbm) g.appendChild(txt('Yesterday’s as-issued forecast appears here once the archive is a day old.', { x: S.L + 8, y: S.T + 30, class: 'axl' }));
-    /* The lead-in hours keep the forecast that stood for them.
-
-       The window opens at noon the day before, and the standing cycles above
-       only begin at their own issuance, so the first half of the figure showed
-       observations with no forecast beside them, as if none had existed. The
-       cycles that stood for yesterday are in the snapshot already; they draw
-       here in their real positions, clipped at the day boundary, in the same
-       dashed weight the as-issued lines use. Not on the day-ahead view, whose
-       lead-in is today and already carried by the standing series. */
-    let YU = [];
+    /* The runs: the superseded ones first, dotted, then each model's newest
+       run solid over them, the Weather Service on top. The lead-in hours keep
+       the runs that stood for yesterday, clipped at the day boundary, because
+       the window opens at noon the day before, earlier than any of today's
+       runs begins, and an empty lead-in read as though no forecast had
+       existed for those hours. */
+    const DRAW = ['mav', 'hrrr', 'lamp', 'nbm', 'nws'];
+    const W_NEW = { nws: 2.4, nbm: 2, lamp: 1.8, mav: 1.8, hrrr: 1.8 }, OP_NEW = { nws: .95, nbm: .9, lamp: .9, mav: .85, hrrr: .9 };
+    const W_OLD = { nws: 1.4, nbm: 1.3, lamp: 1.2, mav: 1.1, hrrr: 1.1 }, OP_OLD = { nws: .8, nbm: .75, lamp: .7, mav: .65, hrrr: .65 };
+    const byDraw = (a, b) => DRAW.indexOf(a.k) - DRAW.indexOf(b.k) || (a.ms - b.ms);
+    const dotted = r => line(r.pts, { stroke: COL[r.k], 'stroke-width': W_OLD[r.k], 'stroke-dasharray': '2 3', opacity: od(OP_OLD[r.k]) });
     if (dayMode !== 'tomorrow') {
       const yg = el('g', { class: 'ydfill' });
-      [['lamp', COL.lamp, 1.2, .7], ['nbm', COL.nbm, 1.3, .75], ['nws', COL.nws, 1.4, .8]].forEach(([k, col, w, op]) => {
-        const yk = YD[k]; if (!yk || !yk.rows) return;
-        const pts = inWin(rows(yk.rows)).filter(p => p.t <= d0);
-        if (pts.length > 1) {
-          yg.appendChild(line(pts, { stroke: col, 'stroke-width': w, 'stroke-dasharray': '2 3', opacity: od(op) }));
-          YU.push({ nm: 'Yesterday ' + NAME[k] + ' (' + issuedTag(parseStamp(yk.cycle), tz, M) + ')', pts, col });
-        }
-      });
+      runs.filter(r => r.lead).sort(byDraw).forEach(r => yg.appendChild(dotted(r)));
       g.appendChild(yg);
     }
-    if (LAI.length) g.appendChild(line(LAI, { stroke: COL.lamp, 'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: od(.7) }));
-    if (NA.length) g.appendChild(line(NA, { stroke: COL.nbm, 'stroke-width': 1.3, 'stroke-dasharray': '2 3', opacity: od(.75) }));
-    if (A.length) {
-      g.appendChild(line(A, { stroke: COL.nws, 'stroke-width': 1.4, 'stroke-dasharray': '2 3', opacity: od(.8) }));
-      const ai = AI.nws;
-      g.appendChild(txt(ai.preDay ? issuedTag(parseStamp(ai.cycle), tz, M)
-                                  : 'first archived cycle, ' + clock(A[0].t, tz),
-                        { x: x(A[0].t) + 6, y: y(A[0].v) + 14, class: 'mklab', fill: COL.nws }));
+    runs.filter(r => !r.fresh && !r.lead).sort(byDraw).forEach(r => g.appendChild(dotted(r)));
+    const aiNws = runs.find(r => r.k === 'nws' && !r.fresh && !r.lead);
+    if (aiNws) {
+      const p0 = aiNws.pts[0];
+      g.appendChild(txt(AI.nws.preDay ? issuedTag(aiNws.ms, tz, M) : 'first archived cycle, ' + clock(p0.t, tz),
+                        { x: x(p0.t) + 6, y: y(p0.v) + 14, class: 'mklab', fill: COL.nws }));
     }
-    if (LA.length) g.appendChild(line(LA, { stroke: COL.lamp, 'stroke-width': 1.6, 'stroke-dasharray': '1 3', opacity: od(.9) }));
-    if (N.length) g.appendChild(line(N, { stroke: COL.nbm, 'stroke-width': 2, 'stroke-dasharray': '5 4', opacity: od(.9) }));
-    if (F.length) g.appendChild(line(F, { stroke: COL.nws, 'stroke-width': 2.4, opacity: od(.95) }));
+    runs.filter(r => r.fresh).sort(byDraw).forEach(r =>
+      g.appendChild(line(r.pts, { stroke: COL[r.k], 'stroke-width': W_NEW[r.k], opacity: od(OP_NEW[r.k]) })));
     const obsMeta = {};
     ((ob && ob.rows) || []).forEach(r => { obsMeta[P(r.t)] = r; });
     // the reading and when it was taken, to the tenth the report carries
@@ -1106,55 +1194,6 @@ window.WXCity = (() => {
     }
     // last, so the day being asked about sits on top of the day it is compared with
     drawYesterday();
-
-    /* The legend, in the figure's own empty ground.
-
-       Lower right of the temperature panel: by then the day's trace has fallen
-       away and nothing else is competing for the space, so the legend sits where
-       a reader is already looking rather than under the chart where it has to be
-       found. Each source carries when its standing cycle was issued, which is
-       the fact that decides how much of the day that line had already seen. */
-    (function legend() {
-      const items = [{ nm: 'Observed (METAR)', col: COL.obs, w: 2.4, dash: null, iss: null }];
-      if (sub.length) items.push({ nm: 'Range between reports', col: COL.obs, band: true,
-                                    iss: 'not settlement' });
-      ['nws', 'nbm', 'lamp', 'mav'].forEach(k => {
-        const cyc = c[k + 'Cycle'];
-        const ms = parseStamp(cyc);
-        if (!FULLNAME[k]) return;
-        const age = isNaN(ms) ? null : Date.now() - ms;
-        items.push({ nm: FULLNAME[k], col: COL[k], w: 2, dash: k === 'nbm' ? '5 4' : (k === 'lamp' ? '1 3' : null),
-                     iss: isNaN(ms) ? null : clock(ms, tz) + (age != null ? ' \u00b7 ' + ageText(age) : '') });
-      });
-      const lh = 12.5, bw = 216;
-      /* Lower right of the whole figure, not of the temperature panel: on the
-         market layouts that is the ground to the right of the price series
-         and below the strike ladders, which nothing else uses. Without the
-         market panels the figure ends at the temperature panel and the old
-         corner is still the right one. */
-      const y1 = (market && S.PL1 != null) ? S.PL1 : S.B - 6;
-      const y0 = y1 - items.length * lh - 6;
-      const bx = (market && S.PL1 != null) ? S.W - bw - 8 : S.R - bw - 6;
-      g.appendChild(el('rect', { x: bx, y: y0, width: bw, height: y1 - y0, rx: 4,
-                                 fill: 'var(--panel)', 'fill-opacity': .95, stroke: 'var(--line)',
-                                 'stroke-width': .8, 'pointer-events': 'none' }));
-      items.forEach((it, i) => {
-        const yy = y0 + 12 + i * lh;
-        if (it.band) {
-          g.appendChild(el('rect', { x: bx + 7, y: yy - 5, width: 15, height: 7, fill: it.col,
-                                     'fill-opacity': .18, 'pointer-events': 'none' }));
-        } else {
-          g.appendChild(el('line', Object.assign({ x1: bx + 7, x2: bx + 22, y1: yy - 2, y2: yy - 2,
-            stroke: it.col, 'stroke-width': it.w || 2, 'pointer-events': 'none' },
-            it.dash ? { 'stroke-dasharray': it.dash } : {})));
-        }
-        g.appendChild(txt(it.nm, { x: bx + 27, y: yy + 1, 'font-size': 9, fill: 'var(--ink)',
-                                   'pointer-events': 'none' }));
-        if (it.iss) g.appendChild(txt(it.iss, { x: bx + bw - 7, y: yy + 1, 'font-size': 8.5,
-                                                'text-anchor': 'end', fill: 'var(--muted)',
-                                                'pointer-events': 'none' }));
-      });
-    })();
 
     // ---- as-of marker
     const asof = snaps.ob && snaps.ob.asof;
@@ -1249,11 +1288,17 @@ window.WXCity = (() => {
       const obsRows = (ob && ob.rows) || [];
       const fseries = [AI.nws && AI.nws.rows, AI.nbm && AI.nbm.rows, fc && fc.nws && fc.nws.hourly, fc && fc.nbm && fc.nbm.hourly];
       const how = lad.live ? 'ForecastEx Yes price, midway between the Yes bid and one dollar less the No bid, sampled every 10 minutes' : 'placeholder';
+      // a board the exchange has not listed yet has no prices to draw, as its ladder says
+      const unlisted = lad.live && !lad.listed;
       [['h', 'Yes price — high strikes (' + how + ')', S.PH0, S.PH1], ['l', 'Yes price — low strikes (' + how + ')', S.PL0, S.PL1]].forEach(([side, ttl, p0, p1]) => {
         const ypp = v => p1 - (v / 100) * (p1 - p0);
         g.appendChild(el('line', { x1: S.L, x2: S.R, y1: p0 - 24, y2: p0 - 24, stroke: 'var(--line)' }));
         g.appendChild(txt(ttl, { x: S.L, y: p0 - 10, class: 'axl' }));
         [0, 50, 100].forEach(p => { g.appendChild(el('line', { x1: S.L, x2: S.R, y1: ypp(p), y2: ypp(p), class: 'grid' })); g.appendChild(txt(p + '¢', { x: S.L - 8, y: ypp(p) + 4, 'text-anchor': 'end', class: 'ax' })); });
+        if (unlisted) {
+          g.appendChild(txt('not listed yet', { x: (S.L + S.R) / 2, y: (p0 + p1) / 2 + 4, 'text-anchor': 'middle', class: 'axl' }));
+          return;
+        }
         /* Every strike, faintly; the chosen one dark.
 
            Drawing only what had been picked meant an empty panel until a reader
@@ -1265,18 +1310,18 @@ window.WXCity = (() => {
         const all = (lad && lad[side === 'h' ? 'high' : 'low']) || [];
         all.forEach(L => {
           if (chosen.has(L.strike)) return;
-          const pts = WXM.pricePath(obsRows, fseries, unit, side, L.strike, c).filter(p => p.t >= w0);
+          const pts = WXM.pricePath(obsRows, fseries, unit, side, L.strike, c, lad.day).filter(p => p.t >= w0);
           if (pts.length < 2) return;
-          g.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + ypp(p.v).toFixed(1)).join(''),
+          g.appendChild(el('path', { class: 'pxline', d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + ypp(p.v).toFixed(1)).join(''),
                                      fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1,
                                      opacity: .22, 'pointer-events': 'none' }));
         });
         const endLabs = [];
         picked.filter(pk => pk.side === side).forEach(pk => {
-          const pts = WXM.pricePath(obsRows, fseries, unit, pk.side, pk.K, c).filter(p => p.t >= w0);
+          const pts = WXM.pricePath(obsRows, fseries, unit, pk.side, pk.K, c, lad.day).filter(p => p.t >= w0);
           if (!pts.length) return;
           priceSer.push({ label: (pk.side === 'h' ? '>' : '<') + pk.K + '°', col: pk.col, pts });
-          g.appendChild(el('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + ypp(p.v).toFixed(1)).join(''), fill: 'none', stroke: pk.col, 'stroke-width': 1.8 }));
+          g.appendChild(el('path', { class: 'pxline', d: pts.map((p, i) => (i ? 'L' : 'M') + x(p.t).toFixed(1) + ',' + ypp(p.v).toFixed(1)).join(''), fill: 'none', stroke: pk.col, 'stroke-width': 1.8 }));
           // a price history is a run of quotes, not a continuous price
           const pr = pts.length > 1
             ? Math.abs(x(pts[pts.length - 1].t) - x(pts[0].t)) / (pts.length - 1) : 0;
@@ -1308,21 +1353,25 @@ window.WXCity = (() => {
     }
     g.appendChild(txt('Temperature (°' + unit + '), local time' + (unit === 'C' ? ' — Celsius station' : ''), { x: S.W - 14, y: 16, 'text-anchor': 'end', class: 'axl' }));
 
+    /* The crosshair lists the observation, then model by model each run that
+       has a reading at that hour, the newest first (owner, 2026-10-16). Every
+       run is named by when it was issued, the same "8p Y" the level labels on
+       the right carry, and its swatch is solid or dotted like its line. */
+    const runRows = runs.reduce((a, r) => a.concat(r.parts.map(p => ({
+      k: r.k, ms: p.ms, fresh: r.fresh, col: COL[r.k], grp: r.k, pts: p.pts,
+      nm: SHORTNM[r.k] + (isNaN(p.ms) ? '' : ' ' + issuedTag(p.ms, tz, M)) }))), [])
+      .sort((a, b) => MODELS.indexOf(a.k) - MODELS.indexOf(b.k) || (b.ms - a.ms) || (b.fresh - a.fresh));
     HV = { w0, d1, tz, S, market,
-      /* Every run is named by when it was issued, the same "8p Y" the level
-         labels on the right carry. "Now" against "as issued" was a category the
-         reader had to learn; an issue time is the fact behind it and answers the
-         question that category was standing in for. */
-      series: [{ nm: 'Observed', pts: O, col: COL.obs },
-               { nm: runName('NWS', fc && fc.nws && fc.nws.cycle, tz, M), pts: F, col: COL.nws },
-               { nm: runName('NBM', fc && fc.nbm && fc.nbm.cycle, tz, M), pts: N, col: COL.nbm },
-               { nm: runName('LAMP', fc && fc.lamp && fc.lamp.cycle, tz, M), pts: LA, col: COL.lamp },
-               { nm: runName('NWS', AI.nws && AI.nws.cycle, tz, M), pts: A, col: COL.nws },
-               { nm: runName('NBM', AI.nbm && AI.nbm.cycle, tz, M), pts: NA, col: COL.nbm },
-               { nm: runName('LAMP', AI.lamp && AI.lamp.cycle, tz, M), pts: LAI, col: COL.lamp }]
-        .concat(YU)
-        .concat(ySeries.map(s => ({ nm: s.nm, pts: s.pts, col: s.col }))).filter(s => s.pts.length),
+      // the band's hours, which the crosshair reads now that no legend names the band
+      band: sub.map(q => ({ t: Date.parse(q.h), lo: q.lo, hi: q.hi })).filter(q => isFinite(q.t) && q.lo != null && q.hi != null),
+      series: [{ nm: 'Observed', pts: O, col: COL.obs, fresh: true, grp: 'obs' }]
+        .concat(runRows)
+        .concat(ySeries.map(s => ({ nm: s.nm, pts: s.pts, col: s.col, fresh: s.fresh, grp: 'yesterday' })))
+        .filter(s => s.pts.length),
       prices: priceSer };
+    // the line that says the ladders' prices open the exchange, under the day buttons on the full page
+    const chartCard = $('#chartCard');
+    if (chartCard && svgId === 'chart') WXM.tradeNote(svg, chartCard.nextElementSibling);
   }
 
   // ---- crosshair: temperature and time in the top panel, price in the bottom
@@ -1341,8 +1390,24 @@ window.WXCity = (() => {
       const t = HV.w0 + (q.x - S.L) / (S.R - S.L) * (HV.d1 - HV.w0);
       const ts = clock(t, HV.tz) + ' · ' + dateShort(t, HV.tz);
       const near = pts => { let b = null; for (const p of pts) { const d2 = Math.abs(p.t - t); if (d2 <= 45 * 6e4 && (!b || d2 < b.d2)) b = { d2, p }; } return b && b.p; };
-      const rows = [];
-      (inTemp ? HV.series : []).forEach(s => { const p = near(s.pts); if (p) rows.push([sw(s.col) + s.nm, p.v.toFixed(1) + '°']); });
+      const rows = [], listed = new Set();
+      let grp = null;
+      const push = (g2, label, val) => { rows.push([label, val, grp !== null && g2 !== grp ? 'gs' : null]); grp = g2; };
+      // the five minute stream's range in the hour under the pointer, beside
+      // the report it brackets and before the models
+      const hb = inTemp ? HV.band.find(q => t >= q.t && t < q.t + 36e5) : null;
+      let banded = !hb;
+      const bandRow = () => { banded = true; push('obs', swb(COL.obs) + 'Range between reports', hb.lo.toFixed(1) + '–' + hb.hi.toFixed(1) + '°, not settlement'); };
+      (inTemp ? HV.series : []).forEach(s => {
+        if (!banded && s.grp !== 'obs') bandRow();
+        const p = near(s.pts); if (!p) return;
+        // a run held twice, as the newest run's carry-on and as the run that
+        // stood before the day began, is listed once
+        const key = s.k && !isNaN(s.ms) ? s.k + '|' + s.ms + '|' + p.t : null;
+        if (key) { if (listed.has(key)) return; listed.add(key); }
+        push(s.grp, swl(s.col, !s.fresh) + s.nm, p.v.toFixed(1) + '°');
+      });
+      if (!banded) bandRow();
       if (inPrice) {
         HV.prices.filter(s => (hoverSide === 'h') === (s.label[0] === '>')).forEach(s => {
           const p = near(s.pts);
@@ -1352,7 +1417,8 @@ window.WXCity = (() => {
         if (op) rows.push([sw(COL.obs) + 'Observed', op.v.toFixed(1) + '°']);
       }
       if (!rows.length) { clear(); return; }
-      tip.show(e, tip.rows(ts, rows, inPrice ? 'Yes price in cents, midway between the Yes bid and one dollar less the No bid' : null));
+      tip.show(e, tip.rows(ts, rows, inPrice ? 'Yes price in cents, midway between the Yes bid and one dollar less the No bid'
+                                             : 'each model\u2019s newest run first; dotted, a run a newer one superseded'));
       const mk = () => el('line', { stroke: 'var(--muted)', 'stroke-width': .8, 'stroke-dasharray': '2 2', 'pointer-events': 'none' });
       if (!hline || !hline.isConnected) { hline = mk(); svg.appendChild(hline); }
       hline.setAttribute('x1', q.x); hline.setAttribute('x2', q.x); hline.setAttribute('y1', S.T); hline.setAttribute('y2', HV.market ? S.PL1 : S.B);
@@ -1374,33 +1440,7 @@ window.WXCity = (() => {
     svg.addEventListener('mouseleave', () => { tip.hide(); if (hline) hline.remove(); if (vline) vline.remove(); hline = vline = null; });
   }
 
-  /* How current each source is, in the figure's own legend.
-
-     This was a table under the chart and a distinction that did not survive
-     contact with what the products are. There is no useful line between "the
-     newest cycle" and "the cycle standing before the day began": they are both
-     forecasts, issued at different times, and what a reader needs is when each
-     one was issued and therefore how much of the day it had already seen.
-
-     So the legend carries the issue time beside the name, in the empty ground
-     at the lower right of the plot, where the day's trace has already fallen
-     away and nothing else is competing for the space. */
-  const TYPICAL_H = { nws: 6, nbm: 1, lamp: 1, mav: 6 };
-  const FULLNAME = { nws: 'Weather Service', nbm: 'Blend of Models',
-                     lamp: 'Aviation guidance', mav: 'GFS MOS' };
-
-  function ageText(ms) {
-    if (ms == null || !isFinite(ms)) return '';
-    const m = Math.max(0, Math.round(ms / 60000));
-    if (m < 60) return m + ' min old';
-    const hh = Math.floor(m / 60), mm = m % 60;
-    return hh + 'h ' + (mm ? String(mm).padStart(2, '0') + 'm ' : '') + 'old';
-  }
-  function parseStamp(sid) {
-    if (!sid) return NaN;
-    const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?Z?$/.exec(sid);
-    return Date.parse(m ? `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] || '00'}Z` : sid);
-  }
+  const parseStamp = WXC.parseStamp;
 
   async function init(opts = {}) {
     svgId = opts.svgId || 'chart';

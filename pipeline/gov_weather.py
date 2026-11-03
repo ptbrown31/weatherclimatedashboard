@@ -22,7 +22,7 @@ Run it standalone for a quick look at three stations:
 """
 
 from __future__ import annotations
-import json, re, sys, time, urllib.request, urllib.parse, urllib.error, datetime as dt
+import email.utils, json, re, sys, time, urllib.request, urllib.parse, urllib.error, datetime as dt
 from typing import Any, Optional
 
 # ---------------------------------------------------------------------------
@@ -139,6 +139,12 @@ NODD_RTMA = "https://noaa-rtma-pds.s3.amazonaws.com"
 # where the analysis lane reads a file NOAA Open Data does not have (the RTMA
 # analysis of 2026-09-23 19Z reached NOMADS and never NOAA Open Data)
 NOMADS_RTMA = "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod"
+# The HRRR's 2-D surface files and their .idx sidecars on NOAA Open Data, read
+# by range in the same way (pipeline/hrrr.py)
+NODD_HRRR = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
+# NDFD's newest CONUS issuance, one GRIB2 file per element for days one to
+# three, written again every hour (pipeline/ndfd.py); earlier issuances are not kept
+NODD_NDFD = "https://noaa-ndfd-pds.s3.amazonaws.com/opnl/AR.conus/VP.001-003"
 
 
 def _fetch_absent(url: str, tries: int, timeout: int, headers: dict, with_headers: bool = False):
@@ -168,10 +174,43 @@ def _fetch_absent(url: str, tries: int, timeout: int, headers: dict, with_header
     raise RuntimeError("unreachable")
 
 
-def fetch_bytes(url: str, tries: int = 3, timeout: int = 60) -> Optional[bytes]:
+def last_modified(hdrs) -> Optional[str]:
+    """An object's Last-Modified response header as a UTC ISO time to the
+    second, the time its server says the object was written; None when the
+    header is absent or unreadable."""
+    v = hdrs.get("Last-Modified") if hdrs is not None else None
+    if not v:
+        return None
+    try:
+        t = email.utils.parsedate_to_datetime(v)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if t is None:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt.timezone.utc)
+    return t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _note_meta(meta: Optional[dict], hdrs) -> None:
+    """Fill a caller's meta dict with the object's Last-Modified time and ETag."""
+    if meta is not None:
+        meta["lastModified"] = last_modified(hdrs)
+        meta["etag"] = hdrs.get("ETag") if hdrs is not None else None
+
+
+def fetch_bytes(url: str, tries: int = 3, timeout: int = 60, meta: Optional[dict] = None) -> Optional[bytes]:
     """A whole object from NOAA Open Data (an .idx sidecar, a precipitation
-    file); None when it is not there yet."""
-    return _fetch_absent(url, tries, timeout, {})
+    file); None when it is not there yet. With `meta`, the object's
+    Last-Modified time and ETag are written into it."""
+    if meta is None:
+        return _fetch_absent(url, tries, timeout, {})
+    got = _fetch_absent(url, tries, timeout, {}, with_headers=True)
+    if got is None:
+        return None
+    body, hdrs = got
+    _note_meta(meta, hdrs)
+    return body
 
 
 def _content_range_total(value: Optional[str]) -> Optional[int]:
@@ -185,7 +224,8 @@ def _content_range_total(value: Optional[str]) -> Optional[int]:
     return int(m.group(3))
 
 
-def fetch_range(url: str, start: int, end: int, tries: int = 3, timeout: int = 60) -> Optional[bytes]:
+def fetch_range(url: str, start: int, end: int, tries: int = 3, timeout: int = 60,
+                meta: Optional[dict] = None) -> Optional[bytes]:
     """Bytes start to end inclusive of an object (one GRIB2 message out of an
     analysis file, from the .idx offsets); None when the object is not there.
     A server that ignores the range and sends the whole object gets sliced,
@@ -193,11 +233,13 @@ def fetch_range(url: str, start: int, end: int, tries: int = 3, timeout: int = 6
     body accepted is a range that ran past the end of the object: the .idx
     sidecar cannot give the last message's end, the caller asks for a
     generous range, and S3 clamps it and answers 206 with the bytes that
-    exist, saying so in Content-Range. Anything else short is an error."""
+    exist, saying so in Content-Range. Anything else short is an error.
+    With `meta`, the object's Last-Modified time and ETag are written into it."""
     got = _fetch_absent(url, tries, timeout, {"Range": f"bytes={start}-{end}"}, with_headers=True)
     if got is None:
         return None
     body, hdrs = got
+    _note_meta(meta, hdrs)
     want = end - start + 1
     if len(body) == want:
         return body
@@ -1118,6 +1160,40 @@ def fetch_nhc_layer(name: str) -> list[dict]:
         return []
     q = urllib.parse.urlencode({"where": "1=1", "outFields": "*", "f": "geojson"})
     return (_get(f"{NHC_MAP}/{lid}/query?{q}") or {}).get("features", [])
+
+
+# NHC's GIS archive: every full advisory's five-day package (cone, forecast
+# track and forecast points as a zipped shapefile set) for every storm of a
+# season, posted as each advisory is issued and kept after the storm has gone.
+# pipeline/advisories.py copies them so the hurricane page can step through a
+# storm's forecasts. An intermediate advisory's package ends in a letter
+# (al092026_5day_004A.zip) and is not asked for.
+NHC_GIS = "https://www.nhc.noaa.gov/gis"
+
+
+def fetch_nhc_package(storm_id: str, adv: str) -> Optional[bytes]:
+    """One full advisory's package ("al092026", "010"); None when NHC has not posted it."""
+    return fetch_bytes(f"{NHC_GIS}/forecast/archive/{storm_id}_5day_{adv}.zip", timeout=60)
+
+
+def fetch_nhc_storm_advisories(storm_id: str) -> list:
+    """The full advisories NHC's archive lists for one storm, as zero-padded
+    numbers in order ("001", "002", ...)."""
+    sid, year = storm_id[:4], storm_id[4:]
+    html = _fetch(f"{NHC_GIS}/archive_forecast_results.php?id={sid}&year={year}", timeout=60).decode("utf-8", "replace")
+    return sorted(set(re.findall(r"%s_5day_(\d{3})\.zip" % re.escape(storm_id), html)))
+
+
+def fetch_nhc_year_storms(year: int) -> dict:
+    """{ATCF id: label} for every storm in NHC's GIS archive for a year, the
+    label as NHC's index writes it ("Hurricane ISAIAS", "Tropical Depression
+    NINETEEN-E"). A storm that crossed into the central Pacific is listed
+    under both basins with one id."""
+    html = _fetch(f"{NHC_GIS}/archive_forecast.php?year={int(year)}", timeout=60).decode("utf-8", "replace")
+    out = {}
+    for sid, yr, label in re.findall(r"archive_forecast_results\.php\?id=([a-z]{2}\d{2})&(?:amp;)?year=(\d{4})[^>]*>([^<]+)<", html):
+        out[f"{sid}{yr}"] = label.strip()
+    return out
 
 
 # ===========================================================================

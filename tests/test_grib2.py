@@ -28,6 +28,11 @@ SUBGRID_CELLS = {
     "last": (31487, 288.09998046875),
 }
 
+# The values eccodes reads at cells of the HRRR cut, the same in both
+# packings (README): (k, kelvin).
+HRRR_CELLS = [(0, 295.8199157714844), (1, 295.6949157714844), (2, 295.6324157714844), (17, 298.8199157714844),
+              (500, 297.1324157714844), (1154, 298.5699157714844), (577, 308.6949157714844)]
+
 # The sidecar of rtma2p5.20260927/rtma2p5.t10z.2dvaranl_ndfd.grb2_wexp on
 # noaa-rtma-pds, as published; the file is 84,264,163 bytes.
 RTMA_IDX = """\
@@ -403,6 +408,65 @@ class Decoding(unittest.TestCase):
                     want = _expected(ints, 0.0, -6, 0)
                     self.assertEqual(grib2.decode(msg), want, (order, group_len))
                     self.assertEqual(grib2.decode_cells(msg, [0, 1, 2, 34]), [want[k] for k in (0, 1, 2, 34)])
+
+    def test_decode_points_equals_the_whole_field(self):
+        # every packing the writer makes, every group length, holes and none:
+        # the running-sum reader where it applies, the fallbacks elsewhere
+        ks = [34, 0, 1, 2, 17, 17, 33]
+        cases = [dict(template=0)]
+        for template, orders in ((2, (0,)), (3, (1, 2))):
+            for order in orders:
+                for group_len in (4, 7, 35):
+                    cases.append(dict(template=template, order=order, group_len=group_len))
+        for kw in cases:
+            for ints in (INTS, INTS_HOLES):
+                msg = grib2_message(ints, NI, NJ, R=0.0, E=-6, D=0, product="apcp", **kw)
+                want = grib2.decode(msg)
+                self.assertEqual(grib2.decode_points(msg, ks), [want[k] for k in ks], kw)
+        with self.assertRaises(IndexError):
+            grib2.decode_points(grib2_message(INTS, NI, NJ, template=3, order=2, R=0.0, E=-6, D=0, product="apcp"), [NI * NJ])
+
+    def test_decode_points_on_messages_eccodes_packed(self):
+        # a 33 by 35 cut of the HRRR 2 m temperature, packed by eccodes with
+        # spatial differencing of order 1 and of order 2 (fixtures README)
+        for name in ("hrrr_t13z_f06_tmp_2m_subgrid_c3.grb2", "hrrr_t13z_f06_tmp_2m_subgrid_c3o2.grb2"):
+            with open(os.path.join(FIXTURES, name), "rb") as fh:
+                msg = fh.read()
+            self.assertEqual(grib2.drs_def(msg)["template"], 3, name)
+            ks = [k for k, _ in HRRR_CELLS]
+            got = grib2.decode_points(msg, ks)
+            self.assertEqual(got, [v for _, v in HRRR_CELLS], name)
+            whole = grib2.decode(msg)
+            self.assertEqual(got, [whole[k] for k in ks], name)
+            self.assertTrue(grib2.uv_grid_relative(msg), name)
+
+    def test_ndfd_rows_that_alternate_come_back_in_grid_order(self):
+        # NDFD writes its CONUS grids with every second row running east to west
+        # (scanning mode 80). Two 40 by 30 cuts of a MaxT grid, repacked by
+        # eccodes as NDFD packs them (fixtures README): one offshore with
+        # managed missing values, one inland with none, which the point reader
+        # takes without decoding the field. Values are eccodes' with its odd
+        # rows turned round; the odd-row probes differ from their mirror image.
+        with open(os.path.join(FIXTURES, "ndfd_maxt_conus_cut_scan80.grb2"), "rb") as fh:
+            sea = fh.read()
+        g = grib2.grid_def(sea)
+        self.assertEqual((g["scan"], g["Ni"], g["Nj"], grib2.drs_def(sea)["missing"]), (80, 40, 30, 1))
+        field = grib2.decode(sea)
+        present = [v for v in field if v is not None]
+        self.assertEqual(len(field) - len(present), 316)
+        self.assertAlmostEqual(sum(present), 254251.2891, places=3)
+        self.assertEqual((field[1 * 40 + 9], field[0], field[15 * 40 + 20]), (288.1015625, None, 287.6015625))
+        self.assertEqual(grib2.decode_points(sea, [49, 0, 620]), [288.1015625, None, 287.6015625])
+        with open(os.path.join(FIXTURES, "ndfd_maxt_conus_cut_scan80_full.grb2"), "rb") as fh:
+            land = fh.read()
+        self.assertEqual(grib2.drs_def(land)["missing"], 0)
+        whole = grib2.decode(land)
+        self.assertAlmostEqual(sum(whole), 356006.0166, places=3)
+        self.assertEqual((whole[40 + 0], whole[0], whole[29 * 40 + 39]),
+                         (293.70623779296875, 293.70623779296875, 295.39373779296875))
+        ks = [41, 40, 79, 0, 1199, 600, 641]
+        self.assertEqual(grib2.decode_points(land, ks), [whole[k] for k in ks])
+        self.assertTrue(grib2.same_grid(dict(grib2.NDFD, Ni=40, Nj=30, lat1=g["lat1"], lon1=g["lon1"], npts=1200), g))
 
     def test_managed_missing_values_come_back_as_none(self):
         msg = grib2_message(INTS, NI, NJ, template=2, R=0.0, E=-6, D=0, product="apcp",

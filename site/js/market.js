@@ -12,10 +12,9 @@
    the market-implied medians, and the hurricane and climate product groups.
    The numbers are the exchange's own, not fee adjusted. On this exchange
    there are no sellers: every resting order is a bid to buy Yes or a bid to
-   buy No, and the two sides of a pair sum to one dollar. The feed's "ask"
-   on a Yes contract is therefore one dollar less the No bid, and the pages
-   say "No bid"; the Yes price shown is the midpoint between the Yes bid
-   and one dollar less the No bid. Pages call load()/loadSummary()/
+   buy No. The feed's "ask" on a Yes contract is one dollar less the No bid,
+   and the pages say "No bid"; the Yes price shown is the midpoint between
+   the Yes bid and one dollar less the No bid. Pages call load()/loadSummary()/
    loadGroup() first and then the synchronous accessors below.
 
    'placeholder' reproduces the reference package's labeled synthetic data:
@@ -240,6 +239,32 @@ window.WXM = (() => {
     return node;
   }
 
+  /* The line that says a price opens the exchange (owner, 2026-10-22).
+
+     Every price on the site that names a listed contract opens it on IBKR's
+     prediction-market app (linkTo), and nothing on the pages said so. A priced
+     chart or board carries this line under it, and a page that stacks many
+     priced panels of one kind carries it once, above the first. It is shown
+     only where something in `scope` does open a contract: off the live overlay,
+     or with nothing listed, there is nothing to click and no line, and a redraw
+     that loses its last link takes the line away. It goes after `anchor`, or
+     before it with `before`, or at the end of `scope` when there is no anchor,
+     and never twice in one place. */
+  const TRADE_NOTE = 'Click on any price to trade contracts through IBKR Prediction Markets';
+  function tradeNote(scope, anchor, before) {
+    if (!scope || !scope.querySelector || (anchor && !anchor.parentNode)) return null;
+    const near = anchor ? (before ? anchor.previousElementSibling : anchor.nextElementSibling) : scope.lastElementChild;
+    const have = near && near.classList && near.classList.contains('tradenote') ? near : null;
+    if (!scope.querySelector('[data-contract-url]')) { if (have) have.remove(); return null; }
+    if (have) return have;
+    const n = document.createElement('p');
+    n.className = 'cap tradenote';
+    n.textContent = TRADE_NOTE;
+    if (!anchor) scope.appendChild(n);
+    else anchor.parentNode.insertBefore(n, before ? anchor : anchor.nextSibling);
+    return n;
+  }
+
   // implied high/low for the map: the market-implied median for the
   // station's tomorrow, against the NWS forecast for the same day
   // `state` names why a value may be missing: 'unavailable' (no quote summary
@@ -419,12 +444,14 @@ window.WXM = (() => {
   }
 
   // the quote history of one strike through the day: live from the
-  // snapshot's rolling history (10-minute samples), else the shaped placeholder
-  function pricePath(obsRows, forecastSeries, unit, side, K, city) {
+  // snapshot's rolling history (10-minute samples), else the shaped placeholder.
+  // `day` is the contract day whose board the strike is on, today's by default;
+  // the day-ahead view asks for tomorrow's, which has no history until it lists
+  function pricePath(obsRows, forecastSeries, unit, side, K, city, day) {
     if (!on()) return [];
     if (!live()) return pricePathPlaceholder(obsRows, forecastSeries, unit, side, K);
     const d = city && snapOf(city.station); if (!d) return [];
-    const day = city.markers ? city.markers.day : d.markers && d.markers.day;
+    day = day || (city.markers ? city.markers.day : d.markers && d.markers.day);
     const ser = (((d.history || {})[day] || {})[side === 'h' ? 'high' : 'low'] || {})[String(K)] || [];
     const pts = [];
     ser.forEach(s => {
@@ -461,6 +488,30 @@ window.WXM = (() => {
     return { asof: g.asof, stale: S.groups.hurricane.stale, source: S.groups.hurricane.source, markets: g.markets || [] };
   }
 
+  /* One product's ladder for a page that draws a single contract outside the fast
+     lane's groups: its terms from the catalogue (once a day, with the ids a link
+     needs) joined strike by strike to the catalogue's quotes (every half hour).
+     Null off the live overlay, for no id, and for a product the exchange does not
+     list. A strike with no quote yet comes back with no price. */
+  async function productBook(id) {
+    if (!live() || !id) return null;
+    const [t, q] = await Promise.all([WXD.get('catalogue/product/' + id + '.json', 1440),
+                                      WXD.get('catalogue/price/' + id + '.json', 30)]);
+    const terms = t.data;
+    if (!terms || terms.state !== 'listed' || !(terms.contracts || []).length) return null;
+    const quote = {};
+    ((q.data && q.data.rows) || []).forEach(r => { quote[r.spec + '|' + r.strike] = r; });
+    return {
+      id, name: terms.marketName || terms.name, productConid: terms.productConid,
+      asof: q.data ? q.data.asof : null, stale: q.stale,
+      rows: terms.contracts.map(c => {
+        const r = quote[c.spec + '|' + c.strike] || {};
+        return { strike: c.strike, numeric: c.numeric, label: c.label, spec: c.spec, expiryLabel: c.expiryLabel,
+                 conidYes: c.conidYes, bid: r.bid, ask: r.ask, mid: r.mid, bidSize: r.bidSize, askSize: r.askSize };
+      }),
+    };
+  }
+
   /* A book showing a 1c bid against a 99c ask is an empty book, not a 50c
      price: the midpoint of the widest possible spread says nothing. The test
      needs both sides present at the extremes, because a lone 1c bid with no
@@ -478,6 +529,32 @@ window.WXM = (() => {
   // contract nobody has bid on at all
   const emptyBook = r => !!(r && r.mid != null && !realMid(r));
 
-  return { realMid, emptyBook, mode, on, live, load, loadSummary, loadGroup, summaryLoad, implied, impliedWind, anticipatedWind, ladder, hourly, windLadder, pricePath, climateProducts, hurricaneMarkets, label,
-           payout, payoutText, feeCents, contractUrl, linkTo, termsUrl, termsLink, get LABEL() { return label(); }, PLACEHOLDER };
+  /* The standing book as four rows for a price box (owner, 2026-10-16). A
+     standing bid on one side is what lets a reader buy the other side now, at
+     one dollar less that bid. The central value sits midway between the Yes bid
+     and the price to buy Yes, and the spread is the gap between them. With one
+     side bid the central value is that side alone, as the Yes price is
+     everywhere on the site, and there is no spread. A book whose two sides both
+     bid the minimum carries no price on the boards that follow that rule, so
+     `empty` gives it no central value. Bids in cents. */
+  function bookRows(bid, noBid, empty) {
+    const c = v => (Number.isInteger(v) ? v : v.toFixed(1)) + '¢';
+    if (bid == null && noBid == null) return [['Standing bids', 'none on either side, so neither side can be bought now']];
+    const yesNow = noBid == null ? null : 100 - noBid;
+    const mid = bid != null && yesNow != null ? (bid + yesNow) / 2 : null;
+    return [
+      ['Standing Yes bid', bid == null ? 'none, so No cannot be bought now'
+        : c(bid) + ', so you can buy No now at ' + c(100 - bid)],
+      ['Standing No bid', noBid == null ? 'none, so Yes cannot be bought now'
+        : c(noBid) + ', so you can buy Yes now at ' + c(yesNow)],
+      ['Central value', empty ? 'none, both sides bid the minimum'
+        : mid != null ? c(mid) + ', midway between ' + c(bid) + ' and ' + c(yesNow)
+        : bid != null ? c(bid) + ', the Yes bid alone'
+        : yesNow != null ? c(yesNow) + ', one dollar less the No bid alone' : null],
+      ['Spread', mid != null ? c(yesNow - bid) + ', from ' + c(bid) + ' to ' + c(yesNow) : null],
+    ];
+  }
+
+  return { realMid, emptyBook, bookRows, mode, on, live, load, loadSummary, loadGroup, summaryLoad, implied, impliedWind, anticipatedWind, ladder, hourly, windLadder, pricePath, climateProducts, hurricaneMarkets, productBook, label,
+           payout, payoutText, feeCents, contractUrl, linkTo, tradeNote, TRADE_NOTE, termsUrl, termsLink, get LABEL() { return label(); }, PLACEHOLDER };
 })();

@@ -66,12 +66,38 @@ window.WXStorm = (() => {
   const numOf = name => { const i = NUMWORD.indexOf(String(name || '').trim()); return i > 0 ? i : null; };
   let ROSTER = [];
   function setRoster(list) { ROSTER = list || []; }
+  /* The NHC advisories the site keeps for each storm (pipeline/advisories.py):
+     the index names every storm it holds, with each name the storm carried, so
+     a storm filed here under its name finds the advisories it had as a
+     depression too. One storm's file is read when its section is drawn. */
+  let ADV = null;
+  const advDocs = {};
+  function setAdvisories(idx) { ADV = idx || null; }
+  const advEntries = nm => {
+    const key = String(nm || '').toLowerCase();
+    return Object.entries((ADV && ADV.storms) || {})
+      .filter(([, e]) => (e.names || []).some(x => String(x).toLowerCase() === key))
+      .sort((p, q) => (q[1].year || 0) - (p[1].year || 0));
+  };
+  async function advisoriesOf(storm) {
+    const hit = advEntries(storm.name).find(([, e]) => String(e.year) === String(storm.year));
+    if (!hit) return null;
+    const id = hit[0];
+    if (!(id in advDocs)) {
+      const r = await WXD.get('advisories/' + id + '.json', 30, { store: false });
+      advDocs[id] = r.data || null;
+    }
+    return advDocs[id];
+  }
   // the ocean being looked at: a storm belongs to one, and so does its section
   let BASIN = 'AL';
   function setBasin(b) { BASIN = b || 'AL'; }
+  // the roster names a running storm's ocean; a settled one's comes from its kept advisories
   const stormBasin = nm => {
     const r = ROSTER.find(x => String(x.name).toLowerCase() === String(nm || '').toLowerCase());
-    return r && r.basin ? r.basin : 'AL';
+    if (r && r.basin) return r.basin;
+    const a = advEntries(nm)[0];
+    return a && a[1].basin ? a[1].basin : 'AL';
   };
   const inBasin = nm => (BASIN === 'AL' ? stormBasin(nm) === 'AL' : stormBasin(nm) !== 'AL');
   function supersededBy(s) {
@@ -84,9 +110,9 @@ window.WXStorm = (() => {
     return hit ? hit.name : null;
   }
   // what a folded storm's summary says about why it is folded
-  // the vendor publishes a full float; a tenth of a mile an hour is the
-  // precision the figure carries and the settlement is read at
-  const mph = v => (v == null ? null : v.toFixed(1) + ' mph');
+  // the vendor publishes a full float; the contracts resolve on whole miles an
+  // hour (owner, 2026-10-12), so the figure is printed and settled as WXC.settleMph
+  const mph = v => (v == null ? null : WXC.settleMph(v) + ' mph');
   const doneLabel = s => (s.final ? 'settled'
     : supersededBy(s) ? 'now named ' + supersededBy(s)
     : 'no longer updating');
@@ -190,6 +216,21 @@ window.WXStorm = (() => {
     if (!MK) return [];
     return MK.markets.filter(m => /^LHL[A-Z]{2}[A-Z]?$/.test(m.symbol) && belongsTo(m, storm));
   }
+  /* A settled storm's pool, once the exchange has dropped it from the listing.
+     The quote job keeps every pool's price series and an index of them by symbol
+     with the exchange's name (pipeline/market.py), and the same name test finds
+     the storm's pool there. It stands in for the listing with no contracts, so
+     the chart takes its candidates from the series and links nowhere. */
+  async function storedPools(storm) {
+    let idx = null;
+    try { idx = (await WXD.get('lhl/index.json', 30, { store: false })).data; } catch (e) { idx = null; }
+    return Object.entries((idx && idx.pools) || {})
+      .filter(([sym, v]) => /^LHL[A-Z]{2}[A-Z]?$/.test(sym) && belongsTo({ name: v && v.name }, storm))
+      .map(([sym, v]) => ({ symbol: sym, name: v.name, contracts: [], stored: true }));
+  }
+  // a place name as the pool's strikes and the vendor's list both write it, so
+  // "St Petersburg" meets "St. Petersburg" and "Rio Lagartos" meets "Río Lagartos"
+  const placeKey = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z]/g, '');
   const priceAt = (m, threshold) => {
     if (!m) return null;
     const c = (m.contracts || []).find(x => Number(x.strike) === Number(threshold));
@@ -207,16 +248,16 @@ window.WXStorm = (() => {
   // compared: an interim settlement arrives on the exchange's schedule, not the
   // vendor's, so the step onto it is not a gap. With fewer than three cycles
   // there is no cadence to speak of and nothing is marked.
+  // a cycle's forecast time if it parses, and otherwise the delivery id, which
+  // is always the cycle's own YYYYMMDDHH and is the thing the ledger is keyed on
+  function cycleAt(s) {
+    const p = Date.parse(s.at || '');
+    if (isFinite(p)) return p;
+    const m = /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(s.id || ''));
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) : NaN;
+  }
   function gaps(cyc) {
-    // the forecast time if it parses, and otherwise the delivery id, which is
-    // always the cycle's own YYYYMMDDHH and is the thing the ledger is keyed on
-    const when = s => {
-      const p = Date.parse(s.at || '');
-      if (isFinite(p)) return p;
-      const m = /^(\d{4})(\d{2})(\d{2})(\d{2})$/.exec(String(s.id || ''));
-      return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) : NaN;
-    };
-    const t = cyc.map(s => (s.kind === 'livecyc' ? when(s) : NaN));
+    const t = cyc.map(s => (s.kind === 'livecyc' ? cycleAt(s) : NaN));
     const d = [];
     for (let k = 1; k < cyc.length; k++) if (isFinite(t[k]) && isFinite(t[k - 1])) d.push([k, t[k] - t[k - 1]]);
     if (d.length < 2) return [];
@@ -260,15 +301,91 @@ window.WXStorm = (() => {
   // the vendor's stamp stands in where there is none, and steps with neither
   // go last, in the order the ledger holds them. The final is not a delivery
   // on this axis.
+  //
+  // The cycles themselves always read in forecast order. A cycle can be
+  // recorded after a later one: the vendor published Isaias's 00Z and 06Z
+  // three seconds apart on 7 October, the lane then filed only the newest, and
+  // the 00Z went in an hour after the 06Z, so the series read 06Z before 00Z
+  // until the vendor re-sent the 06Z (Reask flagged it). The cycles therefore
+  // fill the places cycles hold in the arrival order, sorted by forecast time,
+  // and an interim keeps its place among them.
   const arrivedAt = s => {
     const t = [s && s.ts, s && s.at].map(v => Date.parse(v || '')).find(isFinite);
     return t == null ? Infinity : t;
   };
   function delivered(doc) {
-    return ((doc && doc.steps) || []).filter(s => s.kind !== 'final')
+    const out = ((doc && doc.steps) || []).filter(s => s.kind !== 'final')
       .map((s, i) => [s, i])
       .sort((a, b) => (arrivedAt(a[0]) - arrivedAt(b[0])) || (a[1] - b[1]))
       .map(x => x[0]);
+    const slots = [];
+    out.forEach((s, k) => { if (s.kind === 'livecyc') slots.push(k); });
+    const cyc = slots.map(k => out[k]);
+    // a cycle with no forecast time to sort on leaves the arrival order as it is
+    if (cyc.some(s => !isFinite(cycleAt(s)))) return out;
+    cyc.map((s, i) => [s, i]).sort((a, b) => (cycleAt(a[0]) - cycleAt(b[0])) || (a[1] - b[1]))
+      .forEach((x, j) => { out[slots[j]] = x[0]; });
+    return out;
+  }
+  // The moment each column on the axis stands for, for walking a price between
+  // columns. A cycle recorded after a later one (see delivered) would put its
+  // column's moment past the next column's and send the price backwards, so it
+  // is taken as having arrived with the next one, which is when the vendor had
+  // in fact published it.
+  function columnTimes(cyc) {
+    const t = cyc.map(s => [s.ts, s.at].map(v => Date.parse(v || '')).find(isFinite));
+    for (let k = t.length - 2; k >= 0; k--)
+      if (t[k] != null && t[k + 1] != null && t[k] > t[k + 1]) t[k] = t[k + 1];
+    return t;
+  }
+
+  // ---- the replay's steps (owner, 2026-10-20)
+  //
+  // One step per full NHC advisory, in time order, each carrying the advisory
+  // and the newest LiveCyc delivery whose cycle is at or before the advisory's
+  // synoptic time. An advisory and a cycle of the same stamp are one forecast
+  // cycle: the vendor builds its 18Z cycle on the track NHC issues at 21Z. A
+  // delivery whose cycle no advisory has (the site holds no advisories for the
+  // storm, or NHC's archive lacks one) is a step of its own, with the advisory
+  // in force before it. The Metryc interim and the final close the storm.
+  // `own` says whether the delivery is the step's own cycle or one carried from
+  // before it. A cycle is carried for twelve hours, two cycles, which covers a
+  // file the vendor missed; once it stops issuing them for a storm the later
+  // advisories carry none, and `since` names the last.
+  const CARRY_MS = 12 * 3600000;
+  function replaySteps(doc, adv) {
+    const cyc = delivered(doc);
+    const lc = cyc.filter(s => s.kind === 'livecyc').map(s => ({ s, t: cycleAt(s) })).filter(x => isFinite(x.t));
+    const advs = ((adv && adv.advisories) || []).map(a => ({ a, t: Date.parse(a.t0 || '') })).filter(x => isFinite(x.t));
+    const newestBy = (list, t) => list.reduce((hit, x) => (x.t <= t && (!hit || x.t >= hit.t) ? x : hit), null);
+    const steps = advs.map(x => {
+      const d = newestBy(lc, x.t);
+      const fresh = d && x.t - d.t <= CARRY_MS;
+      return { kind: 'adv', t: x.t, adv: x.a, delivery: fresh ? d.s : null, own: !!(d && d.t === x.t),
+               since: d && !fresh ? d.s : null };
+    });
+    lc.forEach(x => {
+      if (advs.some(y => y.t === x.t)) return;
+      const a = newestBy(advs, x.t);
+      steps.push({ kind: 'cycle', t: x.t, adv: a ? a.a : null, delivery: x.s, own: true });
+    });
+    steps.sort((p, q) => p.t - q.t);
+    cyc.filter(s => s.kind === 'interim').forEach(s => steps.push({ kind: 'interim', t: arrivedAt(s), adv: null, delivery: s, own: true }));
+    // the final, filed as a step, or held only as the ledger's figures (the cards' columns allow the same)
+    const fin = ((doc && doc.steps) || []).find(s => s.kind === 'final') || (doc && doc.final ? { id: 'FINAL', kind: 'final' } : null);
+    if (fin) steps.push({ kind: 'final', t: arrivedAt(fin), adv: null, delivery: fin, own: true });
+    return steps;
+  }
+  // what a step is, as the timeline names it
+  function stepLabel(st) {
+    const cyc = s => String((s && s.id) || '').replace(/^(\d{4})(\d{2})(\d{2})(\d{2})$/, '$2/$3 $4Z');
+    if (st.kind === 'interim') return 'Metryc interim';
+    if (st.kind === 'final') return 'Metryc final';
+    if (st.kind === 'cycle') return 'LiveCyc ' + cyc(st.delivery);
+    const a = st.adv || {};
+    const t0 = new Date(st.t).toISOString();
+    return 'Advisory ' + Number(a.adv) + ' · ' + t0.slice(5, 7) + '/' + t0.slice(8, 10) + ' ' + t0.slice(11, 13) + 'Z'
+      + (st.since ? ' · no LiveCyc since ' + cyc(st.since) : !st.delivery ? ' · no LiveCyc yet' : st.own ? '' : ' · LiveCyc ' + cyc(st.delivery));
   }
 
   // ---- the columns of a storm's axis
@@ -305,48 +422,158 @@ window.WXStorm = (() => {
     return cols;
   }
 
+  /* An axis label's width as the page sets it, measured once per string in a
+     ruler kept out of sight on the page. The ruler's text carries the label's
+     class and size, so the width is the one the reader gets. The stylesheet's
+     size for that class wins over the label's own attribute, and the reader's
+     system font sets the rest. Where nothing can be measured a generous
+     estimate stands in, which spaces the labels further apart than they need. */
+  const WIDTHS = {};
+  let RULER = null;
+  function labelWidth(s, size) {
+    const key = size + ' ' + s;
+    if (WIDTHS[key] != null) return WIDTHS[key];
+    let w = 0;
+    try {
+      if (!RULER || !RULER.isConnected) {
+        RULER = el('svg', { 'aria-hidden': 'true', width: 0, height: 0,
+          style: 'position:absolute;left:0;top:0;overflow:hidden;visibility:hidden;pointer-events:none' });
+        document.body.appendChild(RULER);
+      }
+      const t = RULER.appendChild(txt(s, { class: 'axl', 'font-size': size }));
+      w = t.getComputedTextLength();
+      RULER.removeChild(t);
+    } catch (e) { w = 0; }
+    if (w > 0) WIDTHS[key] = w;
+    return w > 0 ? w : String(s).length * size * 1.5;
+  }
+
   // The delivery axis, drawn the same way wherever the vendor's deliveries are
-  // the x axis: the NHC cycle each file is built on in UTC, the moment the file
-  // arrived on the Eastern clock, and the date where the day turns over. A
-  // column still to come is ticked dashed and labeled for what it waits on.
+  // the x axis. Its rows are the NHC cycle each file is built on in UTC, the
+  // moment the file arrived on the Eastern clock, and the date where the day
+  // turns over. A column still to come is ticked dashed and labeled for what
+  // it waits on.
   // Cycle labels thin rather than overlap, so a storm that runs a week keeps
-  // an axis that can still be read; the pending columns always show. What
-  // the rows are is said once, in the section's key, because a heading on
-  // the chart itself has nowhere to sit that the end columns cannot reach.
-  function deliveryAxis(svg, cols, x, B, size) {
+  // an axis that can still be read. What the rows are is said once, in the
+  // section's key, because a heading on the chart itself has nowhere to sit
+  // that the end columns cannot reach.
+  //
+  // The Metryc columns carry one word each, Interim and Final, because the
+  // shading's key already names them Metryc. Their labels and those of the
+  // columns still to come are placed first. These columns stand together at
+  // the end of the axis, and on a long storm they sit closer than their labels
+  // are wide, which printed Isaias's two Metryc labels over each other. Each
+  // label starts centered on its tick and moves right, into the margin, where
+  // it would meet the one before. Any that would then pass the margin's edge
+  // (xmax) move back left, and take the ones before them along where they
+  // would meet. The next cycle's label gives way where that leaves it clear of
+  // its own tick, and Interim and Final always stay. A cycle label that would
+  // meet a label already placed is left out, the same as a thinned one.
+  function deliveryAxis(svg, cols, x, B, size, xmax = Infinity) {
     const n = cols.length;
     if (!n) return;
     const room = Math.max(2, Math.floor((x(n - 1) - x(0)) / (size * 5.2)));
     const every = Math.max(1, Math.ceil(n / room));
+    // the space kept between two labels, about two word spaces at the axis's
+    // size, so that Interim and Final side by side read as two labels
+    const GAP = 6;
     let day = '';
-    cols.forEach((c, k) => {
+    const labs = cols.map((c, k) => {
       const s = c.step || {};
       const m = String(s.id || '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})$/);
-      const pending = !c.step;
-      const show = pending || !m || k % every === 0 || k === n - 1;
-      svg.appendChild(el('line', { x1: x(k), x2: x(k), y1: B, y2: B + (show ? 4 : 2),
-        stroke: 'var(--rule)', 'stroke-width': 1, 'stroke-dasharray': pending ? '2 2' : null }));
-      let r1 = '', r2 = '';
-      if (m) { r1 = m[4] + 'Z'; r2 = etTime(s.ts) || etTime(s.at); }
-      else if (c.kind === 'next') { r1 = c.cycle || 'next'; r2 = 'next'; }
-      else if (c.kind === 'interim' || c.kind === 'interim-ph') { r1 = 'Metryc'; r2 = 'Interim'; }
-      else if (c.kind === 'final' || c.kind === 'final-ph') { r1 = 'Metryc'; r2 = 'final'; }
-      const op = pending ? 0.55 : 1;
-      // row one: the NHC cycle the file is built on, in UTC
-      if (show && r1) svg.appendChild(txt(r1, { x: x(k), y: B + 4 + size, 'text-anchor': 'middle',
-        class: 'axl', 'font-size': size, opacity: op }));
-      // row two: when the file itself arrived, on the Eastern clock
-      if (show && r2) svg.appendChild(txt(r2, { x: x(k), y: B + 5 + size * 2.15,
-        'text-anchor': 'middle', class: 'axl', 'font-size': size * 0.9, opacity: 0.75 * op }));
-      if (!m) return;
-      // row three: the cycle's date, only where the day turns over
-      const d = m[2] + '/' + m[3];
-      if (d !== day) {
-        if (show) svg.appendChild(txt(d, { x: x(k), y: B + 6 + size * 3.3, 'text-anchor': 'middle',
-          class: 'axl', 'font-size': size, opacity: .75 }));
-        day = d;
+      const q = { k, cx: x(k), pending: !c.step, r1: '', r2: '', r3: '' };
+      q.fixed = q.pending || !m;
+      if (m) {
+        q.r1 = m[4] + 'Z'; q.r2 = etTime(s.ts) || etTime(s.at);
+        // the cycle's date, only where the day turns over
+        const d = m[2] + '/' + m[3];
+        if (d !== day) { q.r3 = d; day = d; }
       }
+      else if (c.kind === 'next') { q.r1 = c.cycle || 'next'; q.r2 = 'next'; q.yields = true; }
+      else if (c.kind === 'interim' || c.kind === 'interim-ph') q.r1 = 'Interim';
+      else if (c.kind === 'final' || c.kind === 'final-ph') q.r1 = 'Final';
+      q.w = Math.max(q.r1 ? labelWidth(q.r1, size) : 0, q.r2 ? labelWidth(q.r2, size * 0.9) : 0,
+                     q.r3 ? labelWidth(q.r3, size) : 0);
+      q.show = q.fixed;
+      return q;
     });
+    const pack = list => {
+      let edge = -Infinity;
+      list.forEach(q => { q.cx = Math.max(x(q.k), edge + GAP + q.w / 2); edge = q.cx + q.w / 2; });
+      edge = xmax + GAP;
+      list.slice().reverse().forEach(q => { q.cx = Math.min(q.cx, edge - GAP - q.w / 2); edge = q.cx - q.w / 2; });
+      return list;
+    };
+    let placed = pack(labs.filter(q => q.fixed && q.w > 0));
+    const off = placed.filter(q => q.yields && Math.abs(q.cx - x(q.k)) > q.w / 2);
+    if (off.length) {
+      off.forEach(q => { q.show = false; });
+      placed = pack(placed.filter(q => !q.yields || q.show));
+    }
+    const clear = q => placed.every(p => q.cx + q.w / 2 + GAP <= p.cx - p.w / 2 || q.cx - q.w / 2 >= p.cx + p.w / 2 + GAP);
+    labs.forEach(q => {
+      if (q.fixed || !(q.k % every === 0 || q.k === n - 1) || !clear(q)) return;
+      q.show = true;
+      placed.push(q);
+    });
+    labs.forEach(q => {
+      svg.appendChild(el('line', { x1: x(q.k), x2: x(q.k), y1: B, y2: B + (q.show ? 4 : 2),
+        stroke: 'var(--rule)', 'stroke-width': 1, 'stroke-dasharray': q.pending ? '2 2' : null }));
+      if (!q.show) return;
+      const op = q.pending ? 0.55 : 1;
+      // row one, the NHC cycle the file is built on in UTC, or the file the column holds
+      if (q.r1) svg.appendChild(txt(q.r1, { x: q.cx, y: B + 4 + size, 'text-anchor': 'middle',
+        class: 'axl', 'font-size': size, opacity: op }));
+      // row two, when the file itself arrived on the Eastern clock
+      if (q.r2) svg.appendChild(txt(q.r2, { x: q.cx, y: B + 5 + size * 2.15,
+        'text-anchor': 'middle', class: 'axl', 'font-size': size * 0.9, opacity: 0.75 * op }));
+      // row three, the date where the day turns over
+      if (q.r3) svg.appendChild(txt(q.r3, { x: q.cx, y: B + 6 + size * 3.3, 'text-anchor': 'middle',
+        class: 'axl', 'font-size': size, opacity: .75 }));
+    });
+  }
+
+  // ---- what each column of the vendor's measures
+  //
+  // A LiveCyc file looks forward from its cycle: the chance of a gust above the
+  // strike from then on, which falls toward zero once the storm has passed a
+  // place whatever the place has already had. The Metryc interim and final are
+  // cumulative: the highest gust over the whole storm, which is what the
+  // contract settles on. So a location's line can sink through the cycles and
+  // come back up at the interim, as Mobile's did for Isaias. Each chart is
+  // shaded by which kind of file each column is, so the turn reads as a change
+  // of measure on the chart itself (owner, 2026-10-12). A pending column takes
+  // the shade of the file it waits on.
+  const phaseOf = c => (c.kind === 'livecyc' || c.kind === 'next' ? 'fwd' : 'cum');
+  function phaseBands(svg, cols, x, wcol, L, R, T, B) {
+    let k0 = 0;
+    for (let k = 1; k <= cols.length; k++) {
+      if (k < cols.length && phaseOf(cols[k]) === phaseOf(cols[k0])) continue;
+      const ph = phaseOf(cols[k0]);
+      const x0 = Math.max(L, x(k0) - wcol / 2), x1 = Math.min(R, x(k - 1) + wcol / 2);
+      if (x1 > x0) svg.appendChild(el('rect', { class: 'phase phase-' + ph, x: x0, y: T, width: x1 - x0,
+        height: B - T, fill: 'var(--ph-' + ph + ')', 'pointer-events': 'none' }));
+      k0 = k;
+    }
+  }
+  // The chart's own key to the shading, right-aligned on a baseline above the
+  // plot. Each label starts just after its swatch and the room left for it is
+  // a generous estimate, so a wide font can only push the two keys apart, never
+  // onto each other or a swatch.
+  const PHASES = [['fwd', 'LiveCyc, forward-looking'], ['cum', 'Metryc, cumulative']];
+  function phaseKey(svg, xr, yb, size) {
+    const est = t => t.length * size * 0.6, sw = size * 1.5, gap = size * 0.45, sep = size * 1.2;
+    let xe = xr;
+    for (let i = PHASES.length - 1; i >= 0; i--) {
+      const [ph, t] = PHASES[i];
+      const xs = xe - est(t) - gap - sw;
+      svg.appendChild(el('rect', { class: 'phasekey phase-' + ph, x: xs, y: yb - size * 0.8, width: sw,
+        height: size * 0.9, rx: 1, fill: 'var(--ph-' + ph + ')', stroke: 'var(--rule)', 'stroke-width': 0.6,
+        'pointer-events': 'none' }));
+      svg.appendChild(txt(t, { x: xs + sw + gap, y: yb, 'font-size': size, fill: 'var(--muted)',
+        'pointer-events': 'none' }));
+      xe = xs - sep;
+    }
   }
 
   // ---- which series stands forward
@@ -355,22 +582,29 @@ window.WXStorm = (() => {
   // the exchange's price is the default. One state for the whole section, so
   // a click restyles every chart at once. Each chart opened to fill the window
   // carries its own copy of the switch, because the section's is behind it then.
-  let EMPH = 'exchange';
+  /* The location cards open with Reask's LiveCyc forward, the fair-value reference
+     for these contracts (owner, 2026-10-09: the exchange's quotes are the market
+     maker's with no trading behind them, and set beside the forecast they read as a
+     disagreement). The pool chart draws only the exchange's price and keeps it forward. */
+  let EMPH = 'livecyc';
   function setEmph(mode) {
-    EMPH = mode === 'livecyc' ? 'livecyc' : 'exchange';
-    document.querySelectorAll('svg.scard, svg.lhlserie').forEach(s => {
+    EMPH = mode === 'exchange' ? 'exchange' : 'livecyc';
+    document.querySelectorAll('svg.scard').forEach(s => {
       s.classList.toggle('emph-livecyc', EMPH === 'livecyc');
       s.classList.toggle('emph-exchange', EMPH === 'exchange');
     });
     document.querySelectorAll('.emphtog button').forEach(b => b.classList.toggle('on', b.dataset.mode === EMPH));
   }
-  const NOTE = 'LiveCyc is a forward-looking forecast only, whereas the contract settles on the maximum wind '
+  const NOTE = 'Reask\u2019s LiveCyc probabilities are the fair-value reference for these contracts. '
+    + 'LiveCyc is a forward-looking forecast only, whereas the contract settles on the maximum wind '
     + 'gust experienced over the entire course of the storm. After a storm has passed a location or dissipates, '
     + 'the LiveCyc forward-looking wind gust probabilities will drop toward zero, regardless of what gusts have '
-    + 'been experienced at a given location.';
+    + 'been experienced at a given location. Each chart is shaded to show this. Blue columns are LiveCyc forecasts, '
+    + 'which look forward from their cycle. Amber columns are Reask\u2019s Metryc interim and final, which count the '
+    + 'highest gust over the whole storm, so a strike whose line fell toward zero can stand high there.';
   function controls() {
     const tog = h('div', { class: 'emphtog', role: 'group', 'aria-label': 'which series stands forward' });
-    [['exchange', 'Exchange price'], ['livecyc', 'LiveCyc']].forEach(([m, t]) => {
+    [['livecyc', 'LiveCyc'], ['exchange', 'Exchange price']].forEach(([m, t]) => {
       const b = h('button', { class: m === EMPH ? 'on' : '', text: t, 'data-mode': m,
                               title: 'bring the ' + t + ' lines forward' });
       b.onclick = () => setEmph(m);
@@ -382,15 +616,19 @@ window.WXStorm = (() => {
       h('div', { class: 'emphctl' }, [h('span', { class: 'emphl', text: 'Highlight' }), tog]),
       note]);
   }
-  // the key: a color per strike, and the two line styles
-  function legend(thr, used) {
+  // the key: a color per strike, the two line styles and the interim's square
+  function legend(thr, used, settled) {
     const d = h('div', { class: 'slegend' });
     (thr || []).forEach((t, i) => {
       if (used && !used[t]) return;
       d.appendChild(h('span', {}, [h('i', { class: 'sw', style: 'background:' + rung(i, thr.length) }), '≥' + t]));
     });
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'Reask LiveCyc, the fair-value reference']));
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kq' }), 'Metryc interim']));
+    if (settled) d.appendChild(h('span', { class: 'kk', text: '✓ ✕ how each strike settled' }));
     d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl' }), 'exchange price, the Yes midpoint']));
-    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'kl dash' }), 'Forecasts from Reask']));
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'ph fwd' }), 'LiveCyc columns, forward-looking from each cycle']));
+    d.appendChild(h('span', { class: 'kk' }, [h('i', { class: 'ph cum' }), 'Metryc columns, cumulative over the storm']));
     d.appendChild(h('span', { class: 'kk', text: 'axis rows, the NHC cycle over the file’s arrival in ET, dated where the day turns' }));
     return d;
   }
@@ -406,16 +644,19 @@ window.WXStorm = (() => {
   // ---- one location's card: the two series through the deliveries.
   //
   // A dashed line per strike is the vendor's LiveCyc probability as published,
-  // a solid line in the same color the exchange's Yes price for the same
-  // contract, both on the delivery axis with the pending columns held open at
-  // the end. Returns the node, a setCursor so scrubbing moves a line and a few
-  // marks rather than rebuilding every card, and the strikes it drew.
-  function card(doc, sid, storm, gp) {
+  // a square in the same color the Metryc interim's, and a solid line the
+  // exchange's Yes price for the same contract, all on the delivery axis with
+  // the pending columns held open at the end. Returns the node, a setCursor so
+  // scrubbing moves a line and a few marks rather than rebuilding every card,
+  // and the strikes it drew.
+  function card(doc, sid, storm, gp, keptCode) {
     const meta = doc.sites[sid] || {};
     const thr = doc.thresholds || [];
-    const cyc = delivered(doc);                                          // what the timeline scrubs
+    const cyc = delivered(doc);                                          // the deliveries, for the gaps between them
     const cols = columns(doc, stormEntry(storm));
     const fin = doc.final || null;
+    // the location's settled gust, once the final file is in
+    const settled = !!(fin && fin[sid] != null);
     // a storm under the owner's ruling carries its recorded prices and no live quote
     const ruled = doc.pricesFrom === 'override';
     const listed = lMarket(storm.name, sid);
@@ -439,6 +680,26 @@ window.WXStorm = (() => {
     // the newest thing the vendor has said, cycle or interim: where the price
     // now belongs, and what the latest column is
     const newest = cols.map((c, k) => (c.step && c.kind !== 'final' ? k : -1)).filter(k => k >= 0).pop();
+    /* The exchange's price that goes with a delivery: the one standing while that
+       file was the newest, which is the market's answer to it (owner, 2026-10-08/09).
+       The vendor lane reads it every half hour onto the newest delivery and stops
+       when the next file is filed (`pricesEnd`), so it is never the next file's
+       price. The newest delivery takes the price now. A delivery filed before that
+       reading began falls back on the reading made when the next file landed, which
+       is right when the market maker is slow and wrong when it moves within minutes,
+       as it did for Isaias's 06Z of 9 October. A storm under the owner's ruling
+       carries the desk's figure for each delivery as that delivery's own price, so
+       nothing is moved there. */
+    const nextStep = k => { for (let j = k + 1; j < cols.length; j++) if (cols[j].step && cols[j].kind !== 'final') return cols[j].step; return null; };
+    const readOf = (st, t) => { const v = st && ((st.prices || {})[sid] || {})[String(t)]; return v == null ? null : v; };
+    const endOf = k => { const st = cols[k] && cols[k].step; return st && st.pricesEnd && st.pricesEnd[sid] ? st.pricesEnd[sid] : null; };
+    const priceWith = (k, t) => {
+      if (ruled) return readOf(cols[k].step, t);
+      if (k === newest && mk) return priceAt(mk, t);
+      const end = endOf(k);
+      if (end) return end[String(t)] == null ? null : end[String(t)];
+      return readOf(k === newest ? cols[k].step : nextStep(k), t);
+    };
     const used = {};
 
     [0, 25, 50, 75, 100].forEach(p => {
@@ -449,7 +710,11 @@ window.WXStorm = (() => {
     const pend = cols.findIndex(c => !c.step);
     if (pend >= 0) svg.appendChild(el('rect', { class: 'pending', x: x(pend) - wcol / 2, y: T,
       width: x(cols.length - 1) - x(pend) + wcol / 2, height: B - T, fill: 'var(--shade)', 'pointer-events': 'none' }));
-    deliveryAxis(svg, cols, x, B, 7.5);
+    // which columns look forward and which count the whole storm, over the pending shade
+    phaseBands(svg, cols, x, wcol, L, R, T, B);
+    phaseKey(svg, R, T - 5, 8);
+    // the end labels may run into the right margin, short of the viewBox's edge
+    deliveryAxis(svg, cols, x, B, 7.5, W - 2);
 
     // the strikes worth a row anywhere on this card: a LiveCyc figure above
     // zero at some delivery, a recorded price, or a price now
@@ -471,32 +736,42 @@ window.WXStorm = (() => {
       const band = el('rect', { class: 'hband', x: x(k) - wcol / 2, y: T, width: Math.max(wcol, 6), height: B - T, fill: 'transparent' });
       bind(band, () => {
         const arr = (s.sites && s.sites[sid]) || [];
-        const pr = (s.prices && s.prices[sid]) || {};
         const nowCol = k === newest && !!mk;
-        // the figure in the second column is whichever file this column is:
-        // a forecast cycle's LiveCyc, or the Metryc interim's folded ladder
+        // Two figures a row: the vendor's, to the whole percent (owner, 2026-10-08),
+        // and the exchange's Yes midpoint, the one standing while this file was the
+        // newest and on the newest delivery the one standing now, so this box and the
+        // panel beside the map never quote two prices for one contract. The column of
+        // the exchange's price less LiveCyc was dropped on 2026-10-09 with LiveCyc
+        // made the fair-value reference: with no trading, the gap is the market
+        // maker's and not a finding. The figure in the second column is whichever
+        // file this column is: a forecast cycle's LiveCyc, or the Metryc interim's.
         const head = ['strike', c.kind === 'interim' ? 'Metryc interim' : 'LiveCyc', 'exchange']
-          .concat(nowCol ? ['now'] : []).concat(fin && fin[sid] != null ? ['settled'] : []);
+          .concat(fin && fin[sid] != null ? ['settled'] : []);
         const rows = [];
         thr.forEach((t, i) => {
           if (!used[t]) return;
           // a zero the vendor printed is a figure and reads as one
           const v = arr.length > i && arr[i] != null ? arr[i] : null;
-          const p = pr[String(t)];
-          const r = ['≥' + t + ' mph', v == null ? null : v + '%', p == null ? null : Math.round(p) + '¢'];
-          if (nowCol) { const live = priceAt(mk, t); r.push(live == null ? null : live + '¢'); }
-          if (fin && fin[sid] != null) r.push(fin[sid] >= t ? '✓ Yes' : '✕ No');
+          const pw = priceWith(k, t);
+          const ex = pw == null ? null : Math.round(pw);
+          const r = ['≥' + t + ' mph', v == null ? null : esc(WXC.vendorPct(v)), ex == null ? null : ex + '¢'];
+          if (fin && fin[sid] != null) r.push(WXC.settleMph(fin[sid]) >= t ? '✓ Yes' : '✕ No');
           rows.push(r);
         });
         const et = etTime(s.ts) || etTime(s.at);
         const what = c.kind === 'final' ? 'final settlement' + (fin && fin[sid] != null ? ' · ' + mph(fin[sid]) : '')
           : c.kind === 'interim' ? 'the Metryc interim file'
               + (arr.length ? '' : ' · it carries no figure for this location')
-          : 'delivery ' + (k + 1) + ' of ' + (lastLc + 1) + ' so far';
+          : 'delivery ' + (k + 1) + ' of ' + (lastLc + 1) + ' so far'
+              + (s.as ? ' · delivered as ' + esc(s.as) + ', the depression’s number' : '');
         return colTip(esc(meta.name || sid) + ' · ' + label(s) + (k === newest ? ' (latest)' : ''),
           et ? 'file ' + et + ' ET' : '', head,
           rows.length ? rows : [['—', 'nothing above zero', null]],
-          what + (url ? ' · click to open the contract' : '') + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
+          what + ' · exchange is the Yes midpoint ' + (ruled ? 'recorded for this delivery'
+            : nowCol ? 'standing now' : endOf(k) ? 'standing last while this file was the newest'
+            : 'standing when the next file arrived')
+          + ' · LiveCyc is the fair-value reference'
+          + (url ? ' · click to open the contract' : '') + ' · ' + esc((RK && RK.attribution) || 'Powered by Reask'));
       }, url);
       svg.appendChild(band);
     });
@@ -521,46 +796,75 @@ window.WXStorm = (() => {
       const gl = el('g'); slashes(gl, mid, B, 9); svg.appendChild(gl);
     });
 
-    // the vendor's LiveCyc ladder, dashed: one line per strike from the
-    // delivery it first carried a figure on, through the interim if there is
-    // one, and at settlement a snap to 100 or 0 for how the strike resolved
+    /* The vendor's figures, one color per strike. LiveCyc looks forward from
+       each cycle and the Metryc files count the whole storm, so no line joins
+       the two (owner, 2026-10-15). LiveCyc is a dashed line through the cycles
+       from the first that carried a figure above zero. The interim is a square
+       per strike on the same axis. Once the final is in, every LiveCyc reading
+       and every square carries a check or a cross for how the strike settled,
+       and a dotted line runs from the square to a dot at 100 or 0 in the Final
+       column, as on the internal desk. A strike the interim gave no figure gets
+       its dot and no line. */
     const kf = cols.length - 1;
-    let anyHit = false, anyMiss = false, ri = 0;
+    const ki = cols.findIndex(c => c.kind === 'interim');
+    const gsz = Math.max(6, Math.min(9, wcol * 0.85));
+    const qsz = Math.max(7, Math.min(10, wcol * 0.9));
+    const mark = (cx, cy, hit, col, size) => svg.appendChild(txt(hit ? '✓' : '✕', { class: 'rsmk',
+      x: cx.toFixed(1), y: (cy + size * 0.36).toFixed(1), 'text-anchor': 'middle', 'font-size': size.toFixed(1),
+      'font-weight': 700, fill: col, 'pointer-events': 'none' }));
+    let ri = 0;
+    const ims = [];
     thr.forEach((t, i) => {
       const col = rung(i, thr.length);
+      const hit = settled && WXC.settleMph(fin[sid]) >= t;
       const pts = [];
       cols.forEach((c, k) => {
-        if (!c.step || c.kind === 'final') return;
+        if (!c.step || c.kind !== 'livecyc') return;
         const arr = c.step.sites && c.step.sites[sid];
         const p = arr && arr.length > i ? arr[i] : null;
         if (p == null) return;
         if (!pts.length && p <= 0) return;
         pts.push([k, p]);
       });
-      if (!pts.length) return;
-      const d = pts.map((p, j) => (j ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join('');
-      svg.appendChild(el('path', { class: 'lcline', d: d, fill: 'none', stroke: col, 'stroke-width': 1.7,
-                                   'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
-      // one point per delivery: the vendor issues these at set times and nothing
+      // a zero the interim printed is a figure, on a strike that already has a line
+      const ia = ki >= 0 ? (cols[ki].step.sites || {})[sid] : null;
+      const ip = ia && ia.length > i && ia[i] != null && (pts.length || ia[i] > 0) ? ia[i] : null;
+      if (!pts.length && ip == null) return;
+      if (pts.length > 1) svg.appendChild(el('path', { class: 'lcline',
+        d: pts.map((p, j) => (j ? 'L' : 'M') + x(p[0]).toFixed(1) + ',' + y(p[1]).toFixed(1)).join(''),
+        fill: 'none', stroke: col, 'stroke-width': 1.7, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }));
+      // one mark per delivery: the vendor issues these at set times and nothing
       // is measured between them, so each reading is marked rather than implied
-      // a rung with a single reading, which a location the interim alone
-      // names has, is still a reading and gets its dot
-      if ((pts.length > 1 && wcol >= 5) || pts.length === 1) pts.forEach(v => svg.appendChild(el('circle',
-        { class: 'ldot', cx: x(v[0]).toFixed(1), cy: y(v[1]).toFixed(1), r: Math.min(2.6, wcol / 4),
-          fill: col, 'pointer-events': 'none' })));
-      if (fin && fin[sid] != null) {
-        const hit = fin[sid] >= t, last = pts[pts.length - 1];
+      if ((pts.length > 1 && wcol >= 5) || pts.length === 1) pts.forEach(v => {
+        if (settled) mark(x(v[0]), y(v[1]), hit, col, gsz);
+        else svg.appendChild(el('circle', { class: 'ldot', cx: x(v[0]).toFixed(1), cy: y(v[1]).toFixed(1),
+          r: Math.min(2.6, wcol / 4), fill: col, 'pointer-events': 'none' }));
+      });
+      const xi = ip == null ? null : x(ki), yi = ip == null ? null : y(ip);
+      if (settled) {
         const xr = x(kf) - 4 + (ri % 5) * 2, yr = y(hit ? 100 : 0);
-        svg.appendChild(el('path', { class: 'lcline', d: 'M' + x(last[0]).toFixed(1) + ',' + y(last[1]).toFixed(1)
+        if (ip != null) svg.appendChild(el('path', { class: 'finline', d: 'M' + xi.toFixed(1) + ',' + yi.toFixed(1)
           + 'L' + xr.toFixed(1) + ',' + yr.toFixed(1), fill: 'none', stroke: col, 'stroke-width': 1,
           'stroke-dasharray': '2 2', 'pointer-events': 'none' }));
-        svg.appendChild(el('circle', { class: 'ldot', cx: xr.toFixed(1), cy: yr.toFixed(1), r: 2.6, fill: col, 'pointer-events': 'none' }));
-        if (hit) anyHit = true; else anyMiss = true;
+        svg.appendChild(el('circle', { class: 'findot', cx: xr.toFixed(1), cy: yr.toFixed(1), r: 2.6, fill: col,
+          stroke: 'var(--panel)', 'stroke-width': 0.8, 'pointer-events': 'none' }));
         ri++;
       }
+      if (ip != null) ims.push({ i, ip, xi, yi, hit, col });
     });
-    if (anyHit) svg.appendChild(txt('✓', { x: x(kf) + 8, y: y(100) + 4, 'font-size': 10, fill: 'var(--yes)' }));
-    if (anyMiss) svg.appendChild(txt('✕', { x: x(kf) + 8, y: y(0) + 1, 'font-size': 10, fill: 'var(--muted)' }));
+    /* The interim's squares, over the lines to the final. Strikes that share a
+       figure stack, and the one nearest the line between Yes and No stands on
+       top: the lowest of those the interim put near zero, the highest of those
+       it put near one hundred. A strike the interim misread sits there, as
+       Gulfport's 60 mph did for Isaias, printed at 1% and settled Yes at 62. */
+    ims.sort((a, b) => (a.ip >= 50 ? a.i : -a.i) - (b.ip >= 50 ? b.i : -b.i)).forEach(m => {
+      svg.appendChild(el('rect', { class: 'intmk', x: (m.xi - qsz / 2).toFixed(1), y: (m.yi - qsz / 2).toFixed(1),
+        width: qsz.toFixed(1), height: qsz.toFixed(1), fill: 'var(--panel)', stroke: m.col, 'stroke-width': 1.2,
+        'pointer-events': 'none' }));
+      if (settled) mark(m.xi, m.yi, m.hit, m.col, Math.min(gsz, qsz - 1.5));
+      else svg.appendChild(el('circle', { class: 'intdot', cx: m.xi.toFixed(1), cy: m.yi.toFixed(1), r: 1.6, fill: m.col,
+        'pointer-events': 'none' }));
+    });
 
     // the exchange's price, solid and in the same color: one line per strike
     // through the price recorded with each delivery, a square at each reading
@@ -569,7 +873,7 @@ window.WXStorm = (() => {
       const pp = [];
       cols.forEach((c, k) => {
         if (!c.step) return;
-        const v = ((c.step.prices || {})[sid] || {})[String(t)];
+        const v = c.kind === 'final' ? null : priceWith(k, t);
         if (v != null) pp.push([k, v]);
       });
       if (pp.length > 1) svg.appendChild(el('path', { class: 'pxline',
@@ -577,11 +881,10 @@ window.WXStorm = (() => {
         fill: 'none', stroke: col, 'stroke-width': 2.4, 'pointer-events': 'none' }));
       pp.forEach(q => svg.appendChild(el('rect', { class: 'pxdot', x: (x(q[0]) - 2.2).toFixed(1), y: (y(q[1]) - 2.2).toFixed(1),
         width: 4.4, height: 4.4, fill: col, 'pointer-events': 'none' })));
-      // the price now is fresher than the one recorded when the newest delivery
-      // landed: a hollow square beside that column, hollow to read as the market's
-      const live = mk && newest != null ? priceAt(mk, t) : null;
-      if (live != null) svg.appendChild(el('rect', { class: 'pxnow', x: x(newest) + 5, y: y(live) - 3.5, width: 7, height: 7,
-        fill: 'transparent', stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
+      // The price now used to stand as a hollow square beside the newest column, and
+      // the cursor drew another over the price there, so two boxes sat side by side
+      // saying what the newest column's hover table now says in figures (owner,
+      // 2026-10-08). Neither is drawn.
     });
 
     // the cursor: a line at the delivery being read and a dot on each series there
@@ -589,36 +892,53 @@ window.WXStorm = (() => {
     svg.appendChild(cline);
     const marks = el('g');
     svg.appendChild(marks);
-    function setCursor(ti) {
-      const s = cyc[Math.max(0, Math.min(ti, cyc.length - 1))] || {};
+    // The cursor follows the replay's step: the delivery the step carries. Before
+    // the storm's first delivery there is none, and the cursor is not drawn.
+    function setCursor(st) {
+      const s = st || {};
       const k = colOf[s.id];
-      if (k == null) return;
-      cline.setAttribute('x1', x(k)); cline.setAttribute('x2', x(k));
       marks.innerHTML = '';
+      if (k == null) { cline.setAttribute('visibility', 'hidden'); return; }
+      cline.removeAttribute('visibility');
+      cline.setAttribute('x1', x(k)); cline.setAttribute('x2', x(k));
+      // the interim's squares already mark its readings, and the final's ticks and crosses its own
+      if (s.kind === 'interim' || s.kind === 'final') return;
       const arr = (s.sites && s.sites[sid]) || [];
-      const pr = (s.prices && s.prices[sid]) || {};
       thr.forEach((t, i) => {
         if (!used[t]) return;
         const col = rung(i, thr.length);
         const v = arr.length > i ? arr[i] : null;
-        // a forecast at zero is drawn as nothing; an interim at zero is a published figure
-        if (v != null && (v > 0 || s.kind === 'interim')) marks.appendChild(el('circle', { cx: x(k), cy: y(v), r: 2.8, fill: col, 'pointer-events': 'none' }));
-        const p = pr[String(t)];
-        if (p != null) marks.appendChild(el('rect', { x: x(k) - 3.2, y: y(p) - 3.2, width: 6.4, height: 6.4, fill: 'var(--panel)',
-          stroke: col, 'stroke-width': 1.6, 'pointer-events': 'none' }));
+        // a forecast at zero is drawn as nothing. Once the final is in the mark is a
+        // ring, so the check or cross at the reading stays legible inside it.
+        if (v == null || v <= 0) return;
+        marks.appendChild(el('circle', settled
+          ? { cx: x(k), cy: y(v), r: 5.5, fill: 'none', stroke: col, 'stroke-width': 1.2, 'pointer-events': 'none' }
+          : { cx: x(k), cy: y(v), r: 2.8, fill: col, 'pointer-events': 'none' }));
       });
     }
-    if (fin && fin[sid] != null) svg.appendChild(txt(mph(fin[sid]), { x: x(kf) - 6, y: B - 3, 'text-anchor': 'end',
-      'font-size': 9.5, 'font-weight': 700, fill: 'var(--ink)' }));
 
     const wrap = h('div', { class: 'scardwrap', 'data-sid': sid });
     // the key and the switch travel with the card when it fills the window
-    wrap.appendChild(h('div', { class: 'xhdr' }, [controls(), legend(thr, used)]));
-    const title = h('div', { class: 'lth' }, [h('div', { class: 'lt', text: (meta.name || sid) + ' (' + sid + ')' })]);
+    wrap.appendChild(h('div', { class: 'xhdr' }, [controls(), legend(thr, used, settled)]));
+    // the settled gust stands in the title, as the internal desk prints it, and not
+    // on the panel (owner, 2026-10-15)
+    const lt = h('div', { class: 'lt' }, [(meta.name || sid) + ' (' + sid + ')']);
+    if (settled) lt.appendChild(h('span', { class: 'ltfin', text: ' · final ' + mph(fin[sid]) }));
+    const title = h('div', { class: 'lth' }, [lt]);
     title.appendChild(WXC.expander(wrap, 'Expand'));
     wrap.appendChild(title);
-    if (!ruled) wrap.appendChild(h('div', { class: 'cap', style: 'margin:0 0 4px',
-      text: listed ? 'contracts listed · ' + listed.symbol : 'no contracts listed for this location yet' }));
+    /* Once the storm has settled the exchange drops its contracts from the
+       listing, so a location that traded reads as one that never had a contract.
+       The recorded prices say which locations were listed, and the kept pool's
+       symbol gives the exchange's two letters for the storm, which are not
+       always the first two of its name (Nolo's are NL). */
+    const settledHere = !!doc.final;
+    const hadPrices = (doc.steps || []).some(st => (st.prices && st.prices[sid]) || (st.pricesEnd && st.pricesEnd[sid]));
+    const contractsLine = listed ? 'contracts listed · ' + listed.symbol
+      : settledHere && hadPrices ? 'contracts listed' + (keptCode ? ' · L' + keptCode + sid : '')
+      : settledHere ? 'no contracts listed for this location'
+      : 'no contracts listed for this location yet';
+    if (!ruled) wrap.appendChild(h('div', { class: 'cap', style: 'margin:0 0 4px', text: contractsLine }));
     else if (listed) wrap.appendChild(h('div', { class: 'cap', style: 'margin:0 0 4px', text: listed.symbol }));
     wrap.appendChild(svg);
     return { node: wrap, setCursor, used };
@@ -637,41 +957,44 @@ window.WXStorm = (() => {
     return node;
   }
 
-  // ---- the timeline across deliveries
+  // ---- the timeline across the replay's steps
   //
-  // One tick per delivery, in the order they arrived. The strip is sized to the
-  // deliveries that exist now; when the next one lands the page redraws with one
-  // more tick and the cursor stays where the reader left it, or follows the end
-  // if that is where it already was. There is no scale to fix in advance and
-  // nothing beyond the last tick, because the storm's length is not known.
-  function timeline(cyc, gp, onMove) {
+  // One tick per step: a full NHC advisory, filled where the vendor's cycle of
+  // the same stamp is in and hollow where the figures are carried from an earlier
+  // one or there are none yet, then the Metryc interim and the final. The strip
+  // is sized to the steps that exist now; when the next one lands the page
+  // redraws with one more tick and the cursor follows the end. There is no scale
+  // to fix in advance and nothing beyond the last tick, because the storm's
+  // length is not known. Where the site holds no advisories for the storm the
+  // steps are its deliveries, and a stretch of missed cycles carries the break.
+  function timeline(steps, gp, onMove) {
     const W = 960, H = 46, L = 16, R = 936;
-    const n = Math.max(cyc.length, 2);
+    const n = Math.max(steps.length, 2);
     const x = i => L + (i / (n - 1)) * (R - L);
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'stimeline', tabindex: '0',
-                            role: 'slider', 'aria-label': 'vendor delivery' });
+                            role: 'slider', 'aria-label': 'storm step' });
     svg.appendChild(el('line', { x1: L, x2: R, y1: 20, y2: 20, stroke: 'var(--line)', 'stroke-width': 2 }));
-    cyc.forEach((s, i) => {
-      const interim = s.kind === 'interim';
-      svg.appendChild(interim
-        ? el('rect', { x: x(i) - 3.5, y: 16.5, width: 7, height: 7, fill: 'var(--accent)' })
-        : el('circle', { cx: x(i), cy: 20, r: 3, fill: 'var(--muted)' }));
+    steps.forEach((st, i) => {
+      if (st.kind === 'interim') svg.appendChild(el('rect', { x: x(i) - 3.5, y: 16.5, width: 7, height: 7, fill: 'var(--accent)', class: 'tk tk-int' }));
+      else if (st.kind === 'final') svg.appendChild(el('rect', { x: x(i) - 3.5, y: 16.5, width: 7, height: 7, fill: 'var(--ink)', class: 'tk tk-fin' }));
+      else svg.appendChild(el('circle', st.own && st.delivery
+        ? { cx: x(i), cy: 20, r: 3, fill: 'var(--muted)', class: 'tk tk-own' }
+        : { cx: x(i), cy: 20, r: 2.6, fill: 'var(--panel)', stroke: 'var(--muted)', 'stroke-width': 1.2, class: 'tk tk-carry' }));
     });
     (gp || []).forEach(g => {
-      if (g.after + 1 >= cyc.length) return;
+      if (g.after + 1 >= steps.length) return;
       const gl = el('g'); slashes(gl, (x(g.after) + x(g.after + 1)) / 2, 20, 11); svg.appendChild(gl);
     });
     const cur = el('path', { d: '', fill: 'var(--ink)' });
     const lab = txt('', { x: L, y: 40, class: 'ax', 'font-weight': 700 });
     svg.appendChild(cur); svg.appendChild(lab);
-    let ti = cyc.length - 1;
+    let ti = steps.length - 1;
     function place() {
       const px = x(ti);
       cur.setAttribute('d', 'M' + px + ' 10L' + (px + 5) + ' 2L' + (px - 5) + ' 2Z');
-      const s = cyc[ti] || {};
-      lab.textContent = label(s) + '  ·  delivery ' + (ti + 1) + ' of ' + cyc.length + (ti === cyc.length - 1 ? ' (latest)' : '');
+      lab.textContent = stepLabel(steps[ti] || {}) + '  ·  step ' + (ti + 1) + ' of ' + steps.length + (ti === steps.length - 1 ? ' (latest)' : '');
       // centered under the cursor, then measured and pulled back inside the frame so
-      // the reading never runs off the end at the newest delivery
+      // the reading never runs off the end at the newest step
       const w = lab.getComputedTextLength ? lab.getComputedTextLength() : 0;
       lab.setAttribute('x', Math.min(Math.max(px - w / 2, 4), Math.max(4, W - 4 - w)));
       onMove(ti);
@@ -679,28 +1002,28 @@ window.WXStorm = (() => {
     const at = ev => {
       const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
       const q = pt.matrixTransform(svg.getScreenCTM().inverse());
-      return Math.max(0, Math.min(cyc.length - 1, Math.round(((q.x - L) / (R - L)) * (n - 1))));
+      return Math.max(0, Math.min(steps.length - 1, Math.round(((q.x - L) / (R - L)) * (n - 1))));
     };
     let dragging = false;
     svg.addEventListener('pointerdown', e => { dragging = true; svg.setPointerCapture(e.pointerId); ti = at(e); place(); });
     svg.addEventListener('pointermove', e => { if (dragging) { ti = at(e); place(); } });
     svg.addEventListener('pointerup', e => { dragging = false; try { svg.releasePointerCapture(e.pointerId); } catch (x) { /* already released */ } });
     svg.addEventListener('keydown', e => {
-      const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'Home' ? -cyc.length : e.key === 'End' ? cyc.length : 0;
+      const d = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'Home' ? -steps.length : e.key === 'End' ? steps.length : 0;
       if (!d) return;
       e.preventDefault();
-      ti = Math.max(0, Math.min(cyc.length - 1, ti + d));
+      ti = Math.max(0, Math.min(steps.length - 1, ti + d));
       place();
     });
-    return { svg, place, step: d => { ti = Math.max(0, Math.min(cyc.length - 1, ti + d)); place(); },
-             last: () => { ti = cyc.length - 1; place(); }, get: () => ti };
+    return { svg, place, step: d => { ti = Math.max(0, Math.min(steps.length - 1, ti + d)); place(); },
+             last: () => { ti = steps.length - 1; place(); }, get: () => ti };
   }
 
   // ---- the pool contracts: candidate locations as the strikes.
   // The same bars every other contract on the site gets: Yes green from the
   // left, No red to the right, the two summing to a dollar, rows ordered by
   // whoever stands highest. The dashed tick on a row is the raw calculation.
-  function pools(storm, skip) {
+  function pools(storm, skip, settled) {
     const out = [];
     const mine = poolMarkets(storm.name);
     /* The pool has a card whether or not the exchange has opened one.
@@ -718,7 +1041,10 @@ window.WXStorm = (() => {
        listing test would therefore drop the desk's figure at the moment it is
        most useful, in favour of a ladder with nothing in it. */
     const priced = mine.some(m => (m.contracts || []).some(c => WXM.realMid(c)));
-    if (!priced) {
+    /* Once the storm has settled the card has nothing left to say: the pool's
+       series and how it resolved are drawn below from the kept prices, and a
+       storm that never had a pool gets no card about one (owner, 2026-10-13). */
+    if (!priced && !settled) {
       const div = h('div', { class: 'ladder' }, [
         h('div', { class: 'lt', text: 'Which reference location records the highest wind' }),
         h('div', { class: 'cap', style: 'margin:0 0 6px',
@@ -864,7 +1190,7 @@ window.WXStorm = (() => {
     const rec = ((doc && doc.points) || []).map(q => ({ t: Date.parse(q.t), p: q.p || {} }))
       .filter(q => isFinite(q.t));
     const now = {};
-    if (ruled) {
+    if (ruled || m.stored) {
       const lp = rec.length ? rec[rec.length - 1].p : {};
       Object.keys(lp).forEach(nm => { const b = book(lp[nm]); if (b) now[nm] = b; });
     } else {
@@ -888,16 +1214,29 @@ window.WXStorm = (() => {
        strikes are place names, so the ledger's own site list joins the two. */
     const finalGusts = (ledger && ledger.final) || null;
     const idByName = {};
-    Object.entries((ledger && ledger.sites) || {}).forEach(([id, v]) => { if (v && v.name) idByName[v.name] = id; });
-    const gustOf = nm => (finalGusts ? finalGusts[idByName[nm]] : null);
-    const names = (m.contracts || []).map(c => c.label).filter(Boolean)
-      .sort((a, b) => ((now[b] && !now[b].empty ? now[b].mid : 0) - (now[a] && !now[a].empty ? now[a].mid : 0))
-                   || ((latestCalc[b] || 0) - (latestCalc[a] || 0))).slice(0, 8);
+    Object.entries((ledger && ledger.sites) || {}).forEach(([id, v]) => { if (v && v.name) idByName[placeKey(v.name)] = id; });
+    const gustOf = nm => (finalGusts ? finalGusts[idByName[placeKey(nm)]] : null);
+    // the candidates are the listing's strikes; a pool the exchange has dropped
+    // keeps them in its series, every place a book was recorded for
+    let cands = (m.contracts || []).map(c => c.label).filter(Boolean);
+    if (!cands.length) {
+      const seen = {};
+      rec.forEach(q => Object.keys(q.p || {}).forEach(nm => { seen[nm] = true; }));
+      cands = Object.keys(seen);
+    }
+    const priceOf = nm => (now[nm] && !now[nm].empty ? now[nm].mid : 0);
+    const gustSort = nm => { const g = gustOf(nm); return g == null ? -Infinity : g; };
+    // once the final is in, the rows follow how it resolved, the winner first;
+    // before, they follow the market
+    const names = cands.slice().sort(finalGusts
+      ? (a, b) => (gustSort(b) - gustSort(a)) || (priceOf(b) - priceOf(a))
+      : (a, b) => (priceOf(b) - priceOf(a)) || ((latestCalc[b] || 0) - (latestCalc[a] || 0))).slice(0, 8);
     if (!names.length) return null;
     const colOf = i => rung(names.length - 1 - i, Math.max(2, names.length));
 
-    const W = 960, Hh = 250, L = 46, R = 600, T = 26, B = 186;
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'lhlserie emph-' + EMPH });
+    // tall enough for the panel's rows and its footing; eight rows ran past 250
+    const W = 960, Hh = Math.max(250, 20 + names.length * 26 + 32), L = 46, R = 600, T = 26, B = 186;
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'lhlserie emph-exchange' });
     // a click anywhere on the chart opens the pool at the location standing highest
     const top = (m.contracts || []).find(cc => (cc.label || String(cc.strike)) === names[0]) || {};
     const url = WXM.contractUrl(m.productConid, top.conidYes || top.conid);
@@ -909,8 +1248,10 @@ window.WXStorm = (() => {
     // other; a delivery before the calculation existed has a column and no dot
     const cols = columns(ledger, stormEntry({ name: ledger.name, year: ledger.year }));
     const kf = cols.findIndex(c => c.kind === 'final');
+    // read at the vendor's full precision: two candidates can print the same whole
+    // mile an hour, and the pool's terms break such a tie on the full values
     let winner = null, bestGust = -Infinity;
-    if (kf >= 0 && finalGusts) names.forEach(nm => {
+    if (kf >= 0 && finalGusts) cands.forEach(nm => {
       const g = gustOf(nm);
       if (g != null && g > bestGust) { bestGust = g; winner = nm; }
     });
@@ -927,7 +1268,11 @@ window.WXStorm = (() => {
     const pend = cols.findIndex(c => !c.step);
     if (pend >= 0) svg.appendChild(el('rect', { class: 'pending', x: x(pend) - wcol / 2, y: T,
       width: x(cols.length - 1) - x(pend) + wcol / 2, height: B - T, fill: 'var(--shade)', 'pointer-events': 'none' }));
-    deliveryAxis(svg, cols, x, B, 9);
+    // the same shading as the location cards: the pool settles on the Metryc final too
+    phaseBands(svg, cols, x, wcol, L, R, T, B);
+    phaseKey(svg, R, T - 4, 9.5);
+    // the end labels stop short of the ladder's row dots beside the chart
+    deliveryAxis(svg, cols, x, B, 9, R + 20);
     // the legend, inside the frame, with what the axis rows are
     svg.appendChild(el('line', { x1: L, x2: L + 20, y1: 11, y2: 11, stroke: 'var(--ink)', 'stroke-width': 2.4 }));
     svg.appendChild(txt('exchange price', { x: L + 25, y: 14, class: 'ax' }));
@@ -936,7 +1281,8 @@ window.WXStorm = (() => {
         'stroke-width': 1.7, 'stroke-dasharray': '5 4' }));
       svg.appendChild(txt('calculation', { x: L + 135, y: 14, class: 'ax' }));
     }
-    svg.appendChild(txt('axis rows, the NHC cycle over the file’s arrival in ET', { x: R, y: 14, 'text-anchor': 'end',
+    // under the axis it describes; above the plot it printed over the shading's key
+    svg.appendChild(txt('axis rows, the NHC cycle over the file’s arrival in ET', { x: L, y: Hh - 6, 'text-anchor': 'start',
       class: 'ax', opacity: .75 }));
 
     // time anchors: a delivery sits at its column, and the price walks between
@@ -945,7 +1291,7 @@ window.WXStorm = (() => {
     // three hours after the last file sits halfway to where the next file will
     // land. Quotes from before the first delivery have no column and are not
     // drawn.
-    const anchors = cyc.map(s => [s.ts, s.at].map(v => Date.parse(v || '')).find(isFinite));
+    const anchors = columnTimes(cyc);
     const nextK = cols.findIndex(c => c.kind === 'next');
     const CADENCE = 6 * 3600000;
     const tx = t => {
@@ -1037,15 +1383,34 @@ window.WXStorm = (() => {
     // ---- the market's ladder, to the right of the chart: the same bars as
     // the count contracts, rows in the chart's own order and colors
     const LX2 = 636, RX2 = 946, LT = 20, rowH = 26;
-    const lad = el('g', { class: 'plad' });
+    // once the final is in, the panel says how the pool resolved: each candidate's
+    // gust and the side that pays, in the ladder's colors, the winner's Yes at a
+    // dollar and every other No at a dollar
+    const resolved = kf >= 0 && !!winner;
+    const lad = el('g', { class: resolved ? 'plad presolved' : 'plad' });
     svg.appendChild(lad);
-    lad.appendChild(txt('The market’s ladder', { x: LX2, y: 13, 'font-size': 11.5, 'font-weight': 700, fill: 'var(--navy)' }));
+    lad.appendChild(txt(resolved ? 'How it resolved' : 'The market’s ladder', { x: LX2, y: 13, 'font-size': 11.5, 'font-weight': 700, fill: 'var(--navy)' }));
     const px2 = q => LX2 + Math.max(0, Math.min(1, q / 100)) * (RX2 - LX2);
     names.forEach((nm, i) => {
       const c = (m.contracts || []).find(cc => (cc.label || String(cc.strike)) === nm) || {};
       const col = colOf(i);
       const yTop = LT + i * rowH, bh = rowH - 8, by = yTop + 3;
       const g = el('g', { class: 'prow' });
+      if (resolved) {
+        const yes = nm === winner, gst = gustOf(nm);
+        g.appendChild(el('rect', { x: LX2, y: by, width: RX2 - LX2, height: bh, rx: 2,
+                                   fill: yes ? 'var(--yes)' : 'var(--no)', opacity: 0.85 }));
+        g.appendChild(el('circle', { cx: LX2 - 9, cy: by + bh / 2, r: 3, fill: col }));
+        g.appendChild(txt(nm, { x: LX2 + 4, y: by + bh / 2 + 3.5, 'font-size': 10, 'font-weight': 700, fill: '#fff' }));
+        g.appendChild(txt((gst == null ? 'no figure' : WXC.settleMph(gst) + ' mph') + ' · ' + (yes ? 'Yes' : 'No'),
+          { x: RX2 - 4, y: by + bh / 2 + 3.5, 'text-anchor': 'end', 'font-size': 10, 'font-weight': 700, fill: '#fff' }));
+        bind(g, () => tip.rows((m.name || m.symbol) + ' — ' + esc(nm),
+          [['Peak gust', gst == null ? 'not in the final file' : WXC.settleMph(gst) + ' mph'],
+           ['Resolved', yes ? 'Yes, the highest gust of the candidates' : 'No']],
+          'settled on the vendor’s final peak gusts'));
+        lad.appendChild(g);
+        return;
+      }
       const b = now[nm] || null;
       const v = b && !b.empty ? Math.round(b.mid) : null;
       const cv = latestCalc[nm] != null ? latestCalc[nm] : null;
@@ -1086,10 +1451,11 @@ window.WXStorm = (() => {
       }
       lad.appendChild(g);
     });
-    [0, 25, 50, 75, 100].forEach(cc => lad.appendChild(txt(String(cc), { x: px2(cc),
+    if (!resolved) [0, 25, 50, 75, 100].forEach(cc => lad.appendChild(txt(String(cc), { x: px2(cc),
       y: LT + names.length * rowH + 12, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 })));
-    lad.appendChild(txt('Yes green, No red · ¢' + (ruledCalc ? ' · dashed tick: the calculation' : ''), { x: (LX2 + RX2) / 2,
-      y: LT + names.length * rowH + 24, 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
+    lad.appendChild(txt(resolved ? 'Yes green, No red · the Metryc final, in whole mph'
+                                 : 'Yes green, No red · ¢' + (ruledCalc ? ' · dashed tick: the calculation' : ''), { x: (LX2 + RX2) / 2,
+      y: LT + names.length * rowH + (resolved ? 14 : 24), 'text-anchor': 'middle', class: 'ax', 'font-size': 9 }));
 
     const wrap = h('div', { class: 'cwrap', style: 'margin:12px 0 0' });
     wrap.appendChild(h('div', { class: 'xhdr' }, [controls()]));
@@ -1183,22 +1549,48 @@ window.WXStorm = (() => {
      the panel is now built here, inside the storm it belongs to. */
   let FILEPANEL = null;
   function setFilePanel(fn) { FILEPANEL = fn; }
-  const filePanel = (storm, host) => { if (FILEPANEL) { try { FILEPANEL(storm, host); } catch (e) { /* the charts stand on their own */ } } };
+  // the panel hands back its map, which the storm's timeline moves; null when it drew none
+  const filePanel = (storm, host, replay) => {
+    if (!FILEPANEL) return null;
+    try { return FILEPANEL(storm, host, replay) || null; } catch (e) { return null; /* the charts stand on their own */ }
+  };
+  /* The bar and the strip that step through a storm, moving everything that
+     reads a step: the map, and every location's card. */
+  function stepper(host, steps, gp, onMove) {
+    const tl = timeline(steps, gp, onMove);
+    const bar = h('div', { class: 'bar sbar' });
+    const prev = h('button', { text: '◀', title: 'the step before this one' });
+    const next = h('button', { text: '▶', title: 'the step after this one' });
+    const now = h('button', { text: 'Latest', title: 'jump to the most recent step' });
+    prev.onclick = () => tl.step(-1); next.onclick = () => tl.step(1); now.onclick = () => tl.last();
+    [prev, next, now].forEach(b => bar.appendChild(b));
+    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', text: 'drag the strip, use the arrows, or press ← and → when it has focus' }));
+    host.appendChild(bar);
+    host.appendChild(tl.svg);
+    return tl;
+  }
 
-  /* The two contracts a storm carries, under whatever else its panel drew:
-     the document governing the per-location wind ladder, and the pool card,
-     which stands whether or not the exchange has opened a pool. Both paths
-     through drawStorm end here, including the one for a storm the vendor has
-     published no ladder for, which is the storm whose panel was silent about
-     the pool before. */
+  /* The two contracts a storm carries: the document governing the
+     per-location wind ladder, and the pool card, which stands whether or not
+     the exchange has opened a pool. Every path through drawStorm draws both,
+     including the one for a storm the vendor has published no ladder for,
+     which is the storm whose panel was silent about the pool before. Where
+     the storm has deliveries the pool card sits with the newest figures above
+     the series, and the terms close the section. */
   function contractsFoot(storm, host, skip) {
-    /* Both documents, once each, whatever the board is doing. Putting the
-       pool's link on the pool card lost it exactly when the pool was listed
-       and its own series had already claimed the card. */
+    termsLine(host);
+    poolCards(storm, host, skip);
+  }
+  /* Both documents, once each, whatever the board is doing. Putting the
+     pool's link on the pool card lost it exactly when the pool was listed and
+     its own series had already claimed the card. */
+  function termsLine(host) {
     const lt = [WXM.termsLink('L', 'Wind contract terms and conditions'),
                 WXM.termsLink('LHL', 'Pool terms and conditions')].filter(Boolean).join(' · ');
     if (lt) { const lp = h('p', { class: 'cap', style: 'margin:2px 0 0' }); lp.innerHTML = lt; host.appendChild(lp); }
-    const p = pools(storm, skip);
+  }
+  function poolCards(storm, host, skip, settled) {
+    const p = pools(storm, skip, settled);
     if (p.length) { const g = h('div', { class: 'ladders' }); p.forEach(x => g.appendChild(x)); host.appendChild(g); }
   }
 
@@ -1210,9 +1602,11 @@ window.WXStorm = (() => {
       ledgers[key] = r.data || null;
     }
     const doc = ledgers[key];
+    const adv = await advisoriesOf(storm);
     host.innerHTML = '';
     const cyc = delivered(doc);
     const gp = gaps(cyc);
+    const steps = replaySteps(doc, adv);
     host.appendChild(h('p', { class: 'cap', text: phase(doc) }));
     if (doc && passedPending(storm, doc)) {
       const nt = h('div', { class: 'note warn' });
@@ -1226,9 +1620,14 @@ window.WXStorm = (() => {
       host.appendChild(nt);
     }
     if (!doc || !cyc.length) {
+      /* Listed, with no vendor file yet: the map still steps through NHC's
+         advisories, with the places that have contracts on it (owner,
+         2026-10-20: the map appears as soon as a Live Hurricane contract does). */
       host.appendChild(h('p', { class: 'cap', text: 'No probability ladder has been published for this storm yet.' }));
-      filePanel(storm, host);
+      const map = steps.length ? filePanel(storm, host, { doc, steps }) : (filePanel(storm, host), null);
+      if (map) stepper(host, steps, [], i => map.setStep(i)).place();
       contractsFoot(storm, host, []);
+      WXM.tradeNote(host, host.querySelector('.ladders'));
       host.appendChild(h('p', { class: 'cap attrib', text: (RK && RK.attribution) || 'Powered by Reask' }));
       return;
     }
@@ -1238,34 +1637,53 @@ window.WXStorm = (() => {
       peak[sid] = Math.max(...cyc.map(s => Math.max(...((s.sites && s.sites[sid]) || [0]))), 0);
     });
     const order = Object.keys(peak).filter(sid => peak[sid] > 0).sort((a, b) => peak[b] - peak[a]);
+    // a settled storm's markets have usually left the listing; its pool's kept
+    // series is found by name, and its symbol carries the storm's two letters
+    const settled = !!(doc && doc.final);
+    const kept = settled && !poolMarkets(storm.name).length ? await storedPools(storm.name) : [];
+    const keptCode = kept.length ? kept[0].symbol.slice(3, 5) : null;
     const grid = h('div', { class: 'scards' });
-    const cards = order.slice(0, MAX_CARDS).map(sid => card(doc, sid, storm, gp));
+    const cards = order.slice(0, MAX_CARDS).map(sid => card(doc, sid, storm, gp, keptCode));
     cards.forEach(c => grid.appendChild(c.node));
+    /* The newest figures first, as bars: the vendor's latest file at every
+       location it signals, then the pool card with whatever the board or the
+       desk holds now. The deliveries through time come under them (owner,
+       2026-10-07): early in a storm there are one or two deliveries and the
+       series say little, while the newest file says everything. A pool the
+       exchange has listed is drawn as its own series further down, its ladder
+       beside the line, and gets no card here. */
+    const series = [];
+    for (const m of poolMarkets(storm.name)) {
+      const ser = await poolSeries(m, doc);
+      if (ser) series.push({ m, ser });
+    }
+    // a settled storm's pool has usually left the listing by the time its final
+    // lands; its series is kept, and the index found it by the storm's name above
+    if (settled && !series.length) {
+      for (const m of kept) {
+        const ser = await poolSeries(m, doc);
+        if (ser) series.push({ m, ser });
+      }
+    }
+    const map = filePanel(storm, host, { doc, steps });
+    poolCards(storm, host, series.map(x => x.m.symbol), settled);
     // the switch and the key for every chart in the section, once, above them
     const used = {};
     cards.forEach(c => Object.keys(c.used || {}).forEach(t => { used[t] = true; }));
     host.appendChild(controls());
-    host.appendChild(legend(doc.thresholds || [], used));
-    const tl = timeline(cyc, gp, ti => cards.forEach(c => c.setCursor(ti)));
-    const bar = h('div', { class: 'bar sbar' });
-    const prev = h('button', { text: '◀', title: 'the delivery before this one' });
-    const next = h('button', { text: '▶', title: 'the delivery after this one' });
-    const now = h('button', { text: 'Latest', title: 'jump to the most recent delivery' });
-    prev.onclick = () => tl.step(-1); next.onclick = () => tl.step(1); now.onclick = () => tl.last();
-    [prev, next, now].forEach(b => bar.appendChild(b));
-    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', text: 'drag the strip, use the arrows, or press ← and → when it has focus' }));
-    host.appendChild(bar);
-    host.appendChild(tl.svg);
+    host.appendChild(legend(doc.thresholds || [], used, settled));
+    // the break for missed cycles is marked only where the steps are the deliveries themselves
+    const tl = stepper(host, steps, adv && adv.advisories && adv.advisories.length ? [] : gaps(steps.map(st => st.delivery || {})), i => {
+      const st = steps[i] || {};
+      cards.forEach(c => c.setCursor(st.delivery));
+      if (map) map.setStep(i);
+    });
     host.appendChild(grid);
+    WXM.tradeNote(host, grid);
     tl.place();
     if (order.length > MAX_CARDS) host.appendChild(h('p', { class: 'cap', text: order.length - MAX_CARDS + ' further locations have signalled and are not drawn; the strongest ' + MAX_CARDS + ' are shown.' }));
-    const shown = [];
-    for (const m of poolMarkets(storm.name)) {
-      const ser = await poolSeries(m, doc);
-      if (ser) { host.appendChild(ser); shown.push(m.symbol); }
-    }
-    contractsFoot(storm, host, shown);
-    filePanel(storm, host);
+    series.forEach(x => host.appendChild(x.ser));
+    termsLine(host);
     host.appendChild(h('p', { class: 'cap attrib', text: (RK && RK.attribution) || 'Powered by Reask' }));
     setEmph(EMPH);
   }
@@ -1275,6 +1693,17 @@ window.WXStorm = (() => {
     const host = $('#liveStorms'); if (!host) return;
     host.innerHTML = '';
     const storms = ((rk && rk.storms) || []).filter(s => s && s.name && inBasin(s.name)).sort(byRecency);
+    /* A storm the exchange has listed Live Hurricane contracts for gets its
+       section from that moment, before the vendor's first file (owner,
+       2026-10-20), so its map can step through NHC's advisories with the
+       places it is listed at. The storm is on NHC's roster while it runs, and
+       the exchange's product names carry its name. */
+    ROSTER.forEach(r => {
+      if (!r || !r.name || !inBasin(r.name) || storms.some(s => String(s.name).toLowerCase() === String(r.name).toLowerCase())) return;
+      if (!((MK && MK.markets) || []).some(m => /^L[A-Z]{4,5}$/.test(m.symbol) && belongsTo(m, r.name))) return;
+      storms.unshift({ name: r.name, year: Number(String(r.id || '').slice(4, 8)) || new Date().getUTCFullYear(),
+                       livecyc: null, interim: null, final: null, listedOnly: true });
+    });
     if (!rk || !rk.enabled) {
       host.appendChild(h('p', { class: 'cap', text: 'The live-storm wind lane is not enabled on this site' + (rk && rk.reason ? ' (' + esc(rk.reason) + ')' : '') + '. When it is on and a storm is active, each reference location the vendor signals on appears here, delivery by delivery, beside the exchange’s price for the same contract.' }));
       return;
@@ -1316,7 +1745,15 @@ window.WXStorm = (() => {
     } else {
       host.appendChild(h('p', { class: 'cap', text: 'There are no active live storms. The storms below have completed their lives.' }));
     }
-    done.forEach(s => {
+    // the storms that have run, season by season, the newest season first
+    const seasons = [...new Set(done.map(s => String(s.year)))].sort().reverse();
+    const doneOrdered = [];
+    seasons.forEach(y => {
+      doneOrdered.push({ season: y });
+      done.filter(s => String(s.year) === y).forEach(s => doneOrdered.push(s));
+    });
+    doneOrdered.forEach(s => {
+      if (s.season) { host.appendChild(h('div', { class: 'stormseason', text: s.season + ' season' })); return; }
       const t = stampOf(s);
       const det = h('details', { class: 'stormdone' });
       det.appendChild(h('summary', {}, [
@@ -1386,6 +1823,31 @@ window.WXStorm = (() => {
     return c ? (c.conidYes || c.conid) : null;
   }
 
+  /* One location's series for the map's side panel: the card the storm
+     section draws, built again for the panel. The storm asked for comes first
+     (the one whose ladder the panel shows beside it), then the open storm, then
+     any running storm that carries the location. Resolves to null when no
+     running storm in this basin has delivered on it. */
+  async function seriesCard(sid, stormName) {
+    const keyOf = s => s.name + '_' + s.year;
+    const rank = s => (s.name === stormName ? 2 : 0) + (keyOf(s) === open ? 1 : 0);
+    const storms = ((RK && RK.storms) || []).filter(s => s && s.name && !dormant(s) && inBasin(s.name))
+      .sort((a, b) => rank(b) - rank(a));
+    for (const s of storms) {
+      const k = keyOf(s);
+      if (!(k in ledgers)) {
+        const r = await WXD.get('storm/' + k + '.json', 10);
+        ledgers[k] = r.data || null;
+      }
+      const doc = ledgers[k];
+      if (!doc || !doc.sites || !doc.sites[sid]) continue;
+      const cyc = delivered(doc);
+      if (!cyc.length) continue;
+      return { node: card(doc, sid, s, gaps(cyc)).node, storm: s.name };
+    }
+    return null;
+  }
+
   // which locations have a series to show, so the map can mark exactly the dots
   // that will open one rather than asking per dot
   function sites() {
@@ -1401,5 +1863,5 @@ window.WXStorm = (() => {
     return out;
   }
 
-  return { init, draw, showSite, sites, dormant, stampOf, setRoster, setBasin, supersededBy, doneLabel, setFilePanel, setLocationName };
+  return { init, draw, showSite, sites, seriesCard, dormant, stampOf, setRoster, setBasin, setAdvisories, supersededBy, doneLabel, setFilePanel, setLocationName };
 })();

@@ -13,10 +13,12 @@ cartographic boundaries) and world-atlas (Natural Earth).
 
 Outputs:
     site/assets/basemap.json        statePaths, statesByName, stateCenters, nationLonLat,
-                                    worldPaths, viewBox
+                                    worldPaths, viewBox, goesConus (the part of a GOES-East
+                                    CONUS satellite frame the landing page shows)
     site/assets/hurricane-geo.json  countries in the Atlantic box, coastal states, centroids
     config/cities.json              the roster with px/py (CONUS map) and wx/wy (world picker)
-    config/field_grid.json          the shading cells and the screen transform
+    config/field_grid.json          the screen transform (ndfd.py takes the map's cells back through
+                                    it) and the retired interpolation cells
 """
 from __future__ import annotations
 import csv
@@ -38,14 +40,15 @@ WW, WH = 960.0, 480.0                     # the world picker viewBox
 STEP = 12.0                               # shading cell size, screen px
 SKIP = {"02", "15", "60", "66", "69", "72", "78"}   # AK, HI, territories (Hawaii is on the picker)
 HBOX = [-101.0, 4.0, -40.0, 48.0]         # the Atlantic hurricane box: lon0, lat0, lon1, lat1
-# (state FIPS, county name) -> the label the landfall contract uses
-COUNTIES = {("48", "Harris"): "Harris, Texas", ("12", "Broward"): "Broward, Florida",
-            ("12", "Palm Beach"): "Palm Beach, Florida", ("12", "Miami-Dade"): "Miami-Dade, Florida",
-            ("12", "Hillsborough"): "Hillsborough, Florida", ("12", "Lee"): "Lee, Florida",
-            # Hawaii's four counties, drawn on the Pacific view (Kalawao, the fifth, is a
-            # 5 km peninsula on Molokai's north shore and no contract names it)
-            ("15", "Hawaii"): "Hawaii, Hawaii", ("15", "Honolulu"): "Honolulu, Hawaii",
-            ("15", "Kauai"): "Kauai, Hawaii", ("15", "Maui"): "Maui, Hawaii"}
+# The landfall contract names counties as "<county>, <state>", and the desk adds them
+# storm by storm (Isaias brought eight, Hancock, Mississippi to Okaloosa, Florida, on
+# 2026-10-07, none of which a hand-kept list here carried). So the geometry carries
+# every county with a coastline in a state the contract can name, and the page draws
+# the ones the exchange lists. A county has a coastline when one of its edges is
+# shared with no other county, which in a county topology is the nation's outline;
+# that also takes in counties on a land border or a Great Lake, which cost a little
+# size and are never drawn unless listed.
+COUNTY_SKIP = {("15", "Kalawao")}   # a 5 km peninsula on Molokai's north shore, inside Maui on the map
 # the states a landfall contract can name: the Atlantic and Gulf coast, and Hawaii
 COASTAL = {"Maine", "New Hampshire", "Massachusetts", "Rhode Island", "Connecticut",
            "New York", "New Jersey", "Pennsylvania", "Delaware", "Maryland", "Virginia",
@@ -72,6 +75,64 @@ def albers(lon: float, lat: float) -> tuple:
     return rho * math.sin(th), RHO0 - rho * math.cos(th)
 
 
+def albers_inv(x: float, y: float) -> tuple:
+    """The inverse of albers(): projected coordinates to (lon, lat) in degrees.
+    rho N squared is C - 2 N sin(lat), and the angle about the cone's apex is
+    N times the longitude from the origin."""
+    rho = math.hypot(x, RHO0 - y)
+    th = math.atan2(x, RHO0 - y)
+    s = (C - (rho * N) ** 2) / (2 * N)
+    return math.degrees(LON0 + th / N), math.degrees(math.asin(max(-1.0, min(1.0, s))))
+
+
+# The GOES-East CONUS sector, for the satellite loop under the landing map
+# (pipeline/floater.py copies STAR's frames of it). The ABI fixed grid measures a
+# point by the two scan angles, in radians, at which a geostationary satellite over
+# 75.0 W sees it. That is the grid's own origin, where GOES-East's files put it,
+# although the satellite is parked at 75.2 W. The CONUS sector's outer pixel edges
+# are the bounds below, and STAR publishes the whole sector at every size (5:3).
+# Checked 2026-10-10 by drawing the state outlines this projects onto two of
+# STAR's night frames: 95 percent of the outline fell on STAR's own drawn borders,
+# and no shift did better by more than a quarter pixel at 1250 wide.
+GOES_LON0 = -75.0
+GOES_H = 42164160.0                     # the satellite's distance from the Earth's centre, m
+GOES_REQ, GOES_RPOL = 6378137.0, 6356752.31414
+GOES_CONUS_X = (-0.101332, 0.038612)    # west and east edges
+GOES_CONUS_Y = (0.128212, 0.044268)     # north and south edges
+GOES_FRAME = (1250, 750)                # the frame size the crop is written in
+
+
+def goes_conus_px(lon: float, lat: float) -> tuple:
+    """lon/lat -> pixel in a GOES_FRAME-sized frame of the GOES-East CONUS sector
+    (the forward projection of the GOES-R Product User's Guide, section 4.2.8)."""
+    e2 = 1 - GOES_RPOL ** 2 / GOES_REQ ** 2
+    phi, lam = math.radians(lat), math.radians(lon - GOES_LON0)
+    phic = math.atan((GOES_RPOL ** 2 / GOES_REQ ** 2) * math.tan(phi))
+    rc = GOES_RPOL / math.sqrt(1 - e2 * math.cos(phic) ** 2)
+    sx = GOES_H - rc * math.cos(phic) * math.cos(lam)
+    sy = -rc * math.cos(phic) * math.sin(lam)
+    sz = rc * math.sin(phic)
+    x = math.asin(-sy / math.sqrt(sx * sx + sy * sy + sz * sz))
+    y = math.atan(sz / sx)
+    (x0, x1), (y0, y1) = GOES_CONUS_X, GOES_CONUS_Y
+    return ((x - x0) / (x1 - x0) * GOES_FRAME[0], (y0 - y) / (y0 - y1) * GOES_FRAME[1])
+
+
+def goes_conus_crop(rings_ll: list, left: float, right: float) -> list:
+    """The part of a CONUS frame the landing page shows: the lower 48 with the same
+    margins the map gives it, left and right of `left`..`right` in the map's 960
+    wide box, so at the map's width the country is the map's size. The satellite
+    sees the north at a slant, so its country is a fifth shorter than the map's;
+    top and bottom get the map's PAD. [x, y, w, h] in GOES_FRAME pixels."""
+    pts = [goes_conus_px(lon, lat) for r in rings_ll for lon, lat in r]
+    gx0, gx1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    gy0, gy1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    k = (gx1 - gx0) / (right - left)          # frame pixels per map unit
+    x0, x1 = gx0 - left * k, gx1 + (W - right) * k
+    y0, y1 = gy0 - PAD * k, gy1 + PAD * k
+    return [round(x0, 1), round(y0, 1), round(x1 - x0, 1), round(y1 - y0, 1)]
+
+
 def world_xy(lon: float, lat: float) -> tuple:
     return round((lon + 180.0) / 360.0 * WW, 1), round((90.0 - lat) / 180.0 * WH, 1)
 
@@ -86,6 +147,10 @@ class Transform:
 
     def project(self, lon: float, lat: float) -> tuple:
         return self.screen(*albers(lon, lat))
+
+    def unscreen(self, sx: float, sy: float) -> tuple:
+        """Screen pixels back to (lon, lat)."""
+        return albers_inv((sx - self.TX) / self.S, (self.TY - sy) / self.S)
 
     def to_json(self) -> dict:
         return {"S": self.S, "TX": self.TX, "TY": self.TY, "W": W, "H": H, "PAD": PAD, "STEP": STEP}
@@ -166,16 +231,44 @@ def point_in_rings(x: float, y: float, rings) -> bool:
     return hit
 
 
+def arc_ids(g: dict) -> list:
+    """The arcs a topology polygon is built from, direction dropped."""
+    rings = g.get("arcs") or []
+    if g.get("type") == "Polygon":
+        rings = [rings]
+    elif g.get("type") != "MultiPolygon":
+        return []
+    return [i if i >= 0 else ~i for poly in rings for ring in poly for i in ring]
+
+
+_ARC_USE = {}
+
+
+def coastline_county(g: dict, topo: dict) -> bool:
+    """Whether a county has an edge no other county shares: the nation's outline."""
+    key = id(topo)
+    if key not in _ARC_USE:
+        use = {}
+        for h in topo["objects"]["counties"]["geometries"]:
+            for i in set(arc_ids(h)):
+                use[i] = use.get(i, 0) + 1
+        _ARC_USE.clear()
+        _ARC_USE[key] = use
+    use = _ARC_USE[key]
+    return any(use.get(i, 0) == 1 for i in arc_ids(g))
+
+
 def build_assets(cities: list) -> dict:
     """Project everything and write the four output files. `cities` is the
     roster as (sid, name, lat, lon, tz, unit) tuples."""
     topo, ring_coords = decode_topo(os.path.join(GEO, "states-10m.json"))
-    polys = []
+    polys, rings_ll = [], []
     for g in topo["objects"]["states"]["geometries"]:
         if g["properties"].get("name") is None or g["id"] in SKIP:
             continue
         for ring in geom_rings(g, ring_coords):
             polys.append((g["properties"]["name"], [albers(x, y) for x, y in ring]))
+            rings_ll.append(ring)
 
     allp = [p for _, r in polys for p in r]
     minx, maxx = min(p[0] for p in allp), max(p[0] for p in allp)
@@ -184,6 +277,7 @@ def build_assets(cities: list) -> dict:
     TX = PAD + (W - 2 * PAD - (maxx - minx) * S) / 2 - minx * S
     TY = PAD + (H - 2 * PAD - (maxy - miny) * S) / 2 + maxy * S
     tr = Transform(S, TX, TY)
+    goes_crop = goes_conus_crop(rings_ll, minx * S + TX, maxx * S + TX)
 
     paths = [p for _, r in polys if (p := path_of(tr, r))]
     state_paths = " ".join(paths)
@@ -282,20 +376,25 @@ def build_assets(cities: list) -> dict:
             states_ll[nm] = rr
             scent[nm] = centroid(rr)
 
-    # the counties the landfall contracts name, from the Census county boundaries
-    # (us-atlas counties-10m; ids are FIPS codes, the state being the first two digits)
+    # every coastal county of a state the landfall contract can name, from the Census
+    # county boundaries (us-atlas counties-10m; ids are FIPS codes, the state being the
+    # first two digits), labelled the way the contract labels them
     ctopo, cring = decode_topo(os.path.join(GEO, "counties-10m.json"))
+    state_of = {str(g["id"]).zfill(2): g["properties"]["name"] for g in ctopo["objects"]["states"]["geometries"]}
     counties, cocent = {}, {}
     for g in ctopo["objects"]["counties"]["geometries"]:
         fid = str(g["id"]).zfill(5)
-        label = COUNTIES.get((fid[:2], g["properties"].get("name")))
-        if not label:
+        st, nm = state_of.get(fid[:2]), g["properties"].get("name")
+        if st not in COASTAL or (fid[:2], nm) in COUNTY_SKIP or not coastline_county(g, ctopo):
             continue
         rr = [simplify(r, 0.01) for r in geom_rings(g, cring)]
         rr = [r for r in rr if len(r) > 4]
         if rr:
-            counties[label] = rr
-            cocent[label] = centroid(rr)
+            # Baltimore city and Baltimore County share a name; one label carries both
+            label = "%s, %s" % (nm, st)
+            counties.setdefault(label, []).extend(rr)
+    for label, rr in counties.items():
+        cocent[label] = centroid(rr)
     basins = {nm: ["EP"] for nm in list(states_ll) + list(counties) if PACIFIC(nm)}
     basins.update({nm: ["AL", "EP"] for nm in countries if nm in BOTH_OCEANS})
 
@@ -331,7 +430,8 @@ def build_assets(cities: list) -> dict:
     # outline (map and city pickers), the world picker (city page), and the
     # hurricane geography with the nation coastline (hurricane page)
     with open(os.path.join(ASSETS, "basemap.json"), "w") as fh:
-        json.dump({"viewBox": f"0 0 {W:.0f} {H:.0f}", "statePaths": state_paths}, fh, separators=(",", ":"))
+        json.dump({"viewBox": f"0 0 {W:.0f} {H:.0f}", "statePaths": state_paths,
+                   "goesConus": {"frame": list(GOES_FRAME), "crop": goes_crop}}, fh, separators=(",", ":"))
     with open(os.path.join(ASSETS, "world.json"), "w") as fh:
         json.dump({"viewBox": f"0 0 {WW:.0f} {WH:.0f}", "worldPaths": " ".join(wpaths)}, fh, separators=(",", ":"))
     with open(os.path.join(ASSETS, "hurricane-geo.json"), "w") as fh:
@@ -377,31 +477,3 @@ def load_roster() -> list:
 def load_field_grid() -> dict:
     with open(os.path.join(CONFIG, "field_grid.json")) as fh:
         return json.load(fh)
-
-
-def idw_field(grid: dict, stations: list, key_hi: str, key_lo: str) -> dict:
-    """
-    The landing map's pale shading: inverse-distance weighting of the listed
-    stations' NWS forecasts in screen space, over the precomputed CONUS cells.
-    It is DERIVED content and labelled so on the page. The NDFD grid itself
-    (NOAA Open Data, GRIB2) would be the official field; this keeps the site
-    to the calls already made.
-        -> {"step", "cells": [[x, y, high, low]], "domain": [lo, hi]}
-    """
-    pts = [s for s in stations if s.get("onConus") and s.get(key_hi) is not None]
-    cells = []
-    for gx, gy in grid["cells"]:
-        cx, cy = gx + STEP / 2, gy + STEP / 2
-        num_h = num_l = den = 0.0
-        for s in pts:
-            d2 = (s["px"] - cx) ** 2 + (s["py"] - cy) ** 2 + 900.0   # soften near stations
-            w = 1.0 / d2
-            num_h += w * s[key_hi]
-            lo = s.get(key_lo)
-            num_l += w * (lo if lo is not None else s[key_hi] - 18)
-            den += w
-        if den:
-            cells.append([gx, gy, round(num_h / den, 1), round(num_l / den, 1)])
-    vals = [v for c in cells for v in c[2:]]
-    dom = [5 * math.floor(min(vals) / 5), 5 * math.ceil(max(vals) / 5)] if vals else [40, 100]
-    return {"step": STEP, "cells": cells, "domain": dom, "stations": len(pts)}

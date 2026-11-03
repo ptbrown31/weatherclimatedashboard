@@ -205,22 +205,6 @@ class DayBucketing(unittest.TestCase):
             self.assertIn("highRest", block, name + " publishes a today figure without a rest-of-day high")
             self.assertIn("lowRest", block, name + " publishes a today figure without a rest-of-day low")
 
-    def test_obs_today_only_answers_for_the_day_asked(self):
-        class FakeStore(object):
-            def __init__(self, d):
-                self.d = d
-
-            def get(self, k):
-                return self.d.get(k)
-
-        body = json.dumps({"today": {"date": "2026-08-28",
-                                     "high": {"v": 79.0}, "low": {"v": 59.0}}}).encode()
-        st = FakeStore({"snapshots/obs/KMSP.json": body})
-        self.assertEqual(snapshots._obs_today(st, "KMSP", "2026-08-28"), {"high": 79.0, "low": 59.0})
-        self.assertEqual(snapshots._obs_today(st, "KMSP", "2026-08-27"), {})
-        self.assertEqual(snapshots._obs_today(st, "KMSP", None), {})
-        self.assertEqual(snapshots._obs_today(FakeStore({}), "KMSP", "2026-08-28"), {})
-
     def test_obs_decode_and_extremes(self):
         raw = [
             {"icaoId": "KLAX", "obsTime": 1787349180, "temp": 26.1, "metarType": "METAR", "temp_source": "tgroup"},   # 21:53Z
@@ -334,16 +318,68 @@ class AsIssued(unittest.TestCase):
     def test_missing(self):
         self.assertEqual(snapshots._as_issued_key(self.st, "KPHX", "hourly", "20260821T070000Z"), (None, False))
 
-    def test_bulletin_cycle_at_exactly_midnight_counts_as_pre_day(self):
-        # NBM stamps carry minutes only; a 07:00Z cycle against a 07:00:00Z cutoff is pre-day
+    def test_a_minute_stamped_cycle_compares_as_its_own_instant(self):
+        # NBM stamps carry minutes only; a 07:00Z cycle sits AT a 07:00:00Z cutoff, so the
+        # snapshot's cutoff one second before midnight is what leaves the midnight run out
         for stamp in ("20260821T0600Z", "20260821T0700Z", "20260821T0800Z"):
             self.st.put(f"archive/KLAX/nbh_{stamp}.txt.gz", b"x")
         key, pre = snapshots._as_issued_key(self.st, "KLAX", "nbh", "20260821T070000Z")
         self.assertEqual((snapshots._stamp_of(key), pre), ("20260821T0700Z", True))
 
+    def test_the_run_the_chart_pins_to_was_issued_before_midnight(self):
+        # the city chart pins its levels to the last run issued BEFORE local
+        # midnight; a 07:00Z cycle at LA's midnight belongs to the day (owner, 2026-10-16)
+        for stamp in ("20260821T0600Z", "20260821T0700Z", "20260821T0800Z"):
+            self.st.put(f"archive/KLAX/nbh_{stamp}.txt.gz", b"x")
+        cut = snapshots._cutoff_before("2026-08-21T07:00:00Z")
+        self.assertEqual(cut, "20260821T065959Z")
+        key, pre = snapshots._as_issued_key(self.st, "KLAX", "nbh", cut)
+        self.assertEqual((snapshots._stamp_of(key), pre), ("20260821T0600Z", True))
+        # an NWS issuance carries seconds, and one at midnight to the second belongs to the day too
+        self.st.put("archive/KLAX/hourly_20260821T070000Z.json.gz", b"x")
+        key, pre = snapshots._as_issued_key(self.st, "KLAX", "hourly", cut)
+        self.assertEqual((snapshots._stamp_of(key), pre), ("20260821T025900Z", True))
+
+
+class ChartLevels(unittest.TestCase):
+    """The map's hover shows the numbers the city chart's level lines carry."""
+    def _rows(self, start, temps, step_h=1):
+        t0 = dt.datetime.fromisoformat(start.replace("Z", "+00:00"))
+        return [{"t": (t0 + dt.timedelta(hours=i * step_h)).strftime("%Y-%m-%dT%H:%M:%SZ"), "tempF": v}
+                for i, v in enumerate(temps)]
+
+    def test_today_reads_the_pinned_run_and_tomorrow_the_newest(self):
+        mk = {"dayStart": "2026-10-16T07:00:00Z", "dayEnd": "2026-10-17T07:00:00Z"}
+        # the run issued before the day: rows from 06Z, its highest row inside the day at 22Z
+        ai_rows = self._rows("2026-10-16T06:00:00Z", [99, 60, 61, 62] + [70] * 12 + [80, 75, 70] + [65] * 10)
+        # the HRRR's pinned run carried on by an older 48-hour run under its own cycle
+        hr_main = self._rows("2026-10-16T07:00:00Z", [50] * 10)
+        hr_ext = self._rows("2026-10-16T17:00:00Z", [90, 40] + [55] * 20)
+        snap = {"markers": mk,
+                "asIssued": {"nws": {"cycle": "20261016T062634Z", "rows": ai_rows},
+                             "hrrr": {"cycle": "20261016T0600Z", "rows": hr_main, "extCycle": "20261016T0000Z",
+                                      "ext": hr_ext}},
+                "nws": {"cycle": "20261016T150000Z",
+                        "hourly": self._rows("2026-10-17T05:00:00Z", [1, 2] + [66] * 10 + [77, 77] + [60] * 14)}}
+        lv = snapshots.chart_levels(snap, "F")
+        # 99 sits at 06Z, before the day: the high is 80 and the low 60
+        self.assertEqual(lv["today"]["nws"], [80, 60, "20261016T062634Z", "20261016T062634Z"])
+        # the high and the low each name the run holding them
+        self.assertEqual(lv["today"]["hrrr"], [90, 40, "20261016T0000Z", "20261016T0000Z"])
+        # tomorrow runs from the day's end for a day; 05Z and 06Z belong to today; the earlier of two equal highs
+        self.assertEqual(lv["tomorrow"]["nws"], [77, 60, "20261016T150000Z", "20261016T150000Z"])
+        self.assertNotIn("nbm", lv["today"])
+
+    def test_a_celsius_station_reads_its_celsius_rows(self):
+        mk = {"dayStart": "2026-10-16T05:00:00Z", "dayEnd": "2026-10-17T05:00:00Z"}
+        rows = [dict(r, tempC=round((r["tempF"] - 32) * 5 / 9, 1))
+                for r in self._rows("2026-10-16T05:00:00Z", [50, 59, 41])]
+        lv = snapshots.chart_levels({"markers": mk, "asIssued": {"nbm": {"cycle": "20261016T0400Z", "rows": rows}}}, "C")
+        self.assertEqual(lv["today"]["nbm"][:2], [15.0, 5.0])
+
 
 class FieldAndRoster(unittest.TestCase):
-    def test_assets_exist_and_field_is_deterministic(self):
+    def test_assets_exist_and_the_screen_transform_inverts(self):
         from pipeline import basemap
         roster = basemap.load_roster()
         # the roster, which is no longer only the contract stations. Colorado
@@ -355,14 +391,11 @@ class FieldAndRoster(unittest.TestCase):
         self.assertEqual(len(roster), 49)
         klax = next(c for c in roster if c["station"] == "KLAX")
         self.assertTrue(0 < klax["px"] < 200 and 300 < klax["py"] < 600)   # left, lower half of the canvas
-        grid = basemap.load_field_grid()
-        self.assertGreater(len(grid["cells"]), 1500)
-        pts = [{**c, "hi": 80.0 + i, "lo": 60.0} for i, c in enumerate(roster)]
-        f1 = basemap.idw_field(grid, pts, "hi", "lo")
-        f2 = basemap.idw_field(grid, pts, "hi", "lo")
-        self.assertEqual(f1, f2)
-        self.assertEqual(len(f1["cells"]), len(grid["cells"]))
-        self.assertTrue(all(60 <= c[2] <= 120 for c in f1["cells"]))
+        # the screen transform the landing map's NDFD cells are taken back through
+        tr = basemap.Transform.from_json(basemap.load_field_grid()["transform"])
+        lon, lat = tr.unscreen(klax["px"], klax["py"])
+        self.assertAlmostEqual((lon, lat)[0], klax["lon"], delta=0.01)
+        self.assertAlmostEqual((lon, lat)[1], klax["lat"], delta=0.01)
 
 
 if __name__ == "__main__":

@@ -71,23 +71,12 @@
   "api_key": ""
  },
  "expected_listings": {
-  "_note": "Listings the owner has said the exchange will carry but which it has not listed yet. Shown on the matching basin view as pending, never with a price. Delete an entry once the exchange lists it: the Hawaii landfall contract was listed on 2026-09-03 and its entry was removed then.",
+  "_note": "Listings the owner has said the exchange will carry but which it has not listed yet. Shown on the matching basin view as pending, never with a price. Delete an entry once the exchange lists it: the Hawaii landfall contract was listed on 2026-09-03 and its entry was removed then. Lowell's (EP, wind gust contracts and a highest-wind pool at Honolulu, Hilo, Kahului and Kapa'a) was removed on 2026-10-10, the storm no longer being in NHC's roster.",
   "landfall": [],
-  "storms": [
-   {
-    "basin": "EP",
-    "name": "Lowell",
-    "products": [
-     "wind gust contracts",
-     "a highest-wind pool"
-    ],
-    "locations": [
-     "Honolulu",
-     "Hilo",
-     "Kahului",
-     "Kapa'a"
-    ]
-   }
-  ]
+  "storms": []
+ },
+ "gdp_contract": {
+  "_note": "The world GDP per person contract on climate-gdp.html (owner, 2026-11-02). It is proposed to list in mid-January 2027. Until then the page draws the proposed strikes from its model file, hatched, with no price. Once the exchange lists it, put its product id here and add it to config/contracts.json (scripts/build_contracts.py), so the catalogue jobs carry its terms and quotes. The page then draws the exchange's prices, each opening the contract on IBKR.",
+  "product": null
  }
 }

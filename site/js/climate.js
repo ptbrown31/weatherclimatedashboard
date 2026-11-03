@@ -439,7 +439,7 @@ window.WXClimate = (() => {
          level and a link that could not be clicked. Most of it restated the two
          prices in another form. What is left is what changes the meaning of the
          number: when it settles, and where the series stands against the strike.
-         The book itself is one line at the foot for anyone who wants it. */
+         Under them, the standing book in four rows (owner, 2026-10-16). */
       const html = () => '<b>' + product.name + ' — ' + c.label + '</b>'
         + tip.price(c.ask, c.bid == null ? null : 1 - c.bid,
                     c.ask == null ? null : (WXM.payoutText(Math.round(c.ask * 100)) || '').split(' ')[0]
@@ -449,12 +449,11 @@ window.WXClimate = (() => {
         + tip.rows(null, [
           ['Settles', c.expiryLabel],
           ['Series now', fmtV(last[1]) + ' ' + unitShort + ' (' + sgn(last[1] - c.threshold) + ' vs ' + fmtThr(c.threshold) + ')'],
-        ], (c.bid != null || c.ask != null
-              ? 'Yes bid ' + cents(c.bid) + ' · No bid ' + cents(c.ask == null ? null : 1 - c.ask)
-                + ' · they buy, they do not sell, and the two sum to a dollar'
-              : 'no bids on either side')
-           + (c.empty ? ' · both sides bid the minimum, so no price is shown' : '')
-           + (WXM.termsUrl(product.id) ? ' · ' + WXM.termsLink(product.id, 'terms') : ''));
+        ])
+        // the standing book in four rows, as on the city ladders (owner, 2026-10-16)
+        + '<div class="tq">' + tip.rows(null, WXM.bookRows(c.bid == null ? null : Math.round(c.bid * 100),
+            c.ask == null ? null : 100 - Math.round(c.ask * 100), !!c.empty),
+          (WXM.termsUrl(product.id) ? WXM.termsLink(product.id, 'terms') : '')) + '</div>';
       m.onmousemove = e => tip.show(e, html());
       m.onmouseleave = () => tip.hide();
       m.onclick = e => tip.pin(e, html());
@@ -573,6 +572,7 @@ window.WXClimate = (() => {
     const products = WXM.climateProducts(series, off);
     const byKey = {}; products.forEach(p => { byKey[p.seriesKey] = p; });
     PANELS.forEach(([k, title, unit]) => { if (series[k]) panel(host, k, title, unit, series[k], byKey[k], off, (D.sources || {})[k] || ''); });
+    WXM.tradeNote(host, host, true);
     // each note is a phrase about how one series reached the page, so it reads
     // as a sentence once the series is named
     const seriesName = k => (PANELS.find(p => p[0] === k) || [null, k])[1];

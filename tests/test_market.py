@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -197,6 +198,41 @@ class Contracts(unittest.TestCase):
         self.assertEqual(ex.implied_median([{"strike": 80, "mid": 0.1}, {"strike": 81, "mid": 0.05}], "high")["edge"], "below")
         self.assertIsNone(ex.implied_median([{"strike": 80, "mid": None}], "high")["value"])
 
+    def test_paper_price_reads_one_sided_books_against_the_limit(self):
+        self.assertAlmostEqual(ex.paper_price({"bid": 0.60, "ask": 0.70}), 0.65)
+        self.assertAlmostEqual(ex.paper_price({"bid": 0.87, "ask": None}), (0.87 + 0.99) / 2)   # no No bid: a 99c ask
+        self.assertAlmostEqual(ex.paper_price({"bid": None, "ask": 0.10}), (0.01 + 0.10) / 2)   # no Yes bid: a 1c bid
+        # unquoted: nothing, an empty book of 1c against 99c, or a lone side at the limit
+        for q in ({"bid": None, "ask": None}, {"bid": 0.01, "ask": 0.99}, {"bid": 0.01, "ask": None},
+                  {"bid": None, "ask": 0.99}):
+            self.assertIsNone(ex.paper_price(q), q)
+
+    def test_central_value_follows_the_accuracy_paper(self):
+        def lad(*qs):
+            return [{"strike": k, "bid": b, "ask": a} for k, b, a in qs]
+        # a high crossing at 71.5 settles on whole degrees above the strike: 72
+        hi = lad((70, 0.90, 0.95), (71, 0.60, 0.70), (72, 0.30, 0.40), (73, 0.05, 0.10))
+        self.assertEqual({k: ex.central_value(hi, "high")[k] for k in ("value", "x")}, {"value": 72, "x": 71.5})
+        # a low ladder rises with the strike; its crossing at 57.2 is the degree below: 57
+        lo = lad((56, 0.15, 0.25), (57, 0.40, 0.50), (58, 0.65, 0.75))
+        self.assertEqual({k: ex.central_value(lo, "low")[k] for k in ("value", "x")}, {"value": 57, "x": 57.2})
+        # a crossing on a whole degree is that degree for a high
+        self.assertEqual(ex.central_value(lad((70, 0.70, 0.80), (71, 0.45, 0.55), (72, 0.20, 0.30)), "high")["value"], 71)
+        # a rising pair is pooled to its mean before the crossing is read: 0.65 and 0.75 pool to 0.70
+        pooled = lad((70, 0.90, 0.95), (71, 0.60, 0.70), (72, 0.70, 0.80), (73, 0.10, 0.20))
+        self.assertEqual(ex.central_value(pooled, "high")["x"], round(72 + (0.70 - 0.5) / (0.70 - 0.15), 2))
+        # two listed strikes with no price between the bracketing quoted ones: no value
+        gap = lad((70, 0.90, 0.95), (71, None, None), (72, 0.01, 0.99), (73, 0.05, 0.10))
+        out = ex.central_value(gap, "high")
+        self.assertEqual((out["value"], out["gap"]), (None, True))
+        # one unpriced strike between them is read across
+        one = lad((70, 0.90, 0.95), (71, None, None), (72, 0.05, 0.10))
+        self.assertEqual(ex.central_value(one, "high")["value"], 71)
+        # a ladder that never crosses names the side it sits on
+        self.assertEqual(ex.central_value(lad((80, 0.80, 0.90), (81, 0.70, 0.80)), "high")["edge"], "above")
+        self.assertEqual(ex.central_value(lad((80, 0.10, 0.20), (81, 0.05, 0.10)), "high")["edge"], "below")
+        self.assertIsNone(ex.central_value(lad((80, 0.40, 0.60)), "high")["value"])
+
 
 class History(unittest.TestCase):
     def test_carry_trim_and_dedupe(self):
@@ -294,7 +330,7 @@ class VendorLane(unittest.TestCase):
         out = reask.reask_job(cfg, self.st, self.log, NOW, fetch=fetch)
         self.assertTrue(out["ok"])
         self.assertEqual(out["storms"], 1)
-        self.assertEqual(out["fetched"], 2)
+        self.assertEqual(out["fetched"], 3)          # both listed cycles and the interim
         snap = json.loads(self.st.get(reask.KEY))
         s = snap["storms"][0]
         self.assertEqual(s["livecyc"]["forecastTime"], "2026-08-23T06:00:00Z")      # the latest cycle
@@ -320,6 +356,27 @@ class VendorLane(unittest.TestCase):
         self.assertEqual(out2["fetched"], 0)
         self.assertEqual([c[0] for c in calls[n:]], ["/livecyc/tcwind/list", "/metryc/interim/tcwind/list", "/metryc/historical/tcwind/list"])
 
+    def test_a_settled_storm_stays_and_two_weeks_after_its_final_keeps_only_its_stamps(self):
+        def fetch(path, params=None):
+            return json.dumps({"storms": []}).encode()
+        sites = {"BR": {"name": "Brownsville", "peakGustMph": 88.4}, "CC": {"name": "Corpus Christi", "peakGustMph": 41.0}}
+        at = lambda days: (NOW - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.st.put(reask.KEY, json.dumps({"storms": [
+            {"name": "Old", "year": 2026, "livecyc": {"forecastTime": at(22), "lastModified": at(22), "sites": {"BR": {"p": [1]}}},
+             "interim": {"lastModified": at(21), "sites": {"BR": {"p": [1]}}, "rows": 3},
+             "final": {"lastModified": at(20), "fetched": at(20), "sites": sites}},
+            {"name": "Recent", "year": 2026, "livecyc": None, "interim": None,
+             "final": {"lastModified": at(3), "fetched": at(3), "sites": sites}}]}).encode())
+        cfg = {"sources": {"reask": True}, "reask": {"api_key": "k", "base_url": "https://vendor.invalid/v1"}}
+        reask.reask_job(cfg, self.st, self.log, NOW, fetch=fetch)
+        snap = {s2["name"]: s2 for s2 in json.loads(self.st.get(reask.KEY))["storms"]}
+        self.assertEqual(sorted(snap), ["Old", "Recent"])
+        old = snap["Old"]
+        self.assertEqual(old["final"], {"lastModified": at(20), "fetched": at(20), "n": 2})
+        self.assertEqual((old["interim"], old["livecyc"]["n"], old["livecyc"]["forecastTime"]),
+                         ({"lastModified": at(21), "n": 1}, 1, at(22)))
+        self.assertEqual(snap["Recent"]["final"]["sites"], sites)
+
     def test_list_failure_keeps_previous(self):
         def fetch(path, params=None):
             raise OSError("down")
@@ -332,6 +389,158 @@ class VendorLane(unittest.TestCase):
         self.assertEqual(snap["asof"], "2026-08-23T00:00:00Z")
         self.assertEqual(snap["polled"], "2026-08-23T00:10:00Z")
         self.assertEqual(len(snap["storms"]), 1)
+
+
+class StormRename(unittest.TestCase):
+    """A depression's files arrive under its number until NHC names it, then
+    under the name. The site keeps one storm and one series across the switch
+    (owner's decision 2026-10-07): Nine's deliveries are Isaias's first steps."""
+
+    CFG = {"sources": {"reask": True}, "reask": {"api_key": "k", "base_url": "https://vendor.invalid/v1"}}
+    T0 = dt.datetime(2026, 10, 7, 9, 30, tzinfo=U)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.calls = []
+        self.listing = {}
+        self.roster([{"id": "al092026", "name": "Isaias", "basin": "AL"}])
+
+    def roster(self, storms, named=()):
+        self.st.put("snapshots/hurricane.json", json.dumps({"storms": storms, "season": {"events": {"named": list(named)}}}).encode())
+
+    def fetch(self, path, params=None):
+        self.calls.append((path, dict(params or {})))
+        if path == "/livecyc/tcwind/list":
+            return json.dumps({"storms": [{"storm_name": n, "storm_year": 2026, "last_modified": fcs[-1][1],
+                                           "forecasts": [{"forecast_datetime": f, "last_modified": m} for f, m in fcs]}
+                                          for n, fcs in self.listing.items()]}).encode()
+        if path == "/livecyc/tcwind/probabilities":
+            return LADDER_CSV.encode()
+        if path in ("/metryc/interim/tcwind/list", "/metryc/historical/tcwind/list"):
+            return json.dumps({"storms": []}).encode()
+        raise AssertionError(path)
+
+    def run_at(self, when):
+        return reask.reask_job(self.CFG, self.st, lambda **k: None, when, fetch=self.fetch)
+
+    def index(self):
+        return json.loads(self.st.get(reask.KEY))
+
+    def ledger(self, name):
+        raw = self.st.get("snapshots/storm/%s_2026.json" % name)
+        return json.loads(raw) if raw else None
+
+    def nine_on_its_own(self):
+        """The site as it stood before this change: Nine's first delivery filed under its number."""
+        self.listing = {"Nine": [("2026-10-06T18:00:00Z", "2026-10-06T23:28:00Z")]}
+        self.roster([{"id": "al092026", "name": "Nine", "basin": "AL"}])
+        self.run_at(self.T0 - dt.timedelta(hours=9))
+        self.assertEqual([s["name"] for s in self.index()["storms"]], ["Nine"])
+        self.roster([{"id": "al092026", "name": "Isaias", "basin": "AL"}])
+
+    def test_the_number_numbers_until_nhc_names_it(self):
+        self.listing = {"Nine": [("2026-10-06T18:00:00Z", "2026-10-06T23:28:00Z")]}
+        self.roster([{"id": "al092026", "name": "Nine", "basin": "AL"}])
+        self.run_at(self.T0)
+        self.assertEqual([s["name"] for s in self.index()["storms"]], ["Nine"])
+        self.assertEqual(self.index()["renamed"], {})
+
+    def test_once_named_the_number_files_under_the_name_before_the_vendor_switches(self):
+        self.nine_on_its_own()
+        self.run_at(self.T0)
+        idx = self.index()
+        self.assertEqual([s["name"] for s in idx["storms"]], ["Isaias"])
+        lc = idx["storms"][0]["livecyc"]
+        self.assertEqual((lc["forecastTime"], lc["vendorName"]), ("2026-10-06T18:00:00Z", "Nine"))
+        self.assertEqual(idx["renamed"], {"Nine_2026": "Isaias_2026"})
+        led = self.ledger("Isaias")
+        self.assertEqual([(x["id"], x.get("as")) for x in led["steps"]], [("2026100618", "Nine")])
+        self.assertEqual(led["absorbed"], ["Nine"])
+        self.assertIsNone(self.ledger("Nine"))                                             # retired
+        self.assertIsNotNone(self.st.get("archive/storm/Nine_2026.absorbed-into-Isaias.json"))   # but kept
+        self.assertTrue(self.st.exists("archive/reask/Nine_2026/livecyc_2026100618.csv.gz"))     # the file as it came
+
+    def test_the_vendors_switch_extends_the_same_series(self):
+        self.nine_on_its_own()
+        self.run_at(self.T0)
+        self.listing = {"Nine": [("2026-10-06T18:00:00Z", "2026-10-06T23:28:00Z")],
+                        "Isaias": [("2026-10-07T00:00:00Z", "2026-10-07T05:20:00Z"),
+                                   ("2026-10-07T06:00:00Z", "2026-10-07T11:15:00Z")]}
+        n = len(self.calls)
+        self.run_at(self.T0 + dt.timedelta(hours=3))
+        idx = self.index()
+        self.assertEqual([s["name"] for s in idx["storms"]], ["Isaias"])
+        lc = idx["storms"][0]["livecyc"]
+        self.assertEqual(lc["forecastTime"], "2026-10-07T06:00:00Z")
+        self.assertNotIn("vendorName", lc)
+        led = self.ledger("Isaias")
+        # both cycles the vendor published together land, the 00Z as well as the 06Z
+        self.assertEqual([(x["id"], x.get("as")) for x in led["steps"]],
+                         [("2026100618", "Nine"), ("2026100700", None), ("2026100706", None)])
+        # Nine's old cycle is not fetched again, and each of Isaias's is fetched once
+        got = [(c[1].get("storm_name"), c[1].get("forecast_start_time")) for c in self.calls[n:]
+               if c[0] == "/livecyc/tcwind/probabilities"]
+        self.assertEqual(got, [("Isaias", "2026-10-07T00:00:00Z"), ("Isaias", "2026-10-07T06:00:00Z")])
+        n2 = len(self.calls)
+        self.run_at(self.T0 + dt.timedelta(hours=4))
+        self.assertEqual([c for c in self.calls[n2:] if c[0] == "/livecyc/tcwind/probabilities"], [])
+
+    def test_a_cycle_a_pass_missed_is_filed_on_the_next(self):
+        # the site as the old lane left it on 7 October: Nine's 18Z, then only Isaias's newest
+        self.nine_on_its_own()
+        self.run_at(self.T0)
+        self.st.put("snapshots/storm/Isaias_2026.json", json.dumps(dict(
+            self.ledger("Isaias"), steps=self.ledger("Isaias")["steps"] + [
+                {"id": "2026100706", "kind": "livecyc", "at": "2026-10-07T06:00:00Z", "ts": "t", "prices": {},
+                 "sites": {"BR": [40.5, 20.25, 5.0]}, "siteMeta": {"BR": {"name": "Brownsville", "lat": 25.9, "lon": -97.4}}}])).encode())
+        idx = self.index()
+        idx["storms"][0]["livecyc"].update({"forecastTime": "2026-10-07T06:00:00Z", "lastModified": "2026-10-07T11:38:00Z"})
+        idx["storms"][0]["livecyc"].pop("vendorName", None)
+        self.st.put(reask.KEY, json.dumps(idx).encode())
+        self.listing = {"Nine": [("2026-10-06T18:00:00Z", "2026-10-06T23:28:00Z")],
+                        "Isaias": [("2026-10-07T00:00:00Z", "2026-10-07T11:38:00Z"),
+                                   ("2026-10-07T06:00:00Z", "2026-10-07T11:38:00Z")]}
+        n = len(self.calls)
+        self.run_at(self.T0 + dt.timedelta(hours=3))
+        got = [c[1].get("forecast_start_time") for c in self.calls[n:] if c[0] == "/livecyc/tcwind/probabilities"]
+        self.assertEqual(got, ["2026-10-07T00:00:00Z"])
+        self.assertEqual([x["id"] for x in self.ledger("Isaias")["steps"]], ["2026100618", "2026100700", "2026100706"])
+        self.assertEqual(self.index()["storms"][0]["livecyc"]["forecastTime"], "2026-10-07T06:00:00Z")   # still the newest
+
+    def test_the_join_outlives_the_storms_time_on_the_roster(self):
+        self.nine_on_its_own()
+        self.run_at(self.T0)
+        self.roster([])                     # dissipated, and the best tracks are behind
+        self.listing = {"Nine": [("2026-10-06T18:00:00Z", "2026-10-06T23:28:00Z"),
+                                 ("2026-10-07T12:00:00Z", "2026-10-07T17:00:00Z")]}
+        self.run_at(self.T0 + dt.timedelta(hours=9))
+        idx = self.index()
+        self.assertEqual([s["name"] for s in idx["storms"]], ["Isaias"])
+        self.assertEqual(idx["renamed"], {"Nine_2026": "Isaias_2026"})
+        self.assertEqual([x["id"] for x in self.ledger("Isaias")["steps"]], ["2026100618", "2026100712"])
+        self.assertIsNone(self.ledger("Nine"))
+
+    def test_the_best_tracks_name_the_number_too(self):
+        self.listing = {"Nine": [("2026-10-06T18:00:00Z", "2026-10-06T23:28:00Z")]}
+        self.roster([], named=[{"date": "2026-10-07", "name": "Isaias", "id": "AL092026"}])
+        self.run_at(self.T0)
+        self.assertEqual([s["name"] for s in self.index()["storms"]], ["Isaias"])
+
+    def test_an_old_depression_is_not_joined_to_a_storm_named_since(self):
+        self.listing = {"Nine": [("2026-09-01T18:00:00Z", "2026-09-01T23:00:00Z")]}
+        self.run_at(self.T0)
+        self.assertEqual([s["name"] for s in self.index()["storms"]], ["Nine"])
+
+    def test_a_pacific_number_is_not_read_as_the_atlantic_one(self):
+        self.listing = {"Nine": [("2026-10-06T18:00:00Z", "2026-10-06T23:28:00Z")]}
+        self.roster([{"id": "ep092026", "name": "Ivo", "basin": "EP"}])
+        self.run_at(self.T0)
+        self.assertEqual([s["name"] for s in self.index()["storms"]], ["Nine"])
+
+    def test_number_words(self):
+        self.assertEqual([reask.number_of(x) for x in ("Nine", "nine", "Twenty-One", "Isaias", "", None)],
+                         [9, 9, 21, None, None, None])
 
 
 class QuoteJob(unittest.TestCase):
@@ -793,6 +1002,16 @@ class PriceAtEachDelivery(unittest.TestCase):
     def test_restricted_to_the_sites_in_the_delivery(self):
         self.assertEqual(list(reask.l_prices(self.st, "Erin", {"BR"})), ["BR"])
 
+    def test_found_by_the_product_name_and_an_empty_book_is_no_price(self):
+        # Nolo's contracts went up as LNL, not the LNO its name's first letters give
+        self.st.put("snapshots/market/hurricane.json", json.dumps({"markets": [
+            {"symbol": "LNLHL", "name": "Hurricane Nolo Wind Gusts in Hilo", "contracts": [
+                {"strike": 70, "bid": 0.02, "ask": 0.06, "mid": 0.04},
+                {"strike": 80, "bid": 0.01, "ask": 0.99, "mid": 0.5}]},
+            {"symbol": "LHLNL", "name": "Hurricane Nolo Peak Wind Location", "contracts": [{"strike": 1, "mid": 0.3}]},
+        ]}).encode())
+        self.assertEqual(reask.l_prices(self.st, "Nolo", {"HL", "NL"}), {"HL": {"70": 4.0}})
+
     def test_no_market_snapshot_is_not_an_error(self):
         empty = storage.LocalStorage(tempfile.mkdtemp())
         self.assertEqual(reask.l_prices(empty, "Erin", {"BR"}), {})
@@ -1107,6 +1326,45 @@ class LhlSeries(unittest.TestCase):
         self.assertEqual([q["t"][:10] for q in pts], ["2026-11-30"])
 
 
+
+class LhlIndex(unittest.TestCase):
+    """The index of pool series, which is how a settled storm's page finds its
+    pool once the exchange has dropped it from the listing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.t0 = dt.datetime(2026, 10, 12, 20, 0, tzinfo=dt.timezone.utc)
+
+    def index(self):
+        return json.loads(self.st.get(market.LHL_INDEX))["pools"]
+
+    def test_a_listed_pool_is_indexed_under_its_symbol_with_the_exchange_name(self):
+        market._lhl_series(self.st, self.t0, LhlSeries.ITEMS)
+        market._lhl_index(self.st, self.t0, LhlSeries.ITEMS)
+        self.assertEqual(self.index(), {"LHLERG": {"name": "Erin - highest wind, Gulf Coast", "listed": True}})
+
+    def test_a_pool_the_exchange_has_dropped_keeps_its_entry_and_its_series_time(self):
+        market._lhl_series(self.st, self.t0, LhlSeries.ITEMS)
+        market._lhl_index(self.st, self.t0, LhlSeries.ITEMS)
+        later = self.t0 + dt.timedelta(days=1)
+        market._lhl_index(self.st, later, [m for m in LhlSeries.ITEMS if m["symbol"] != "LHLERG"])
+        self.assertEqual(self.index(), {"LHLERG": {"name": "Erin - highest wind, Gulf Coast", "listed": False,
+                                                   "asof": "2026-10-12T20:00:00Z"}})
+
+    def test_a_series_written_before_the_index_existed_is_found(self):
+        self.st.put("snapshots/lhl/LHLIS.json", json.dumps({"schema": 1, "symbol": "LHLIS",
+            "name": "Hurricane Isaias Peak Wind Location", "asof": "2026-10-12T20:13:09Z", "points": []}).encode())
+        market._lhl_index(self.st, self.t0, [])
+        self.assertEqual(self.index()["LHLIS"]["name"], "Hurricane Isaias Peak Wind Location")
+        self.assertFalse(self.index()["LHLIS"]["listed"])
+
+    def test_an_unchanged_index_is_not_written_again(self):
+        market._lhl_series(self.st, self.t0, LhlSeries.ITEMS)
+        self.assertTrue(market._lhl_index(self.st, self.t0, LhlSeries.ITEMS))
+        self.assertFalse(market._lhl_index(self.st, self.t0 + dt.timedelta(minutes=10), LhlSeries.ITEMS))
+
 class NamelessNodes(unittest.TestCase):
     """A symbol node with no name is what would wake the storm matcher's
     nameless branch, which is dead against the API as it stands. The quote job
@@ -1232,3 +1490,96 @@ class AnticipatedLadders(unittest.TestCase):
         rows = [{"strike": 16, "mid": 0.91}, {"strike": 52, "mid": 0.53}, {"strike": 63, "mid": 0.08}]
         self.assertEqual(ex.implied_median(rows, "wind"), ex.implied_median(rows, "high"))
         self.assertIsNotNone(ex.implied_median(rows, "wind")["value"])
+
+
+class EndPrices(unittest.TestCase):
+    """The market's answer to each delivery (owner, 2026-10-09): the vendor lane
+    reads the exchange's prices onto the newest delivery every pass and stops when
+    the next file is filed, so a delivery's kept reading is never the price the
+    market maker set for a later file."""
+
+    CFG = StormRename.CFG
+    T0 = dt.datetime(2026, 10, 9, 5, 0, tzinfo=U)
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.listing = [("2026-10-09T00:00:00Z", "2026-10-09T04:50:00Z")]
+        self.broken = set()
+        self.st.put("snapshots/hurricane.json", json.dumps({"storms": [{"id": "al092026", "name": "Isaias", "basin": "AL"}]}).encode())
+
+    def market(self, mid):
+        self.st.put("snapshots/market/hurricane.json", json.dumps({"markets": [
+            {"symbol": "LISBR", "name": "Hurricane Isaias Wind Gusts in Brownsville",
+             "contracts": [{"strike": 70.0, "bid": mid - 0.06, "ask": mid + 0.06, "mid": mid}]}]}).encode())
+
+    def fetch(self, path, params=None):
+        if path == "/livecyc/tcwind/list":
+            return json.dumps({"storms": [{"storm_name": "Isaias", "storm_year": 2026, "last_modified": self.listing[-1][1],
+                                           "forecasts": [{"forecast_datetime": f, "last_modified": m} for f, m in self.listing]}]}).encode()
+        if path == "/livecyc/tcwind/probabilities":
+            if (params or {}).get("forecast_start_time") in self.broken:
+                raise OSError("vendor timed out")
+            return LADDER_CSV.encode()
+        if path in ("/metryc/interim/tcwind/list", "/metryc/historical/tcwind/list"):
+            return json.dumps({"storms": []}).encode()
+        raise AssertionError(path)
+
+    def run_at(self, when):
+        return reask.reask_job(self.CFG, self.st, lambda **k: None, when, fetch=self.fetch)
+
+    def steps(self):
+        return {s["id"]: s for s in json.loads(self.st.get("snapshots/storm/Isaias_2026.json"))["steps"]}
+
+    def test_the_newest_delivery_keeps_the_price_standing_now(self):
+        self.market(0.30)
+        self.run_at(self.T0)
+        s = self.steps()["2026100900"]
+        self.assertEqual((s["prices"], s["pricesEnd"]), ({"BR": {"70": 30.0}}, {"BR": {"70": 30.0}}))
+        self.market(0.40)                                   # the market maker moves to the file
+        self.run_at(self.T0 + dt.timedelta(minutes=30))
+        s = self.steps()["2026100900"]
+        self.assertEqual(s["prices"], {"BR": {"70": 30.0}})          # the reading as the file landed stays
+        self.assertEqual(s["pricesEnd"], {"BR": {"70": 40.0}})
+        self.assertEqual(s["pricesEndTs"], "2026-10-09T05:30:00Z")
+
+    def test_once_the_next_file_lands_the_earlier_keeps_its_last_reading(self):
+        self.market(0.30)
+        self.run_at(self.T0)
+        self.market(0.40)
+        self.run_at(self.T0 + dt.timedelta(minutes=30))
+        # the vendor publishes the next cycle and the market maker reprices before this lane files it
+        self.listing.append(("2026-10-09T06:00:00Z", "2026-10-09T12:14:00Z"))
+        self.market(0.86)
+        self.run_at(self.T0 + dt.timedelta(hours=7, minutes=23))
+        st = self.steps()
+        self.assertEqual(st["2026100900"]["pricesEnd"], {"BR": {"70": 40.0}})
+        self.assertEqual((st["2026100906"]["prices"], st["2026100906"]["pricesEnd"]),
+                         ({"BR": {"70": 86.0}}, {"BR": {"70": 86.0}}))
+
+    def test_nothing_is_read_while_the_vendor_lists_a_file_this_lane_lacks(self):
+        self.market(0.30)
+        self.run_at(self.T0)
+        self.listing.append(("2026-10-09T06:00:00Z", "2026-10-09T12:14:00Z"))
+        self.broken = {"2026-10-09T06:00:00Z"}
+        self.market(0.86)                                    # already the next file's price
+        self.run_at(self.T0 + dt.timedelta(hours=7, minutes=23))
+        st = self.steps()
+        self.assertNotIn("2026100906", st)
+        self.assertEqual(st["2026100900"]["pricesEnd"], {"BR": {"70": 30.0}})
+
+    def test_a_ruled_storm_carries_the_ruling_and_is_not_read(self):
+        self.market(0.30)
+        with mock.patch.object(reask, "price_override", lambda name, year: {"pricesFrom": "override"} if name == "Isaias" else None), \
+             mock.patch.object(reask, "apply_price_override", lambda doc, ov: False):
+            self.run_at(self.T0)
+        self.assertNotIn("pricesEnd", self.steps()["2026100900"])
+
+    def test_a_cycle_filed_late_is_not_taken_for_the_newest(self):
+        steps = [{"id": "2026100706", "kind": "livecyc", "ts": "2026-10-07T11:44:13Z"},
+                 {"id": "2026100700", "kind": "livecyc", "ts": "2026-10-07T12:44:16Z"},
+                 {"id": "FINAL", "kind": "final", "ts": "2026-10-12T00:00:00Z"}]
+        self.assertEqual(reask.newest_delivery(steps)["id"], "2026100706")
+        steps.insert(2, {"id": "INT", "kind": "interim", "ts": "2026-10-08T03:00:00Z"})
+        self.assertEqual(reask.newest_delivery(steps)["id"], "INT")

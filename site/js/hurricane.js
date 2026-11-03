@@ -40,6 +40,17 @@ window.WXHur = (() => {
   const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
   const RAMP = ['#fde8c8', '#f9cf94', '#f2ad5e', '#e68a2e', '#cf6a14', '#a84e0b', '#7a3607'];
   let H = null, GEO = null, NATION = null, MK = null, RK = null, SZN = null, basin = 'AL', tip = null;
+  // every storm whose NHC advisories the site keeps (pipeline/advisories.py): its id, names, year and ocean
+  let ADV = null;
+  // the sea surface temperature anomaly under the map, and whether the reader wants it
+  let SST = null;
+  let sstOn = (() => { try { return localStorage.getItem('wx.hurricane.sst') !== 'off'; } catch (e) { return true; } })();
+  // the hill shading over the land, one asset per basin, loaded when its basin is first shown
+  const RELIEF = {};
+  let reliefOn = (() => { try { return localStorage.getItem('wx.hurricane.relief') !== 'off'; } catch (e) { return true; } })();
+  // the roads and city names, one asset per basin, loaded alongside the relief
+  const FEAT = {};
+  let featOn = (() => { try { return localStorage.getItem('wx.hurricane.roads') !== 'off'; } catch (e) { return true; } })();
 
   const cents = v => (v == null ? null : Math.round(v * 100));
   const local = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -100,8 +111,7 @@ window.WXHur = (() => {
 
      A reader hovering a strike wants what it costs to take each side. The rest
      of the book stays underneath. Buying Yes costs the Yes ask; buying No costs
-     one dollar less the Yes bid, because there are no sellers and the two sides
-     sum to a dollar. */
+     one dollar less the Yes bid. */
   const priceHead = c => (!c ? '' : tip.price(
     c.ask == null ? null : c.ask,
     c.bid == null ? null : 1 - c.bid,
@@ -199,11 +209,17 @@ window.WXHur = (() => {
 
      A basin is a different question, so the Pacific view carries no Atlantic
      storm and no Atlantic contract, and the other way round. A storm's ocean
-     comes from the NHC roster, matched by name, and anything the roster does
-     not name is treated as Atlantic, which is where this lane has run. */
+     comes from the NHC roster, matched by name, and once the roster has let it
+     go, from the advisories the site keeps for it, newest season first, so a
+     settled Pacific storm stays on the Pacific view. Anything neither names is
+     treated as Atlantic, which is where this lane has run. */
   const stormBasin = nm => {
-    const r = ((H && H.storms) || []).find(x => String(x.name).toLowerCase() === String(nm || '').toLowerCase());
-    return r && r.basin ? r.basin : 'AL';
+    const key = String(nm || '').toLowerCase();
+    const r = ((H && H.storms) || []).find(x => String(x.name).toLowerCase() === key);
+    if (r && r.basin) return r.basin;
+    const a = Object.values((ADV && ADV.storms) || {}).filter(e => (e.names || []).some(x => String(x).toLowerCase() === key))
+      .sort((p, q) => (q.year || 0) - (p.year || 0))[0];
+    return a && a.basin ? a.basin : 'AL';
   };
   const inBasin = nm => (basin === 'AL' ? stormBasin(nm) === 'AL' : stormBasin(nm) !== 'AL');
   // what the owner has said the exchange will list but it has not listed yet
@@ -219,6 +235,32 @@ window.WXHur = (() => {
     const halo = 'stroke-width:' + (3 * g).toFixed(2) + 'px';
     const outl = (H.outlook || []).filter(o => (o.basin || '') === BASINS[b].outlook);
     const oplaced = [];
+    /* Labels that do not collide. Each takes the first of a few positions around
+       its point where it overlaps no label or point already drawn; the storm's
+       own line goes first, then its forecast points in order, and a forecast
+       label that finds no room is left to the point's hover, which carries the
+       same words. Widths are estimated from the character count. */
+    const boxes = [];
+    // a label must also sit inside the window on view, or it is cut off at its edge
+    const inside = bx => bx[0] >= view.x + 2 * g && bx[2] <= view.x + view.w - 2 * g
+                         && bx[1] >= view.y + 2 * g && bx[3] <= view.y + view.h - 2 * g;
+    const free = bx => inside(bx) && !boxes.some(q => bx[0] < q[2] && bx[2] > q[0] && bx[1] < q[3] && bx[3] > q[1]);
+    function place(text, x, y, size, attrs, spots, force) {
+      const w = text.length * size * 0.56;
+      const at = ([dx, dy, anchor]) => {
+        const ax = x + dx * g, ay = y + dy * g;
+        const x0 = anchor === 'end' ? ax - w : anchor === 'middle' ? ax - w / 2 : ax;
+        return { ax, ay, anchor, bx: [x0 - g, ay - size * 0.9, x0 + w + g, ay + size * 0.3] };
+      };
+      const cands = spots.map(at);
+      // the first free spot; a label that must be drawn takes the first spot
+      // inside the view when none is free, overlap and all
+      const pick = cands.find(c => free(c.bx)) || (force ? (cands.find(c => inside(c.bx)) || cands[0]) : null);
+      if (!pick) return false;
+      boxes.push(pick.bx);
+      svg.appendChild(txt(text, Object.assign({ x: pick.ax, y: pick.ay, 'text-anchor': pick.anchor, 'font-size': size }, attrs)));
+      return true;
+    }
     const path = (r, close) => r.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ',' + Y(p[1]).toFixed(1)).join('') + (close ? 'Z' : '');
     outl.forEach(o => rings(o.region).forEach(r => {
       const area = el('path', { d: path(r, true), fill: 'rgba(224,138,30,.13)', stroke: '#e08a1e', 'stroke-width': 1.6 * g, 'stroke-dasharray': (6 * g) + ' ' + (4 * g) });
@@ -229,6 +271,7 @@ window.WXHur = (() => {
       let cy = r.reduce((s, p) => s + Y(p[1]), 0) / r.length;
       while (oplaced.some(q => Math.abs(cx - q[0]) < 115 * g && Math.abs(cy - q[1]) < 34 * g)) cy += 34 * g;
       oplaced.push([cx, cy]);
+      boxes.push([cx - 50 * g, cy - 11 * g, cx + 50 * g, cy + 18 * g]);
       svg.appendChild(txt((o.prob7 || '?') + ' / 7 days', { x: cx, y: cy, 'text-anchor': 'middle', 'font-size': 11 * g, 'font-weight': 700, fill: '#b26a08', class: 'lbl', style: halo }));
       svg.appendChild(txt((o.prob2 || '?') + ' / 2 days', { x: cx, y: cy + 14 * g, 'text-anchor': 'middle', 'font-size': 9.5 * g, fill: '#b26a08', class: 'lbl', style: halo }));
     }));
@@ -271,14 +314,28 @@ window.WXHur = (() => {
       const pts = !stale ? (s.points || [])
         : (s.lat != null && s.lon != null
             ? [{ lon: s.lon, lat: s.lat, kt: s.intensityKt, type: s.classification, tau: 0, label: null }] : []);
-      pts.forEach((p, i) => {
-        svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: (p.tau === 0 ? 6 : 4.5) * g, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 * g }));
-        // a forecast point's label is short (the full name is in its hover), so a
-        // track of seven points stays readable; the current position's is full
-        if (p.label) svg.appendChild(txt(p.label.replace(':00', '') + (p.kt ? ' · ' + windText(p.kt, p.type, p, 'short') : ''), { x: X(p.lon) + 8 * g, y: Y(p.lat) + (i % 2 ? 14 : -8) * g, 'font-size': 9 * g, fill: 'var(--ink)', class: 'lbl', style: halo }));
-        if (p.tau === 0) svg.appendChild(txt((p.type || s.classification) + ' ' + s.name + ' · '
+      // the points first, so no label is placed over one
+      pts.forEach(p => {
+        const pr = (p.tau === 0 ? 6 : 4.5) * g;
+        svg.appendChild(el('circle', { cx: X(p.lon), cy: Y(p.lat), r: pr, fill: ptColor(p), stroke: 'var(--panel)', 'stroke-width': 1.2 * g }));
+        boxes.push([X(p.lon) - pr, Y(p.lat) - pr, X(p.lon) + pr, Y(p.lat) + pr]);
+      });
+      // the storm's own line first, then a short label per point (the full name
+      // is in its hover), each where it collides with nothing drawn before it
+      pts.map((p, i) => [p, i]).sort((a, c) => (c[0].tau === 0) - (a[0].tau === 0)).forEach(([p, i]) => {
+        const x = X(p.lon), y = Y(p.lat);
+        if (p.tau === 0) place((p.type || s.classification) + ' ' + s.name + ' · '
           + (p.kt != null ? windText(p.kt, p.type || s.classification, p, 'mid') : windText(s.intensityKt, s.classification, null, 'mid')) + ' · adv ' + advNow,
-          { x: X(p.lon) + 10 * g, y: Y(p.lat) - 20 * g, 'font-size': 12.5 * g, 'font-weight': 700, fill: 'var(--navy)', class: 'lbl', style: halo }));
+          x, y, 12.5 * g, { 'font-weight': 700, fill: 'var(--navy)', class: 'lbl slbl', style: halo },
+          [[10, -20, 'start'], [-10, -20, 'end'], [10, 30, 'start'], [-10, 30, 'end'], [14, 4, 'start'], [-14, 4, 'end']], true);
+        if (p.label) {
+          const sp = [[8, -8, 'start'], [8, 14, 'start'], [-8, -8, 'end'], [-8, 14, 'end'], [0, -13, 'middle'], [0, 21, 'middle']];
+          if (i % 2) sp.unshift(sp.splice(1, 1)[0]);       // alternate sides along the track
+          place(p.label.replace(':00', '') + (p.kt ? ' · ' + windText(p.kt, p.type, p, 'short') : ''), x, y, 9 * g,
+                { fill: 'var(--ink)', class: 'lbl slbl', style: halo }, sp);
+        }
+      });
+      pts.forEach(p => {
         // the hover target: an invisible circle wider than the drawn point
         const now = p.tau === 0;
         const rows = [
@@ -306,7 +363,7 @@ window.WXHur = (() => {
       // the current position's target goes on top, so a slow storm's +12 h point cannot cover it
       hits.sort((a, b) => a[0] - b[0]).forEach(([, hit]) => svg.appendChild(hit));
     });
-    return { storms: storms.length, areas: outl.length,
+    return { storms: storms.length, areas: outl.length, boxes,
              stale: storms.filter(s2 => s2.geometryStale).map(s2 => s2.name) };
   }
 
@@ -381,6 +438,32 @@ window.WXHur = (() => {
     out.sort((a, b) => b.p80 - a.p80);
     return out.length ? out : null;
   }
+  /* What a dot's size reads: the vendor's chance of a gust at one threshold,
+     which used to be 80 mph whatever the storm. A strong storm takes the places
+     in its path to nearly a hundred percent there and their dots all reach full
+     size, so the size stopped telling which face the worst wind (owner,
+     2026-10-09; Isaias read 98% and 97% at Fort Walton Beach and Pensacola).
+     The threshold now follows the storm: the lowest one at which no location
+     has reached ninety percent, so the most likely place to see the most
+     extreme wind is still short of full size and the places behind it fall
+     away by how far short they come (Isaias on 9 October: 100 mph, reading 86,
+     73, 26, 3 and 2 percent down the coast). A weaker storm comes back down
+     the ladder on its own. The chance is the vendor's published figure, the
+     Metryc interim's where that is higher. */
+  const SIZE_FULL = 90;                                      // percent
+  const chanceAt = (v, t) => (v || []).reduce((m, x) => {
+    const i = (x.thresholds || []).indexOf(t);
+    if (i < 0) return m;
+    return Math.max(m, x.p[i] || 0, x.interim && x.interim.p ? (x.interim.p[i] || 0) : 0);
+  }, 0);
+  let sizeT = 80;
+  function sizeThreshold(locs) {
+    const sites = locs.map(L => vendorSite(L.id)).filter(Boolean);
+    const thr = [...new Set(sites.flatMap(v => v.flatMap(x => x.thresholds || [])))].sort((a, b) => a - b);
+    if (!thr.length) return 80;
+    const t = thr.find(u => !sites.some(v => chanceAt(v, u) >= SIZE_FULL));
+    return t != null ? t : thr[thr.length - 1];
+  }
   // the tooltip for a reference location, on the map and in the vendor table.
   // Takes one storm's row or the list vendorSite returns, and when more than
   // one storm is signalling on the location, every one is shown, each under
@@ -402,13 +485,13 @@ window.WXHur = (() => {
         rows.push(['Storm', esc(v2.storm) + ' · ' + esc(v2.file || 'LiveCyc')
           + (v2.forecastTime ? ' cycle ' + utc(v2.forecastTime) : '')
           + (v2.received ? ', received ' + utc(v2.received) : '')]);
-        v2.thresholds.map((t, i) => (v2.p[i] ? ['&ge; ' + t + ' mph', v2.p[i] + '%'] : null))
+        v2.thresholds.map((t, i) => (v2.p[i] ? ['&ge; ' + t + ' mph', esc(WXC.vendorPct(v2.p[i]))] : null))
           .filter(Boolean).slice(0, cap).forEach(r => rows.push(r));
         if (v2.interim) {
           // the interim's rungs under their own heading; a published zero at
           // every rung is printed at the lowest one, since it is a figure
           rows.push(['Metryc interim', 'received ' + utc(v2.interim.received)]);
-          const im = v2.thresholds.map((t, i) => (v2.interim.p[i] ? ['interim &ge; ' + t + ' mph', v2.interim.p[i] + '%'] : null))
+          const im = v2.thresholds.map((t, i) => (v2.interim.p[i] ? ['interim &ge; ' + t + ' mph', esc(WXC.vendorPct(v2.interim.p[i]))] : null))
             .filter(Boolean);
           (im.length ? im.slice(0, cap) : [['interim &ge; ' + v2.thresholds[0] + ' mph', '0%']]).forEach(r => rows.push(r));
         }
@@ -420,6 +503,167 @@ window.WXHur = (() => {
   }
   const locationById = id => ((GEO && GEO.locations) || []).find(L => L.id === id);
 
+  /* A reference location's box on the map: the contract to trade there.
+
+     The newest vendor file's ladder and the series through the storm sit in
+     the panel beside the map, so this box no longer repeats them (owner,
+     2026-10-08). It shows one of the location's listed wind contracts as the
+     prices to buy Yes and No now, in the box every other contract on this site
+     uses: the highest listed threshold the vendor gives at least a ten percent
+     chance, which is the rung still in play, or the lowest listed one when
+     none reaches that. The chance is the vendor's later word where there is
+     one, the Metryc interim over the cycle, as in the panel. A storm with
+     figures here and no listed contract gives the vendor's chance at that rung
+     instead, and two storms on one location each get their own block, hottest
+     first, because each is its own hazard. A location with no figures keeps
+     its plain description. */
+  const IN_PLAY = 10;                                       // percent
+  function inPlay(thr, p, strikes) {
+    const at = t => p[thr.findIndex(x => Number(x) === Number(t))] || 0;
+    const up = strikes.map(Number).sort((a, b) => a - b);
+    // judged on the figure as the page prints it, so a rung reading 10% is in play
+    const hot = up.filter(t => Math.round(at(t)) >= IN_PLAY);
+    const t = hot.length ? hot[hot.length - 1] : up[0];
+    return { t, p: at(t) };
+  }
+  const centsOf = v => (v == null ? '\u2014' : Math.round(v * 100) + '\u00a2');
+  const paysOf = v => {
+    const m = v == null ? null : WXM.payout(Math.round(v * 100));
+    return m == null ? null : 'pays ' + m + '\u00d7';
+  };
+  function dotTip(L, v) {
+    const list = Array.isArray(v) ? v : (v ? [v] : []);
+    if (!list.length) return locationTip(L, v);
+    const credit = esc((RK && RK.attribution) || 'Powered by Reask');
+    const blocks = list.map(v2 => {
+      const s = ((RK && RK.storms) || []).find(x => x.name === v2.storm);
+      const lm = s ? lMarketOf(s, L.id) : null;
+      const thr = v2.thresholds || [];
+      const p = v2.interim ? v2.interim.p : v2.p;
+      const file = v2.interim ? 'Metryc interim' : 'LiveCyc' + (v2.forecastTime ? ' ' + utc(v2.forecastTime) : '');
+      const cs = (lm && lm.contracts) || [];
+      if (!cs.length) {
+        const r = inPlay(thr, p, thr);
+        return tip.rows(esc(v2.storm) + ' \u00b7 ' + esc(L.name) + ' (' + esc(L.id) + ')',
+          [['LiveCyc chance, gusts &ge; ' + r.t + ' mph', esc(WXC.vendorPct(r.p))], ['Contract', 'none listed here']],
+          credit + ', ' + file + ' file');
+      }
+      const r = inPlay(thr, p, cs.map(c => c.strike));
+      const c = cs.find(x => Number(x.strike) === r.t);
+      // a book whose two sides both bid the minimum is empty and carries no price
+      const empty = WXM.emptyBook(c);
+      const yesBuy = empty ? null : c.ask, noBuy = empty || c.bid == null ? null : 1 - c.bid;
+      // a click on the location pins this box, and a price in a pinned box opens the contract
+      const url = WXM.contractUrl(lm.productConid, c.conidYes || c.conid);
+      return '<b>' + esc(lm.name || v2.storm + ' \u00b7 ' + L.name) + ' \u2014 ' + esc(c.label || 'At Least ' + r.t) + '</b>'
+        + tip.price(yesBuy, noBuy, paysOf(yesBuy), paysOf(noBuy), url)
+        + tip.rows(null, [['Fair-value reference (LiveCyc)', esc(WXC.vendorPct(r.p))], ['Settles', esc(c.expiryLabel)]],
+          (c.bid != null || c.ask != null
+            ? 'Yes bid ' + centsOf(c.bid) + ' \u00b7 No bid ' + centsOf(c.ask == null ? null : 1 - c.ask)
+            : 'no bids on either side')
+          + (empty ? ' \u00b7 both sides bid the minimum, so no price is shown' : '')
+          + ' \u00b7 the highest listed rung with a LiveCyc chance of ' + IN_PLAY + '% or more \u00b7 ' + credit
+          + (url ? '<br><span class="tnot">Click the location to pin this box.</span>'
+                 + '<span class="tyes">Click a price to open the contract on IBKR.</span>' : ''));
+    });
+    return blocks.join('<div style="height:8px"></div>')
+      + (list.length > 1 ? '<div class="tf">each storm is its own hazard</div>' : '');
+  }
+
+  /* ---- the side panel: one location's ladder and series, filled from the map
+
+     Beside the map on a wide screen while a storm is running in the basin on
+     view. Its two slots stand empty, each saying what it will hold, until a red
+     location is hovered or focused; the panel then draws that location's ladder
+     from the newest vendor file and its series through the storm, the cards the
+     storm section draws below, and keeps them until another location is
+     hovered. The strongest locations are offered as a way in. */
+  let sideSid = null, sideKey = '';
+  function sideLive() {
+    return !!(RK && RK.enabled && window.WXStorm)
+      && (RK.storms || []).some(s => inBasin(s.name) && !WXStorm.dormant(s) && s.livecyc);
+  }
+  function sideSlot(id, label, empty) {
+    return h('div', { class: 'msbox', id }, [h('div', { class: 'mslbl', text: label }), h('div', { class: 'msempty', text: empty })]);
+  }
+  function sideFrame() {
+    const wrap = $('#mapWrap'), side = $('#mapSide');
+    if (!wrap || !side) return;
+    const on = sideLive();
+    wrap.classList.toggle('has-side', on);
+    side.hidden = !on;
+    if (!on) { side.innerHTML = ''; sideKey = ''; sideSid = null; return; }
+    const ranked = ((GEO && GEO.locations) || []).map(L => [L, vendorSite(L.id)])
+      .filter(([, v]) => v && v.some(x => x.p.some(q => q > 0)))
+      .sort((a, b) => (chanceAt(b[1], sizeT) - chanceAt(a[1], sizeT)) || (Math.max.apply(null, b[1][0].p) - Math.max.apply(null, a[1][0].p)));
+    const key = basin + '|' + ranked.slice(0, 4).map(x => x[0].id).join(',') + '|' + (RK.asof || '');
+    if (key === sideKey) return;
+    sideKey = key;
+    side.innerHTML = '';
+    side.appendChild(h('div', { class: 'mshd', text: 'Live Hurricane contract at one location' }));
+    side.appendChild(h('p', { class: 'cap', style: 'margin:0', text: 'Hover a red location on the map to fill these two panels.' }));
+    side.appendChild(sideSlot('msLadder', 'Ladder', 'The chance of a gust at or above each threshold from the newest vendor file, '
+      + 'with the exchange’s price once that threshold is listed.'));
+    side.appendChild(sideSlot('msSeries', 'Through the storm', 'The same chances delivery by delivery, with the exchange’s price, '
+      + 'as in the cards below the map.'));
+    if (ranked.length) {
+      const q = h('div', { class: 'msquick' }, [h('span', { text: 'Strongest now ' })]);
+      ranked.slice(0, 4).forEach(([L]) => {
+        const b = h('button', { text: L.name, title: 'show ' + L.name + ' in these panels' });
+        b.onclick = () => showSide(L.id, true);
+        b.onmouseenter = () => showSide(L.id);
+        q.appendChild(b);
+      });
+      side.appendChild(q);
+    }
+    if (sideSid) showSide(sideSid, true);
+  }
+  /* A link can name a reference location (?loc=PC): the exchange's research
+     button sends a reader here from one location's wind contract, through the
+     aliases in config/category_aliases.json. Once the ledgers have landed the
+     location fills the panel beside the map, or on a screen too narrow for the
+     panel its card below is brought into view. A location nothing has been
+     delivered for leaves the page as it opens. */
+  function focusLoc(id) {
+    if (!id || !locationById(id)) return;
+    const series = (window.WXStorm && WXStorm.sites) ? WXStorm.sites() : {};
+    if (!series[id] && !vendorSite(id)) return;
+    const side = $('#mapSide');
+    if (side && !side.hidden && getComputedStyle(side).display !== 'none') showSide(id, true);
+    else if (window.WXStorm && WXStorm.showSite) WXStorm.showSite(id);
+  }
+  async function showSide(id, again) {
+    const side = $('#mapSide'); if (!side || side.hidden) return;
+    if (id === sideSid && !again) return;
+    sideSid = id;
+    document.querySelectorAll('#basin circle.msel').forEach(c => c.classList.remove('msel'));
+    const dot = document.querySelector('#basin circle[data-loc="' + id + '"]'); if (dot) dot.classList.add('msel');
+    const v = vendorSite(id);
+    const top = v && v[0];
+    const s = top && (RK.storms || []).find(x => x.name === top.storm);
+    const nm = (locationById(id) || {}).name || id;
+    const lad = $('#msLadder'), ser = $('#msSeries');
+    if (lad) {
+      lad.innerHTML = '';
+      lad.appendChild(h('div', { class: 'mslbl', text: 'Ladder' }));
+      const shown = s && shownFile(s);
+      const row = shown && shown.file.sites && shown.file.sites[id];
+      lad.classList.toggle('filled', !!row);
+      lad.appendChild(row ? ladderCard(s, shown, id, row)
+        : h('div', { class: 'msempty', text: nm + ' carries no figure in the newest vendor file.' }));
+    }
+    if (ser) {
+      const got = WXStorm.seriesCard ? await WXStorm.seriesCard(id, top && top.storm) : null;
+      if (sideSid !== id) return;           // a later hover has taken the panel
+      ser.innerHTML = '';
+      ser.appendChild(h('div', { class: 'mslbl', text: 'Through the storm' }));
+      ser.classList.toggle('filled', !!got);
+      ser.appendChild(got ? got.node : h('div', { class: 'msempty', text: 'No delivery has carried ' + nm + ' yet.' }));
+    }
+    // the panel's ladder and series can carry prices the map itself did not
+    if ($('#basinCap')) WXM.tradeNote($('#mapWrap'), $('#basinCap'));
+  }
+
   // ---- zoom and pan on the basin map
   //
   // The whole map is drawn in one coordinate space, so zooming is a matter of
@@ -429,6 +673,10 @@ window.WXHur = (() => {
   // because a window over one ocean means nothing over another.
   const VIEW0 = { x: 0, y: 0, w: 980, h: 600 };
   let view = Object.assign({}, VIEW0);
+  /* The page opens on the active storms rather than the whole ocean, and keeps
+     following them as advisories come in until the reader zooms or pans; from
+     then on the view is the reader's until the basin changes. */
+  let autoView = true;
   const MAXZ = 12;                       // beyond this the vector outlines are the limit, not the pixels
   /* Glyph scale. The viewBox zoom magnifies everything, geography and glyphs
      alike, so at 4x a storm label filled the Gulf. Dots, labels and stroke
@@ -447,13 +695,21 @@ window.WXHur = (() => {
     svg.setAttribute('viewBox', [view.x, view.y, view.w, view.h].map(n => Math.round(n * 100) / 100).join(' '));
     const z = VIEW0.w / view.w;
     const lbl = $('#basinZoomLevel');
-    if (lbl) lbl.textContent = z < 1.02 ? 'whole basin' : Math.round(z * 10) / 10 + '×';
+    const names = stormsHere().map(s => s.name);
+    const onStorm = names.length && autoView && z > 1.02;
+    if (lbl) lbl.textContent = z < 1.02 ? 'whole basin' : onStorm ? names.join(' and ') + ', ' + Math.round(z * 10) / 10 + '×' : Math.round(z * 10) / 10 + '×';
     svg.classList.toggle('grab', z > 1.02);
+    // the sea temperature switch only where there is a field to switch
+    const ss = $('#basinSst');
+    if (ss) ss.hidden = !(SST && SST.basins && SST.basins[basin]);
+    const sb = $('#basinStorm');
+    if (sb) { sb.hidden = !names.length; sb.textContent = names.join(' and '); sb.title = 'zoom to ' + names.join(' and ') + (names.length > 1 ? '’ tracks' : '’s track'); }
   }
   function zoomAbout(factor, cx, cy) {
     const z = VIEW0.w / view.w;
     const want = Math.min(Math.max(z * factor, 1), MAXZ);
     if (Math.abs(want - z) < 1e-6) return;
+    autoView = false;
     const w = VIEW0.w / want, h = VIEW0.h / want;
     // keep the point under the pointer where it is
     view.x = cx - (cx - view.x) * (w / view.w);
@@ -465,7 +721,51 @@ window.WXHur = (() => {
     view.x = Math.min(Math.max(view.x, VIEW0.x), VIEW0.x + VIEW0.w - view.w);
     view.y = Math.min(Math.max(view.y, VIEW0.y), VIEW0.y + VIEW0.h - view.h);
   }
-  const resetView = () => { view = Object.assign({}, VIEW0); applyView(); scheduleRescale(); };
+  const resetView = () => { autoView = true; view = Object.assign({}, VIEW0); applyView(); scheduleRescale(); };
+  const wholeBasin = () => { autoView = false; view = Object.assign({}, VIEW0); applyView(); scheduleRescale(); };
+  const toStorm = () => { const sv = stormView(); if (!sv) return; autoView = true; view = sv; applyView(); scheduleRescale(); };
+  /* The window a reader most likely came for: the cones, forecast tracks and
+     positions of the storms active in this basin, and the reference locations a
+     running storm signals on, with room around them, at the map's own shape and
+     never closer than four times. Null when no storm is active here. */
+  function stormView() {
+    const [b0, la0, b1, la1] = BASINS[basin].box;
+    const kx = VIEW0.w / (b1 - b0), ky = VIEW0.h / (la1 - la0);
+    const xs = [], ys = [];
+    const add = (lon, lat) => {
+      if (lon < b0 || lon > b1 || lat < la0 || lat > la1) return;
+      xs.push((lon - b0) * kx); ys.push((la1 - lat) * ky);
+    };
+    stormsHere().forEach(s => {
+      if (!s.geometryStale) {
+        (s.cone || []).forEach(c => rings(c).forEach(r => r.forEach(q => add(q[0], q[1]))));
+        (s.track || []).forEach(c => rings(c).forEach(r => r.forEach(q => add(q[0], q[1]))));
+        (s.points || []).forEach(p => add(p.lon, p.lat));
+      }
+      if (s.lat != null && s.lon != null) add(s.lon, s.lat);
+    });
+    if (!xs.length) return null;
+    ((GEO && GEO.locations) || []).forEach(L => {
+      const v = vendorSite(L.id);
+      if (v && v.some(x => x.p.some(q => q > 0))) add(L.lon, L.lat);
+    });
+    let x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    let y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    const px = Math.max(36, (x1 - x0) * 0.14), py = Math.max(36, (y1 - y0) * 0.14);
+    x0 -= px; x1 += px; y0 -= py; y1 += py;
+    const focus = [x0, y0, x1, y1];
+    const ar = VIEW0.w / VIEW0.h;
+    // no closer than four times: a storm with only a position and no cone yet
+    // would otherwise fill the map with one dot
+    let w = Math.max(x1 - x0, (y1 - y0) * ar, VIEW0.w / 4);
+    w = Math.min(w, VIEW0.w);
+    const hh = w / ar;
+    const v = { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - hh / 2, w, h: hh };
+    v.x = Math.min(Math.max(v.x, VIEW0.x), VIEW0.x + VIEW0.w - v.w);
+    v.y = Math.min(Math.max(v.y, VIEW0.y), VIEW0.y + VIEW0.h - v.h);
+    v.focus = focus;
+    return v;
+  }
   function atPoint(ev) {
     const svg = $('#basin');
     const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
@@ -481,22 +781,32 @@ window.WXHur = (() => {
       zoomAbout(ev.deltaY < 0 ? 1.18 : 1 / 1.18, cx, cy);
     }, { passive: false });
     let drag = null, moved = 0;
+    /* The pointer is captured only once a press has moved far enough to be a
+       drag. Capturing it on the press itself sent every click on a zoomed map
+       to the map, so a location or a landfall region under the pointer never
+       heard it, and the storm view opens zoomed in. */
     svg.addEventListener('pointerdown', ev => {
       if (VIEW0.w / view.w <= 1.02) return;            // nothing to pan at full extent
-      drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, id: ev.pointerId };
-      moved = 0; svg.setPointerCapture(ev.pointerId); svg.classList.add('grabbing');
+      drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, id: ev.pointerId, held: false };
+      moved = 0;
     });
     svg.addEventListener('pointermove', ev => {
       if (!drag) return;
       const k = view.w / svg.getBoundingClientRect().width;
       const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy;
       moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+      if (moved <= 4) return;
+      if (!drag.held) {
+        try { svg.setPointerCapture(drag.id); } catch (e) { /* the pointer has gone */ }
+        drag.held = true; svg.classList.add('grabbing');
+      }
+      autoView = false;
       view.x = drag.vx - dx * k; view.y = drag.vy - dy * k;
       clampView(); applyView();
     });
     const end = ev => {
       if (!drag) return;
-      try { svg.releasePointerCapture(drag.id); } catch (e) { /* already released */ }
+      if (drag.held) try { svg.releasePointerCapture(drag.id); } catch (e) { /* already released */ }
       drag = null; svg.classList.remove('grabbing');
     };
     svg.addEventListener('pointerup', end);
@@ -507,9 +817,260 @@ window.WXHur = (() => {
     const mk = (label, title, fn) => { const b = h('button', { text: label, title }); b.onclick = fn; bar.appendChild(b); };
     mk('−', 'zoom out', () => zoomAbout(1 / 1.5, view.x + view.w / 2, view.y + view.h / 2));
     mk('+', 'zoom in', () => zoomAbout(1.5, view.x + view.w / 2, view.y + view.h / 2));
-    mk('Reset', 'back to the whole basin', resetView);
+    const sb = h('button', { id: 'basinStorm', text: '', title: 'zoom to the active storm' });
+    sb.onclick = toStorm; sb.hidden = true; bar.appendChild(sb);
+    mk('Whole basin', 'back to the whole basin', wholeBasin);
+    const sw = h('button', { id: 'basinSst', text: 'Sea temperature', title: 'show or hide the sea surface temperature anomaly' });
+    sw.classList.toggle('on', sstOn);
+    sw.onclick = () => {
+      sstOn = !sstOn; sw.classList.toggle('on', sstOn);
+      try { localStorage.setItem('wx.hurricane.sst', sstOn ? 'on' : 'off'); } catch (e) { /* a private window keeps the default */ }
+      draw();
+    };
+    bar.appendChild(sw);
+    const rw = h('button', { id: 'basinRelief', text: 'Relief', title: 'show or hide the hill shading over the land' });
+    rw.classList.toggle('on', reliefOn);
+    rw.onclick = () => {
+      reliefOn = !reliefOn; rw.classList.toggle('on', reliefOn);
+      try { localStorage.setItem('wx.hurricane.relief', reliefOn ? 'on' : 'off'); } catch (e) { /* a private window keeps the default */ }
+      if (reliefOn) loadRelief(basin); else draw();
+    };
+    bar.appendChild(rw);
+    const fw = h('button', { id: 'basinRoads', text: 'Roads and cities', title: 'show or hide the main roads and city names' });
+    fw.classList.toggle('on', featOn);
+    fw.onclick = () => {
+      featOn = !featOn; fw.classList.toggle('on', featOn);
+      try { localStorage.setItem('wx.hurricane.roads', featOn ? 'on' : 'off'); } catch (e) { /* a private window keeps the default */ }
+      if (featOn) loadFeatures(basin); else draw();
+    };
+    bar.appendChild(fw);
     bar.appendChild(h('span', { class: 'cap', style: 'margin:0', id: 'basinZoomLevel', text: 'whole basin' }));
     bar.appendChild(h('span', { class: 'cap', style: 'margin:0', text: '· scroll to zoom, drag to pan' }));
+  }
+
+  /* ---- the sea surface temperature anomaly
+
+     NOAA Coral Reef Watch's daily anomaly, the day's satellite SST less its own
+     daily climatology at each pixel (pipeline/sst.py), drawn under the land so
+     only the sea shows it. A hurricane draws its energy from the upper ocean,
+     so warmer than usual water along a track is worth seeing. The scale is
+     diverging and its middle is clear: water within half a degree of usual
+     leaves the sea its own colour, warmer reads orange to red and cooler light
+     to deep blue, and the wash stays light so the contracts on the land and the
+     red reference locations still read over it. The browser smooths the 0.2 degree cells when it scales the
+     image. Hovering the sea reads the cell under the pointer. */
+  const SST_CACHE = {};
+  const SST_SPAN = 4;                    // degrees Celsius at the ends of the scale
+  const WARM = [[253, 219, 199], [244, 165, 130], [214, 96, 77], [178, 24, 43], [103, 0, 31]];
+  const COOL = [[209, 229, 240], [146, 197, 222], [67, 147, 195], [33, 102, 172], [5, 48, 97]];
+  function sstColor(a) {
+    const m = Math.min(1, Math.abs(a) / SST_SPAN);
+    const stops = a >= 0 ? WARM : COOL;
+    const f = m * (stops.length - 1), i = Math.min(stops.length - 2, Math.floor(f)), t = f - i;
+    const c = stops[i].map((v, j) => Math.round(v + (stops[i + 1][j] - v) * t));
+    const alpha = Math.abs(a) < 0.5 ? 0 : Math.min(0.6, 0.1 + 0.55 * m);
+    return [c[0], c[1], c[2], Math.round(255 * alpha)];
+  }
+  function sstImage(gr) {
+    const key = basin + '|' + (SST && SST.asof) + '|' + gr.nx + 'x' + gr.ny;
+    if (SST_CACHE[key]) return SST_CACHE[key];
+    const raw = atob(gr.data);
+    const vals = new Int8Array(raw.length);
+    for (let k = 0; k < raw.length; k++) vals[k] = raw.charCodeAt(k) << 24 >> 24;
+    const cv = document.createElement('canvas');
+    cv.width = gr.nx; cv.height = gr.ny;
+    const ctx = cv.getContext('2d');
+    const im = ctx.createImageData(gr.nx, gr.ny);
+    for (let k = 0; k < vals.length; k++) {
+      if (vals[k] === -128) continue;     // land, ice or missing: left clear
+      const c = sstColor(vals[k] / 10);
+      im.data[4 * k] = c[0]; im.data[4 * k + 1] = c[1]; im.data[4 * k + 2] = c[2]; im.data[4 * k + 3] = c[3];
+    }
+    ctx.putImageData(im, 0, 0);
+    return (SST_CACHE[key] = { url: cv.toDataURL('image/png'), vals });
+  }
+  function sstDay() {
+    const d = SST && SST.asof ? new Date(SST.asof + 'T12:00:00Z') : null;
+    return d ? MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate() : '';
+  }
+  function drawSst(svg, X, Y, kx, ky, b0, la1, gr) {
+    const img = sstImage(gr);
+    const half = gr.step / 2;
+    const node = el('image', { href: img.url, x: X(gr.lon0 - half), y: Y(gr.lat0 + half),
+                               width: gr.nx * gr.step * kx, height: gr.ny * gr.step * ky,
+                               preserveAspectRatio: 'none', class: 'sstlayer' });
+    node.addEventListener('mousemove', ev => {
+      const [x, y] = atPoint(ev);
+      const lon = b0 + x / kx, lat = la1 - y / ky;
+      const i = Math.round((gr.lat0 - lat) / gr.step), j = Math.round((lon - gr.lon0) / gr.step);
+      if (i < 0 || j < 0 || i >= gr.ny || j >= gr.nx) { tip.hide(); return; }
+      const v = img.vals[i * gr.nx + j];
+      if (v === -128) { tip.hide(); return; }
+      const c = v / 10;
+      tip.show(ev, tip.rows('Sea surface temperature anomaly',
+        [['Anomaly', (c > 0 ? '+' : '') + c.toFixed(1) + ' °C (' + (c > 0 ? '+' : '') + (c * 1.8).toFixed(1) + ' °F)'],
+         ['Reads', c >= 0.5 ? 'warmer than usual' : c <= -0.5 ? 'cooler than usual' : 'near its usual temperature'],
+         ['Position', position(lat, lon)], ['Day', sstDay()]],
+        'NOAA Coral Reef Watch daily 5 km SST anomaly, against its daily climatology'));
+    });
+    node.addEventListener('mouseleave', () => tip.hide());
+    svg.appendChild(node);
+  }
+
+  /* ---- the hill shading over the land
+
+     NOAA NCEI's ETOPO 2022 relief, shaded once under a sun in the north-west
+     (scripts/build_relief.py) and checked in as an asset per basin. Laid over
+     the land as light and shadow only: flat ground is left clear, so the
+     landfall shading keeps its colour and the coastal plains a storm crosses
+     stay plain, while the Sierra Madre, the Appalachians and the islands' high
+     ground read as terrain. No pointer events; the regions under it keep their
+     tooltips and links. */
+  function loadRelief(b) {
+    if (!reliefOn || RELIEF[b] !== undefined) { if (reliefOn && RELIEF[b]) draw(); return; }
+    RELIEF[b] = null;                       // asked for; a failure leaves the map plain
+    fetch(WXC.asset('relief-' + b + '.json')).then(x => x.json()).then(d => {
+      RELIEF[b] = d && d.data ? Object.assign(d, { url: reliefImage(d) }) : null;
+      if (RELIEF[b] && basin === b) draw();
+    }).catch(() => {});
+  }
+  function reliefImage(d) {
+    const raw = atob(d.data);
+    const cv = document.createElement('canvas');
+    cv.width = d.nx; cv.height = d.ny;
+    const ctx = cv.getContext('2d');
+    const im = ctx.createImageData(d.nx, d.ny);
+    for (let k = 0; k < raw.length; k++) {
+      const v = raw.charCodeAt(k) << 24 >> 24;
+      if (!v) continue;
+      const lit = v > 0;
+      const c = lit ? 255 : 0;
+      im.data[4 * k] = c; im.data[4 * k + 1] = c; im.data[4 * k + 2] = c;
+      im.data[4 * k + 3] = Math.round(255 * Math.min(1, Math.abs(v) / 127) * (lit ? 0.4 : 0.55));
+    }
+    ctx.putImageData(im, 0, 0);
+    return cv.toDataURL('image/png');
+  }
+  function drawRelief(svg, X, Y, kx, ky, d) {
+    const half = d.step / 2;
+    svg.appendChild(el('image', { href: d.url, x: X(d.lon0 - half), y: Y(d.lat0 + half),
+                                  width: d.nx * d.step * kx, height: d.ny * d.step * ky,
+                                  preserveAspectRatio: 'none', class: 'relieflayer', 'pointer-events': 'none' }));
+  }
+
+  /* ---- roads and city names
+
+     Natural Earth's 1:10m roads and populated places (scripts/build_map_features.py),
+     an asset per basin. A reader following a storm towards a coast wants to
+     know which towns and which highways are in its way, and the reference
+     locations alone do not say. Both stay out of the way of the contracts: the
+     roads are thin lines under the storm layers with no pointer events, the
+     expressways and major highways from the storm's own view inward and the
+     secondary highways only past three times; the names come after the storm
+     is drawn, the largest cities first, more of them the closer the view and
+     near the storm, each placed where it collides with no storm label, no
+     reference dot and no other name. */
+  function loadFeatures(b) {
+    if (!featOn || FEAT[b] !== undefined) { if (featOn && FEAT[b]) draw(); return; }
+    FEAT[b] = null;                         // asked for; a failure leaves the map without them
+    fetch(WXC.asset('features-' + b + '.json')).then(x => x.json()).then(d => {
+      FEAT[b] = d && d.roads ? d : null;
+      if (FEAT[b] && basin === b) draw();
+    }).catch(() => {});
+  }
+  function drawRoads(svg, X, Y, g, z, F) {
+    if (z < 1.5) return;
+    const [vx0, vy0, vx1, vy1] = [view.x, view.y, view.x + view.w, view.y + view.h];
+    const d1 = [], d2 = [];
+    F.roads.forEach(([cls, pts]) => {
+      if (cls === 2 && z < 3) return;
+      const xy = pts.map(p => [X(p[0]), Y(p[1])]);
+      // a run wholly outside the window adds nothing but length to the path
+      if (xy.every(q => q[0] < vx0) || xy.every(q => q[0] > vx1) || xy.every(q => q[1] < vy0) || xy.every(q => q[1] > vy1)) return;
+      (cls === 1 ? d1 : d2).push('M' + xy.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join('L'));
+    });
+    if (d2.length) svg.appendChild(el('path', { d: d2.join(''), fill: 'none', stroke: 'var(--map-road2)', 'stroke-width': .55 * g,
+                                                'stroke-linecap': 'round', 'pointer-events': 'none', class: 'roads2' }));
+    if (d1.length) svg.appendChild(el('path', { d: d1.join(''), fill: 'none', stroke: 'var(--map-road)', 'stroke-width': .85 * g,
+                                                'stroke-linecap': 'round', 'pointer-events': 'none', class: 'roads1' }));
+  }
+  function drawPlaces(g2, X, Y, g, z, F, taken, refs, focus) {
+    // Natural Earth's ranks present in the asset, one more step down the list per
+    // zoom tier, and one step further inside the box the storm view frames, where
+    // the reader is placing the track rather than the continent
+    const tiers = [2, 3, 4, 6, 8];
+    const t = z < 1.5 ? 0 : z < 2.5 ? 1 : z < 4 ? 2 : z < 7 ? 3 : 4;
+    const maxRank = tiers[t], maxNear = tiers[Math.min(t + 1, tiers.length - 1)];
+    const boxes = taken.slice();            // the storm's labels and points, then each name as it is placed
+    // A dot the vendor has signalled is never written over. An unsignalled dot is
+    // small and grey, and a coast lined with them would otherwise leave Miami or
+    // Tampa unnamed, so the largest cities' names may graze one when nothing else fits.
+    const hard = (refs || []).filter(q => q[4]), soft = (refs || []).filter(q => !q[4]);
+    const clear = (bx, list) => !list.some(q => bx[0] < q[2] && bx[2] > q[0] && bx[1] < q[3] && bx[3] > q[1]);
+    const inside = bx => bx[0] >= view.x + 2 * g && bx[2] <= view.x + view.w - 2 * g
+                         && bx[1] >= view.y + 2 * g && bx[3] <= view.y + view.h - 2 * g;
+    const free = (bx, strict) => inside(bx) && clear(bx, boxes) && clear(bx, hard) && (!strict || clear(bx, soft));
+    for (const [name, lon, lat, rank] of F.places) {
+      if (rank > maxNear) break;                     // the asset lists the largest cities first
+      const x = X(lon), y = Y(lat);
+      if (x < view.x || x > view.x + view.w || y < view.y || y > view.y + view.h) continue;
+      const near = !!focus && x >= focus[0] && x <= focus[2] && y >= focus[1] && y <= focus[3];
+      if (rank > (near ? maxNear : maxRank)) continue;
+      // a city at a reference location is marked by that location's dot, and its
+      // name stands clear of the dot however large the chance has drawn it
+      const ref = (refs || []).find(q => x >= q[0] - g && x <= q[2] + g && y >= q[1] - g && y <= q[3] + g);
+      const off = Math.max(4 * g, (ref ? (ref[2] - ref[0]) / 2 : 1.7 * g) + 2 * g);
+      const size = (rank <= 2 ? 10.5 : 9.5) * g, w = String(name).length * size * 0.55;
+      // right, left, above, below, then the same a little further out, where a
+      // coast of dots leaves no room close in
+      const ring = o => [[o, 3.5 * g, 'start'], [-o, 3.5 * g, 'end'], [0, -o - 2 * g, 'middle'], [0, o + 9 * g, 'middle']];
+      const spots = ring(off).concat(ring(off + 3 * g));
+      let pick = null;
+      for (const strict of rank <= 2 ? [true, false] : [true]) {
+        for (const [dx, dy, anchor] of spots) {
+          const ax = x + dx, ay = y + dy;
+          const x0 = anchor === 'end' ? ax - w : anchor === 'middle' ? ax - w / 2 : ax;
+          const bx = [x0 - g, ay - size * 0.9, x0 + w + g, ay + size * 0.3];
+          if (free(bx, strict)) { pick = { ax, ay, anchor, bx }; break; }
+        }
+        if (pick) break;
+      }
+      if (!pick) continue;
+      boxes.push(pick.bx, [x - 2 * g, y - 2 * g, x + 2 * g, y + 2 * g]);
+      if (!ref) g2.appendChild(el('circle', { cx: x, cy: y, r: 1.7 * g, fill: 'var(--map-place)' }));
+      g2.appendChild(txt(name, { x: pick.ax, y: pick.ay, 'text-anchor': pick.anchor, 'font-size': size,
+                                 fill: 'var(--map-place)', class: 'lbl plbl', style: 'stroke-width:' + (2.6 * g).toFixed(2) + 'px' }));
+    }
+  }
+
+  /* ---- a satellite loop for each storm on view
+
+     NOAA/NESDIS STAR's GOES floater follows each storm NHC is tracking, and the
+     pipeline copies its newest three hours of GeoColor frames into this site's
+     bucket every half hour (pipeline/floater.py; owner, 2026-10-10). Each storm in
+     the basin on view gets a card under the map; WXC.satLoop draws and plays it. */
+  let FLOAT = null;                    // snapshots/floater/index.json
+  let loopStops = [];
+  const loopUrl = f => WXD.base() + '/snapshots/' + f.key;
+  function loopCard(sid, s, L) {
+    const lp = WXC.satLoop({
+      frames: L.frames.map(f => ({ t: f.t, src: loopUrl(f) })), width: 500, height: 500,
+      head: (s.name || sid) + (s.intensityKt != null ? ' \u00b7 ' + windText(s.intensityKt, s.classification, null, 'mid') : ''),
+      sub: WXC.loopSub(L.satellite, L.frames), credit: 'Imagery from NOAA/NESDIS STAR',
+      alt: L.satellite + ' GeoColor satellite loop of ' + (s.name || sid), attrs: { 'data-storm': sid } });
+    loopStops.push(lp.stop);
+    return lp.card;
+  }
+  function drawLoops() {
+    const host = $('#stormLoops'); if (!host) return;
+    loopStops.forEach(f => f()); loopStops = [];
+    host.innerHTML = '';
+    const idx = (FLOAT && FLOAT.storms) || {};
+    const here = stormsHere().map(s => [String(s.id || '').toUpperCase(), s])
+      .filter(([sid]) => idx[sid] && WXC.loopFresh(idx[sid].frames));
+    host.hidden = !here.length;
+    if (!here.length) return;
+    host.appendChild(h('div', { class: 'loops' }, here.map(([sid, s]) => loopCard(sid, s, idx[sid]))));
   }
 
   function draw() {
@@ -518,8 +1079,11 @@ window.WXHur = (() => {
     const kx = W / (b1 - b0), ky = Hh / (la1 - la0);
     const X = lon => (lon - b0) * kx, Y = lat => (la1 - lat) * ky;
     const svg = $('#basin'); svg.innerHTML = '';
+    if (autoView) view = stormView() || Object.assign({}, VIEW0);
     const g = GS();          // glyph scale at the current zoom, 1 at whole basin
     svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
+    const sstGrid = sstOn && SST && SST.basins ? SST.basins[basin] : null;
+    if (sstGrid) drawSst(svg, X, Y, kx, ky, b0, la1, sstGrid);
     const lf = landfallQuotes();
     const hlf = market('HLF');
     let shadedHere = 0;      // regions drawn on this view that carry a listed contract
@@ -559,11 +1123,26 @@ window.WXHur = (() => {
       (NATION || []).forEach(r => poly([r], 'var(--map-land)', 'var(--map-line)', .6 * g));
       // a state or county is drawn on its own view only
       Object.entries(GEO.states || {}).forEach(([nm, rr]) => { if (!regionHere(nm)) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--map-line)', .7 * g, t, u, nm); });
-      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => { if (!regionHere(nm)) return; const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8 * g, t, u, nm); });
+      // The geometry carries every coastal county, because the desk names new ones storm by
+      // storm, so a county is drawn only where the exchange lists it, in the dark outline
+      // that marks a named county over its state.
+      const listedHere = new Set(Object.keys(lf || {}).map(regionKey));
+      Object.entries(GEO.counties || {}).forEach(([nm, rr]) => {
+        if (!regionHere(nm) || !listedHere.has(nm)) return;
+        const [f, t, u] = fillFor(nm, nm); poly(rr, f, 'var(--ink)', .8 * g, t, u, nm);
+      });
     }
+    if (reliefOn && RELIEF[basin]) drawRelief(svg, X, Y, kx, ky, RELIEF[basin]);
+    const zf = VIEW0.w / view.w;
+    if (featOn && FEAT[basin]) drawRoads(svg, X, Y, g, zf, FEAT[basin]);
     const counts = drawNhc(svg, X, Y, basin, g);
-    // the reference locations: small dots, scaled by the vendor's P(gust > 80 mph) when the lane is live
+    // the names sit under the reference dots but are placed after them, so none is drawn beneath one
+    const plg = featOn && FEAT[basin] ? svg.appendChild(el('g', { class: 'places', 'pointer-events': 'none' })) : null;
+    const refBoxes = [];
+    // the reference locations: small dots, sized by the vendor's chance of a gust at the
+    // threshold the storm has made telling (sizeThreshold) when the lane is live
     let vendorShown = 0;
+    sizeT = sizeThreshold(((GEO && GEO.locations) || []).filter(L => L.lon >= b0 && L.lon <= b1 && L.lat >= la0 && L.lat <= la1));
     // the locations that have a delivery series loaded: those are the dots that
     // open one, which is not the same set as those with a current livecyc row
     const withSeries = (window.WXStorm && WXStorm.sites) ? WXStorm.sites() : {};
@@ -572,82 +1151,95 @@ window.WXHur = (() => {
       const v = vendorSite(L.id);
       // a location the interim settles high is a signal even when the newest
       // cycle has moved on and reads zero there
-      const im80 = x => (x.interim && x.interim.p ? (x.interim.p[x.thresholds.indexOf(80)] || 0) : 0);
       const any = !!(v && v.some(x => x.p.some(p => p > 0) || (x.interim && x.interim.p.some(p => p > 0))));
-      const p80 = v ? Math.max.apply(null, v.map(x => Math.max(x.p80 || 0, im80(x)))) : 0;
-      const r = (p80 > 0 ? 3 + 9 * Math.sqrt(Math.min(p80, 100) / 100) : (any ? 3 : 2.2)) * g;
+      const pT = chanceAt(v, sizeT);
+      const r = (pT > 0 ? 3 + 9 * Math.sqrt(Math.min(pT, 100) / 100) : (any ? 3 : 2.2)) * g;
       if (any) vendorShown++;
-      const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .85 : .55, stroke: 'var(--panel)', 'stroke-width': .6 * g });
-      attach(c, locationTip(L, v));
+      refBoxes.push([X(L.lon) - r, Y(L.lat) - r, X(L.lon) + r, Y(L.lat) + r, any]);
+      const c = el('circle', { cx: X(L.lon), cy: Y(L.lat), r, fill: any ? 'rgba(192,57,43,.75)' : 'var(--muted)', 'fill-opacity': any ? .9 : .55,
+                               stroke: any ? '#fff' : 'var(--panel)', 'stroke-width': (any ? 1 : .6) * g,
+                               'data-loc': L.id, class: L.id === sideSid ? 'msel' : null });
+      attach(c, dotTip(L, v));
       if (any || withSeries[L.id]) {
-        // a click goes to the location's card in the storm section below,
-        // where its series is already drawn, rather than drawing it again here
+        c.addEventListener('mouseenter', () => showSide(L.id));
+        c.addEventListener('focus', () => showSide(L.id));
+      }
+      if (any || withSeries[L.id]) {
+        // A click pins the location's box, whose prices then open the contract
+        // on IBKR (owner, 2026-10-08), and fills the panel beside the map; the
+        // pin is attach()'s own handler. The key does the same for a reader
+        // without a pointer.
         c.style.cursor = 'pointer';
         c.setAttribute('role', 'button');
         c.setAttribute('tabindex', '0');
-        c.setAttribute('aria-label', L.name + ' — go to its storm probability series');
-        const hit = ev => {
-          ev.preventDefault(); ev.stopPropagation();
-          if (window.WXStorm && WXStorm.showSite) WXStorm.showSite(L.id);
-        };
-        // replaces the pin handler attach() set: the card below is where this
-        // click goes, and a pinned box left behind here is noise on the way
-        c.onclick = hit;
-        c.removeAttribute('data-tip-pin');
-        c.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') hit(ev); });
+        c.setAttribute('aria-label', L.name + ' \u2014 show its contract');
+        c.addEventListener('click', () => showSide(L.id, true));
+        c.addEventListener('keydown', ev => {
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          ev.preventDefault();
+          const b = c.getBoundingClientRect();
+          tip.pin({ clientX: b.left + b.width / 2, clientY: b.top + b.height / 2 }, dotTip(L, v));
+          showSide(L.id, true);
+        });
       }
       svg.appendChild(c);
     });
-    wireZoom(); applyView();
+    if (plg) {
+      const sv = stormView();
+      drawPlaces(plg, X, Y, g, zf, FEAT[basin], counts.boxes || [], refBoxes, sv && sv.focus);
+    }
+    wireZoom(); applyView(); sideFrame();
     $('#modeTitle').textContent = B.name.toUpperCase() + ' · NHC forecast tracks, cones and formation odds' + (shadedHere ? ' · landfall regions shaded by the exchange’s Yes price' : '');
-    /* The map's caption, in two blocks: what is drawn and what a click does.
-       The conditional sentences carry facts that are not always true, so a
-       caption never describes shading or an outlook that is not there. */
+    /* The map's caption, kept to what the key and the boxes cannot say (owner,
+       2026-10-08): that a basin has no storm, why a storm's cone is missing,
+       and where each layer comes from, naming only the layers on view. What a
+       shade means is in the key, what a contract pays is in its box and in the
+       landfall section, and what a click does is in the box it pins. */
     {
       const cap = $('#basinCap'); cap.innerHTML = '';
-      const para = t => cap.appendChild(h('p', { class: 'cap', style: 'margin:8px 2px 0', text: t }));
-      para((counts.storms ? '' : 'No active tropical cyclones in this basin at the last update. ')
-        + 'Orange dashed regions show NHC seven-day formation odds. NHC cones and tracks are shown when a '
-        + 'storm is active. '
-        + (basin === 'EP' ? 'The Central Pacific outlook is issued by CPHC and is not in this feed, so that '
-                          + 'part of the map shows storms only. ' : '')
-        + (shadedHere ? 'States, countries and the named counties are shaded by the Yes price of the Major '
-              + 'Hurricane (Category 3+) landfall contract for that region, which pays on a landfall in the region '
-              + 'or within 50 miles of its border; clicking a shaded region opens '
-              + 'that contract on the exchange. ' : '')
-        + 'The point locations are associated with the Live Hurricane contract.'
+      const sources = ['Storms, cones and outlooks from the National Hurricane Center']
+        .concat(sstGrid ? ['sea temperature from NOAA Coral Reef Watch'] : [])
+        .concat(reliefOn && RELIEF[basin] ? ['relief from NOAA NCEI ETOPO 2022'] : [])
+        .concat(featOn && FEAT[basin] ? ['roads and cities from Natural Earth'] : []);
+      cap.appendChild(h('p', { class: 'cap', style: 'margin:8px 2px 0', text:
+        (counts.storms ? '' : 'No active tropical cyclones in this basin at the last update. ')
         + ((counts.stale || []).length
-            ? ' ' + counts.stale.join(' and ') + (counts.stale.length > 1 ? ' are' : ' is')
+            ? counts.stale.join(' and ') + (counts.stale.length > 1 ? ' are' : ' is')
               + ' drawn at the position on the latest advisory: the cone service has stopped updating '
-              + (counts.stale.length > 1 ? 'them' : 'it') + ', so the superseded cone and forecast track are not shown.'
-            : ''));
-      para('During a live storm, clicking a red reference location opens its probability series below the '
-        + 'map; clicking the same location again opens its wind contract.');
+              + (counts.stale.length > 1 ? 'them' : 'it') + ', so the superseded cone and forecast track are not shown. '
+            : '')
+        + sources.join(', ') + '.' }));
+      // the map's landfall regions and the panel beside it open their contracts; the
+      // line goes after the caption, which stays the one short paragraph it is
+      WXM.tradeNote($('#mapWrap'), cap);
     }
-    if (shadedHere || vendorShown) {
-      const kg = el('g', { 'pointer-events': 'none' });
-      const bx = 16, by = Hh - 84, bw = 132;
-      kg.appendChild(el('rect', { x: bx - 8, y: by - 16, width: bw + 108, height: 76, rx: 5,
-                                  fill: 'var(--panel)', 'fill-opacity': .88, stroke: 'var(--line)', 'stroke-width': .8 }));
-      let yy = by;
-      if (shadedHere) {
-        kg.appendChild(txt('Landfall contract, Yes price', { x: bx, y: yy - 3, 'font-size': 10, 'font-weight': 700, fill: 'var(--ink)' }));
-        for (let i = 0; i < 48; i++) {
-          kg.appendChild(el('rect', { x: bx + i * (bw / 48), y: yy + 2, width: bw / 48 + .6, height: 9,
-                                      fill: ramp(i / 47) }));
+    /* The key, under the map rather than on it, where it can never sit on a
+       storm's track: one item per thing the map is showing now. */
+    {
+      const key = $('#basinKey');
+      if (key) {
+        key.innerHTML = '';
+        const scale = (stops, a, b) => h('span', { class: 'bkramp' }, [h('span', { class: 'bkend', text: a }),
+          h('i', { class: 'bkbar', style: 'background:linear-gradient(90deg,' + stops.join(',') + ')' }),
+          h('span', { class: 'bkend', text: b })]);
+        if (sstGrid) {
+          const st = [];
+          for (let i = 0; i <= 16; i++) {
+            const c = sstColor(-SST_SPAN + 2 * SST_SPAN * i / 16);
+            st.push(c[3] ? 'rgba(' + c.slice(0, 3).join(',') + ',' + (c[3] / 255).toFixed(2) + ')' : 'var(--map-sea)');
+          }
+          key.appendChild(h('span', { class: 'bkitem' }, [h('b', { text: 'Sea temperature anomaly, ' + sstDay() + ' ' }),
+            scale(st, '−' + SST_SPAN + ' °C', '+' + SST_SPAN + ' °C')]));
         }
-        kg.appendChild(txt('0¢', { x: bx, y: yy + 22, 'font-size': 9, fill: 'var(--muted)' }));
-        kg.appendChild(txt('100¢', { x: bx + bw, y: yy + 22, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted)' }));
-        yy += 34;
+        if (shadedHere) {
+          const st = [];
+          for (let i = 0; i <= 8; i++) st.push(ramp(i / 8));
+          key.appendChild(h('span', { class: 'bkitem' }, [h('b', { text: 'Landfall contract, Yes price ' }), scale(st, '0¢', '100¢')]));
+        }
+        key.appendChild(h('span', { class: 'bkitem' }, [h('i', { class: 'bkdot' }), h('span', { text: 'a reference location' })]));
+        if (vendorShown) key.appendChild(h('span', { class: 'bkitem' }, [h('i', { class: 'bkdot live' }),
+          h('span', { text: 'sized by the chance of a gust of ' + sizeT + ' mph or more' })]));
       }
-      kg.appendChild(el('circle', { cx: bx + 5, cy: yy + 2, r: 3.4, fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.4 }));
-      kg.appendChild(txt('a reference location', { x: bx + 14, y: yy + 5.5, 'font-size': 9.5, fill: 'var(--ink)' }));
-      if (vendorShown) {
-        yy += 14;
-        kg.appendChild(el('circle', { cx: bx + 5, cy: yy + 2, r: 4.6, fill: 'rgba(192,57,43,.55)', stroke: 'rgba(192,57,43,.9)', 'stroke-width': 1 }));
-        kg.appendChild(txt('sized by the chance of a gust over 80 mph', { x: bx + 14, y: yy + 5.5, 'font-size': 9.5, fill: 'var(--ink)' }));
-      }
-      svg.appendChild(kg);
     }
   }
 
@@ -785,6 +1377,7 @@ window.WXHur = (() => {
     host.appendChild(div);
     host.appendChild(h('p', { class: 'cap', text: 'A Yes pays if a hurricane makes landfall in the United States at exactly '
       + 'Category 4 on or before the date named.' }));
+    WXM.tradeNote(host);
   }
 
   // ---- how much of the season's chance is still ahead
@@ -972,6 +1565,7 @@ window.WXHur = (() => {
       });
     });
     $('#laddersCap').textContent = '';
+    WXM.tradeNote($('#ladders'), $('#laddersCap'));
   }
 
   // ---- the season's count so far, beside the ladder that prices it
@@ -1282,6 +1876,7 @@ window.WXHur = (() => {
     host.appendChild(h('p', { class: 'cap', text: 'A Yes contract pays if a hurricane makes landfall in that region, or on land within 50 miles of the '
       + 'region\u2019s border, during the season named while at Category 3 or stronger. The exchange\u2019s terms define a landfall as the eye crossing '
       + 'onto land, so a storm that stays offshore has not made landfall for this contract even where hurricane-force winds reach the area.' }));
+    WXM.tradeNote(host);
   }
 
   // ---- the vendor lane
@@ -1304,7 +1899,8 @@ window.WXHur = (() => {
      This used to be a section of its own, which meant every storm appeared
      twice on the page, once for its deliveries and once for its latest file.
      The storm module now asks for this panel and puts it inside the storm's
-     own record. */
+     own record. The panel opens with the map that steps through the storm
+     (replayMap), and a settled storm's final is that map's last step. */
   const VENDOR_ROWS = 16;
   const GUST_LABELS = 12;                    // how many places on the map carry their number
   function shownFile(s) {
@@ -1319,7 +1915,8 @@ window.WXHur = (() => {
     const got = shown.file.lastModified ? ' · file received ' + utc(shown.file.lastModified) : '';
     if (shown.kind === 'final') return 'Metryc final' + got + ' · peak gust at ' + n + ' locations';
     if (shown.kind === 'interim') return 'Metryc interim' + got + ' · ' + n + ' locations';
-    return 'LiveCyc cycle ' + utc(shown.file.forecastTime) + got + ' · ' + n + ' locations with non-zero probability';
+    return 'LiveCyc cycle ' + utc(shown.file.forecastTime) + got + ' · ' + n + ' locations with non-zero probability'
+      + (shown.file.vendorName ? ' · delivered as ' + shown.file.vendorName + ', the depression’s number' : '');
   }
   // the exchange's wind contract for this storm and location, where one is
   // listed, so a row or a dot opens its market the way every other priced
@@ -1340,112 +1937,69 @@ window.WXHur = (() => {
     return (nm && MK && (MK.markets || []).find(m2 => /^L[A-Z]{2}[A-Z]{2}$/.test(m2.symbol)
       && m2.symbol.slice(3) === loc && String(m2.name || '').toLowerCase().indexOf(nm) >= 0)) || null;
   }
-  const mph1 = v => (v == null ? null : v.toFixed(1) + ' mph');
+  // a Metryc gust in whole miles an hour, as the wind contracts resolve it (owner, 2026-10-12)
+  const mph1 = v => (v == null ? null : WXC.settleMph(v) + ' mph');
 
-  /* The settled gusts as a map, not a table.
+  /* The gust a location's ladder gives even odds of reaching: its median (owner,
+     2026-10-20, read the way the accuracy paper reads a temperature ladder).
 
-     The final file is the storm's record: the gust each reference location
-     recorded, which is what the wind contracts settle on. Sorted down a table
-     it says which places were hit hardest and nothing about where they are, so
-     the same numbers are drawn on the geography instead, fitted to the places
-     that recorded something. Every one of them is a dot, sized and shaded by
-     its gust; the strongest carry their figure, because 79 labels over one
-     coastline is not a map anyone can read. The rest answer on hover.
-
-     The projection is equirectangular with longitude squeezed by the cosine of
-     the middle latitude, so the coastline keeps its shape at this scale rather
-     than being stretched to fill the frame the way the basin map deliberately
-     is. */
-  function gustMap(storm, file) {
-    if (!GEO) return null;
-    const pts = Object.entries(file.sites || {}).map(([id, r]) => {
-      const L = locationById(id);
-      return { id, name: r.name || (L && L.name) || id, g: r.peakGustMph, L,
-               lat: L ? L.lat : null, lon: L ? L.lon : null };
-    }).filter(p => p.lat != null && p.g != null && p.g > 0);
-    if (pts.length < 2) return null;
-    /* The view follows the storm, not the vendor's list.
-
-       The file gives every reference location a number, so a Gulf landfall
-       still writes 0.6 mph against Richmond and Cape Hatteras. Fitting the
-       frame to all of them draws the whole seaboard and squeezes the places
-       that were actually hit into a thumbnail, so the frame is fitted to the
-       strongest twenty and everything inside it is drawn. The caption says how
-       many recorded a gust outside the view. */
-    const W = 960;
-    const all = pts.slice().sort((a, b) => b.g - a.g);
-    const top = all.slice(0, 20);
-    const latMid = top.reduce((a, p) => a + p.lat, 0) / top.length;
-    const k = Math.cos(latMid * Math.PI / 180) || 1;
-    const ux = p => p.lon * k, uy = p => -p.lat;
-    let x0 = Math.min.apply(null, top.map(ux)), x1 = Math.max.apply(null, top.map(ux));
-    let y0 = Math.min.apply(null, top.map(uy)), y1 = Math.max.apply(null, top.map(uy));
-    // room for the labels, and a floor on the span so two neighbouring places
-    // do not zoom the frame down to a stretch of water
-    const padX = Math.max((x1 - x0) * 0.14, 0.8), padY = Math.max((y1 - y0) * 0.16, 0.8);
-    x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
-    // the frame takes its height from the shape of the ground it covers, within
-    // bounds that keep a wide coastal strip readable and a compact one from
-    // filling the page
-    const Hh = Math.max(300, Math.min(560, Math.round(W * (y1 - y0) / (x1 - x0))));
-    const sc = Math.min(W / (x1 - x0), Hh / (y1 - y0));
-    const ox = (W - (x1 - x0) * sc) / 2, oy = (Hh - (y1 - y0) * sc) / 2;
-    const X = lon => ox + (lon * k - x0) * sc, Y = lat => oy + (-lat - y0) * sc;
-    const lo0 = x0 / k, lo1 = x1 / k, la0 = -y1, la1 = -y0;
-    const pts2 = all.filter(p => p.lon >= lo0 && p.lon <= lo1 && p.lat >= la0 && p.lat <= la1);
-    const outside = all.length - pts2.length;
-
-    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'gustmap' });
-    svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
-    const inView = rr => rr.some(r => r.some(q => q[0] >= lo0 && q[0] <= lo1 && q[1] >= la0 && q[1] <= la1));
-    const land = (rr, stroke, sw) => {
-      if (!inView(rr)) return;
-      svg.appendChild(el('path', { d: rr.map(r => 'M' + r.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join('L') + 'Z').join(' '),
-                                   fill: 'var(--map-land)', stroke, 'stroke-width': sw, 'pointer-events': 'none' }));
-    };
-    Object.values(GEO.countries || {}).forEach(rr => land(rr, 'var(--map-line)', .7));
-    (NATION || []).forEach(r => land([r], 'var(--map-line)', .7));
-    Object.values(GEO.states || {}).forEach(rr => land(rr, 'var(--map-line)', .5));
-
-    const gmax = Math.max.apply(null, pts2.map(p => p.g));
-    const rOf = g => 3 + 8 * Math.sqrt(Math.min(g / gmax, 1));
-    pts2.forEach(p => { p.px = X(p.lon); p.py = Y(p.lat); p.r = rOf(p.g); });
-    // faintest first, so the strongest sit on top where places crowd together
-    pts2.slice().reverse().forEach(p => {
-      const c = el('circle', { cx: p.px.toFixed(1), cy: p.py.toFixed(1), r: p.r.toFixed(1),
-                               fill: ramp(p.g / gmax), 'fill-opacity': .9, stroke: 'var(--ink)', 'stroke-width': .5 });
-      const L = p.L || { id: p.id, name: p.name, region: null, country: null, state: null };
-      const url = windUrl(storm, p.id);
-      attach(c, tip.rows(esc(p.name) + ' (' + esc(p.id) + ')',
-        [['Peak gust', mph1(p.g)], ['Region', esc(L.region)], ['Country', esc(L.country)], ['State', esc(L.state)],
-         ['Storm', esc(storm.name) + ' ' + storm.year]],
-        esc((RK && RK.attribution) || 'Powered by Reask') + '; the final file, which the wind contracts settle on'
-          + (url ? ' · click to open this location’s contract' : '')));
-      if (url) WXM.linkTo(c, url, 'Open the ' + p.name + ' wind contract on IBKR');
-      svg.appendChild(c);
+     The ladder is the chance of a gust at or above each threshold, in percent.
+     It is first made to fall with the threshold by pooling any neighbours that
+     rise (a ladder should already fall), then read where it crosses fifty, on
+     the straight line between the two thresholds either side, and printed in
+     whole miles an hour as the contracts settle. A ladder already under fifty
+     at its lowest threshold has no median the thresholds can name and reads as
+     below that threshold; one still at fifty or more at its highest reads as at
+     or above it. The site computes this figure from the vendor's published
+     ladder by the owner's decision; the ladder itself is shown as published. */
+  function gustMedian(thr, arr) {
+    if (!thr || !thr.length) return null;
+    const blocks = [];
+    thr.forEach((t, i) => {
+      blocks.push({ v: Math.max(0, Math.min(100, Number((arr && arr[i]) || 0))), n: 1 });
+      while (blocks.length > 1 && blocks[blocks.length - 2].v < blocks[blocks.length - 1].v) {
+        const b = blocks.pop(), a = blocks.pop();
+        blocks.push({ v: (a.v * a.n + b.v * b.n) / (a.n + b.n), n: a.n + b.n });
+      }
     });
+    const q = [];
+    blocks.forEach(b => { for (let k = 0; k < b.n; k++) q.push(b.v); });
+    if (q[0] < 50) return { below: thr[0] };
+    if (q[q.length - 1] >= 50) return { above: thr[thr.length - 1] };
+    for (let i = 0; i < q.length - 1; i++) {
+      if (q[i] >= 50 && q[i + 1] < 50)
+        return { mph: WXC.settleMph(thr[i] + ((q[i] - 50) / (q[i] - q[i + 1])) * (thr[i + 1] - thr[i])) };
+    }
+    return null;
+  }
+  const gustText = m => (!m ? null : m.mph != null ? m.mph + ' mph' : m.below != null ? 'under ' + m.below + ' mph'
+    : m.above + ' mph or more');
+  // the figure a dot is sized and shaded by: a median under the lowest threshold has none
+  const gustOf = m => (!m ? null : m.mph != null ? m.mph : m.above != null ? m.above : null);
 
-    /* The strongest places carry their figure on the map.
+  /* The strongest places carry their figure on the map.
 
-       Each label takes the first free position on a ring around its dot,
-       working outwards, and is dropped if nothing on either ring is clear: a
-       number printed over another number is worse than one left to the hover.
-       A label pushed out to the second ring gets a hairline back to its dot,
-       because at that distance the pairing is no longer obvious. */
-    const placed = [];
-    const dots = pts2.map(p => ({ x0: p.px - p.r * .9, x1: p.px + p.r * .9, y0: p.py - p.r * .9, y1: p.py + p.r * .9 }));
+     Each label takes the first free position on a ring around its dot, working
+     outwards, and is dropped if nothing on either ring is clear: a number
+     printed over another number is worse than one left to the hover. A label
+     pushed out to the second ring gets a hairline back to its dot, because at
+     that distance the pairing is no longer obvious. */
+  function labelDots(g, pts, view, avoid, s) {
+    s = s || 1;
+    const placed = (avoid || []).slice();
+    const dots = pts.map(p => ({ x0: p.px - p.r * .9, x1: p.px + p.r * .9, y0: p.py - p.r * .9, y1: p.py + p.r * .9 }));
     const clash = (b, arr) => arr.some(a => !(b.x1 < a.x0 || b.x0 > a.x1 || b.y1 < a.y0 || b.y0 > a.y1));
     let labeled = 0;
-    pts2.slice(0, GUST_LABELS).forEach(p => {
-      const val = p.g.toFixed(1);
-      const w = p.name.length * 5.3 + val.length * 6.2 + 6;
+    pts.forEach(p => {
+      const val = String(p.label);
+      const w = (p.name.length * 5.3 + val.length * 6.2 + 6) * s;
       const spots = [];
       [0, 1].forEach(ring => {
-        const d = p.r + 4 + ring * 15;
-        spots.push([p.px + d, p.py + 3.2, 'start', ring], [p.px - d, p.py + 3.2, 'end', ring],
-                   [p.px, p.py - d - 1, 'middle', ring], [p.px, p.py + d + 7.5, 'middle', ring],
+        const d = p.r + (4 + ring * 15) * s;
+        spots.push([p.px + d, p.py + 3.2 * s, 'start', ring], [p.px - d, p.py + 3.2 * s, 'end', ring],
+                   [p.px, p.py - d - s, 'middle', ring], [p.px, p.py + d + 7.5 * s, 'middle', ring],
                    [p.px + d * .8, p.py - d * .8, 'start', ring], [p.px - d * .8, p.py - d * .8, 'end', ring],
-                   [p.px + d * .8, p.py + d * .8 + 5, 'start', ring], [p.px - d * .8, p.py + d * .8 + 5, 'end', ring]);
+                   [p.px + d * .8, p.py + d * .8 + 5 * s, 'start', ring], [p.px - d * .8, p.py + d * .8 + 5 * s, 'end', ring]);
       });
       // first pass keeps clear of the dots as well as of the other labels;
       // covering a place's own mark is only accepted when nothing else is free
@@ -1454,53 +2008,430 @@ window.WXHur = (() => {
         for (let i = 0; i < spots.length; i++) {
           const lx = spots[i][0], ly = spots[i][1], anchor = spots[i][2], ring = spots[i][3];
           const bx = anchor === 'start' ? lx : anchor === 'end' ? lx - w : lx - w / 2;
-          const box = { x0: bx - 2, x1: bx + w + 2, y0: ly - 9, y1: ly + 3 };
-          if (box.x0 < 2 || box.x1 > W - 2 || box.y0 < 2 || box.y1 > Hh - 2) continue;
+          const box = { x0: bx - 2 * s, x1: bx + w + 2 * s, y0: ly - 9 * s, y1: ly + 3 * s };
+          if (box.x0 < view.x0 + 2 * s || box.x1 > view.x1 - 2 * s || box.y0 < view.y0 + 2 * s || box.y1 > view.y1 - 2 * s) continue;
           if (clash(box, placed)) continue;
           if (!pass && clash(box, dots)) continue;
           put = { lx, ly, anchor, ring, box };
           break;
         }
       }
-      if (put) {
-        const lx = put.lx, ly = put.ly, anchor = put.anchor, ring = put.ring, box = put.box;
-        placed.push(box);
-        labeled++;
-        if (ring) svg.appendChild(el('line', { x1: p.px.toFixed(1), y1: p.py.toFixed(1),
-          x2: (anchor === 'start' ? box.x0 : anchor === 'end' ? box.x1 : (box.x0 + box.x1) / 2).toFixed(1),
-          y2: ((box.y0 + box.y1) / 2).toFixed(1), stroke: 'var(--muted)', 'stroke-width': .7, 'pointer-events': 'none' }));
-        // the label sits on the sea as often as on the land; a panel-colored
-        // plate under it keeps both readable
-        svg.appendChild(el('rect', { x: box.x0.toFixed(1), y: box.y0.toFixed(1), width: (box.x1 - box.x0).toFixed(1),
-                                     height: (box.y1 - box.y0).toFixed(1), rx: 2.5, fill: 'var(--panel)',
-                                     'fill-opacity': .78, 'pointer-events': 'none' }));
-        const t = txt('', { x: lx.toFixed(1), y: ly.toFixed(1), 'text-anchor': anchor, 'font-size': 10.5,
-                            'pointer-events': 'none' });
-        const sp = (s2, at) => { const n = el('tspan', at); n.textContent = s2; t.appendChild(n); };
-        sp(val + ' ', { 'font-weight': 700, fill: 'var(--ink)' });
-        sp(p.name, { fill: 'var(--muted)' });
-        svg.appendChild(t);
-      }
+      if (!put) return;
+      const lx = put.lx, ly = put.ly, anchor = put.anchor, box = put.box;
+      placed.push(box);
+      labeled++;
+      if (put.ring) g.appendChild(el('line', { x1: p.px.toFixed(1), y1: p.py.toFixed(1),
+        x2: (anchor === 'start' ? box.x0 : anchor === 'end' ? box.x1 : (box.x0 + box.x1) / 2).toFixed(1),
+        y2: ((box.y0 + box.y1) / 2).toFixed(1), stroke: 'var(--muted)', 'stroke-width': .7 * s, 'pointer-events': 'none' }));
+      // the label sits on the sea as often as on the land; a panel-colored
+      // plate under it keeps both readable
+      g.appendChild(el('rect', { x: box.x0.toFixed(1), y: box.y0.toFixed(1), width: (box.x1 - box.x0).toFixed(1),
+                                 height: (box.y1 - box.y0).toFixed(1), rx: 2.5 * s, fill: 'var(--panel)',
+                                 'fill-opacity': .78, 'pointer-events': 'none' }));
+      const t = txt('', { x: lx.toFixed(1), y: ly.toFixed(1), 'text-anchor': anchor, 'font-size': 10.5 * s,
+                          'pointer-events': 'none', class: 'glbl' });
+      const sp = (s2, at) => { const n = el('tspan', at); n.textContent = s2; t.appendChild(n); };
+      sp(val + ' ', { 'font-weight': 700, fill: 'var(--ink)' });
+      sp(p.name, { fill: 'var(--muted)' });
+      g.appendChild(t);
     });
+    return labeled;
+  }
 
-    // the key: what the shading and the size mean, in the units the file is in
-    const kg = el('g', { 'pointer-events': 'none' });
-    const bx = 16, by = Hh - 46, bw = 150;
-    kg.appendChild(el('rect', { x: bx - 8, y: by - 18, width: bw + 34, height: 46, rx: 5,
-                                fill: 'var(--panel)', 'fill-opacity': .9, stroke: 'var(--line)', 'stroke-width': .8 }));
-    kg.appendChild(txt('Peak gust recorded, mph', { x: bx, y: by - 5, 'font-size': 10, 'font-weight': 700, fill: 'var(--ink)' }));
-    for (let i = 0; i < 48; i++) kg.appendChild(el('rect', { x: bx + i * (bw / 48), y: by, width: bw / 48 + .6, height: 9, fill: ramp(i / 47) }));
-    kg.appendChild(txt('0', { x: bx, y: by + 20, 'font-size': 9, fill: 'var(--muted)' }));
-    kg.appendChild(txt(gmax.toFixed(1), { x: bx + bw, y: by + 20, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted)' }));
-    svg.appendChild(kg);
-    return { svg, drawn: pts2.length, labeled, outside };
+  /* The storm step by step: NHC's forecast and each location's gust on one map
+     (owner, 2026-10-20).
+
+     The storm section's timeline moves it. At each full NHC advisory the map
+     draws that advisory's cone and forecast track, where the storm was and the
+     path it had taken by then, and at each location the median gust of the
+     newest LiveCyc ladder the vendor had built by that hour (gustMedian). LiveCyc
+     looks forward from its cycle, so a place the storm has passed falls back.
+     The interim and the final close the storm: the interim's median, then the
+     gust each place recorded, which the wind contracts settle on. The storm's
+     own places, those with a contract and those in the vendor's record of it,
+     are always drawn, a ring where the figure is under the lowest threshold or
+     there is none; any other place is drawn once its figure reaches it.
+
+     The view holds the places that matter to the storm and the cones of the
+     advisories that carried LiveCyc figures, the storm's contract period, or of
+     every advisory while the vendor has published nothing for it (owner,
+     2026-10-20: Nolo's whole track ran a hundred degrees of longitude and left
+     Hawaii a few pixels wide). Cones from before or after that period run off
+     the edge. The view is fixed from the first step, so nothing moves while
+     stepping, and the shading's scale is the storm's whole range for the same
+     reason. The projection is equirectangular with longitude squeezed by the
+     cosine of the middle latitude, so a coastline keeps its shape at this
+     scale. */
+  function replayMap(storm, doc, steps) {
+    if (!GEO || !steps || !steps.length) return null;
+    const thr = (doc && doc.thresholds) || [];
+    const fin = (doc && doc.final) || null;
+    const sites = (doc && doc.sites) || {};
+    const nm = String(storm.name || '').toLowerCase();
+    // the places with contracts: listed now, or priced in the ledger while they were
+    const traded = new Set();
+    ((MK && MK.markets) || []).forEach(m => {
+      if (/^L[A-Z]{4}$/.test(m.symbol) && !/^LHL/.test(m.symbol) && String(m.name || '').toLowerCase().indexOf(nm) >= 0)
+        traded.add(m.symbol.slice(3));
+    });
+    ((doc && doc.steps) || []).forEach(s => [s.prices, s.pricesEnd].forEach(pr => Object.keys(pr || {}).forEach(id => traded.add(id))));
+    const loc = {};
+    new Set([...Object.keys(sites), ...Object.keys(fin || {}), ...traded]).forEach(id => {
+      const L = locationById(id);
+      if (L && L.lat != null && L.lon != null)
+        loc[id] = { id, L, name: (sites[id] && sites[id].name) || L.name || id, lat: L.lat, lon: L.lon };
+    });
+    // each step's figure at each place
+    const figs = steps.map(st => {
+      const out = {};
+      Object.keys(loc).forEach(id => {
+        if (st.kind === 'final') {
+          const g = fin && fin[id];
+          if (g != null && WXC.settleMph(g) > 0) out[id] = { mph: WXC.settleMph(g) };
+          return;
+        }
+        if (!st.delivery) return;
+        // a cycle files only the places it gave a chance, so a place it left out stands at zero
+        const m = gustMedian(thr, (st.delivery.sites || {})[id]);
+        if (m) out[id] = m;
+      });
+      return out;
+    });
+    const finalTop = Object.keys(fin || {}).filter(id => loc[id]).sort((a, b) => fin[b] - fin[a]).slice(0, 20);
+    // the storm's own places: a contract, or a place in the vendor's record of the storm
+    const own = new Set([...traded, ...Object.keys(sites)].filter(id => loc[id]));
+    const key = new Set(own);
+    figs.forEach((f, i) => Object.keys(f).forEach(id => { if (gustOf(f[id]) != null && steps[i].kind !== 'final') key.add(id); }));
+    finalTop.forEach(id => key.add(id));
+    // the advisories in step order, each once
+    const advs = [];
+    steps.forEach(st => { if (st.adv && advs.indexOf(st.adv) < 0) advs.push(st.adv); });
+    const carried = advs.filter(a => steps.some(st => st.adv === a && st.delivery && (st.kind === 'adv' || st.kind === 'cycle')));
+    const frame = [];
+    (carried.length ? carried : advs).forEach(a => {
+      (a.cone || []).forEach(r => r.forEach(q => frame.push(q)));
+      (a.track || []).forEach(r => r.forEach(q => frame.push(q)));
+      (a.points || []).forEach(p => frame.push([p.lon, p.lat]));
+    });
+    key.forEach(id => frame.push([loc[id].lon, loc[id].lat]));
+    if (frame.length < 2) return null;
+
+    const W = 960;
+    const latMid = frame.reduce((s, q) => s + q[1], 0) / frame.length;
+    const k = Math.cos(latMid * Math.PI / 180) || 1;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    frame.forEach(q => { x0 = Math.min(x0, q[0] * k); x1 = Math.max(x1, q[0] * k); y0 = Math.min(y0, -q[1]); y1 = Math.max(y1, -q[1]); });
+    // room for the labels, and a floor on the span so two neighbouring places
+    // do not zoom the frame down to a stretch of water
+    const padX = Math.max((x1 - x0) * 0.14, 0.8), padY = Math.max((y1 - y0) * 0.16, 0.8);
+    x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
+    const Hh = Math.max(320, Math.min(600, Math.round(W * (y1 - y0) / (x1 - x0))));
+    const sc = Math.min(W / (x1 - x0), Hh / (y1 - y0));
+    const ox = (W - (x1 - x0) * sc) / 2, oy = (Hh - (y1 - y0) * sc) / 2;
+    const X = lon => ox + (lon * k - x0) * sc, Y = lat => oy + (-lat - y0) * sc;
+    const lo0 = (x0 - ox / sc) / k, lo1 = (x0 + (W - ox) / sc) / k, la0 = -(y0 + (Hh - oy) / sc), la1 = -(y0 - oy / sc);
+    const inside = p => p.lon >= lo0 && p.lon <= lo1 && p.lat >= la0 && p.lat <= la1;
+
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + Hh, class: 'gustmap replay',
+                            'data-view': [lo0, lo1, la0, la1].map(v => v.toFixed(2)).join(',') });
+    svg.appendChild(el('rect', { x: 0, y: 0, width: W, height: Hh, fill: 'var(--map-sea)' }));
+    const inView = rr => rr.some(r => r.some(q => q[0] >= lo0 && q[0] <= lo1 && q[1] >= la0 && q[1] <= la1));
+    const land = (rr, stroke, sw) => {
+      if (!inView(rr)) return;
+      svg.appendChild(el('path', { d: rr.map(r => 'M' + r.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join('L') + 'Z').join(' '),
+                                   fill: 'var(--map-land)', stroke, 'stroke-width': sw, 'vector-effect': 'non-scaling-stroke',
+                                   'pointer-events': 'none' }));
+    };
+    /* A Pacific storm's coordinates run west past the date line (pipeline/
+       advisories.py writes 147 east as -213), so where the view reaches past it
+       the land beyond is drawn a second time, a turn of the globe to the west. */
+    const west = rr => rr.map(r => r.map(q => [q[0] > 0 ? q[0] - 360 : q[0], q[1]]));
+    const lands = (rr, stroke, sw) => { land(rr, stroke, sw); if (lo0 < -180 && rr.some(r => r.some(q => q[0] > 0))) land(west(rr), stroke, sw); };
+    Object.values(GEO.countries || {}).forEach(rr => lands(rr, 'var(--map-line)', .7));
+    (NATION || []).forEach(r => lands([r], 'var(--map-line)', .7));
+    Object.values(GEO.states || {}).forEach(rr => lands(rr, 'var(--map-line)', .5));
+    const dyn = el('g');
+    svg.appendChild(dyn);
+
+    /* Zoom and pan, as on the basin map (owner, 2026-10-20). The viewBox moves,
+       and a beat after a zoom settles the step is drawn again with its dots,
+       labels, lines and key multiplied by the glyph scale, the world units per
+       screen unit, so they keep their size on screen at every zoom; the labels
+       go to the strongest places in view. The view stays where the reader left
+       it while the timeline steps. The pointer is captured only once a press has
+       moved far enough to be a drag, so a click on a place still reaches it. */
+    const VIEW0 = { x: 0, y: 0, w: W, h: Hh };
+    let view = Object.assign({}, VIEW0), cur = steps.length - 1, rescale = null;
+    const MAXZ = 12;
+    const lvl = h('span', { class: 'cap', style: 'margin:0', text: 'whole view' });
+    function applyView() {
+      svg.setAttribute('viewBox', [view.x, view.y, view.w, view.h].map(n => Math.round(n * 100) / 100).join(' '));
+      const z = W / view.w;
+      lvl.textContent = z < 1.02 ? 'whole view' : Math.round(z * 10) / 10 + '×';
+      svg.classList.toggle('grab', z > 1.02);
+    }
+    const clampView = () => {
+      view.x = Math.min(Math.max(view.x, 0), W - view.w);
+      view.y = Math.min(Math.max(view.y, 0), Hh - view.h);
+    };
+    function zoomAbout(factor, cx, cy) {
+      const z = W / view.w, want = Math.min(Math.max(z * factor, 1), MAXZ);
+      if (Math.abs(want - z) < 1e-6) return;
+      const w = W / want, hh = Hh / want;
+      // keep the point under the pointer where it is
+      view.x = cx - (cx - view.x) * (w / view.w);
+      view.y = cy - (cy - view.y) * (hh / view.h);
+      view.w = w; view.h = hh;
+      clampView(); applyView();
+      clearTimeout(rescale); rescale = setTimeout(() => setStep(cur), 140);
+    }
+    const atPoint = ev => {
+      const pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+      return [q.x, q.y];
+    };
+    svg.addEventListener('wheel', ev => {
+      ev.preventDefault();
+      const [cx, cy] = atPoint(ev);
+      zoomAbout(ev.deltaY < 0 ? 1.18 : 1 / 1.18, cx, cy);
+    }, { passive: false });
+    let drag = null, moved = 0;
+    svg.addEventListener('pointerdown', ev => {
+      if (W / view.w <= 1.02) return;                  // nothing to pan at full extent
+      drag = { sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y, id: ev.pointerId, held: false };
+      moved = 0;
+    });
+    svg.addEventListener('pointermove', ev => {
+      if (!drag) return;
+      const k = view.w / svg.getBoundingClientRect().width;
+      const dx = ev.clientX - drag.sx, dy = ev.clientY - drag.sy;
+      moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+      if (moved <= 4) return;
+      if (!drag.held) {
+        try { svg.setPointerCapture(drag.id); } catch (e) { /* the pointer has gone */ }
+        drag.held = true; svg.classList.add('grabbing');
+      }
+      view.x = drag.vx - dx * k; view.y = drag.vy - dy * k;
+      clampView(); applyView();
+    });
+    const endDrag = () => {
+      if (!drag) return;
+      const held = drag.held;
+      if (held) try { svg.releasePointerCapture(drag.id); } catch (e) { /* already released */ }
+      drag = null; svg.classList.remove('grabbing');
+      if (held) setStep(cur);                           // the key and the labels follow the view
+    };
+    svg.addEventListener('pointerup', endDrag);
+    svg.addEventListener('pointercancel', endDrag);
+    // a pan that ends over a place must not also open its contract
+    svg.addEventListener('click', ev => { if (moved > 4) { ev.stopPropagation(); ev.preventDefault(); moved = 0; } }, true);
+    const bar = h('div', { class: 'bar rzoom' });
+    const mk = (label, title, fn) => { const b = h('button', { text: label, title }); b.onclick = fn; bar.appendChild(b); };
+    mk('−', 'zoom the storm map out', () => zoomAbout(1 / 1.5, view.x + view.w / 2, view.y + view.h / 2));
+    mk('+', 'zoom the storm map in', () => zoomAbout(1.5, view.x + view.w / 2, view.y + view.h / 2));
+    mk('Whole view', 'back to the storm map’s whole view', () => { view = Object.assign({}, VIEW0); applyView(); setStep(cur); });
+    bar.appendChild(lvl);
+    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', text: '· scroll to zoom, drag to pan' }));
+
+    let gmax = thr.length ? thr[0] + 10 : 1;
+    figs.forEach(f => Object.values(f).forEach(m => { const g = gustOf(m); if (g != null) gmax = Math.max(gmax, g); }));
+    const rOf = g => 3 + 8 * Math.sqrt(Math.min(g / gmax, 1));
+    const path = (r, close) => r.map((q, i) => (i ? 'L' : 'M') + X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join('') + (close ? 'Z' : '');
+    const day = iso => { const d = new Date(Date.parse(iso)); return isFinite(d) ? String(d.getUTCHours()).padStart(2, '0') + 'Z ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] : '—'; };
+    const cycOf = s => String((s && s.id) || '').replace(/^(\d{4})(\d{2})(\d{2})(\d{2})$/, (x, y, mo, d, hh) => hh + 'Z ' + (+d) + ' ' + MONTHS[+mo - 1]);
+    const cap = h('p', { class: 'cap replaycap' });
+    let out = { drawn: 0, labeled: 0, outside: 0 };
+
+    function setStep(i) {
+      cur = Math.max(0, Math.min(i, steps.length - 1));
+      const st = steps[cur];
+      const f = figs[cur];
+      const s = view.w / W;                              // the glyph scale
+      dyn.innerHTML = '';
+      // the path so far: every advisory's hour-zero position up to the one in force
+      const closing = st.kind === 'interim' || st.kind === 'final';
+      const upto = closing ? advs.length - 1 : advs.indexOf(st.adv);
+      const trail = advs.slice(0, upto + 1).map(a => (a.points || [])[0]).filter(Boolean);
+      if (trail.length > 1) dyn.appendChild(el('path', { d: path(trail.map(p => [p.lon, p.lat])), fill: 'none', stroke: 'var(--muted)',
+        'stroke-width': 1.4 * s, 'stroke-dasharray': (3 * s) + ' ' + (3 * s), class: 'rpath', 'pointer-events': 'none' }));
+      trail.slice(0, closing ? trail.length : -1).forEach(p => dyn.appendChild(el('circle', { cx: X(p.lon).toFixed(1), cy: Y(p.lat).toFixed(1),
+        r: 2.2 * s, fill: ptColor(p), 'pointer-events': 'none' })));
+      const a = closing ? null : st.adv;
+      if (a) {
+        (a.cone || []).forEach(r => dyn.appendChild(el('path', { d: path(r, true), class: 'rcone', fill: 'rgba(100,116,139,.16)',
+          stroke: '#64748b', 'stroke-width': s, 'pointer-events': 'none' })));
+        (a.track || []).forEach(r => dyn.appendChild(el('path', { d: path(r), fill: 'none', stroke: 'var(--navy)', 'stroke-width': 2 * s,
+          'pointer-events': 'none' })));
+        (a.points || []).forEach(p => {
+          const now = p.tau === 0;
+          const c = el('circle', { cx: X(p.lon).toFixed(1), cy: Y(p.lat).toFixed(1), r: (now ? 6 : 4) * s, fill: ptColor(p),
+                                   stroke: 'var(--panel)', 'stroke-width': 1.2 * s, class: now ? 'rnow' : 'rpt' });
+          attach(c, tip.rows(esc(p.type || '') + ' ' + esc(a.name || storm.name) + ' — ' + (now ? 'position at advisory ' + esc(Number(a.adv)) : 'forecast point'),
+            [['Valid', utc(p.t)], ['Wind', p.kt != null ? windText(p.kt, p.type, p) : '—'], ['Type', typeText(p.type)],
+             ['Position', position(p.lat, p.lon)], ['Advisory', esc(Number(a.adv)) + ', issued ' + utc(a.issued)],
+             now ? null : ['Lead', p.tau + ' h']], 'NWS National Hurricane Center, as issued'));
+          dyn.appendChild(c);
+        });
+      }
+      // the places, faintest first, so the strongest sit on top where places crowd together
+      const pts = [];
+      Object.keys(loc).forEach(id => {
+        const p = loc[id], m = f[id], g = gustOf(m);
+        if (!inside(p)) return;
+        if (g == null && !own.has(id)) return;
+        if (g == null && st.kind === 'final') return;
+        pts.push({ id, name: p.name, L: p.L, lon: p.lon, lat: p.lat, m, g, px: X(p.lon), py: Y(p.lat), r: (g == null ? 3.2 : rOf(g)) * s });
+      });
+      pts.sort((p, q) => (q.g == null ? -1 : q.g) - (p.g == null ? -1 : p.g));
+      pts.slice().reverse().forEach(p => {
+        const c = p.g == null
+          ? el('circle', { cx: p.px.toFixed(1), cy: p.py.toFixed(1), r: p.r.toFixed(2), fill: 'var(--panel)', 'fill-opacity': .85,
+                           stroke: 'var(--muted)', 'stroke-width': s, class: 'gring' })
+          : el('circle', { cx: p.px.toFixed(1), cy: p.py.toFixed(1), r: p.r.toFixed(2), fill: ramp(p.g / gmax), 'fill-opacity': .9,
+                           stroke: 'var(--ink)', 'stroke-width': .5 * s, class: 'gdot' });
+        const url = windUrl(storm, p.id);
+        const what = st.kind === 'final' ? 'Peak gust recorded' : st.kind === 'interim' ? 'Metryc interim median gust' : 'LiveCyc median gust';
+        attach(c, tip.rows(esc(p.name) + ' (' + esc(p.id) + ')',
+          [[what, p.m ? gustText(p.m) : 'no figure yet'],
+           st.kind === 'final' ? null : ['From', st.delivery ? (st.kind === 'interim' ? 'the Metryc interim file' : 'the LiveCyc cycle of ' + cycOf(st.delivery))
+             : st.since ? 'no LiveCyc cycle since ' + cycOf(st.since) : 'no LiveCyc cycle yet'],
+           ['Region', esc(p.L.region)], ['Country', esc(p.L.country)], ['State', esc(p.L.state)],
+           ['Contract', traded.has(p.id) ? 'listed' : null]],
+          esc((RK && RK.attribution) || 'Powered by Reask') + (st.kind === 'final' ? '; the final file, which the wind contracts settle on'
+            : st.kind === 'interim' ? '; the median of the interim file’s ladder' : '; the median of the cycle’s ladder, which looks forward from its cycle')
+            + (url ? ' · click to open this location’s contract' : '')));
+        if (url) WXM.linkTo(c, url, 'Open the ' + p.name + ' wind contract on IBKR');
+        dyn.appendChild(c);
+      });
+      const nowP = a && (a.points || [])[0];
+      const avoid = nowP ? [{ x0: X(nowP.lon) - 7 * s, x1: X(nowP.lon) + 7 * s, y0: Y(nowP.lat) - 7 * s, y1: Y(nowP.lat) + 7 * s }] : [];
+      const seen = p => p.px >= view.x && p.px <= view.x + view.w && p.py >= view.y && p.py <= view.y + view.h;
+      const labeled = labelDots(dyn, pts.filter(p => p.g != null && seen(p)).slice(0, GUST_LABELS)
+        .map(p => Object.assign({}, p, { label: p.m.mph != null ? p.m.mph : p.m.above + '+' })),
+        { x0: view.x, y0: view.y, x1: view.x + view.w, y1: view.y + view.h }, avoid, s);
+      // the key: what the shading and the size mean at this step, in the view's bottom left at every zoom
+      const kg = el('g', { 'pointer-events': 'none' });
+      const bx = view.x + 16 * s, by = view.y + view.h - 46 * s, bw = 150 * s;
+      kg.appendChild(el('rect', { x: bx - 8 * s, y: by - 18 * s, width: bw + 112 * s, height: 46 * s, rx: 5 * s,
+                                  fill: 'var(--panel)', 'fill-opacity': .9, stroke: 'var(--line)', 'stroke-width': .8 * s }));
+      kg.appendChild(txt(st.kind === 'final' ? 'Peak gust recorded, mph' : st.kind === 'interim' ? 'Metryc interim median gust, mph'
+        : 'LiveCyc median gust, mph', { x: bx, y: by - 5 * s, 'font-size': 10 * s, 'font-weight': 700, fill: 'var(--ink)', class: 'gkey' }));
+      for (let j = 0; j < 48; j++) kg.appendChild(el('rect', { x: bx + j * (bw / 48), y: by, width: bw / 48 + .6 * s, height: 9 * s, fill: ramp(j / 47) }));
+      kg.appendChild(txt('0', { x: bx, y: by + 20 * s, 'font-size': 9 * s, fill: 'var(--muted)' }));
+      kg.appendChild(txt(String(gmax), { x: bx + bw, y: by + 20 * s, 'text-anchor': 'end', 'font-size': 9 * s, fill: 'var(--muted)' }));
+      if (st.kind !== 'final' && thr.length) {
+        kg.appendChild(el('circle', { cx: bx + bw + 16 * s, cy: by + 4.5 * s, r: 3.2 * s, fill: 'var(--panel)', stroke: 'var(--muted)', 'stroke-width': s }));
+        kg.appendChild(txt('under ' + thr[0], { x: bx + bw + 23 * s, y: by + 8 * s, 'font-size': 9 * s, fill: 'var(--muted)' }));
+      }
+      dyn.appendChild(kg);
+      // what this step is, under the map
+      const outside = st.kind === 'final' ? Object.keys(fin || {}).filter(id => loc[id] && WXC.settleMph(fin[id]) > 0 && !inside(loc[id])).length : 0;
+      const pathNote = advs.length ? 'The storm’s path through NHC’s advisories. ' : '';
+      // the final file carries every reference location, whatever the storm did, so the count says which list it is
+      const listed = Object.keys((storm.final && storm.final.sites) || {}).length || (storm.final && storm.final.n) || Object.keys(fin || {}).length;
+      cap.textContent = st.kind === 'final'
+        ? pathNote + 'Each place shows the peak gust it recorded in the Metryc final file, which the wind contracts settle on'
+          + (outside ? '; ' + outside + ' further location' + (outside === 1 ? '' : 's') + ' recorded a gust outside the view.' : '.')
+          + ' The final file carries all ' + listed + ' locations on the vendor’s list, whatever the storm did.'
+        : st.kind === 'interim'
+          ? pathNote + 'Each place shows the median gust of the Metryc interim file.'
+          : (a ? 'NHC advisory ' + Number(a.adv) + ', issued ' + day(a.issued) + ', with the path so far. ' : 'No NHC advisory on file for this cycle. ')
+            + (st.delivery ? 'Each place shows the median gust of the LiveCyc cycle of ' + cycOf(st.delivery) + '; rings are under ' + (thr[0] || 60) + ' mph.'
+              : st.since ? 'No LiveCyc cycle since ' + cycOf(st.since) + '; rings mark the storm’s reference locations.'
+              : 'No LiveCyc cycle yet; rings mark the storm’s reference locations.');
+      out = { drawn: pts.length, labeled, outside, step: cur };
+      svg.setAttribute('data-step', String(cur));
+    }
+    return { svg, cap, bar, setStep, get: () => out, steps: steps.length };
   }
 
   /* The vendor's latest file for one storm, built for the storm module. */
-  function stormFile(storm, into) {
+  /* One location's gust ladder from the newest vendor file: the card the
+     storm's file panel draws per location, and the one the map's side panel
+     draws for the location under the pointer. */
+  function ladderCard(storm, shown, id, r) {
+    const thr = shown.file.thresholds || [];
+    const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
+    const card = h('div', { class: 'ladder vloc' }, [
+      h('div', { class: 'lt', text: (r.name || L.name || id) + ' (' + id + ')' }),
+      h('div', { class: 'cap', style: 'margin:0 0 6px', text: storm.name + ' · ' + shown.label })]);
+    /* Each rung is the exchange's board for that threshold, in the Yes
+       green and No red every other ladder on this site uses, with a tick
+       where the vendor's published probability sits.
+
+       Before the exchange lists a storm the bar is built from the vendor's
+       probability instead, because that is the only number there is and a
+       reader wants the shape of the ladder either way. It is drawn hatched
+       and says so, and it is replaced by the price the moment a real one
+       exists. The tick and the bar then sit on the same scale, which is
+       the comparison worth having: the vendor's figure against what the
+       exchange is charging for it. */
+    const lm = lMarketOf(storm, id);
+    const priceAt = t => {
+      const c = lm && (lm.contracts || []).find(x => Number(x.strike) === Number(t));
+      return c && WXM.realMid(c) ? { pc: Math.round(c.mid * 100), c } : null;
+    };
+    const carried = thr.map((t, i) => [t, r.p[i] || 0]).filter(x => x[1] > 0 || priceAt(x[0]));
+    (carried.length ? carried : [[thr[0], 0]]).slice().reverse().forEach(([t, v]) => {
+      const pr = priceAt(t);
+      const pc = pr ? pr.pc : Math.max(0, Math.min(100, v));
+      const bar = h('span', { class: 'vtrack' + (pr ? '' : ' vsoft') }, [
+        h('span', { class: 'vyes', style: 'width:' + pc + '%' }),
+        h('span', { class: 'vno', style: 'width:' + (100 - pc) + '%' }),
+        h('span', { class: 'vmark', style: 'left:' + Math.max(0, Math.min(100, v)) + '%' })]);
+      const row = h('div', { class: 'vrung' }, [
+        h('span', { class: 'vlab', text: '\u2265 ' + t + ' mph' }), bar,
+        h('span', { class: 'vpct', text: pr ? pr.pc + '\u00a2' : WXC.vendorPct(v) })]);
+      attach(row, tip.rows(esc(r.name || L.name || id) + ' \u00b7 gusts of ' + t + ' mph or greater',
+        [['Yes price', pr ? pr.pc + '\u00a2' : null],
+         ['No price', pr ? (100 - pr.pc) + '\u00a2' : null],
+         ['Yes bid', pr && pr.c.bid != null ? Math.round(pr.c.bid * 100) + '\u00a2' : null],
+         ['No bid', pr && pr.c.ask != null ? Math.round((1 - pr.c.ask) * 100) + '\u00a2' : null],
+         ['Vendor probability', esc(WXC.vendorPct(v))],
+         ['Bar', pr ? 'the exchange\u2019s price' : 'the vendor\u2019s probability, no price yet']],
+        pr ? 'the tick marks the vendor\u2019s figure on the same scale'
+           : 'the exchange has not opened this threshold; the bar is the vendor\u2019s figure and the '
+             + 'tick sits on it'));
+      card.appendChild(row);
+    });
+    attach(card, locationTip(L, { storm: storm.name, file: shown.label, thresholds: thr, p: r.p,
+                                  forecastTime: shown.kind === 'livecyc' ? shown.file.forecastTime : null,
+                                  received: shown.file.lastModified }));
+    const url = windUrl(storm, id);
+    if (url) WXM.linkTo(card, url, 'Open the ' + (r.name || id) + ' wind contract on IBKR');
+    return card;
+  }
+
+  /* A storm's panel: the map that steps through it, then, while the storm is
+     running, the vendor's latest file. A settled storm's record is the map's
+     last step, the gust each place recorded, so its panel is the map alone.
+     Returns the map, which the storm module's timeline moves. */
+  function stormFile(storm, into, replay) {
+    // settled as the rest of the page reads it: the storm's index entry carries the final
+    const settled = !!(storm && storm.final);
+    const ctl = replay && replay.steps && replay.steps.length ? replayMap(storm, replay.doc, replay.steps) : null;
+    if (ctl) {
+      into.appendChild(h('div', { class: 'filehd', text: 'NHC forecasts and gusts, step by step' }));
+      // a settled storm's record is the vendor's final file, and the panel says when it arrived
+      const fin = settled ? shownFile(storm) : null;
+      if (fin && fin.kind === 'final') into.appendChild(h('p', { class: 'cap filesrc', style: 'margin:0 0 6px', text: sourceLine(fin) }));
+      else if (settled && storm.final && storm.final.lastModified)
+        into.appendChild(h('p', { class: 'cap filesrc', style: 'margin:0 0 6px',
+          text: 'Metryc final · file received ' + utc(storm.final.lastModified) + (storm.final.n ? ' · peak gust at ' + storm.final.n + ' locations' : '') }));
+      into.appendChild(ctl.bar);
+      into.appendChild(h('div', { class: 'card replaycard' }, [ctl.svg]));
+      into.appendChild(ctl.cap);
+      if (settled) return ctl;
+    }
     const shown = shownFile(storm);
-    into.appendChild(h('div', { class: 'filehd', text: shown ? shown.label : 'Vendor file' }));
-    if (!shown) { into.appendChild(h('p', { class: 'cap', style: 'margin:0', text: 'No vendor file published yet.' })); return; }
+    if (!shown) {
+      if (!ctl) {
+        into.appendChild(h('div', { class: 'filehd', text: 'Vendor file' }));
+        into.appendChild(h('p', { class: 'cap', style: 'margin:0', text: 'No vendor file published yet.' }));
+      }
+      return ctl;
+    }
+    into.appendChild(h('div', { class: 'filehd', text: shown.label }));
     into.appendChild(h('p', { class: 'cap filesrc', style: 'margin:0 0 6px', text: sourceLine(shown) }));
     const later = shown.kind === 'interim' && storm.livecyc && storm.livecyc.lastModified
                   && Date.parse(storm.livecyc.lastModified) > Date.parse(storm.interim.lastModified || 0);
@@ -1508,22 +2439,7 @@ window.WXHur = (() => {
     const notes = [];
     let rows = all;
     if (shown.kind === 'final') {
-      const map = gustMap(storm, shown.file);
-      if (map) {
-        into.appendChild(h('div', { class: 'card' }, [map.svg]));
-        /* The final file carries every reference location, whatever the storm
-           did. Milton's lists Brownsville and Corpus Christi, neither of which
-           the storm went near, so the count has to say which list it is
-           counting. */
-        notes.push('Every reference location inside the view, sized and shaded by the gust it recorded, the '
-          + 'strongest ' + map.labeled + ' carrying their figure and the rest on hover. '
-          + (map.outside ? map.outside + ' further location' + (map.outside === 1 ? '' : 's')
-              + ' recorded a lower gust outside the view. ' : '')
-          + 'The final file carries all ' + all.length + ' locations on the vendor’s list, whatever the storm did.');
-        if (notes.length) into.appendChild(h('p', { class: 'cap', text: notes.join(' ') }));
-        return;
-      }
-      // too few places recorded anything to make a map of: the figures themselves
+      // no map could be drawn (no geography, or no ledger to step through): the figures themselves
       const gust = r => (r.peakGustMph == null ? -Infinity : r.peakGustMph);
       rows = all.slice().sort((a, b) => gust(b[1]) - gust(a[1])
                                      || String(a[1].name || '').localeCompare(String(b[1].name || ''))).slice(0, VENDOR_ROWS);
@@ -1586,58 +2502,9 @@ window.WXHur = (() => {
          wind contract at a station is the other way round, strictly greater,
          and says so on its own page. */
       const grid = h('div', { class: 'ladders vgrid' });
-      rows.forEach(([id, r]) => {
-        const L = locationById(id) || { id, name: r.name, region: null, country: null, state: null };
-        const card = h('div', { class: 'ladder vloc' }, [
-          h('div', { class: 'lt', text: (r.name || L.name || id) + ' (' + id + ')' }),
-          h('div', { class: 'cap', style: 'margin:0 0 6px', text: storm.name + ' · ' + shown.label })]);
-        /* Each rung is the exchange's board for that threshold, in the Yes
-           green and No red every other ladder on this site uses, with a tick
-           where the vendor's published probability sits.
-
-           Before the exchange lists a storm the bar is built from the vendor's
-           probability instead, because that is the only number there is and a
-           reader wants the shape of the ladder either way. It is drawn hatched
-           and says so, and it is replaced by the price the moment a real one
-           exists. The tick and the bar then sit on the same scale, which is
-           the comparison worth having: the vendor's figure against what the
-           exchange is charging for it. */
-        const lm = lMarketOf(storm, id);
-        const priceAt = t => {
-          const c = lm && (lm.contracts || []).find(x => Number(x.strike) === Number(t));
-          return c && WXM.realMid(c) ? { pc: Math.round(c.mid * 100), c } : null;
-        };
-        const carried = thr.map((t, i) => [t, r.p[i] || 0]).filter(x => x[1] > 0 || priceAt(x[0]));
-        (carried.length ? carried : [[thr[0], 0]]).slice().reverse().forEach(([t, v]) => {
-          const pr = priceAt(t);
-          const pc = pr ? pr.pc : Math.max(0, Math.min(100, v));
-          const bar = h('span', { class: 'vtrack' + (pr ? '' : ' vsoft') }, [
-            h('span', { class: 'vyes', style: 'width:' + pc + '%' }),
-            h('span', { class: 'vno', style: 'width:' + (100 - pc) + '%' }),
-            h('span', { class: 'vmark', style: 'left:' + Math.max(0, Math.min(100, v)) + '%' })]);
-          const row = h('div', { class: 'vrung' }, [
-            h('span', { class: 'vlab', text: '\u2265 ' + t + ' mph' }), bar,
-            h('span', { class: 'vpct', text: pr ? pr.pc + '\u00a2' : v + '%' })]);
-          attach(row, tip.rows(esc(r.name || L.name || id) + ' \u00b7 gusts of ' + t + ' mph or greater',
-            [['Yes price', pr ? pr.pc + '\u00a2' : null],
-             ['No price', pr ? (100 - pr.pc) + '\u00a2' : null],
-             ['Yes bid', pr && pr.c.bid != null ? Math.round(pr.c.bid * 100) + '\u00a2' : null],
-             ['No bid', pr && pr.c.ask != null ? Math.round((1 - pr.c.ask) * 100) + '\u00a2' : null],
-             [(RK && RK.attribution ? 'Vendor' : 'Vendor') + ' probability', v + '%'],
-             ['Bar', pr ? 'the exchange\u2019s price' : 'the vendor\u2019s probability, no price yet']],
-            pr ? 'the tick marks the vendor\u2019s figure on the same scale'
-               : 'the exchange has not opened this threshold; the bar is the vendor\u2019s figure and the '
-                 + 'tick sits on it'));
-          card.appendChild(row);
-        });
-        attach(card, locationTip(L, { storm: storm.name, file: shown.label, thresholds: thr, p: r.p,
-                                      forecastTime: shown.kind === 'livecyc' ? shown.file.forecastTime : null,
-                                      received: shown.file.lastModified }));
-        const url = windUrl(storm, id);
-        if (url) WXM.linkTo(card, url, 'Open the ' + (r.name || id) + ' wind contract on IBKR');
-        grid.appendChild(card);
-      });
+      rows.forEach(([id, r]) => grid.appendChild(ladderCard(storm, shown, id, r)));
       into.appendChild(grid);
+      WXM.tradeNote(into, grid);
     }
     /* Why a later cycle is not the one shown, where that applies, and what was
        left off. LiveCyc is forward-looking from its own start, so a location
@@ -1649,6 +2516,7 @@ window.WXHur = (() => {
     if (all.length > rows.length) notes.push('Showing the ' + rows.length + ' of ' + all.length
       + (shown.kind === 'final' ? ' reference locations that recorded the highest gusts.' : ' locations in the file that stand highest.'));
     if (notes.length) into.appendChild(h('p', { class: 'cap', text: notes.join(' ') }));
+    return ctl;
   }
 
   /* What the section says above the storms: when the next file is due while a
@@ -1677,8 +2545,11 @@ window.WXHur = (() => {
     const rk = await WXD.get('reask.json', 10);
     const sz = await WXD.get('season.json', 1440);
     const mk = await WXM.loadGroup('hurricane');
+    const adv = await WXD.get('advisories/index.json', 30).catch(() => ({ data: null }));
     const geo = await fetch(WXC.asset('hurricane-geo.json')).then(x => x.json()).catch(() => null);
     H = r.data; GEO = geo; NATION = geo ? geo.nation : null; RK = rk.data; SZN = sz.data; MK = WXM.hurricaneMarkets();
+    ADV = (adv && adv.data) || null;
+    if (window.WXStorm && WXStorm.setAdvisories) WXStorm.setAdvisories(ADV);
     // the roster is what lets the vendor lane see that a numbered depression
     // and the named storm it became are one system
     if (window.WXStorm && WXStorm.setRoster) WXStorm.setRoster((H && H.storms) || []);
@@ -1693,7 +2564,9 @@ window.WXHur = (() => {
         basin = b;
         ['b1', 'b2'].forEach(x => $('#' + x).classList.remove('on'));
         $('#' + id).classList.add('on');
-        resetView(); draw(); drawStorms(); drawLandfall(); drawVendorNote(); basinSections(); drawDiscussion();
+        resetView(); draw(); drawStorms(); drawLandfall(); drawVendorNote(); basinSections(); drawDiscussion(); drawLoops();
+        loadRelief(b);
+        loadFeatures(b);
         if (window.WXStorm && WXStorm.setBasin) {
           WXStorm.setBasin(b);
           Promise.resolve(WXStorm.draw(RK, MK)).then(() => draw()).catch(() => {});
@@ -1712,6 +2585,21 @@ window.WXHur = (() => {
     }
     draw(); drawStorms(); drawSeason(); drawLandfall(); drawVendorNote(); basinSections();
     drawDiscussion();
+    // the sea surface temperature layer is a day-old field and the map does not wait for it
+    WXD.get('sst.json', 2880).then(x => { SST = (x && x.data) || null; if (SST) draw(); }).catch(() => {});
+    // the storms' satellite loops, read again every half hour so a page left open keeps up,
+    // and drawn again when a loop's newest frame passes the age at which it is not shown
+    let loopSig = null;
+    const readLoops = () => WXD.get('floater/index.json', 30, { store: false }).then(x => {
+      const d = (x && x.data) || null;
+      const sig = JSON.stringify(Object.entries((d && d.storms) || {})
+        .map(([k, w]) => [k, (w.frames || []).slice(-1)[0], WXC.loopFresh(w.frames)]));
+      if (sig !== loopSig) { loopSig = sig; FLOAT = d; drawLoops(); }
+    }).catch(() => {});
+    readLoops();
+    setInterval(readLoops, 30 * 60000);
+    loadRelief(basin);
+    loadFeatures(basin);
     if (window.WXStorm) {
       WXStorm.init(tip);
       // the vendor's latest file belongs to the storm, not to a section of its own
@@ -1722,7 +2610,8 @@ window.WXHur = (() => {
       if (WXStorm.setBasin) WXStorm.setBasin(basin);
       // the map's dots ask this module for a location's series, so the map is
       // drawn again once the ledgers have landed and the dots can answer
-      Promise.resolve(WXStorm.draw(RK, MK)).then(() => draw()).catch(() => {});
+      const wantLoc = (WXC.param('loc') || '').toUpperCase();
+      Promise.resolve(WXStorm.draw(RK, MK)).then(() => { draw(); focusLoc(wantLoc); }).catch(() => {});
     }
   }
   return { init };

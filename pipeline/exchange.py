@@ -39,6 +39,7 @@ is quoted and No is used only when Yes has no book at all.
 from __future__ import annotations
 import datetime as dt
 import json
+import math
 import re
 import threading
 import time
@@ -524,8 +525,8 @@ def yes_quote(qy: Optional[dict], qn: Optional[dict]) -> dict:
     side; otherwise the No contract's bids are complemented (yes bid = 1 - no
     ask). Sizes are contracts. `from` records which contract the numbers came
     from. Language note: the exchange has no sellers, only bids to buy Yes or
-    No that sum to one dollar; the feed's "ask" on a Yes contract is one
-    dollar less the best No bid, and the pages say "No bid"."""
+    No. The feed's "ask" on a Yes contract is one dollar less the best No bid,
+    and the pages say "No bid"."""
     def num(d, k):
         v = (d or {}).get(k)
         try:
@@ -572,3 +573,87 @@ def implied_median(rows: List[dict], side: str) -> dict:
     if pts[0][1] < 0.5:
         return {"value": None, "edge": "below", "n": len(pts)}
     return {"value": None, "edge": "above", "n": len(pts)}
+
+
+# a book side at the exchange's limit: a one-cent Yes bid, or a one-cent No bid
+# (a ninety-nine-cent Yes ask)
+_LIMIT_LO, _LIMIT_HI = 0.01, 0.99
+
+
+def paper_price(q: dict) -> Optional[float]:
+    """The Yes price the accuracy paper reads for one strike (docs/accuracy.md,
+    "Market value"), or None for a strike it counts as unquoted.
+
+    Both sides quoted: midway between the Yes bid and one dollar less the No
+    bid. One side quoted: midway against the empty side at its limit, a missing
+    Yes bid counting as one cent and a missing No bid as a ninety-nine-cent ask.
+    Unquoted: no bid on either side, a two-sided book bidding one cent against
+    ninety-nine, or a lone side sitting at that limit."""
+    b, a = q.get("bid"), q.get("ask")
+    lo = b is not None and round(b * 100) <= round(_LIMIT_LO * 100)
+    hi = a is not None and round(a * 100) >= round(_LIMIT_HI * 100)
+    if b is None and a is None:
+        return None
+    if b is not None and a is not None:
+        return None if lo and hi else (b + a) / 2
+    if b is not None:
+        return None if lo else (b + _LIMIT_HI) / 2
+    return None if hi else (_LIMIT_LO + a) / 2
+
+
+def _pool_falling(pts: list) -> list:
+    """Pool adjacent violators so the probabilities do not rise with the
+    strike: each run that rises is replaced by its mean, until none does."""
+    blocks: list = []                       # [sum, count, strikes]
+    for k, p in pts:
+        blocks.append([p, 1, [k]])
+        while len(blocks) > 1 and blocks[-2][0] / blocks[-2][1] < blocks[-1][0] / blocks[-1][1]:
+            s, n, ks = blocks.pop()
+            blocks[-1][0] += s
+            blocks[-1][1] += n
+            blocks[-1][2] += ks
+    return [(k, s / n) for s, n, ks in blocks for k in ks]
+
+
+def central_value(rows: List[dict], side: str) -> dict:
+    """The market's whole-degree central value for one daily temperature
+    ladder, by the method of the accuracy paper (docs/accuracy.md; owner,
+    2026-10-20, for every page that shows the market's number for the day).
+
+    Each strike's Yes price is `paper_price`. The quoted strikes are made
+    monotone in the strike by pooling adjacent violators (a high ladder's
+    P(high > K) falls as K rises, a low ladder's P(low < K) rises). The crossing
+    x is the linear interpolation of the 0.5 level between the two bracketing
+    quoted strikes. There is no value when the ladder never crosses, `edge`
+    then naming the side it sits on, or when the bracketing quoted strikes have
+    two or more listed strikes with no price between them (`gap`). The value is
+    ceil(x) for a high and floor(x) for a low, because settlement is strict:
+    a high above K settles Yes only past K, so the whole-degree median is the
+    next degree up, and a low's is the degree below."""
+    listed = sorted({r["strike"] for r in rows if r.get("strike") is not None})
+    pts = sorted((r["strike"], p) for r in rows
+                 if r.get("strike") is not None and (p := paper_price(r)) is not None)
+    out = {"value": None, "x": None, "edge": None, "gap": False, "n": len(pts)}
+    if len(pts) < 2:
+        return out
+    low = side == "low"
+    if low:
+        pts = [(k, 1 - p) for k, p in pts]  # P(low < K) rises with K: flip to a falling curve
+    pts = _pool_falling(pts)
+    for i, ((k0, p0), (k1, p1)) in enumerate(zip(pts, pts[1:])):
+        if not (p0 >= 0.5 >= p1):
+            continue
+        if p0 == p1:
+            # a pooled run sitting at exactly one half: its middle
+            run = [k for k, p in pts if p == p0]
+            x = (run[0] + run[-1]) / 2
+        else:
+            x = k0 + (p0 - 0.5) / (p0 - p1) * (k1 - k0)
+        if sum(1 for k in listed if k0 < k < k1) >= 2:
+            out.update(gap=True)
+            return out
+        x = round(x, 6)
+        out.update(x=round(x, 2), value=int(math.floor(x) if low else math.ceil(x)))
+        return out
+    out["edge"] = "below" if pts[0][1] < 0.5 else "above"
+    return out

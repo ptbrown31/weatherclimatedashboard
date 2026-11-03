@@ -74,6 +74,7 @@ window.WXWindStation = (() => {
       host.textContent = '';
       Array.from(dayBar.querySelectorAll('button')).forEach(function (b, j) { b.classList.toggle('on', j === i); });
       WXK.wind(host, city, obs, fc, days.length ? days[i][0] : wind);
+      WXM.tradeNote(host, host.querySelector('.card'));
       // the two columns are the same two whatever day is drawn, so one note for
       // the page rather than one under each chart
       host.appendChild(note);

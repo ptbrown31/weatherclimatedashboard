@@ -15,10 +15,14 @@ refused with a ValueError rather than guessed at.
     decode(msg)         -> the whole field, None where the bitmap says missing
     decode_cells(msg, ks)   -> a few cells, without decoding the field when
                                the packing allows it (5.0, no bitmap)
+    decode_points(msg, ks)  -> a few cells of a complex-packed field too,
+                               by running sums, without holding the field
+    uv_grid_relative(msg)   -> whether a wind's components follow the grid
     random_access(msg)  -> whether decode_cells can do that for this message
     parse_idx(text)     -> the .idx sidecar as message byte ranges
     lcc_ij / lcc_latlon / nearest_cell   -> the Lambert projection, both ways
-    WEXP, G184, same_grid   -> the two grids the lane accepts
+    WEXP, G184, same_grid   -> the two grids the analysis lane accepts
+    HRRR                    -> the HRRR's 3 km grid (pipeline/hrrr.py)
 
 Every multi-octet integer in GRIB2 is big-endian. Signed integers are not
 two's complement: the most significant bit is a sign flag and the rest is the
@@ -38,6 +42,7 @@ one less than the octet numbers in the WMO tables.
 """
 
 from __future__ import annotations
+import itertools
 import math
 import struct
 from typing import Optional
@@ -363,18 +368,43 @@ def _scales(drs: dict) -> "tuple":
     return bs, ds
 
 
+# Scanning mode 64: +i, +j, i varies fastest. Mode 80 is the same with every
+# second row running the other way (flag 0x10), which is how NDFD writes its
+# grids, so the spatial differences run on across each row's end; the decoders
+# turn those rows round so k = j * Ni + i means the same point in both.
+_SCANS = (64, 80)
+
+
+def _stored(ks: list, grid: dict) -> list:
+    """Grid indices k = j * Ni + i to their places in section 7: the same for
+    scanning mode 64, mirrored within every second row for mode 80."""
+    if grid["scan"] != 80:
+        return ks
+    ni = grid["Ni"]
+    return [k if (k // ni) % 2 == 0 else (k // ni) * ni + (ni - 1 - k % ni) for k in ks]
+
+
+def _unturn(vals: list, grid: dict) -> list:
+    """Section 7 order to k = j * Ni + i: rows 1, 3, 5, ... reversed in place
+    for scanning mode 80, nothing for 64."""
+    if grid["scan"] == 80:
+        ni = grid["Ni"]
+        for j in range(1, grid["Nj"], 2):
+            vals[j * ni:(j + 1) * ni] = vals[j * ni:(j + 1) * ni][::-1]
+    return vals
+
+
 def decode(msg: bytes) -> list:
-    """The whole field, one float per grid point in section 3 order (k = j *
-    Ni + i for scanning mode 64), None where the bitmap marks a point missing
-    or the packing's own missing-value management does."""
+    """The whole field, one float per grid point, k = j * Ni + i (scanning
+    modes 64 and 80), None where the bitmap marks a point missing or the
+    packing's own missing-value management does."""
     secs = sections(msg)
     grid = grid_def(msg)
     drs = drs_def(msg)
     npts = grid["npts"]
-    if grid["scan"] != 64:
-        # Scanning mode 64: +i, +j, i varies fastest. Any other layout would
-        # change what k means, so it is refused rather than reordered.
-        raise ValueError(f"scanning mode {grid['scan']}, not 64")
+    if grid["scan"] not in _SCANS:
+        # any other layout would change what k means, so it is refused rather than reordered
+        raise ValueError(f"scanning mode {grid['scan']}, not 64 or 80")
     p, ln = secs[7]
     data = msg[p + 5:p + ln]
     bitmap = _bitmap_bits(msg, secs, npts)
@@ -404,7 +434,7 @@ def decode(msg: bytes) -> list:
         # float list grows instead of both standing whole
         for i in range(0, n, _CHUNK):
             vals[i:i + _CHUNK] = [None if x is None else (x * bs + R) * ds for x in vals[i:i + _CHUNK]]
-    return _expand(vals, bitmap, npts)
+    return _unturn(_expand(vals, bitmap, npts), grid)
 
 
 def _unpack_complex(data: bytes, drs: dict) -> list:
@@ -518,13 +548,17 @@ def decode_cells(msg: bytes, ks: list) -> list:
     """
     secs = sections(msg)
     drs = drs_def(msg)
-    npts = grid_def(msg)["npts"]
+    grid = grid_def(msg)
+    npts = grid["npts"]
     for k in ks:
         if not 0 <= k < npts:
             raise IndexError(f"cell {k} outside a grid of {npts} points")
     if drs["template"] != 0 or has_bitmap(msg):
         field = decode(msg)
         return [field[k] for k in ks]
+    if grid["scan"] not in _SCANS:
+        raise ValueError(f"scanning mode {grid['scan']}, not 64 or 80")
+    ks = _stored(ks, grid)
     p, ln = secs[7]
     data = msg[p + 5:p + ln]
     nbits = drs["bits"]
@@ -544,6 +578,109 @@ def decode_cells(msg: bytes, ks: list) -> list:
         x = (chunk >> (nb * 8 - off - nbits)) & mask
         out.append((x * bs + R) * ds)
     return out
+
+
+def decode_points(msg: bytes, ks: list) -> list:
+    """The values at grid indices ks, in that order, without holding the field.
+
+    Simple packing reads its cells in place (decode_cells). Complex packing
+    (5.2 and 5.3) with no bitmap and no missing values, which is how NCEP
+    packs the HRRR's surface fields, is read group by group and its spatial
+    differences are undone by running sums, so only the wanted cells are kept:
+    a 1.9 million point field costs under a second and the memory of one
+    group. Anything else decodes the whole field. The floats are formed as
+    decode forms them, so the two agree to the last bit.
+    """
+    secs = sections(msg)
+    drs = drs_def(msg)
+    grid = grid_def(msg)
+    npts = grid["npts"]
+    for k in ks:
+        if not 0 <= k < npts:
+            raise IndexError(f"cell {k} outside a grid of {npts} points")
+    bitmap = has_bitmap(msg)
+    if drs["template"] == 0 and not bitmap:
+        return decode_cells(msg, ks)
+    if bitmap or drs["template"] not in (2, 3) or drs["missing"] != 0 or drs["split"] != 1:
+        field = decode(msg)
+        return [field[k] for k in ks]
+    if grid["scan"] not in _SCANS:
+        raise ValueError(f"scanning mode {grid['scan']}, not 64 or 80")
+    ks = _stored(ks, grid)
+    p, ln = secs[7]
+    br = _Bits(msg[p + 5:p + ln])
+    n, ng, nbits = drs["n"], drs["ng"], drs["bits"]
+    order, first, minsd = 0, [], 0
+    if drs["template"] == 3:
+        order, w = drs["order"], drs["extra"]
+        if order not in (1, 2) or w == 0:
+            raise ValueError(f"spatial differencing order {order} with {w} extra octets")
+        for _ in range(order):
+            first.append(br.read(8 * w))
+        raw = br.read(8 * w)
+        top = 1 << (8 * w - 1)
+        minsd = -(raw & (top - 1)) if raw & top else raw
+    refs = br.read_many(nbits, ng)
+    br.align()
+    widths = [drs["ref_w"] + v for v in br.read_many(drs["bits_w"], ng)]
+    br.align()
+    lens = [drs["ref_l"] + drs["inc_l"] * v for v in br.read_many(drs["bits_l"], ng)]
+    br.align()
+    if ng:
+        lens[-1] = drs["last_l"]
+    if sum(lens) != n:
+        raise ValueError(f"group lengths sum to {sum(lens)}, section 5 says {n} values")
+
+    def groups():
+        # each packed value with its group reference and the minimum of the
+        # differences already added, read one group at a time as it is wanted
+        for g in range(ng):
+            base = refs[g] + minsd
+            if widths[g] == 0:
+                yield itertools.repeat(base, lens[g])
+            else:
+                yield [base + x for x in br.read_many(widths[g], lens[g])]
+
+    stream = itertools.chain.from_iterable(groups())
+    if order == 2:
+        # The first two values are the descriptors. After them each first
+        # difference is the one before plus the packed value, and each value is
+        # the one before plus its first difference (regulation 92.9.3.9).
+        diffs = itertools.accumulate(itertools.chain((first[1] - first[0],), itertools.islice(stream, 2, None)))
+        values = itertools.accumulate(itertools.chain((first[0],), diffs))
+    elif order == 1:
+        values = itertools.accumulate(itertools.chain((first[0],), itertools.islice(stream, 1, None)))
+    else:
+        values = stream
+    bs, ds = _scales(drs)
+    R = drs["R"]
+    out = [None] * len(ks)
+    pos, last_k, last_v = 0, None, None
+    for i in sorted(range(len(ks)), key=lambda q: ks[q]):
+        k = ks[i]
+        if k != last_k:
+            # islice skips the cells in between without a Python step per cell
+            last_k, last_v = k, (next(itertools.islice(values, k - pos, None)) * bs + R) * ds
+            pos = k + 1
+        out[i] = last_v
+    return out
+
+
+def uv_grid_relative(msg: bytes) -> bool:
+    """True when a wind message's u and v run along the grid's x and y axes
+    rather than toward east and north: bit 5 of the resolution and component
+    flags (code table 3.3), byte 46 of a template 3.30 section."""
+    b = _section(msg, sections(msg), 3)
+    return bool(b[46] & 0x08)
+
+
+# The HRRR CONUS 3 km grid, as NCEP writes the surface files.
+HRRR = {
+    "Ni": 1799, "Nj": 1059, "lat1": 21.138123, "lon1": 237.280472,
+    "lov": 262.5, "latin1": 38.5, "latin2": 38.5, "lad": 38.5,
+    "dx": 3000.0, "dy": 3000.0, "scan": 64, "radius": 6371229.0,
+    "npts": 1799 * 1059,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +812,10 @@ G184 = {
     "dx": 2539.703, "dy": 2539.703, "scan": 64, "radius": 6371200.0,
     "npts": 2145 * 1377,
 }
+
+# NDFD's own CONUS grids (noaa-ndfd-pds, opnl/AR.conus): grid 184 written with
+# every second row running the other way (scanning mode 80).
+NDFD = dict(G184, scan=80)
 
 _GRID_DEGREES = ("lat1", "lon1", "lov", "latin1", "latin2", "lad")
 _GRID_METRES = ("dx", "dy", "radius")

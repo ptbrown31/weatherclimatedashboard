@@ -26,6 +26,7 @@ window.WXWind = (() => {
        the reader asked to see is on screen; navigating away would show them the
        same panel on a page of its own. A station with no panel here, which is
        any the board does not list, still opens its own page. */
+    let picks = 0;
     const vm = await WXVarMap.init('wind', {
       onPick: c => {
         const el = document.getElementById('wind-' + c.station);
@@ -41,14 +42,34 @@ window.WXWind = (() => {
         const still = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         try { window.scrollTo({ top, behavior: still ? 'smooth' : 'auto' }); }
         catch (e) { window.scrollTo(0, top); }
-        /* Re-measured, not remembered. The charts below lay out while the scroll
-           is in flight, so the position taken before it started is off by the
-           time it lands, and it landed far enough past to push the station's
-           own heading above the fold. */
-        setTimeout(() => {
-          const want = el.getBoundingClientRect().top + window.scrollY - 12;
-          if (Math.abs(window.scrollY - want) > 8) window.scrollTo(0, want);
-        }, 450);
+        /* Re-measured, not remembered, and only once the page is still.
+
+           A position set while Chromium's smooth scroll is still running is
+           applied on top of the progress the animation has made since the page
+           last heard from it, so a correction issued mid-flight landed 7 to 21
+           pixels past the panel's top (measured 2026-10-20) and pushed the
+           station's own heading above the fold. The check waits until two looks
+           150 ms apart find the page where it was, then sets it outright if it
+           is off, and looks again. Where a smooth scroll never starts the page
+           is still at the first look and is set then. A wheel, touch, key or
+           press from the reader, or another dot, ends the checking, so it
+           never pulls anyone back. */
+        const ticket = ++picks;
+        let last = window.scrollY, looks = 0, yours = false;
+        const stop = () => { yours = true; };
+        const ears = ['wheel', 'touchstart', 'keydown', 'pointerdown'];
+        ears.forEach(ev => window.addEventListener(ev, stop, { passive: true }));
+        const look = () => {
+          const y = window.scrollY, still = Math.abs(y - last) < 0.5;
+          last = y;
+          if (!yours && ticket === picks && looks++ < 12) {
+            if (!still) return void setTimeout(look, 150);
+            const want = el.getBoundingClientRect().top + y - 12;
+            if (Math.abs(y - want) > 2) { window.scrollTo(0, want); return void setTimeout(look, 150); }
+          }
+          ears.forEach(ev => window.removeEventListener(ev, stop));
+        };
+        setTimeout(look, 150);
         el.classList.add('pick');
         setTimeout(() => el.classList.remove('pick'), 1600);
         return true;
@@ -168,8 +189,10 @@ window.WXWind = (() => {
       const dayWord = day === 'today' ? 'today' : day === 'tomorrow' ? 'tomorrow'
         : (bar.querySelector('button[data-day="dayafter"]') || {}).textContent || 'that day';
       say(open + ' of ' + (boards || maxes.length) + ' listed for ' + dayWord);
-      // one note for the board, not one per city
+      // one note for the board, not one per city, and one line above the first city
+      // that says the ladders' prices open the exchange
       if (maxes.length) list.appendChild(WXK.windNote());
+      WXM.tradeNote(list, list.querySelector('section.prod'), true);
       if (others.length) {
         list.appendChild(h('p', { class: 'cap', style: 'margin-top:14px' },
           'Average wind speed contracts at ' + others.map(cityOf).sort().join(', ') + ' settle on the day\u2019s average.'));

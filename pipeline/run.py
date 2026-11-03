@@ -27,6 +27,14 @@ Jobs:
     series       the underlying series the monthly weather contracts settle on (once a day)
     discussion   the forecast office's own written reasoning, per office   (once a day)
     subhourly    the five minute stream between the hourly reports    (every 10 min)
+    hrrr         the HRRR at each station's grid point, run by run, from NOAA
+                 Open Data                                         (every 15 min)
+    ndfd         NDFD's daytime high and overnight low behind the landing map,
+                 each new issuance from NOAA Open Data             (every 30 min)
+    sst          the sea surface temperature anomaly behind the hurricane map
+                 (checked every 3 h, fetched when a new day lands)
+    floater      a GOES satellite loop for each active storm, from NOAA/NESDIS STAR's
+                 floater frames                                           (every 30 min)
     locator      a metro-scale map of each station, fetched once        (once a day)
     catquotes    prices for the catalogue's monthly and annual contracts   (every 30 min)
     accuracy     the record builder's accuracy figures, copied from the
@@ -48,15 +56,18 @@ JOBS = {}
 
 
 def _register():
-    from . import archive, snapshots, hurricane, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report, severe, accuracy, analysis
+    from . import archive, snapshots, hurricane, advisories, scorecard, normals, climate, season, market, reask, headline, traffic, catalogue, series, catquotes, discussion, subhourly, locator, report, severe, accuracy, analysis, sst, floater, hrrr, ndfd
     JOBS["archive"] = archive.one_pass
     JOBS["forecast"] = snapshots.forecast_pass
     JOBS["obs"] = snapshots.obs_pass
     JOBS["hurricane"] = hurricane.hurricane_pass
+    JOBS["advisories"] = advisories.advisories_pass
     JOBS["scorecard"] = scorecard.scorecard_pass
     JOBS["normals"] = normals.normals_pass
     JOBS["climate"] = climate.climate_pass
     JOBS["season"] = season.season_pass
+    JOBS["sst"] = sst.sst_pass
+    JOBS["floater"] = floater.floater_pass
     JOBS["quotes"] = market.quotes_pass
     JOBS["reask"] = reask.reask_pass
     JOBS["headline"] = headline.headline_pass
@@ -74,6 +85,12 @@ def _register():
     # at H+47, and a pass may spend its whole budget on the backfill, which
     # no chained lane could afford to wait behind
     JOBS["analysis"] = analysis.analysis_pass
+    # hrrr is in no chain either: a pass reads a run's hours as NOAA publishes
+    # them and may spend most of its budget on a 48-hour run
+    JOBS["hrrr"] = hrrr.hrrr_pass
+    # ndfd too: NDFD writes a new issuance about ten minutes before each hour,
+    # and the pass that finds one spends a few seconds a message decoding it
+    JOBS["ndfd"] = ndfd.ndfd_pass
 
     def chain(*names):
         # one absolute deadline for the whole chain; the archive step (the
@@ -103,17 +120,19 @@ def _register():
     # accuracy sits after catquotes: it only copies files the builder has
     # already pushed, so it needs no fresh input from the steps before it, and
     # its one read of the manifest is cheap when nothing has changed
-    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "catquotes", "accuracy", "subhourly")
+    # the SST anomaly goes last: it checks a date most passes and fetches about once a day
+    # advisories follows hurricane: it reads the roster the hurricane step has just written
+    JOBS["half-hourly"] = chain("archive", "forecast", "hurricane", "advisories", "floater", "catquotes", "accuracy", "subhourly", "sst")
     # report last, so it reads the day traffic has just counted
     JOBS["daily"] = chain("scorecard", "normals", "climate", "season", "severe", "catalogue", "series", "discussion", "locator", "headline", "traffic", "report")
     JOBS["market"] = chain("quotes", "reask", "headline")
-    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline")
+    JOBS["all"] = chain("archive", "forecast", "obs", "hurricane", "floater", "quotes", "reask", "scorecard", "normals", "climate", "season", "headline", "sst")
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.run", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | accuracy | analysis | market | half-hourly | daily | all")
+    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | accuracy | analysis | hrrr | ndfd | sst | floater | market | half-hourly | daily | all")
     ap.add_argument("--config", help="path to site.json (default config/site.json)")
     ap.add_argument("--backend", choices=["local", "s3"], help="override storage backend")
     ap.add_argument("--root", help="local backend: data directory")

@@ -143,6 +143,33 @@ class Job(unittest.TestCase):
         self.assertEqual(self.published()["built"], "2026-09-11T10:50:00Z")
         self.assertIn(accuracy.DST_PREFIX + "map.json", [k for k, _c, _h in self.st.puts])
 
+    def test_a_build_recorded_with_no_file_written_is_published(self):
+        # the job before schema 2 met a schema-2 build, skipped every file and still recorded the build;
+        # the job that reads schema 2 publishes it rather than taking the record's word for it
+        files = {"map.json": fixture("map.json")}
+        self.ship(files)
+        self.st.put(accuracy.DST_MANIFEST, json.dumps({
+            "schema": 1, "built": BUILT, "asof": "2026-09-09", "files": [],
+            "skipped": [{"name": "map.json", "reason": "meta.schema is 'accuracy-figures/2'"}]}).encode())
+        self.st.puts.clear()
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "map.json"), files["map.json"])
+        self.assertEqual(self.published()["files"], ["map.json"])
+
+    def test_a_build_with_no_file_passing_leaves_the_published_set_and_its_record(self):
+        good = {"map.json": fixture("map.json")}
+        self.ship(good)
+        self.assertEqual(self.run_pass(), 0)
+        before = self.published()
+        body = json.loads(fixture("map.json"))
+        body["meta"]["schema"] = "accuracy-figures/3"
+        self.ship({"map.json": json.dumps(body).encode()}, built="2026-09-11T10:50:00Z")
+        self.assertEqual(self.run_pass(), 1)
+        self.assertEqual(self.st.puts, [])
+        self.assertEqual(self.published(), before)
+        self.assertEqual(self.st.get(accuracy.DST_PREFIX + "map.json"), good["map.json"])
+        self.assertEqual([x["name"] for x in archive.LAST_STATUS["skipped"]], ["map.json"])
+
     # ------------------------------------------------------------ transport
     def test_a_hash_mismatch_publishes_nothing_and_reports_it(self):
         mp, cal = fixture("map.json"), fixture("calibration.json")
@@ -182,7 +209,7 @@ class Job(unittest.TestCase):
     def test_a_file_failing_the_meta_check_is_skipped_and_reported(self):
         good = fixture("map.json")
         body = json.loads(fixture("calibration.json"))
-        body["meta"]["conventions"] = "v2"          # built under conventions the page does not draw
+        body["meta"]["conventions"] = "v1"          # built under conventions the page does not draw
         bad = json.dumps(body).encode()
         self.ship({"map.json": good, "calibration.json": bad})
         self.assertEqual(self.run_pass(), 0)
@@ -195,11 +222,13 @@ class Job(unittest.TestCase):
         self.assertEqual([s["name"] for s in archive.LAST_STATUS["skipped"]], ["calibration.json"])
 
     def test_the_stamps_the_contract_names(self):
-        ok = {"meta": {"schema": "accuracy-figures/1", "asof": "2026-09-09", "conventions": "v1"}}
+        ok = {"meta": {"schema": "accuracy-figures/2", "asof": "2026-09-09", "conventions": "v2"}}
         self.assertIsNone(accuracy.check_meta("grid.json", ok))
         self.assertIn("schema", accuracy.check_meta("grid.json", {"meta": dict(ok["meta"], schema=1)}))
-        self.assertIn("asof", accuracy.check_meta("grid.json", {"meta": {"schema": "accuracy-figures/1", "conventions": "v1"}}))
-        self.assertIn("conventions", accuracy.check_meta("grid.json", {"meta": {"schema": "accuracy-figures/1", "asof": "2026-09-09"}}))
+        self.assertIn("asof", accuracy.check_meta("grid.json", {"meta": {"schema": "accuracy-figures/2", "conventions": "v2"}}))
+        self.assertIn("conventions", accuracy.check_meta("grid.json", {"meta": {"schema": "accuracy-figures/2", "asof": "2026-09-09"}}))
+        # a file of the earlier schema is refused, so the page never reads a shape it does not draw
+        self.assertIn("schema", accuracy.check_meta("grid.json", {"meta": dict(ok["meta"], schema="accuracy-figures/1")}))
         self.assertEqual(accuracy.check_meta("grid.json", {"metric": {}}), "no meta")
         self.assertEqual(accuracy.check_meta("grid.json", [1, 2]), "not a JSON object")
         # a trace carries its date and build time and none of the figure stamps

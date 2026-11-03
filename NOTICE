@@ -14,9 +14,25 @@ The estimators on the accuracy page are typeset with KaTeX, vendored under
 site/vendor/katex, Copyright (c) 2013-2020 Khan Academy and other
 contributors, used under the MIT license (site/vendor/katex/LICENSE).
 
-Country basemap outlines derive from Natural Earth (public domain). US state
-and county geometry derives from the US Census Bureau's cartographic boundary
-files (public domain).
+Country basemap outlines, and the roads and city names on the hurricane map,
+derive from Natural Earth (public domain). US state and county geometry derives
+from the US Census Bureau's cartographic boundary files (public domain). The
+hill shading on the hurricane map is computed from NOAA NCEI's ETOPO 2022
+global relief model, and its sea surface temperature anomaly is NOAA Coral Reef
+Watch's daily 5 km product, read through NOAA CoastWatch; both are public
+domain works of the United States Government. The satellite loop for each active
+storm is GOES GeoColor imagery published by NOAA/NESDIS STAR (its storm
+floaters), and the loop under the landing map is the NWS Weather Prediction
+Center's surface analysis over satellite imagery, redrawn on the map's
+projection; both are public domain works of the United States Government.
+
+The world GDP contract's page also draws on economic data: the World Bank's
+World Development Indicators (CC BY 4.0), the IMF's World Economic Outlook and
+its historical forecasts (under the IMF's terms of use), and the Penn World
+Table and Barro-Ursua world GDP series and the authors' temperature shocks,
+from Bilal and Kanzig's (2026) replication package. Berkeley Earth's land and
+ocean series (under Berkeley Earth's terms) and NASA's GISTEMP appear there for
+comparison. The page names each source with its link and terms.
 
 Altimetry acknowledgment: sea level data provided by the NOAA Laboratory for
 Satellite Altimetry. AMOC annual means: data from the RAPID AMOC monitoring

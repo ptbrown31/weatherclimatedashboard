@@ -42,6 +42,17 @@ boto3; do not cut MemorySize below it without measuring this lane again. Not mea
 Linux (no docker on the Mac), so the CloudWatch REPORT line's Max Memory
 Used after the first landing passes is the number to record here.
 
+The daily chain ran out of the 512 MB every morning from 2026-09-27 to
+2026-10-07. Measured on the Mac on 2026-10-07 against a copy of the archive,
+with boto3 loaded, it peaked at 629 MB. The scorecard held 163 MB of merged
+observations and 206 MB of parsed quote passes, both growing with every day of
+the record, and the crop yields then read a 52 MB csv whole. Reading both
+through brought the chain's peak to 112 MB from a 77 MB start. Max Memory
+Used on a REPORT line is the container's high-water mark across invocations
+(a 0.9 s analysis pass that read nothing reported 287 MB on 2026-10-07), so a
+daily pass on a container that ran the analysis lane earlier shows that lane's
+figure, not its own.
+
 Alarms: the handler raises, which marks the invocation as an error for
 CloudWatch, when every request in a pass failed OR when any enabled source
 has failed for FAIL_STREAK_ALARM passes in a row (health.json). A source

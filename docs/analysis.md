@@ -15,7 +15,13 @@ Yes. 2026-09-29 (schema 2, this document): **RTMA resolves every variable, preci
 included**; the sixty-seven settlement locations approved that day replace the fifty
 population centres; every value is converted exactly and the day's aggregate rounded once;
 the day's precipitation runs from midnight to midnight; a file NOAA Open Data lacks is read
-from NCEP's NOMADS server. 2026-09-30: **URMA is dropped from the lane and the page**, since
+from NCEP's NOMADS server. 2026-10-14 (owner's ruling, the draft terms): **a place-day is
+final at its cut-off, 12:45 AM local time on the day after**, on the files published on NOAA
+Open Data or NOMADS by then (a file's Last-Modified time on the server it was read from); a file
+published later never counts, the first published version of a file counts, and a place-day with
+no hour by the cut-off goes to event review. It replaced the rule of 2026-10-13 (a file on
+neither server six hours after its hour was not published, and a day was final once every file
+was in or not published), which had replaced half an hour after the product usually lands. 2026-09-30: **URMA is dropped from the lane and the page**, since
 it does not resolve. The lane read it for comparison until then; it reads RTMA only now, the
 published days, place files and CSV files were rewritten without it (`LAYOUT`, section 5),
 and its archive and frames under `archive/analysis2/{hours,precip}/urma/` and
@@ -45,11 +51,22 @@ LastModified. NOAA writes each RTMA file once; neither the analysis nor the prec
 is rewritten. Over the thirty days to 2026-09-27 one file of the 720 analysis hours and none of
 the precipitation hours was missing from NOAA Open Data: the analysis of 2026-09-23 19Z, which
 NOMADS had (published there at 19:46Z) and which never reached the bucket. NCEP's NOMADS
-server keeps the last fourteen days under the same directory and file names
-(`https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod/`) and answers byte ranges with 206. A file on NOMADS counts as published (owner's decision 2026-09-29): a file NOAA Open
+server lists fourteen day directories under the same directory and file names
+(`https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod/`) and answers byte ranges with 206; on
+2026-10-13 it held the analysis files for about the last ten days (the oldest valid 2026-10-03 20Z)
+and the precipitation files for all fourteen. A file on NOMADS counts as published (owner's decision 2026-09-29): a file NOAA Open
 Data does not have half an hour after the product usually lands (`lagMinutes` plus
 `NOMADS_AFTER_MINUTES = 30`) is read from there while NOMADS still keeps it (section 5), a file on
-neither by then is not published, and every archive document records its `source`.
+neither `NOT_PUBLISHED_AFTER_HOURS = 6` hours after its valid time (a precipitation file, after its
+hour ends) is listed in the state as not published, and every archive document records its
+`source` and its `published` time, the Last-Modified header of the server it was read from (from
+2026-10-14; earlier documents carry none). A precipitation file NOAA Open Data lacks is looked for
+on NOMADS from `PCP_NOMADS_AFTER_MINUTES = 27` after its hour ends, so the day's last
+accumulation, usually on the bucket 17 minutes after midnight, is looked for before the cut-off.
+The draft terms (owner's decision 2026-10-14) say the NOMADS copy counts when the two servers'
+copies of a file differ, and that values count as published, without adjustment. The lane reads
+NOAA Open Data first and NOMADS only for a file NOAA Open Data lacks, so it never compares the
+two copies; no difference between them has been seen.
 
 **Where each variable comes from.**
 
@@ -150,23 +167,28 @@ There is no analogue of the station report conventions (last report in the hour,
 tenths group); the page says this in its method note.
 
 **Final and provisional.** RTMA resolves (owner's decision 2026-09-29;
-`index.resolvesOn`). A day's high, low, gust and wind are *final* once every hour's
-analysis file is either read or known not published, and the value is then the hours available,
-so a missing file does not hold the day open (owner's decision 2026-09-29, the owner's terms:
-"the contract will resolve based on available hours within the contract date"); `finalAt` is the
-pass that found it so, and a day that resolved short says so (`hours < of`, labelled "final, 23 of
-24 hours" on the page). Its precipitation *resolves* the same way over the rows' accumulations,
-the last being the one that ends at midnight, stamped `resolvedAt`. A file is known not
-published when it was on neither NOAA Open Data nor NOMADS half an hour after it was due; the
-state lists such hours (`missing`, `pmissing`) and unlists one that turns up. NOAA never revises an
-RTMA file and a final value stands, so an hour that turns up after the day resolved is shown in the
-place file, marked `late` (or `pcpLate`), dimmed on the page, and not counted. A day whose files
-never come is closed 48 hours after its local end, never final. There is no revision. A partial
-day carries the running value over the hours read and is labelled with the count. A day still
-short of its hours 48 hours after its local end is *closed incomplete*: its value stands on the
-hours read, it is never marked final, and the count is shown. The valid times of the analyses
-are the `at`, `t`, `valid` and `asof` stamps; `finalAt` and `resolvedAt` are the times of the
-pass that resolved, and `written` is the pass that wrote the file.
+`index.resolvesOn`). A place-day is *final* at its cut-off, 12:45 AM local time on the day after
+(`day_cutoff`, the day's end plus 45 minutes; clocks never change in that span), on the hours
+whose files were published by then (owner's ruling 2026-10-14, the draft terms): an analysis
+counts when its file's `published` time is at or before the cut-off, and an accumulation when
+its file's is and the file holds a value at the place. A document read before 2026-10-14
+carries no `published` time and counts. Until the cut-off the day is *provisional* and its
+values run over the hours read. At the cut-off `finalAt` and `resolvedAt` are the cut-off
+itself, and a day short of hours says so (`hours < of`, "final, 23 of 24 hours" on the page). A
+file published after the cut-off is shown in the place file, marked `late` (or `pcpLate`),
+dimmed on the page, and never counted; one published before the cut-off and read after it
+counts, so the summary comes out the same whenever it is rebuilt and needs no memory of an
+earlier one. The first published version of a file counts: the analysis hour is written once,
+and a precipitation read of the same server's file with another Last-Modified time adds nothing
+and is recorded as `replaced`. A place with no analysis that counts at the cut-off has no value
+and is marked for event review (`review`), and one with no accumulation that counts has
+`precip.review`; a place with nothing read at all gets `review_entry` when other places of the
+day have hours, and a day with nothing read anywhere is not written. There is no closed state
+any more: `closed` is always false, and the page still reads it in files written before
+2026-10-14. The state lists hours on neither server six hours after they were due (`missing`,
+`pmissing`) for the lane's own bookkeeping; they no longer decide anything about a day. The
+valid times of the analyses are the `at`, `t`, `valid` and `asof` stamps, and `written` is the
+pass that wrote a file.
 
 **Map lattice.** For the map, each hourly field is sampled onto a regular lattice in the
 site's CONUS screen space (the 960 × 600 Albers viewBox of `pipeline/basemap.py`): pitch 3 px,
@@ -277,7 +299,7 @@ else `public, max-age=60, stale-while-revalidate=300, stale-if-error=86400`.
                   "px": 852.0, "py": 208.6, "cell": {"wexp": [2010, 857, 2011675], "g184": [1810, 857, 1840075],
                   "centre": [40.7141, -74.0129], "distanceKm": 0.63, ...geometry...}} , ... 67 ],
   "days": ["2026-08-30", ..., "2026-09-29"],
-  "dayStatus": { "2026-09-27": {"places": 67, "final": 67, "resolved": 67, "closed": 0}, ... },
+  "dayStatus": { "2026-09-27": {"places": 67, "final": 67, "resolved": 67, "closed": 0, "review": 0}, ... },
   "lastResolvedDay": "2026-09-27",
   "lattice": {"pitch": 3, "cols": 320, "rows": 200, "viewBox": "0 0 960 600"},
   "variables": { "high": {"unit": "°F", "hourly": "temp", "rule": "..."}, ... },
@@ -310,8 +332,10 @@ landed still adds its precipitation, a separate file: it counts in `precip.hours
 `hours`, so it cannot make a day complete (RTMA 2026-09-23 19Z never reached NOAA Open Data,
 and its precipitation file did). A day file written before 2026-09-30 carried a `urma`
 entry beside `rtma` and a `revised` field in each precipitation total; the rewrite of that day
-drops both. A partial day has `complete: false` and `hours < of`; a closed incomplete day has
-`closed: true` and `final: false`. A place with no hours yet is absent. `high`, `low`, `gust`, `wind` or
+drops both. A partial day has `complete: false` and `hours < of`; a place in event review has
+`review: true`, `hours: 0` and no values, and its precipitation `review: true`. A day file
+written before 2026-10-14 can carry a closed incomplete day (`closed: true`, `final: false`). A
+place with no hours yet is absent until its cut-off. `high`, `low`, `gust`, `wind` or
 `precip` is `null` when no hour read has a value for it.
 
 **`snapshots/analysis2/loc/<id>/YYYY-MM-DD.json`** — the location-day at the hourly scale.
@@ -336,11 +360,12 @@ had no value yet has `precip: null`.
 **`snapshots/analysis2/csv/YYYY-MM-DD-raw.csv` and `-processed.csv`** — the day as CSV (owner's
 decision 2026-09-29), rewritten with the day file. The raw file has one row per place and hour
 in the files' own units: `date, location, local_hour, valid_utc, temp_k, wind_ms, gust_ms,
-precip_mm, precip_file_utc, analysis_source, precip_source`, the precipitation being the hour that
+precip_mm, precip_file_utc, analysis_source, precip_source, analysis_published, precip_published`
+(the files' Last-Modified times, empty for a file read before 2026-10-14), the precipitation being the hour that
 starts at `valid_utc` and filed under `precip_file_utc`, nothing converted or rounded. The
 processed file has one row per place: `date, location, name, state, final, final_at, hours, of,
 high_f, high_exact, low_f, low_exact, gust_mph, gust_exact, wind_mph, wind_exact, precip_in,
-precip_exact, precip_hours, precip_resolved, precip_resolved_at`. Both carried a `product` column
+precip_exact, precip_hours, precip_resolved, precip_resolved_at, review, precip_review`. Both carried a `product` column
 until 2026-09-30. The page links both for the selected day.
 
 **`snapshots/analysis2/grid/index.json`** — which frames exist.
@@ -421,8 +446,8 @@ timeout is never what stops it.
    archived hour in `precipPending`: an hour whose file was absent, refused, or short of a
    place's cell at the last read. A read that adds values rewrites the precipitation key
    and (within the frame window) the precipitation frame; an hour whose file is complete
-   leaves the list; an hour past `PRECIP_WAIT_HOURS = 3` after the product's lag is dropped
-   with whatever coverage it has. The lane never waits on a precipitation file before
+   leaves the list; an hour past `precip_due`, six hours after its hour ends, is dropped
+   with whatever coverage it has, a place still without a value being not published. The lane never waits on a precipitation file before
    archiving an analysis hour.
 2. **Live hours.** For each product, the hours to try are the `gaps` first, then the hours
    after the walk's cursor (the later of `newest` and `scanned`) up to what should have
@@ -436,9 +461,10 @@ timeout is never what stops it.
    is short and its wait has not run out. A file NOAA Open Data does not have is looked for
    on NOMADS from `settled_after` (the product's lag plus `NOMADS_AFTER_MINUTES = 30`) until
    `NOMADS_KEEP_HOURS` (thirteen days, a day short of what NOMADS keeps), and the archive
-   document records `source: "nomads"`; a file on neither from then is not published and its
-   hour goes on the state's `missing` (or `pmissing`) list, so the days it belongs to resolve
-   without it. A `.idx` that is on neither (403 or 404) is an
+   document records `source: "nomads"`; a file on neither six hours after its hour
+   (`absence_final`) goes on the state's `missing` (or `pmissing`) list. The days an hour belongs
+   to resolve at their cut-off whatever the lane has found by then, and `days_past_cutoff` rebuilds
+   a recent place-day whose cut-off has passed while its summary is still provisional or absent. A `.idx` that is on neither (403 or 404) is an
    *absence*: the hour becomes a gap, `scanned` moves past it, and the walk continues. The
    absent hour's precipitation file is read all the same, on every retry of the gap until
    every place has a value, and stored without an archive hour. After one refused
@@ -512,8 +538,8 @@ the method prose, `p.cap#foot`. Scripts: common, data, then `js/analysis.js`; `W
 
 **Controls.** Variable buttons High · Low · Peak gust · Mean wind · Precipitation; a day
 `<select>` over `index.days` (newest first, labelled with the
-weekday, and a day short of every place resolving marked `provisional`, or `closed` when its
-unresolved places have all stopped waiting); an hour stepper under the map (◀ ▶ Play, the valid hour in UTC and in the selected
+weekday, and a day short of every place resolving marked `provisional`, `event review` when its
+unresolved places are all in event review, or `closed` on a file written before 2026-10-14); an hour stepper under the map (◀ ▶ Play, the valid hour in UTC and in the selected
 location's zone when one is picked). State lives in the URL: `?var=high&day=2026-09-26&hour=16&loc=new-york-ny`
 (an address from before 2026-09-30 with `product=` opens on RTMA and loses the parameter).
 With no `day` in the address the page opens on `index.lastResolvedDay` (owner's request
@@ -561,8 +587,9 @@ can be linked.
 
 **Location panel** (`#locPanel`, shown on pick or `?loc=`): the name, state, the day and
 zone, previous and next day buttons; a resolution row of five cards (rounded value, exact
-value cut to a thousandth, status pill final / provisional / closed, with n of the day's hours
-while short, and the time of the extreme); the hourly chart for the selected variable, a
+value cut to a thousandth, status pill final / provisional / event review (closed on a file
+written before 2026-10-14), with n of the day's hours while short, and the time of the extreme;
+a place in event review shows no value and says no hour was published by the 12:45 AM cut-off); the hourly chart for the selected variable, a
 960-wide `svg.ts` in a `.card` in the style of `WXK.plot`: local hours on the x axis, midnight
 and the day end marked, the RTMA hourly series solid in `--ana-rtma`, the value as a horizontal
 line, and a ladder column of hypothetical rungs at whole units around the value (precip at
@@ -585,7 +612,7 @@ report conventions have no analogue here.
 - `tests/test_analysis.py`: with a recording `LocalStorage` and a monkeypatched fetch and
   decoder, a product-hour is written to the archive, its precipitation key and the frames
   with the grid index; day rules (half-up rounding away from zero, the at-least strike test,
-  partial and closed days, the local day spanning two UTC directories, the 23- and 25-hour daylight-time days,
+  partial days, the local day spanning two UTC directories, the 23- and 25-hour daylight-time days,
   Arizona unchanged); `index.json` written last; a missing object is an absence; a raising
   fetch or decode is the hour's failure, the pass still writes the state, the grid index and
   the index, and a persisting one reaches the alarm streak; a product the lane no longer
@@ -595,11 +622,17 @@ report conventions have no analogue here.
   URMA's frames without deleting them; the catch-up span is queued once and clamped; the backfill starts behind
   a late newest hour; the place file carries the precipitation in the row of the hour it
   starts; the day's precipitation runs midnight to midnight; a value the file holds exactly is
-  converted exactly and the aggregate rounded once; a complete day is final and its
-  precipitation total stands; a file missing from NOAA Open Data is read from NOMADS half an hour after it is due
-  and not past thirteen days, and the sweep reads a missing analysis from there; a day resolves
-  on the hours available once the rest are not published, and an hour that turns up later is
-  shown and not counted; the day is written as raw and processed CSV; an
+  converted exactly and the aggregate rounded once; a complete day is final at its cut-off,
+  12:45 AM local time the next day, and not before, stamped with the cut-off; a short day is
+  final there on the hours available and never closed; a file published after the cut-off never
+  counts and is shown as late, one published before it and read after it counts, and the day's
+  last accumulation landing after the cut-off leaves the total; a place with nothing published by
+  the cut-off goes to event review, through a pass, on a day other places have hours for, and a
+  day with nothing read anywhere is not written; a replaced precipitation file keeps its first
+  version; each read carries its file's Last-Modified time, which `fetch_bytes` and `fetch_range`
+  report; a file missing from NOAA Open Data is read from NOMADS half an hour after it is due (a
+  precipitation file 27 minutes after its hour ends) and not past thirteen days, and the sweep
+  reads a missing analysis from there; the day is written as raw and processed CSV; an
   hour whose analysis never lands still adds its precipitation, in the live lane, in the
   backfill and through the daily sweep, without counting toward the day's analyses, and a
   refused file ends a product's sweep for the day;

@@ -14,27 +14,35 @@
    against the thing it drives without the eye travelling. Cloud and moisture
    on the left, wind on the right.
 
-   Two days. Today runs against the newest standing cycles, with the cycles
-   that stood at six the evening before drawn dashed over the hours before
-   midnight, the same way the main chart carries as-issued lines. Yesterday
-   runs entirely against those anchored cycles, the scorecard's anchor, so
-   the postmortem judges the same forecast the standings judged.
+   Two days. Today runs against each tool's newest run, solid, with the run
+   that stood at six the evening before yesterday drawn dotted under it, the
+   way the main chart draws a run a newer one superseded. Yesterday runs
+   entirely against those anchored runs, the scorecard's anchor, so the
+   postmortem judges the same forecast the standings judged, and they are
+   dotted there too.
 
-   Data in: advanced/{SID}.json (the tools, from the archived bulletins and
-   the NWS hourly product) and the obs snapshot the page already carries.
+   Data in: advanced/{SID}.json (the tools, from the archived bulletins, the
+   NWS hourly product and the HRRR at the station's grid point) and the obs
+   snapshot the page already carries.
    Everything drawn is a published number; nothing here is a forecast of the
    site's own. */
 window.WXAdv = (function () {
   'use strict';
   const { el, txt, h, $ } = WXC;
 
-  // color, weight and dash per tool, exactly as the main chart draws them
+  /* Color and weight per tool, exactly as the main chart draws them. Every
+     tool's newest run is solid and a run a newer one superseded is dotted
+     (EARLIER), the one convention both figures use (owner, 2026-10-16), so
+     the tools are told apart by color alone. */
   const TOOLS = [
-    { k: 'nws', name: 'Weather Service', col: 'var(--nws)', w: 2.4, dash: null, op: 0.95 },
-    { k: 'nbm', name: 'Blend of Models', col: 'var(--nbm)', w: 2, dash: '5 4', op: 0.9 },
-    { k: 'lamp', name: 'LAMP', col: 'var(--lamp)', w: 1.6, dash: '1 3', op: 0.9 },
-    { k: 'mav', name: 'GFS MOS', col: 'var(--mav)', w: 2, dash: null, op: 0.9 },
+    { k: 'nws', name: 'Weather Service', short: 'NWS', col: 'var(--nws)', w: 2.4, op: 0.95 },
+    { k: 'nbm', name: 'Blend of Models', short: 'NBM', col: 'var(--nbm)', w: 2, op: 0.9 },
+    { k: 'lamp', name: 'LAMP', short: 'LAMP', col: 'var(--lamp)', w: 1.8, op: 0.9 },
+    { k: 'mav', name: 'GFS MOS', short: 'MOS', col: 'var(--mav)', w: 1.8, op: 0.85 },
+    // the HRRR at the station's grid point (owner, 2026-10-16), absent off the grid
+    { k: 'hrrr', name: 'HRRR', short: 'HRRR', col: 'var(--hrrr)', w: 1.8, op: 0.9 },
   ];
+  const EARLIER = '2 3';
   // METAR cover codes on the same axis as the bulletins' bands: the midpoint
   // of each code's okta range. VV is an obscured sky, which is total cover.
   const OBS_PCT = { CAVOK: 0, CLR: 0, SKC: 0, FEW: 19, SCT: 44, BKN: 75, OVC: 100, VV: 100 };
@@ -70,7 +78,18 @@ window.WXAdv = (function () {
 
   const stampMs = st => {
     const m = /^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)/.exec(st || '');
-    return m ? Date.parse(m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':00Z') : NaN;
+    return m ? Date.parse(m[1] + '-' + m[2] + '-' + m[3] + 'T' + m[4] + ':' + m[5] + ':00Z') : Date.parse(st || '');
+  };
+  /* When a run was issued, as the main chart names it: the hour, a or p, and
+     T or Y for the day on screen or the day before it, else the date. */
+  const runTag = st => {
+    const ms = stampMs(st);
+    if (isNaN(ms)) return '';
+    const key = t => new Date(t).toLocaleDateString('en-CA', { timeZone: tz });
+    const hh = WXC.hourOf(ms, tz), on = key(ms), d0 = dayStart();
+    const d = on === key(d0) ? 'T' : (on === key(d0 - 43200000) ? 'Y'
+      : new Date(ms).toLocaleDateString('en-US', { timeZone: tz, month: 'short', day: 'numeric' }));
+    return (hh % 12 || 12) + (hh < 12 ? 'a' : 'p') + ' ' + d;
   };
   const clockOf = st => {
     const ms = stampMs(st);
@@ -125,10 +144,10 @@ window.WXAdv = (function () {
       return step ? ('L' + X(q.t).toFixed(1) + ' ' + Y(pts[i - 1].v).toFixed(1) + 'L' + X(q.t).toFixed(1) + ' ' + Y(q.v).toFixed(1))
                   : ('L' + X(q.t).toFixed(1) + ' ' + Y(q.v).toFixed(1));
     }).join('');
-    /* The cycles that stood at six the evening before, dashed and dim under
-       the standing lines, across the whole window, the way the main chart
-       carries its as-issued lines. Clipped at midnight these left every tool
-       a hole from midnight until its newest cycle begins, which read as the
+    /* The runs that stood at six the evening before yesterday, dotted and dim
+       under the newest ones, across the whole window, the way the main chart
+       draws a run a newer one superseded. Clipped at midnight these left every
+       tool a hole from midnight until its newest run begins, which read as the
        lines being broken while the observed line above sailed through. */
     const ctx = context();
     if (ctx) TOOLS.forEach(t => {
@@ -136,7 +155,7 @@ window.WXAdv = (function () {
       const pts = rowsIn(ctx[t.k].rows, s, get);
       if (pts.length < 2) return;
       svg.appendChild(el('path', { d: path(pts, false), fill: 'none', stroke: t.col,
-                                   'stroke-width': 1.2, 'stroke-dasharray': '2 3', opacity: 0.7 }));
+                                   'stroke-width': 1.2, 'stroke-dasharray': EARLIER, opacity: 0.7 }));
       pts.forEach(q => svg.appendChild(el('circle', { cx: X(q.t), cy: Y(q.v), r: 1.2,
                                                       fill: t.col, opacity: 0.6 })));
     });
@@ -146,7 +165,8 @@ window.WXAdv = (function () {
       if (pts.length < 2) return;
       const a = { d: path(pts, false), fill: 'none', stroke: t.col,
                   'stroke-width': t.w, opacity: t.op };
-      if (t.dash) a['stroke-dasharray'] = t.dash;
+      // the postmortem's runs are the anchored ones, which newer runs superseded
+      if (day === 'yesterday') a['stroke-dasharray'] = EARLIER;
       svg.appendChild(el('path', a));
       // a dot at every reading, so each line shows its own cadence: hourly
       // tools every hour, the 3-hourly ones every third
@@ -201,7 +221,7 @@ window.WXAdv = (function () {
     const rows = [{ name: 'OBS', col: 'var(--obs)', pts: rowsIn(obRows, s, wget), ctxPts: [] }]
       .concat(TOOLS.map(t => {
         const src = reading()[t.k];
-        return { name: { nws: 'NWS', nbm: 'NBM', lamp: 'LAMP', mav: 'MOS' }[t.k], col: t.col,
+        return { name: t.short, col: t.col,
                  pts: src ? rowsIn(src.rows, s, wget) : [],
                  // a mark the newest cycle has not reached takes the anchored
                  // cycle's barb, dimmed, so the row is whole like the lines
@@ -277,12 +297,21 @@ window.WXAdv = (function () {
           + (r.sky != null ? r.sky + '%' + (r.cover ? ' ' + r.cover : '') : '—') + ' · '
           + (r.wspd != null ? (r.wdir != null ? WXC.compass(r.wdir) + ' at ' : '') + Math.round(r.wspd * 1.15078) + ' mph' : '—'));
       const pack = rows => { const q = near(rows); return q && { temp: q.r.tempF, dew: q.r.dewF, sky: q.r.sky != null ? q.r.sky : OBS_PCT[q.r.cover], cover: q.r.cover, wdir: q.r.wdir, wspd: q.r.wspd }; };
-      const lines = [['Observed (METAR)', fmtRow(pack(obRows))]]
-        .concat(TOOLS.map(t => { const src = reading()[t.k]; return [t.name, fmtRow(src && pack(src.rows))]; }));
+      /* Tool by tool, each run with a reading at this hour, the newest first,
+         named and drawn the way the main chart's crosshair lists them. */
+      const lines = [[WXC.lineSwatch('var(--obs)', false) + 'Observed (METAR)', fmtRow(pack(obRows))]];
+      const ctx = context();
+      TOOLS.forEach(t => {
+        const runs = [[reading()[t.k], day === 'yesterday'], [ctx && ctx[t.k], true]]
+          .filter(([src]) => src).map(([src, early]) => [src, early, pack(src.rows)]).filter(r => r[2]);
+        runs.forEach(([src, early, q], i) => lines.push([WXC.lineSwatch(t.col, early) + t.short + ' ' + runTag(src.cycle),
+                                                         fmtRow(q), i ? null : 'gs']));
+      });
       const when = new Date(at).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
       tip.show(ev, tip.rows(when + ' · temp · dew · sky · wind', lines,
-                            day === 'today' ? 'tools at their newest standing cycle'
-                                            : 'tools as they stood at six the evening before'));
+                            day === 'today' ? 'each tool\u2019s newest run first; dotted, the run that stood at six the evening before yesterday'
+                            : day === 'tomorrow' ? 'each tool\u2019s newest run'
+                            : 'dotted, the runs that stood at six the evening before'));
     });
     svg.addEventListener('mouseleave', () => { rule.setAttribute('visibility', 'hidden'); tip.hide(); });
   }
@@ -302,9 +331,14 @@ window.WXAdv = (function () {
     let H = 32 + 4 * (G.panelH + G.gap) + (1 + TOOLS.length) * G.barbRow + 8 + 26;
     const svg = el('svg', { viewBox: '0 0 ' + G.W + ' ' + H, class: 'ts' });
 
-    // who is which color and dash, once, along the top
+    // who is which color, once, along the top, and on today's view what the dotted lines are
     let lx = G.W - 2;
-    [{ name: 'Observed (METAR)', col: 'var(--obs)', dash: null, w: 2 }].concat(TOOLS.slice().reverse()).forEach(t => {
+    // a tool the snapshot does not carry, such as the HRRR off its grid, has no key
+    const has = t => [reading(), context()].some(rd => rd && rd[t.k]);
+    const key = [{ name: 'Observed (METAR)', col: 'var(--obs)', w: 2 }]
+      .concat(TOOLS.filter(has).map(t => Object.assign({}, t, { dash: day === 'yesterday' ? EARLIER : null })))
+      .concat(day === 'today' ? [{ name: 'Earlier runs', col: 'var(--muted)', w: 1.4, dash: EARLIER }] : []);
+    key.reverse().forEach(t => {
       svg.appendChild(txt(t.name, { x: lx, y: 10, 'text-anchor': 'end', 'font-size': 9.5, fill: t.col }));
       lx -= t.name.length * 5.3 + 30;
       const a = { x1: lx + 4, y1: 6.5, x2: lx + 24, y2: 6.5, stroke: t.col, 'stroke-width': t.w };

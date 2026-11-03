@@ -28,7 +28,7 @@ WIND_ONLY names the twelve stations that carry no temperature contract: those
 nine, plus Nantucket, Martha's Vineyard and Providence, whose MG wind contract
 is the only one written on them. The rule is the contract, not the date they
 joined. They are kept off every temperature surface (the front map, the city
-page's two pickers, the article map) and their own page is built from
+page's two pickers, the article map, the scorecard's figures) and their own page is built from
 wind-station.html rather than city.html, because the city page is built
 around a daily high and low board none of them has. They stay on the wind
 map, which for all nine is the point of carrying them. A station here is
@@ -110,7 +110,7 @@ US_CITIES = [c for c in CITIES if c[5] == "F"]
 
 
 # The stations with no temperature contract, and so nothing to put on a
-# temperature map. Six shore stations carry no ForecastEx product at all; the
+# temperature map. Nine shore stations carry no ForecastEx product at all; the
 # other three carry an MG wind contract and nothing else. Removing a station
 # from this set is all it takes to give it the full city page, should a daily
 # temperature board ever be written on it.

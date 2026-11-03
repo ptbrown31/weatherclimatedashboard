@@ -123,16 +123,23 @@ window.WXAnalysis = (() => {
   };
 
   /* One location's day for the selected variable, with the status the page
-     draws it in. A day is final once every analysis is read or known not
-     published, and its precipitation once every hourly file is; NOAA never
-     revises either. A day short of its hours carries its count, and a closed
-     day (one the job stopped waiting for) is never final. `word` is what the
-     chart rule and the tooltips call the value: a value that can still move
-     is `running`, one that cannot is `resolved`, and a closed day's value is
-     `closed`. */
+     draws it in. A day is final at its cut-off, 12:45 AM local time the next
+     day, on the files published by then (owner's ruling 2026-10-14), and a
+     place with no hour by then is marked for event review and has no value.
+     A day short of its hours carries its count; a closed day comes only from
+     files written before the cut-off rule. `word` is what the chart rule and
+     the tooltips call the value: a value that can still move is `running`,
+     one that cannot is `resolved`, and a closed day's value is `closed`. */
   function resolution(entry, varKey) {
     const e = entry && entry[PRODUCT];
-    if (!e || !e[varKey]) return null;
+    if (!e) return null;
+    const inReview = varKey === 'precip' ? !!(e.precip && e.precip.review) : !!e.review;
+    if (inReview) {
+      const total = hoursInDay(e);
+      return { value: null, exact: null, at: null, kind: 'review', label: 'event review', hours: 0, total,
+               provisional: true, word: 'review', status: 'event review', review: true };
+    }
+    if (!e[varKey]) return null;
     const val = e[varKey], total = hoursInDay(e);
     let n = e.hours || 0;
     let kind;
@@ -213,7 +220,8 @@ window.WXAnalysis = (() => {
     const dayMark = d => {
       const st = status[d];
       if (!st || !st.places || st.resolved === st.places) return '';
-      return st.resolved + st.closed >= st.places ? ' · closed' : ' · provisional';
+      if ((st.review || 0) && st.resolved + (st.review || 0) >= st.places) return ' · event review';
+      return st.resolved + (st.closed || 0) + (st.review || 0) >= st.places ? ' · closed' : ' · provisional';
     };
     days.slice().reverse().forEach(d => daySel.appendChild(h('option', { value: d, text: dayLabel(d) + dayMark(d) })));
     daySel.onchange = () => { S.day = daySel.value; changed('day'); };
@@ -455,6 +463,7 @@ window.WXAnalysis = (() => {
         }
         pairs.push([L ? L.name + ', ' + L.state : g.dataset.loc,
                     res && res.value != null ? res.word + ' ' + withUnit(res.value) + ' (' + res.status + ')'
+                    : res && res.review ? 'no value, event review'
                     : dayRes && dayRes.source === 'none' ? 'the day file could not be read' : 'no value for this day yet']);
       }
       if (g || wc) foot = 'click to open the location';
@@ -869,7 +878,11 @@ window.WXAnalysis = (() => {
         const unit = Vk.unit === 'in' ? ' in' : Vk.unit === 'mph' ? ' mph' : Vk.unit;
         const card = h('div', { class: 'anacard' + (k === S.var ? ' on' : ''), 'data-var': k });
         card.appendChild(h('div', { class: 'al', text: Vk.label }));
-        if (!res || res.value == null) {
+        if (res && res.review) {
+          card.appendChild(h('div', { class: 'av dim', text: 'no value' }));
+          card.appendChild(h('div', { class: 'ae', text: 'no ' + PRODUCT_NAME + ' hour published by the 12:45 AM cut-off' }));
+          card.appendChild(h('span', { class: 'pill anapill off', text: res.label }));
+        } else if (!res || res.value == null) {
           card.appendChild(h('div', { class: 'av dim', text: 'no value' }));
           card.appendChild(h('div', { class: 'ae', text: unread ? 'the day file could not be read' : 'no ' + PRODUCT_NAME + ' hours read yet' }));
         } else {
@@ -1052,7 +1065,7 @@ window.WXAnalysis = (() => {
       });
       // the legend names the line, in its colour, and the day's state
       const e0 = entry && entry[PRODUCT];
-      const rstate = e0 ? (e0.closed ? 'closed' : e0.final ? 'final' : 'provisional') : 'provisional';
+      const rstate = e0 ? (e0.review ? 'event review' : e0.closed ? 'closed' : e0.final ? 'final' : 'provisional') : 'provisional';
       svg2.appendChild(E('line', { x1: Lm, x2: Lm + 14, y1: TOP - 6, y2: TOP - 6, stroke: 'var(--ana-rtma)', 'stroke-width': 2 }));
       svg2.appendChild(T(PRODUCT_NAME + ', ' + rstate, { x: Lm + 18, y: TOP - 2.5, class: 'ax' }));
       const card = h('div', { class: 'card ctr' });
@@ -1113,7 +1126,7 @@ window.WXAnalysis = (() => {
     // the keys pipeline/analysis.py CONVENTIONS writes; an unknown key is shown as itself
     const LABELS = { day: 'Day', high: 'High', low: 'Low', gust: 'Peak gust', wind: 'Mean wind', precip: 'Precipitation',
                      rounding: 'Rounding', provisional: 'Final and provisional', missing: 'Missing files',
-                     closed: 'Closed incomplete days', hourly: 'Hourly values', cell: 'Cell', window: 'Window', strike: 'Value at the strike', resolvedDay: 'Fully resolved day',
+                     review: 'Event review', closed: 'Closed incomplete days', hourly: 'Hourly values', cell: 'Cell', window: 'Window', strike: 'Value at the strike', resolvedDay: 'Fully resolved day',
                      lattice: 'Map lattice', units: 'Units' };
     host.appendChild(h('h2', { text: 'Method' }));
     host.appendChild(h('p', { text: STATEMENT + ' The conventions below are fixed in the pipeline and every file the page reads carries the times of the analyses it was built from.' }));

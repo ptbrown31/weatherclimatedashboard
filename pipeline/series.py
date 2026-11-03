@@ -220,17 +220,24 @@ def crop_yields(fetch: Optional[Callable] = None) -> Dict[str, dict]:
     if not name:
         raise ValueError("no csv in the PSD download")
     agg: Dict[str, Dict[int, Dict[str, float]]] = {}
-    for r in csv.DictReader(io.StringIO(z.read(name).decode("utf-8-sig", "replace"))):
-        crop = (r.get("Commodity_Description") or "").strip()
-        att = (r.get("Attribute_Description") or "").strip()
-        if att not in ("Production", "Rough Production", "Area Harvested"):
-            continue
-        try:
-            my, v = int(r.get("Market_Year")), float(r.get("Value"))
-        except (TypeError, ValueError):
-            continue
-        slot = agg.setdefault(crop, {}).setdefault(my, {"prod": 0.0, "rough": 0.0, "area": 0.0})
-        slot[{"Production": "prod", "Rough Production": "rough"}.get(att, "area")] += v
+    # The csv is read row by row out of the zip and never held whole. It is
+    # 52 MB unpacked (2.9 MB packed in October 2026). Decoded into one string
+    # and copied into a StringIO, which keeps four bytes a character, it held
+    # about 260 MB at once, and the daily pass ran out of its 512 MB inside
+    # this read every morning from 27 September 2026.
+    with z.open(name) as fh:
+        text = io.TextIOWrapper(fh, encoding="utf-8-sig", errors="replace", newline="")
+        for r in csv.DictReader(text):
+            crop = (r.get("Commodity_Description") or "").strip()
+            att = (r.get("Attribute_Description") or "").strip()
+            if att not in ("Production", "Rough Production", "Area Harvested"):
+                continue
+            try:
+                my, v = int(r.get("Market_Year")), float(r.get("Value"))
+            except (TypeError, ValueError):
+                continue
+            slot = agg.setdefault(crop, {}).setdefault(my, {"prod": 0.0, "rough": 0.0, "area": 0.0})
+            slot[{"Production": "prod", "Rough Production": "rough"}.get(att, "area")] += v
     out = {}
     for pid, (key, crop) in CROPS.items():
         by = agg.get(crop) or {}

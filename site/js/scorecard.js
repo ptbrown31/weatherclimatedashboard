@@ -13,8 +13,9 @@
    widest disagreement first.
 
    Data in: scorecard.json for the scored days (including the exchange's
-   implied median for the day, which the pipeline reads from the last quote
-   before local midnight), and summary.json plus the market summary through
+   whole-degree value for the day by the accuracy paper's method, which the
+   pipeline reads from the last quote pass before six the evening before), and
+   summary.json plus the market summary through
    WXM for the forward views. Only the Fahrenheit stations appear: the axis is
    in degrees, and a degree Celsius is not a degree Fahrenheit.
 
@@ -24,7 +25,7 @@ window.WXScore = (() => {
   const { h, $, el, txt } = WXC;
   const NAME = { nws: 'NWS', nbm: 'NBM', mav: 'GFS MOS', lamp: 'LAMP' };
   const ORDER = ['nws', 'nbm', 'mav', 'lamp'];
-  // the figure's five series; `fx` is the exchange's implied median, not a forecast product
+  // the figure's five series; `fx` is the exchange's whole-degree value (the accuracy paper's), not a forecast product
   const SERIES = [
     { k: 'nws', name: 'National Weather Service', col: 'var(--nws)' },
     { k: 'nbm', name: 'Blend of Models', col: 'var(--nbm)' },
@@ -149,7 +150,7 @@ window.WXScore = (() => {
     if (m.lead != null) rowsOut.push(['Lead', m.lead + ' h to local midnight']);
     if (s.k === 'fx' && m.asof) rowsOut.push(['Quotes as of', String(m.asof).replace('T', ' ').replace('Z', 'Z')]);
     const foot = s.k === 'fx'
-      ? 'the strike where the Yes price crosses 50¢, from the exchange’s published bids'
+      ? 'the exchange’s whole-degree value for the day, read from its published bids the way the accuracy paper reads them'
       : (S && S.sources && S.sources[s.k]) || null;
     return tip.rows(r.city + ' (' + r.sid + ') — ' + s.name, rowsOut, foot);
   }
@@ -313,7 +314,7 @@ window.WXScore = (() => {
             + (SERIES.find(x => x.k === k) || {}).name, Math.round(cell.v) + r.unit],
            ['Observed', Math.round(r.obs) + r.unit],
            ['Error', (cell.e > 0 ? '+' : '') + cell.e.toFixed(1) + ' (' + (cell.e > 0 ? 'too warm' : 'too cold') + ')']],
-          k === 'fx' ? 'the exchange’s implied median, left out of the margins'
+          k === 'fx' ? 'the exchange’s whole-degree value for the day, left out of the margins'
                      : 'as this source stood at six the evening before'));
         svg.appendChild(hit);
       });
@@ -373,7 +374,7 @@ window.WXScore = (() => {
 
   // ---------------------------------------------------------- the standings
   // How each tool has done over the last few scored days, ranked by mean
-  // absolute error on the daily high. The exchange's implied median is ranked
+  // absolute error on the daily high. The exchange's whole-degree value is ranked
   // alongside the forecasts here, because the question the table answers is
   // which of them has been closest, and that is arithmetic on published numbers.
   const WINDOW = 14;
@@ -471,7 +472,7 @@ window.WXScore = (() => {
       const r = rows.find(x2 => x2.s.k === k); if (!r) return tip.hide();
       tip.show(e, tip.rows(r.s.name + ' — the last ' + st.days + ' scored days',
         statRows(r.high).concat(r.low ? statRows(r.low, 'daily low ') : []),
-        r.s.k === 'fx' ? 'the exchange’s implied median, scored the same way as a forecast' : (S.sources || {})[r.s.k]));
+        r.s.k === 'fx' ? 'the exchange’s whole-degree value for the day, scored the same way as a forecast' : (S.sources || {})[r.s.k]));
     });
     svg.addEventListener('mouseleave', () => tip.hide());
     host.appendChild(h('div', { class: 'card' }, [svg]));
@@ -597,6 +598,16 @@ window.WXScore = (() => {
     const st = $('#scoreStatus') || $('#pageStatus');
     if (st) { st.innerHTML = ''; st.appendChild(WXC.statusEl([r], 1440)); }
     S = r.data; SUM = sres.data;
+    /* The temperature stations only. The pipeline scores the wind-only shore
+       stations like every other (pipeline/cities.py WIND_ONLY), but they carry
+       no daily temperature market, so they stay off this scorecard as they stay
+       off every temperature surface (owner, 2026-10-20). The roster's own rule,
+       WXC.tempCities, decides; a scored station the roster no longer names is kept. */
+    if (S && S.stations && SUM && SUM.cities) {
+      const temp = new Set(WXC.tempCities(SUM.cities).map(c => c.station));
+      const named = new Set(SUM.cities.map(c => c.station));
+      S.stations = Object.fromEntries(Object.entries(S.stations).filter(([sid]) => !named.has(sid) || temp.has(sid)));
+    }
     /* The grid's controls: which end of the day, and which of the last seven
        scored days. Both go in the address bar so a link reopens the same
        panel, which the daily letter relies on. */

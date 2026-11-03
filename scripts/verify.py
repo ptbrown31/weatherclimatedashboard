@@ -24,6 +24,7 @@ screenshots. Exit 1 on any failure.
 """
 from __future__ import annotations
 import argparse
+import base64
 import datetime as dt
 import json
 import os
@@ -104,15 +105,50 @@ class Check:
         return [r for r in self.results if not r["ok"]]
 
 
-def errors_of(page):
+def errors_of(page, into=None):
     """Collect uncaught exceptions and console errors, ignoring the browser's
     own 'Failed to load resource' lines, which are network status, not script
-    faults (the forced-failure pass produces them on purpose)."""
-    errs = []
+    faults (the forced-failure pass produces them on purpose). `into` adds a
+    second page's errors to a list the run already checks."""
+    errs = [] if into is None else into
     page.on("pageerror", lambda e: errs.append("pageerror: " + str(e)))
     page.on("console", lambda m: errs.append("console: " + m.text)
             if m.type == "error" and "Failed to load resource" not in m.text else None)
     return errs
+
+
+def ndfd_view(view: str, day: str, issued: str = "2026-08-26T03:51:00Z") -> dict:
+    """A view of the landing map's NDFD shading for the checks: whole degrees
+    falling from 95 at the top of the map to 35 at the bottom, one byte a cell
+    (degrees plus 60), the shape pipeline/ndfd.py writes. The bundled samples
+    carry no NDFD issuance for their day, so the checks serve this one."""
+    nx, ny = 240, 150
+    cells = bytes(int(round(95 - 60 * j / (ny - 1))) + 60 for j in range(ny) for _ in range(nx))
+    return {"schema": 1, "view": view, "day": day, "kind": "mint" if view in ("loT", "lo") else "maxt",
+            "issued": issued, "ref": issued, "preDay": True if view in ("hiT", "loT") else None,
+            "start": None, "end": None, "grid": {"step": 4, "nx": nx, "ny": ny}, "offset": 60,
+            "source": "test view", "b64": base64.b64encode(cells).decode("ascii")}
+
+
+def ndfd_route(days: dict):
+    """A route handler serving ndfd_view for each view, `days` {view: day}."""
+    def handler(route):
+        u = route.request.url
+        for v in ("hiT", "loT", "hi", "lo"):
+            if u.split("?")[0].endswith("/ndfd/%s.json" % v):
+                return route.fulfill(status=200, content_type="application/json", body=json.dumps(ndfd_view(v, days[v])))
+        return route.continue_()
+    return handler
+
+
+def tiny_png(rgb) -> bytes:
+    """A 4x4 PNG of one colour, standing in for a satellite frame in the loop checks."""
+    import struct
+    import zlib
+    raw = b"".join(b"\x00" + bytes(rgb) * 4 for _ in range(4))
+    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
 def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
@@ -145,14 +181,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                          ("wind-markets.html", "#board section.prod", "the wind cities"),
                          ("analysis-resolution.html", "#vmap, #anaMap", "analysis resolution page"),
                          ("tropical-cyclone-markets.html", ".basincard svg.minimap", "a map per basin"),
-                         ("allocator.html", "#allocSvg", "the allocation chart")]
+                         ("allocator.html", "#allocSvg", "the allocation chart"),
+                         ("climate-gdp.html", "#gdpMain rect", "the world GDP contract and its ladder")]
                 # a narrowed run walks only the pages it asked for; the sweep is
                 # the part of a pass that is pure page loading, so this is where
                 # skipping actually buys time rather than only hiding output
                 pages = [pg for pg in pages if chk.wants(pg[0] + " " + pg[2])]
                 for path, sel, what in pages:
                     page.goto(f"{srv.url}/{path}")
-                    page.wait_for_timeout(900)
+                    # the world GDP page loads its model's paths and runs it before it draws
+                    page.wait_for_timeout(2500 if path.startswith("climate-gdp") else 900)
                     n = page.locator(sel).count()
                     chk.add(f"{scheme} standalone {path}: renders {what}", n > 0, f"{sel} count={n}")
                     if page.locator("#pageStatus, #chartStatus").count():      # data pages carry a status strip
@@ -182,35 +220,53 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                   "How the daily temperature displays are built",
                                   "What are the four canonical forecast systems compared in the IBKR Campus Publication?",
                                   "Further reading"], str(order)[:200])
-                # ---- the accuracy page: five figures from the record builder's files
+                # ---- the accuracy page: the working paper's figures from the record builder's files
                 #
-                # Every number on the page is the builder's (docs/accuracy.md); the
-                # gates prove the figures draw, each carries its estimator and its
-                # sample, the strip names the window and the build, and the copy
-                # keeps the exchange's language.
+                # Every number on the page is the builder's (docs/accuracy.md, schema 2); the
+                # gates prove the figures draw what the paper draws, each carries its estimator
+                # and its sample, the strip names the window and the build, and the copy keeps
+                # the exchange's language.
                 page.goto(f"{srv.url}/accuracy.html"); page.wait_for_timeout(2500)
-                n_lead = page.locator("#accLead path").count()
-                chk.add(f"{scheme} accuracy: the lead curve draws the market and every system", n_lead >= 3, f"paths={n_lead}")
-                # ---- deterministic skill: the error curve with time to converge under it
-                n_conv = page.locator("#accConv path").count()
-                chk.add(f"{scheme} accuracy: time to converge sits under the error curve and draws every system",
-                        n_conv >= 6 and page.locator("#accDyn, #accCal").count() == 0
-                        and "CRPS" not in page.locator("#accLeadBar").inner_text(), f"paths={n_conv}")
+                lead_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/lead-curve.json").read().decode())
+                n_series = len(lead_file["meta"]["series"])
+                strokes = page.evaluate("""() => [...document.querySelectorAll('#accLead path')].filter(
+                    p => p.getAttribute('fill') === 'none' && !p.classList.contains('acc-sec')).map(p => ({
+                      w: p.getAttribute('stroke-width'), d: p.getAttribute('stroke-dasharray'), o: p.getAttribute('stroke-opacity'),
+                      c: p.getAttribute('stroke') }))""")
+                solid = [x for x in strokes if not x["o"]]
+                faint = [x for x in strokes if x["o"]]
+                chk.add(f"{scheme} accuracy: the error curve draws the market and every series of the file, in the paper's group colours",
+                        n_series >= 20 and len(solid) >= n_series - 4
+                        and {"var(--g-mos)", "var(--g-raw)"} <= {x["c"] for x in solid} and any(x["c"] == "var(--accent)" for x in solid),
+                        f"series={n_series} solid={len(solid)} colours={sorted({x['c'] for x in solid})}")
+                chk.add(f"{scheme} accuracy: LAMP is drawn heavier, a system's second series dashed, and the corrected series faint as issued",
+                        any(x["w"] == "2.3" for x in solid) and sum(1 for x in solid if x["d"] == "5 3") >= 3 and len(faint) >= 8,
+                        f"heavy={sum(1 for x in solid if x['w'] == '2.3')} dashed={sum(1 for x in solid if x['d'] == '5 3')} faint={len(faint)}")
+                chk.add(f"{scheme} accuracy: the convergence chart and the Brier score are gone",
+                        page.locator("#accConv, #accBrier").count() == 0
+                        and page.locator("#accLeadBar button", has_text="Within").count() == 0
+                        and "Brier" not in page.locator(".wrap").inner_text(), "")
                 # ---- the second axis on the error curve, and lead counted back from the extreme
                 sec_day = page.locator("#accLead path.acc-sec").count()
                 lead_svg = page.locator("#accLead").text_content()
                 page.locator("#accLead rect[fill='transparent']").nth(26).hover(); page.wait_for_timeout(300)
                 day_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
-                chk.add(f"{scheme} accuracy: the error curve carries the share of city-days whose extreme was already observed on a second axis",
+                chk.add(f"{scheme} accuracy: the error curve carries the share of city-days whose maximum was already observed on a second axis",
                         sec_day == 1 and "already observed" in lead_svg and "100%" in lead_svg
                         and "had already seen the day" in day_tip, f"sec={sec_day} tip={day_tip[-120:]!r}")
+                chk.add(f"{scheme} accuracy: the hover ranks every series with the market's improvement and the Holm count",
+                        "market better" in day_tip.lower() and "after Holm" in day_tip and day_tip.count("\n") >= 20,
+                        day_tip.replace("\n", " | ")[:160])
+                legend = page.locator("#accLeadKey").inner_text()
+                chk.add(f"{scheme} accuracy: the error curve's legend names the paper's five groups",
+                        all(g in legend for g in ("Station MOS", "Blend", "Human-edited", "Artificial intelligence", "Raw numerical weather prediction")),
+                        legend.replace("\n", " | ")[:160])
                 seg_of = """() => {
                   // stroked series only: the market's band is a filled path with two points per bin
                   const ps = [...document.querySelectorAll('#accLead path')].filter(
                     p => p.getAttribute('fill') === 'none' && !p.classList.contains('acc-sec'));
                   return Math.max.apply(null, ps.map(p => (p.getAttribute('d') || '').split(/[ML]/).length - 1)); }"""
                 day_seg = page.evaluate(seg_of)
-                frame_grp = page.locator("#accLeadBar .tabgroup", has_text="METAR settle")
                 page.locator("#accLeadBar button", has_text="Before the extreme").first.click(); page.wait_for_timeout(600)
                 rel_txt = page.locator("#accLead").text_content()
                 rel_paths = page.locator("#accLead path").count()
@@ -222,77 +278,64 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 rel_seg = page.evaluate(seg_of)
                 chk.add(f"{scheme} accuracy: an alternative is one step per clock hour in the day view and a plain line where the lead is not a clock hour",
                         day_seg > 60 and 10 <= rel_seg <= 40, f"day={day_seg} relative={rel_seg}")
-                chk.add(f"{scheme} accuracy: Before the extreme redraws the error curve by hours before the extreme, with its own second axis and no frame tabs",
-                        "Hours before the day’s extreme was observed" in rel_txt and "target day begins" not in rel_txt
-                        and rel_paths >= 6 and sec_rel == 1 and "forecast this far ahead" in rel_txt
-                        and frame_grp.is_hidden() and "before the extreme" in rel_tip
-                        and "earlier report had already reached" in rel_tip,
-                        f"paths={rel_paths} sec={sec_rel} framehidden={frame_grp.is_hidden()} tip={rel_tip[:80]!r}")
+                chk.add(f"{scheme} accuracy: Before the extreme redraws the error curve by hours before the maximum, with its own second axis",
+                        "Hours before the day’s maximum was observed" in rel_txt and "target day begins" not in rel_txt
+                        and rel_paths >= 20 and sec_rel == 1 and "still priced this far ahead" in rel_txt
+                        and "before the maximum" in rel_tip,
+                        f"paths={rel_paths} sec={sec_rel} tip={rel_tip[:80]!r}")
                 page.locator("#accLeadBar button", has_text="Before the day ends").first.click(); page.wait_for_timeout(400)
-                chk.add(f"{scheme} accuracy: Before the day ends restores the lead from the end of the day and the frame tabs",
-                        "Hours before the end of the target day" in page.locator("#accLead").text_content() and frame_grp.is_visible(), "")
-                conv_before = page.locator("#accConv").inner_html()
-                page.locator("#accLeadBar button", has_text="Within 2").first.click(); page.wait_for_timeout(500)
-                chk.add(f"{scheme} accuracy: the tolerance tab redraws time to converge",
-                        page.locator("#accConv").inner_html() != conv_before, "")
-                page.locator("#accLeadBar button", has_text="Within 1").first.click(); page.wait_for_timeout(300)
-                page.locator("#accConv rect[fill='transparent']").nth(16).hover(); page.wait_for_timeout(300)
-                conv_tip = page.locator("#tip").inner_text().lower() if page.locator("#tip").count() else ""
-                chk.add(f"{scheme} accuracy: the convergence hover ranks the systems and gives each one's half-way lead",
-                        "converged" in conv_tip and "half by" in conv_tip, conv_tip.replace("\n", " | ")[:140])
+                chk.add(f"{scheme} accuracy: Before the day ends restores the lead from the end of the day",
+                        "Hours before the end of the target day" in page.locator("#accLead").text_content(), "")
+                # the values as issued, and the balanced sample, which carries the corrected values alone
+                before = page.locator("#accLead").inner_html()
+                page.locator("#accLeadBar button", has_text="As issued").first.click(); page.wait_for_timeout(500)
+                faint_iss = page.locator("#accLead path[stroke-opacity]").count()
+                chk.add(f"{scheme} accuracy: As issued redraws every series without the correction and without faint lines",
+                        page.locator("#accLead").inner_html() != before and faint_iss == 0, f"faint={faint_iss}")
+                page.locator("#accLeadBar button", has_text="Bias-corrected").first.click(); page.wait_for_timeout(300)
+                before = page.locator("#accLead").inner_html()
+                vals_grp = page.locator("#accLeadBar .tabgroup", has_text="Bias-corrected")
+                page.locator("#accLeadBar button", has_text="Balanced sample").first.click(); page.wait_for_timeout(500)
+                chk.add(f"{scheme} accuracy: the balanced sample redraws the error curve and hides the values tab",
+                        page.locator("#accLead").inner_html() != before and vals_grp.is_hidden(), "")
+                page.locator("#accLeadBar button", has_text="Every day on record").first.click(); page.wait_for_timeout(300)
                 # the market's row in a hover table reads in the hover box's own ink
+                page.locator("#accLead rect[fill='transparent']").nth(26).hover(); page.wait_for_timeout(300)
                 tip_ink = page.evaluate("""() => { const t = document.querySelector('#tip'); const r = t && t.querySelector('tr.tfx td');
                                                    return r ? [getComputedStyle(t).color, getComputedStyle(r).color] : null; }""")
                 chk.add(f"{scheme} accuracy: the ForecastEx row in a hover table is set in the hover box's ink",
                         bool(tip_ink) and tip_ink[0] == tip_ink[1], str(tip_ink))
-                # ---- probabilistic skill: CRPS and the Brier score at full width, then the diagrams
+                # ---- probabilistic skill: CRPS by lead, then the paper's two reliability windows
                 cal_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/calibration.json").read().decode())
-                cal_own = (((cal_file.get("metric", {}).get("high", {}) or {}).get("cohorts", {}) or {}).get("own", {}) or {})
-                ensb = cal_own.get("ensembles", {})
-                brier_sys = set(((((cal_own.get("price", {}).get("mid", {}) or {}).get("brier", {}) or {}).get("strikes", {}) or {})
-                                 .get("nearMoney", {}).get("cli", {}) or {}).get("systems", {}))
-                widths = page.evaluate("""() => ['#accLead', '#accCrps', '#accBrier'].map(s => {
+                crps_blk = cal_file["metric"]["high"]["crps"]["clocks"]["abs"]["calibrated"]["series"]
+                widths = page.evaluate("""() => ['#accLead', '#accCrps'].map(s => {
                     const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().width) : 0; })""")
-                prob_key = page.eval_on_selector_all("#accProbKey > span[data-id]", "e => e.map(x => x.getAttribute('data-id'))")
-                prob_txt = " ".join(page.eval_on_selector_all("#accCrps text, #accBrier text", "e => e.map(x => x.textContent)"))
-                chk.add(f"{scheme} accuracy: CRPS and the Brier score each take the full width of the lead curve, and nothing else is charted by lead",
-                        widths[0] > 0 and all(abs(w - widths[0]) <= 2 for w in widths)
-                        and "CRPS" in prob_txt and "brier score as root mean square, cents" in prob_txt.lower()
-                        and all(page.locator(f"{sel} path[stroke-dasharray]").count() >= 3 for sel in ("#accCrps", "#accBrier"))
-                        and page.locator("#accRel, #accRes, #accSpans, ul.conv").count() == 0, f"widths={widths}")
-                brier_all = ((((cal_own.get("price", {}).get("mid", {}) or {}).get("brier", {}) or {}).get("strikes", {}) or {})
-                             .get("all", {}).get("metar", {}) or {}).get("systems", {})
-                same_n = len({tuple(v.get("n", [])) for v in brier_all.values()}) == 1
-                prob_note = page.locator("#accProbKey").inner_text()
-                chk.add(f"{scheme} accuracy: the probabilistic figures draw the market against the four ensembles on the same contracts and days",
-                        prob_key[:1] == ["FX"] and set(prob_key[1:]) == {"AIFS", "GEFS", "GEM_ENS", "ICON_ENS"}
-                        and len(ensb) >= 4 and brier_sys == {"FX", "AIFS", "GEFS", "GEM", "ICON"} and same_n
-                        and "drawn on the city-days all five share" in prob_note,
-                        f"key={prob_key} brier={sorted(brier_sys)} same_n={same_n}")
+                prob_key = page.locator("#accProbKey").inner_text()
+                chk.add(f"{scheme} accuracy: CRPS takes the full width of the error curve and draws the market against the four calibrated ensembles",
+                        widths[0] > 0 and abs(widths[0] - widths[1]) <= 2 and set(crps_blk) == {"FX", "AIFS", "GEFS", "GEM", "ICON"}
+                        and page.locator("#accCrps path[stroke-dasharray]").count() >= 3
+                        and page.locator("#accCrps path[stroke-opacity]").count() >= 4
+                        and all(n in prob_key for n in ("ECMWF AIFS ensemble", "NOAA GEFS", "ECCC GEPS", "DWD ICON-EPS")),
+                        f"widths={widths} series={sorted(crps_blk)}")
                 diag_txt = page.eval_on_selector_all("#accDiag svg.acc-cal-rel text", "e => e.map(x => x.textContent)")
-                lead_titles = [t for t in diag_txt if t.endswith("before the day ends")]
+                titles = [t for t in diag_txt if t.startswith("Priced ")]
                 n_calc = page.locator("#accDiag circle").count()
-                chk.add(f"{scheme} accuracy: the reliability diagrams follow the charts, one per lead bin to six hours out, titled by lead and sample only",
-                        lead_titles == ["36 to 24 h before the day ends", "24 to 12 h before the day ends", "12 to 6 h before the day ends"]
-                        and n_calc >= 10 and not any(t.lower().startswith(("reliability", "resolution")) for t in diag_txt),
-                        str(lead_titles))
-                for tab in ("Fixed sample", "Two-sided books only", "NWS climate report", "Near-money strikes"):
-                    before = page.locator("#accBrier").inner_html()
-                    page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(500)
-                    chk.add(f"{scheme} accuracy: the {tab} tab redraws the Brier score",
-                            page.locator("#accBrier").inner_html() != before, "")
-                for tab in ("Every shared day", "Yes price midpoint", "METAR settle", "Every quoted strike"):
-                    page.locator("#accProbBar button", has_text=tab).first.click(); page.wait_for_timeout(300)
+                sum_rows = page.locator("#accDiag table.acc-rel-sum tbody tr").count()
+                sum_txt = page.locator("#accDiag table.acc-rel-sum").inner_text() if page.locator("#accDiag table.acc-rel-sum").count() else ""
+                chk.add(f"{scheme} accuracy: the reliability diagrams are the paper's two windows, with the gap and the slope of every system",
+                        titles == ["Priced 12 to 24 h before the day ends", "Priced 6 to 18 h before the maximum"]
+                        and n_calc >= 10 and sum_rows == 5 and re.search(r"\d\.\d\d \[\d\.\d\d, \d\.\d\d\]", sum_txt) is not None,
+                        f"titles={titles} rows={sum_rows}")
+                before = page.locator("#accCrps").inner_html()
+                page.locator("#accProbBar button", has_text="As issued").first.click(); page.wait_for_timeout(500)
+                chk.add(f"{scheme} accuracy: the ensembles' As issued tab redraws CRPS without the faint lines",
+                        page.locator("#accCrps").inner_html() != before and page.locator("#accCrps path[stroke-opacity]").count() == 0, "")
+                page.locator("#accProbBar button", has_text="EMOS-calibrated").first.click(); page.wait_for_timeout(300)
                 page.locator("#accCrps rect[fill='transparent']").nth(24).hover(); page.wait_for_timeout(300)
                 crps_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
-                chk.add(f"{scheme} accuracy: the CRPS hover ranks the distributions against ForecastEx",
-                        "crps" in crps_tip.lower() and "vs forecastex" in crps_tip.lower() and "Amer. Ens." in crps_tip,
+                chk.add(f"{scheme} accuracy: the CRPS hover ranks the distributions with the market's improvement",
+                        "crps °f" in crps_tip.lower() and "market better" in crps_tip.lower() and "NOAA GEFS" in crps_tip,
                         crps_tip.replace("\n", " | ")[-160:])
-                page.locator("#accBrier rect[fill='transparent']").nth(20).hover(); page.wait_for_timeout(300)
-                brier_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""
-                chk.add(f"{scheme} accuracy: the Brier hover ranks the distributions in cents against ForecastEx",
-                        "rms" in brier_tip.lower() and "vs forecastex" in brier_tip.lower() and "Amer. Ens." in brier_tip
-                        and re.search(r"\d+\.\d c", brier_tip) is not None, brier_tip.replace("\n", " | ")[-160:])
                 # ---- the method notes wait behind a button
                 btns = page.locator("button.accnote-btn")
                 hidden = page.eval_on_selector_all(".accnote", "e => e.map(x => x.hidden)")
@@ -307,8 +350,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 n_mapc, n_mapp = page.locator("#accMap circle").count(), page.locator("#accMap path").count()
                 chk.add(f"{scheme} accuracy: the city map draws the states and the stations",
                         n_mapc >= 3 and n_mapp >= 1, f"circles={n_mapc} paths={n_mapp}")
-                n_grid = page.locator("#accGrid tbody tr").count()
-                chk.add(f"{scheme} accuracy: the scorecard grid draws its rows", n_grid >= 6, f"rows={n_grid}")
+                n_grid = page.locator("#accGrid table.acc-t3 tbody tr").count()
+                chk.add(f"{scheme} accuracy: the scorecard draws a row per series and per group", n_grid >= 26, f"rows={n_grid}")
                 notes = page.eval_on_selector_all(".accnote", """e => e.map(x => ({
                     eq: (x.querySelector('.eq') || {textContent: ''}).textContent,
                     n: (x.querySelector('.rule.n') || {textContent: ''}).textContent }))""")
@@ -317,14 +360,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} accuracy: every method note holds an estimator and a counted sample",
                         len(notes) == 4 and not bad_notes, f"notes={len(notes)} bad={bad_notes}")
                 # ---- how far back each record goes: every note names its days, and the
-                # systems table dates every record now that the coverage strip is gone
+                # systems table and the scorecard date every record
                 spans = page.eval_on_selector_all(".accnote", "e => e.map(x => (x.querySelector('.rule.span') || {textContent: ''}).textContent)")
                 chk.add(f"{scheme} accuracy: every method note says which days its figure drew on",
                         len(spans) == 4 and all((t or "").strip() for t in spans),
                         str([(t or "")[:40] for t in spans]))
-                lead_key = page.locator("#accLeadKey .ks").count()
-                chk.add(f"{scheme} accuracy: the lead curve's key dates every system's record",
-                        lead_key >= 6, f"entries={lead_key}")
                 acc_st = page.locator("#pageStatus .status").inner_text() if page.locator("#pageStatus .status").count() else ""
                 chk.add(f"{scheme} accuracy: the status strip names the window and the build",
                         "Data as of" in acc_st and re.search(r"target days [A-Z][a-z]{2} \d+ \d{4} to [A-Z][a-z]{2} \d+ \d{4}", acc_st) is not None,
@@ -470,9 +510,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 #      ladder column that keeps its place before a strike exists.
                 # The samples carry no wind at all, so the observation and the
                 # guidance are routed rather than taken from them.
-                # dated off the clock: "the hours still to come" is measured against
-                # now, so a fixed date would leave nothing ahead and the comparison
-                # the panel draws would never be exercised
+                # The fixture's date is today's, from the wall clock
                 _now = dt.datetime.now(dt.timezone.utc)
                 # the day is the STATION's, not UTC's. Between midnight and four in
                 # the morning Zulu the two disagree, and the plot's window runs from
@@ -485,10 +523,33 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # for the first unopened day pass on an absence
                 DAY2 = (_now.astimezone(_Z("America/New_York")).date()
                         + dt.timedelta(days=2)).isoformat()
-                _past = [_now - dt.timedelta(hours=k) for k in (5, 4, 3, 2)]
+                # The readings sit around 15:10 New York time on that day, and every
+                # page that draws them reads a browser clock fixed at that instant,
+                # so the hours still to come are the same hours to the page and to
+                # the fixture. The plot's window runs from local midnight to midnight
+                # and the readings reach five hours back and three ahead, so placing
+                # them around the wall clock left some outside the day from 22:00 to
+                # 05:00 New York time and failed the hover-band check from 23:00 to
+                # 04:00 (5 bands at 07:55Z on 4 October 2026). Before 02:00 the panel
+                # drew no observation at all.
+                W_NOW = dt.datetime.combine(dt.date.fromisoformat(DAY), dt.time(15, 10),
+                                            tzinfo=_Z("America/New_York")).astimezone(dt.timezone.utc)
+                _past = [W_NOW - dt.timedelta(hours=k) for k in (5, 4, 3, 2)]
                 w_rows = [{"t": t.strftime("%Y-%m-%dT%H:54:00Z"), "tempF": 66.0, "tempC": 18.9, "type": "METAR",
                            "wspd": 9.0 + i, "wgst": (24.0 if i == 3 else None)} for i, t in enumerate(_past)]
-                _ahead = [_now + dt.timedelta(hours=k) for k in (1, 2, 3)]
+                _ahead = [W_NOW + dt.timedelta(hours=k) for k in (1, 2, 3)]
+
+                # Playwright's clock stays on a context for the rest of its life once
+                # set, so the pages that draw this fixture get a context of their own
+                # and the rest of the run keeps the wall clock. Their script errors go
+                # into the run's own list, which the standalone error check reads.
+                # A check that has to sit on one of the samples' own dates passes it.
+                def fixture_page(at=None):
+                    c = browser.new_context(color_scheme=scheme, viewport={"width": 1200, "height": 900})
+                    c.clock.set_fixed_time(at or W_NOW)
+                    pg = c.new_page()
+                    errors_of(pg, into=errs)
+                    return pg
 
                 def wind_routes(route):
                     u = route.request.url
@@ -555,7 +616,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         resp = route.fetch(); d = json.loads(resp.text())
                         # a quiet forward hour: a sustained wind and NO gust, which is
                         # the case a gust-only line gets wrong
-                        d["nbm"] = {"cycle": _iso_z(_now), "hourlyFrom": _iso_z(_ahead[0]), "txn": {},
+                        d["nbm"] = {"cycle": _iso_z(W_NOW), "hourlyFrom": _iso_z(_ahead[0]), "txn": {},
                                     "hourly": [{"t": _iso_z(t), "tempF": 70.0, "tempC": 21.1,
                                                 "wspd": 26.0, "gust": (None if i == 0 else 12.0)}
                                                for i, t in enumerate(_ahead)]}
@@ -571,6 +632,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         return route.fulfill(response=resp, body=json.dumps(d))
                     return route.continue_()
 
+                page_wall, page = page, fixture_page()
                 page.route("**/data/snapshots/**", wind_routes)
                 page.goto(f"{srv.url}/wind-markets.html")
                 page.wait_for_timeout(1800)
@@ -585,8 +647,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                            peaks: txt.some(t => t === 'Peak'),
                            caps: [...document.querySelectorAll('#board section p.cap')].map(p => p.textContent) };
                 }""")
+                # the board's ladders open the exchange, and it says so once, above the first
+                # city rather than under each (owner, 2026-10-22)
+                wtn = page.evaluate("""() => [...document.querySelectorAll('#board p.tradenote')].map(n => ({
+                  text: n.textContent, next: n.nextElementSibling ? n.nextElementSibling.tagName + '.' + n.nextElementSibling.className : null }))""")
+                chk.add(f"{scheme} wind board: one line above the first city says a price opens the exchange",
+                        len(wtn) == 1 and wtn[0]["text"] == "Click on any price to trade contracts through IBKR Prediction Markets" and wtn[0]["next"] == "SECTION.prod ctr", str(wtn))
+                # every routed reading falls inside the station's day, so the count
+                # is exact
                 chk.add(f"{scheme} wind panel: the plot draws a hover band per reading",
-                        bool(wp and wp["bands"] >= 6), str(wp and wp["bands"]))
+                        bool(wp and wp["bands"] == len(w_rows) + len(_ahead)), str(wp and wp["bands"]))
                 # every family that forecasts wind gets its own line, as on the
                 # temperature panel. The Blend and LAMP publish an hourly gust; the
                 # gridpoint's hourly product publishes only a sustained wind, and
@@ -725,9 +795,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # peak does. The chart rows here top out at a 24 kt gust, 28 mph,
                 # and a special report with no temperature carries 40 kt, 46 mph,
                 # so the 43 mph rung is cleared only if the panel reads those rows.
-                _nt = max(_now - dt.timedelta(minutes=50),
-                          dt.datetime.combine(dt.date.fromisoformat(DAY), dt.time(0, 5),
-                                              tzinfo=_Z("America/New_York")).astimezone(dt.timezone.utc))
+                _nt = W_NOW - dt.timedelta(minutes=50)
                 nt_row = {"t": _nt.strftime("%Y-%m-%dT%H:%M:00Z"), "type": "SPECI", "wspd": 28.0, "wgst": 40.0}
 
                 def notemp_routes(route):
@@ -891,6 +959,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   const s = document.querySelector('#board section[id^=wind-]');
                   return s ? s.id.replace('wind-', '') : null;
                 }""")
+                # The panel lands 12 px under the top of the window, to the pixel or
+                # nearly. A tolerance of 20 px once hid a correction issued while the
+                # smooth scroll was still running, which landed 7 to 21 px past the
+                # panel every time (2026-10-20), so the margin is 4 px now.
                 if sid:
                     page.evaluate("() => window.scrollTo(0, 0)")
                     page.click(f'#vmap g.dot[data-station="{sid}"]')
@@ -901,7 +973,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                y: Math.round(window.scrollY), path: location.pathname };
                     }""", sid)
                     chk.add(f"{scheme} wind map: a dot scrolls to that station's panel",
-                            land["y"] > 0 and abs(land["top"] - 12) <= 20, str(land))
+                            land["y"] > 0 and abs(land["top"] - 12) <= 4, str(land))
                     chk.add(f"{scheme} wind map: picking a listed station does not leave the board",
                             "wind-markets" in land["path"], land["path"])
                 # The same while zoomed. The pan used to take pointer capture
@@ -938,8 +1010,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                    y: Math.round(window.scrollY), path: location.pathname };
                         }""", zt["station"])
                         chk.add(f"{scheme} wind map: a dot clicked while zoomed still scrolls to its station's panel",
-                                land["y"] > 0 and abs(land["top"] - 12) <= 20 and "wind-markets" in land["path"], str(land))
+                                land["y"] > 0 and abs(land["top"] - 12) <= 4 and "wind-markets" in land["path"], str(land))
                 page.unroute("**/data/snapshots/**")
+                page.context.close(); page = page_wall
 
                 # ---- the analysis resolution page: a proposed settlement
                 #      framework, unlisted, drawn from samples/snapshots/analysis2
@@ -1191,6 +1264,31 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     pills_c = page.eval_on_selector_all("#locPanel .anapill", "e => e.map(x => x.textContent)")
                     chk.add(f"{scheme} analysis: a closed RTMA day says closed, with its count",
                             r_closed.startswith("closed ") and all(p_.startswith("closed, ") and "of" in p_ for p_ in pills_c), str([r_closed, pills_c[:2]]))
+                # a place with no hour published by its 12:45 AM cut-off goes to
+                # event review (owner's ruling 2026-10-14): every card says so,
+                # no value is drawn, and the dot is hollow
+                def ana_review(route):
+                    u = route.request.url
+                    if u.endswith(f"/analysis2/days/{ana_day}.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        d["locations"]["new-york-ny"]["rtma"] = {
+                            "hours": 0, "of": 24, "complete": False, "high": None, "low": None, "gust": None,
+                            "wind": None, "final": False, "finalAt": None, "review": True, "closed": False,
+                            "precip": {"value": None, "exact": None, "hours": 0, "resolved": False,
+                                       "resolvedAt": None, "review": True}}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", ana_review)
+                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                pills_r = page.eval_on_selector_all("#locPanel .anapill", "e => e.map(x => x.textContent)")
+                cards_r = page.eval_on_selector_all("#locPanel .anacard .ae", "e => e.map(x => x.textContent)")
+                chk.add(f"{scheme} analysis: a place with no hour by the cut-off says event review on every card, with no value",
+                        pills_r == ["event review"] * 5 and all("12:45 AM cut-off" in c_ for c_ in cards_r)
+                        and page.locator("#locPanel line.anares").count() == 0
+                        and page.locator('#vdots g.dot[data-loc="new-york-ny"] circle.prov, #vdots g.dot[data-loc="new-york-ny"] circle.final').count() == 0,
+                        str([pills_r, cards_r[:2]]))
+                page.unroute("**/data/snapshots/**")
                 # the freshness pill judges the job by the index's written time,
                 # not by the analysis valid hour NOAA's lag keeps behind the clock;
                 # the valid hours stand beside it
@@ -1579,6 +1677,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         return route.fulfill(response=resp, body=json.dumps(d))
                     return route.continue_()
 
+                page_wall, page = page, fixture_page()
                 page.route("**/data/snapshots/**", _city_routes)
                 page.goto(f"{srv.url}/city.html?station=KLGA&market=on"); page.wait_for_timeout(2800)
                 cc = page.evaluate("""() => {
@@ -1599,6 +1698,22 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 }""")
                 chk.add(f"{scheme} city page: the other contracts stack rather than hide behind tabs",
                         bool(cc) and cc["tabs"] == 0 and cc["wind"], str(cc))
+                # each priced chart on the page says, under it, that its prices open the exchange
+                ctn = page.evaluate("""() => {
+                  const after = sel => { const n = document.querySelector(sel); const prev = n && n.previousElementSibling;
+                    return n ? { text: n.textContent, prev: prev ? (prev.id || prev.className) : null } : null; };
+                  return { chart: after('#chartCard ~ p.tradenote'), wind: after('#cityWind p.tradenote'),
+                           hourly: after('#cityHourly p.tradenote'), n: document.querySelectorAll('p.tradenote').length,
+                           chartLinks: document.querySelectorAll('#chart [data-contract-url]').length };
+                }""")
+                # (the chart's own ladder here has no listed day, so the chart carries a line only if it links)
+                chk.add(f"{scheme} city page: the wind board and the hourly board each say a price opens the exchange, and the chart when it links",
+                        bool(ctn) and ctn["n"] == 2 + (1 if ctn["chartLinks"] else 0)
+                        and (bool(ctn["chart"]) == bool(ctn["chartLinks"])) and (not ctn["chart"] or ctn["chart"]["prev"] == "bar")
+                        and ctn["wind"] and ctn["wind"]["prev"] == "card expandable"
+                        and ctn["hourly"] and ctn["hourly"]["prev"] == "card expandable"
+                        and all(ctn[k]["text"] == "Click on any price to trade contracts through IBKR Prediction Markets"
+                                for k in ("chart", "wind", "hourly") if ctn[k]), str(ctn))
                 chk.add(f"{scheme} city page: the wind days are buttons, not stacked panels",
                         bool(cc) and cc["windDays"] >= 1 and cc["windCards"] == 1, str(cc))
                 if cc and cc["hourly"]:
@@ -1626,6 +1741,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     chk.add(f"{scheme} city page: hourly rungs are drawn in the plot, not in a side column",
                             cc["columnPrices"] == 0, str(cc))
                 page.unroute("**/data/snapshots/**")
+                page.context.close(); page = page_wall
 
                 # ---- the cyclone area: one map per ocean, each opening its own view
                 page.goto(f"{srv.url}/tropical-cyclone-markets.html"); page.wait_for_timeout(1200)
@@ -1683,6 +1799,44 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         len(bounds) >= 1 and len(errs) == errs_now, str(bounds))
                 chk.add(f"{scheme} city days: exactly one day button is pressed at a time",
                         page.locator("#dayToday.on, #dayTomorrow.on, #dayBoth.on").count() == 1, "")
+                # tomorrow's nights are shaded as today's are (owner, 2026-10-20): the sun carried
+                # forward one day, and everything outside the contract day's daylight shaded
+                nt = page.evaluate("""() => ({ n: document.querySelectorAll('#chart rect[fill="var(--night)"]').length,
+                  sun: [...document.querySelectorAll('#chart text.mklab')].map(t => t.textContent)
+                         .filter(t => t === 'sunrise' || t === 'sunset') })""")
+                chk.add(f"{scheme} city days: tomorrow's nights are shaded as today's are",
+                        nt["n"] == 2 and nt["sun"] == ["sunrise", "sunset"], str(nt))
+                # "Overlay yesterday" is the calendar's yesterday on every view (owner, 2026-10-20):
+                # moved a day on to today, two days on to tomorrow, and on both days twice, the same
+                # yesterday on each day, drawn as two lines that meet at tomorrow's midnight
+                yd_read = lambda: page.evaluate("""() => {
+                  const svg = document.querySelector('#chart');
+                  const mid = [...svg.querySelectorAll('text.mklab')].find(t => t.textContent === 'tomorrow’s midnight');
+                  const segs = [...svg.querySelectorAll('path.yday')].map(p => {
+                    const xs = (p.getAttribute('d').match(/[ML]([\\d.]+),/g) || []).map(q => +q.slice(1, -1));
+                    return { col: p.getAttribute('stroke'), xs, x0: Math.min(...xs), x1: Math.max(...xs) }; });
+                  return { mid: mid ? +mid.getAttribute('x') : null, segs };
+                }""")
+                page.locator("#ydayBtn").click(); page.wait_for_timeout(900)
+                yd_tom = yd_read()
+                page.locator("#dayToday").click(); page.wait_for_timeout(900)
+                yd_tod = yd_read()
+                obs_x = lambda r: [sg["xs"] for sg in (r or {}).get("segs", []) if sg["col"] == "var(--obs)"]
+                chk.add(f"{scheme} city days: on tomorrow the overlay is yesterday, at the hours it holds on today",
+                        len(obs_x(yd_tom)) == 1 and obs_x(yd_tom) == obs_x(yd_tod) and len(obs_x(yd_tod)[0]) >= 12,
+                        str([len(x_) for x_ in obs_x(yd_tom)] + [len(x_) for x_ in obs_x(yd_tod)]))
+                page.locator("#dayBoth").click(); page.wait_for_timeout(1100)
+                yd_both = yd_read()
+                ob2 = [sg for sg in yd_both["segs"] if sg["col"] == "var(--obs)"]
+                models2 = {}
+                for sg in yd_both["segs"]:
+                    if sg["col"] != "var(--obs)":
+                        models2[sg["col"]] = models2.get(sg["col"], 0) + 1
+                chk.add(f"{scheme} city both days: the overlay puts yesterday on today and again on tomorrow",
+                        bool(yd_both["mid"]) and len(ob2) == 2 and ob2[0]["x1"] <= yd_both["mid"] + 1
+                        and ob2[1]["x0"] >= yd_both["mid"] - 1 and models2 and all(v == 2 for v in models2.values()),
+                        str({"mid": yd_both["mid"], "obs": [(round(o["x0"]), round(o["x1"])) for o in ob2], "models": models2}))
+                page.locator("#ydayBtn").click(); page.wait_for_timeout(500)
                 page.locator("#dayToday").click(); page.wait_for_timeout(700)
 
                 # ---- the board's heading: which board, which side, which day
@@ -1706,7 +1860,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 order = page.eval_on_selector_all(".wrap > *", "e=>e.map(x=>x.id||x.className||x.tagName)")
                 body = [o for o in order if o != "site"]
                 chk.add(f"{scheme} landing page: heading first, then the map",
-                        body[0] == "mapTitle" and body.index("card") < body.index("dotKey"),
+                        body[0] == "mapTitle" and body.index("card") < body.index("legend"),
                         str(body[:5]))
 
                 # ---- the stations carried for their wind alone
@@ -1821,6 +1975,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                 return route.fulfill(response=resp, body=json.dumps(d))
                         return route.continue_()
 
+                    page_wall, page = page, fixture_page()
                     page.route("**/data/snapshots/**", _wo_page_routes)
                     errs_wo = len(errs)
                     page.goto(f"{srv.url}/{_href}"); page.wait_for_timeout(1900)
@@ -1840,6 +1995,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     chk.add(f"{scheme} wind-only page: it renders without a script error",
                             len(errs) == errs_wo, str(errs[errs_wo:][:1]))
                     page.unroute("**/data/snapshots/**")
+                    page.context.close(); page = page_wall
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1600)
 
                 # abroad there is no government forecast to compare against, so the
@@ -1848,12 +2004,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # view; on a lows view the absence is correct.
                 page.locator("#m2").click(); page.wait_for_timeout(700)
                 wlabs = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
-                # abroad the label is the market's number and the local date it
-                # applies to; a station with no board is named without a number
+                # abroad the dot carries the market's number and the label the station
+                # and the local date it applies to; a station with no board is named alone
                 import re as _re
-                chk.add(f"{scheme} world map: a label carries the market value and its local date",
-                        sum(1 for l in wlabs if _re.search(r"-?\d+\u00b0[CF]? \u00b7 \w+ \d+$", l)) >= 3,
-                        str(wlabs[:3]))
+                wvals = page.eval_on_selector_all("#mapW text.dotv", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} world map: a dot carries the market value and its label the local date",
+                        len(wvals) >= 3 and sum(1 for l in wlabs if _re.search(r" \u00b7 \w+ \d+$", l)) >= 3,
+                        str(wvals[:3]) + str(wlabs[:3]))
                 chk.add(f"{scheme} world map: a station without a board is named without a number",
                         all(_re.search(r"\d", l) for l in wlabs if "\u00b7" in l), "")
                 page.locator("#m4").click(); page.wait_for_timeout(700)
@@ -1872,10 +2029,30 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         band == 1, str(band))
                 chk.add(f"{scheme} sub-hourly: it is never drawn as a second observation line",
                         page.locator("#chart path[stroke='var(--obs)'][stroke-dasharray]").count() == 0, "")
-                leg2 = page.eval_on_selector_all("#chart text", "e=>e.map(x=>x.textContent)")
-                chk.add(f"{scheme} sub-hourly: the legend names the band and says what it is not",
-                        any("Range between reports" in x for x in leg2)
-                        and any("not settlement" in x for x in leg2), str([x for x in leg2 if "Range" in x]))
+                bt = page.evaluate("""async () => {
+                  const svg = document.querySelector('#chart');
+                  const sub = ((await WXD.get('subhourly/KATL.json')).data || {}).hourly || [];
+                  const fc = (await WXD.get('forecast/KATL.json')).data;
+                  const mark = nm => { const e = [...svg.querySelectorAll('text')].find(t => t.textContent === nm);
+                                       return e ? +e.getAttribute('x') : null; };
+                  const ds = Date.parse(fc.markers.dayStart), de = Date.parse(fc.markers.dayEnd);
+                  const xm = mark('midnight'), xe = mark('day end');
+                  // an hour of the band inside the day on screen
+                  const q = sub.filter(h => h.lo != null && h.hi != null
+                    && Date.parse(h.h) >= ds && Date.parse(h.h) + 36e5 <= de)[0];
+                  if (!q || xm == null || xe == null) return null;
+                  const t = Date.parse(q.h) + 30 * 60000, xq = xm + (t - ds) / (de - ds) * (xe - xm);
+                  const r0 = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+                  svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true,
+                    clientX: r0.left + xq * r0.width / vb.width, clientY: r0.top + 200 * r0.height / vb.height }));
+                  await new Promise(r => setTimeout(r, 120));
+                  const tip = document.querySelector('#tip').innerText;
+                  svg.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+                  return { tip, want: q.lo.toFixed(1) + '\u2013' + q.hi.toFixed(1) };
+                }""")
+                chk.add(f"{scheme} sub-hourly: the crosshair names the band, its range and what it is not",
+                        bool(bt and "Range between reports" in bt["tip"] and bt["want"] in bt["tip"]
+                             and "not settlement" in bt["tip"]), str(bt)[:200])
                 # the station's own place, so a reader knows what the code means
                 # the ladder box on a city page: the two prices, and very little else
                 page.locator("#chart rect[role='link']").nth(1).hover(force=True); page.wait_for_timeout(320)
@@ -1887,10 +2064,35 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         page.locator("#tip .tprice .tps").count() >= 1,
                         str(page.eval_on_selector_all("#tip .tprice .tps", "e=>e.map(x=>x.textContent)")))
                 chk.add(f"{scheme} city ladder box: it is short, and says what the strike asks",
-                        page.locator("#tip .tg .tk").count() <= 3
-                        and "Settles Yes if" in lt, f"rows={page.locator('#tip .tg .tk').count()}")
-                chk.add(f"{scheme} city ladder box: the book is one line, not five rows",
-                        "they buy, they do not sell" in lt and "Yes bid" in lt, lt[-90:])
+                        page.locator("#tip > .tg .tk").count() <= 3
+                        and "Settles Yes if" in lt, f"rows={page.locator('#tip > .tg .tk').count()}")
+                # the standing book under the rows (owner, 2026-10-16): each side's standing bid and
+                # what it lets a reader buy now, the central value and the spread they imply, and no
+                # claim that the two bids sum to a dollar or that nobody sells
+                bk = page.evaluate("""() => {
+                  const txt = sel => [...document.querySelectorAll(sel)].map(e => e.textContent);
+                  const ks = txt('#tip > .tg .tk'), vs = txt('#tip > .tg .tv');
+                  const i = ks.findIndex(k => /median/.test(k));
+                  return { ks: txt('#tip .tq .tk'), vs: txt('#tip .tq .tv'), median: i >= 0 ? vs[i] : null };
+                }""")
+                fmt_c = lambda v: ("%d" % v if v == int(v) else "%.1f" % v) + "\u00a2"
+                m1 = re.match(r"([\d.]+)\u00a2, so you can buy No now at ([\d.]+)\u00a2$", (bk["vs"] or [""])[0])
+                m2 = re.match(r"([\d.]+)\u00a2, so you can buy Yes now at ([\d.]+)\u00a2$", (bk["vs"] + ["", ""])[1])
+                ok_bk = bk["ks"][:2] == ["Standing Yes bid", "Standing No bid"] and bool(m1 or m2)
+                for m in (m1, m2):
+                    if m:
+                        ok_bk = ok_bk and abs(float(m[1]) + float(m[2]) - 100) < 1e-9
+                if m1 and m2:
+                    yb, yn = float(m1[1]), float(m2[2])
+                    ok_bk = (ok_bk and bk["ks"][2:4] == ["Central value", "Spread"]
+                             and bk["vs"][2].startswith(fmt_c((yb + yn) / 2)) and bk["vs"][3].startswith(fmt_c(yn - yb)))
+                chk.add(f"{scheme} city ladder box: the standing bids say what each lets you buy, and give the central value and the spread",
+                        ok_bk, str(bk)[:220])
+                chk.add(f"{scheme} city ladder box: no claim that the bids sum to a dollar or that nobody sells",
+                        "sum to a dollar" not in lt and "do not sell" not in lt and "they buy" not in lt, lt[-120:])
+                chk.add(f"{scheme} city ladder box: the market's median is a whole degree",
+                        bk["median"] is None or "beyond the ladder" in bk["median"]
+                        or bool(re.fullmatch(r"-?\d+\u00b0[FC]", bk["median"])), str(bk["median"]))
 
                 # the two pickers sit side by side and finish at the same height,
                 # so neither pushes the chart off the first screen
@@ -2012,14 +2214,98 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # that differ only in when they were issued
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2600)
                 leg = page.eval_on_selector_all("#chart text", "e=>e.map(x=>x.textContent)")
-                named = [t for t in leg if t in ("Observed (METAR)", "Weather Service", "Blend of Models",
-                                                 "Aviation guidance", "GFS MOS")]
-                chk.add(f"{scheme} legend: the sources are named inside the figure",
-                        len(named) >= 4, str(named))
-                chk.add(f"{scheme} legend: each source carries when it was issued and how old it is",
-                        sum(1 for t in leg if "old" in t) >= 3, str([t for t in leg if "old" in t][:3]))
+                # no legend (owner, 2026-10-16): each source is named, with when its run was
+                # issued, on its level labels, and every run in the crosshair
+                named = [t for t in leg if t.split(" (")[0] in ("Weather Service", "Blend of Models", "LAMP", "GFS MOS")]
+                chk.add(f"{scheme} legend: none in the figure; the level labels name each source and its run",
+                        "Observed (METAR)" not in leg and "Earlier runs" not in leg
+                        and len(named) >= 4 and all(t.endswith(")") and " (" in t for t in named), str(named[:4]))
                 chk.add(f"{scheme} legend: the separate freshness table is gone",
                         page.locator("#freshness").count() == 0, "")
+                # ---- each family as its own station rows (owner, 2026-10-16). The blend's and GFS MOS's
+                # levels are the highest and lowest of the rows the chart draws, never the daily maximum
+                # the bulletin issues beside them; GFS MOS has its line; the HRRR joins the chart, its
+                # legend, its labels and the panels below wherever the snapshots carry it; and the
+                # station's other contracts sit at the foot of the page
+                rows_exp = {}
+
+                def _rows_routes(route):
+                    u = route.request.url
+                    if u.endswith("/forecast/KSFO.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        mk = d.get("markers") or {}
+                        d0, d1 = mk.get("dayStart"), mk.get("dayEnd")
+                        nb, ai = d.get("nbm") or {}, (d.get("asIssued") or {}).get("nbm") or {}
+                        # an issued maximum far above every row, which no label may take
+                        nb["txn"] = {mk.get("day"): {"max": 120.0, "min": 1.0}}
+                        nb["highToday"], nb["lowToday"] = 120.0, 1.0
+                        ai["highToday"], ai["lowToday"] = 120.0, 1.0
+                        # the run issued before the day began, which the levels are pinned to
+                        src = (ai.get("rows") or []) + (ai.get("ext") or [])
+                        inday = [r["tempF"] for r in src if r.get("tempF") is not None and d0 <= r["t"] < d1]
+                        rows_exp["nbm"] = (max(inday), min(inday))
+                        base = (d.get("nws") or {}).get("hourly") or []
+                        stamp = (base[0]["t"][:13].replace("-", "") + "00Z") if base else None
+                        d["hrrr"] = {"cycle": stamp, "extCycle": None, "ext": [],
+                                     "hourly": [{"t": r["t"], "tempF": r["tempF"] + 2.0, "tempC": None, "wspd": 8.0,
+                                                 "gust": 14.0} for r in base if r.get("tempF") is not None]}
+                        # and the run issued before the day began, which its level lines are pinned to
+                        pre = ((d.get("asIssued") or {}).get("nws") or {})
+                        d.setdefault("asIssued", {})["hrrr"] = {
+                            "cycle": pre.get("cycle"), "preDay": True, "extCycle": None, "ext": [],
+                            "rows": [{"t": r["t"], "tempF": r["tempF"] + 1.0, "tempC": None}
+                                     for r in pre.get("rows") or [] if r.get("tempF") is not None]}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    if u.endswith("/advanced/KSFO.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        cur = d.get("current") or {}
+                        base = (cur.get("nws") or {}).get("rows") or []
+                        cur["hrrr"] = {"cycle": "20260826T1000Z", "extCycle": None,
+                                       "rows": [{"t": r["t"], "tempF": (r.get("tempF") or 60) + 2.0, "dewF": r.get("dewF"),
+                                                 "sky": 40, "wdir": 250, "wspd": 12.0, "gust": 18.0} for r in base]}
+                        d["current"] = cur
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+
+                page.route("**/data/snapshots/**", _rows_routes)
+                page.goto(f"{srv.url}/city.html?station=KSFO"); page.wait_for_timeout(2800)
+                fam = page.evaluate("""() => {
+                  const t = [...document.querySelectorAll('#chart text')].map(e => e.textContent);
+                  const names = [...document.querySelectorAll('#chart text.lvlnm')].map(e => e.textContent);
+                  const vals = [...document.querySelectorAll('#chart text.lvlval')].map(e => e.textContent);
+                  const adv = [...document.querySelectorAll('#advPanels text')].map(e => e.textContent);
+                  return { names, vals,
+                           mavLine: document.querySelectorAll('#chart path[stroke="var(--mav)"]').length,
+                           hrrrLine: document.querySelectorAll('#chart path[stroke="var(--hrrr)"]').length,
+                           advHrrr: adv.includes('HRRR'),
+                           advLine: document.querySelectorAll('#advPanels path[stroke="var(--hrrr)"]').length,
+                           foot: (() => { const a = document.querySelector('#scoredDays'), b = document.querySelector('#cityContracts');
+                                          return !!(a && b) && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) > 0; })() };
+                }""")
+                nb_label = page.locator("#chart text.lvlnm").filter(has_text="Blend of Models")
+                t_nb = ""
+                if nb_label.count():
+                    nb_label.first.hover(force=True); page.wait_for_timeout(150)
+                    t_nb = page.locator("#tip").inner_text()
+                want_hi = rows_exp.get("nbm", (None, None))[0]
+                chk.add(f"{scheme} rows: the blend's level is the highest of its rows, not its issued maximum",
+                        bool(t_nb) and "120" not in fam["vals"] and "hourly rows" in t_nb and "highest of those rows" in t_nb
+                        and want_hi is not None and ("%d" % round(want_hi)) in fam["vals"], f"{fam['vals']} {t_nb[-160:]}")
+                chk.add(f"{scheme} rows: GFS MOS draws its 3-hourly rows as a line",
+                        fam["mavLine"] >= 1, str(fam["mavLine"]))
+                chk.add(f"{scheme} rows: the HRRR is in the chart and its labels",
+                        fam["hrrrLine"] >= 1 and any(n.startswith("HRRR") for n in fam["names"]),
+                        str(fam["hrrrLine"]) + str(fam["names"]))
+                chk.add(f"{scheme} rows: the HRRR is in the additional variables panels too",
+                        fam["advHrrr"] and fam["advLine"] >= 1, str({k: fam[k] for k in ("advHrrr", "advLine")}))
+                chk.add(f"{scheme} rows: the station's other contracts sit at the foot of the page", fam["foot"], "")
+                page.unroute("**/data/snapshots/**")
+                # a station whose snapshot carries no HRRR (off the grid) shows none
+                page.goto(f"{srv.url}/city.html?station=KSFO"); page.wait_for_timeout(2200)
+                none_leg = page.eval_on_selector_all("#chart text", "e=>e.map(x=>x.textContent)")
+                chk.add(f"{scheme} rows: without an HRRR snapshot there is no HRRR line or label",
+                        not any(t.startswith("HRRR") for t in none_leg)
+                        and page.locator('#chart path[stroke="var(--hrrr)"]').count() == 0, "")
                 # ---- the station's own record, drawn on its page
                 page.goto(f"{srv.url}/city.html?station=KATL"); page.wait_for_timeout(2400)
                 dots = page.locator("#cityScore circle").count()
@@ -2085,7 +2371,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 page.locator("#cBody .lrow").first.hover(force=True); page.wait_for_timeout(250)
                 t_l = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} ladder: the box uses buy-only language",
-                        "Yes bid" in t_l and "No bid" in t_l and "Buy Yes now at" in t_l and "no sellers" in t_l, t_l[:90])
+                        "Yes bid" in t_l and "No bid" in t_l and "Buy Yes now at" in t_l, t_l[:90])
+                # no claim that the bids sum to a dollar or that nobody sells (owner, 2026-10-16)
+                chk.add(f"{scheme} ladder: the box makes no claim that the bids sum to a dollar or that nobody sells",
+                        "sum to" not in t_l and "sell" not in t_l.lower() and "not fee adjusted" in t_l, t_l[-120:])
                 # a product the rotation has not reached is not a product without bids
                 page.goto(f"{srv.url}/contract.html?id=EMUSX"); page.wait_for_timeout(1500)
                 un = page.locator("#cBody").inner_text()
@@ -2113,10 +2402,14 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} series: a strike names where the series stands against it",
                         "Settles" in t_str and "Series now" in t_str, t_str[:90])
                 chk.add(f"{scheme} series: the strike box carries the exchange's price, not a fair value",
-                        ("Buy Yes" in t_str or "no bids" in t_str) and "fair value" not in t_str
+                        ("BUY YES" in t_str.upper() or "Standing" in t_str) and "fair value" not in t_str
                         and "implied" not in t_str.lower(), t_str[-70:])
                 chk.add(f"{scheme} series: the box is short, and the terms are one click away",
-                        t_str.count("\n") <= 12 and "terms" in t_str, str(t_str.count("\n")))
+                        page.locator("#tip > .tg .tk").count() <= 3 and "terms" in t_str,
+                        f"rows={page.locator('#tip > .tg .tk').count()}")
+                chk.add(f"{scheme} series: the strike box gives the standing book and no claim the bids sum to a dollar",
+                        "Standing" in t_str and "sum to a dollar" not in t_str
+                        and "do not sell" not in t_str, t_str[-160:])
                 # ---- climate change: the unit that governs is not cosmetic, so the
                 # page has to say which one and which baseline
                 for pid, want in (("GT", "Celsius"), ("UST", "Fahrenheit"), ("MACD", "parts per million")):
@@ -2207,25 +2500,24 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 groups = page.eval_on_selector_all("table.acc-sources tr.grp th", "e => e.map(x => x.firstChild.textContent.trim())")
                 kinds = set(page.eval_on_selector_all("table.acc-sources td.kind", "e => e.map(x => x.textContent.trim())"))
                 sys_links = page.locator("table.acc-sources td.sys a").count()
-                chk.add(f"{scheme} sources: every forecast system is listed with a link, the market first, then the four families",
-                        groups == ["Prediction market", "Raw numerical weather prediction models",
-                                   "Numerical weather prediction with model output statistics",
-                                   "Human forecasting systems", "AI systems"]
-                        and sys_links >= 21 and any(k.startswith("Deterministic") for k in kinds)
+                chk.add(f"{scheme} sources: every series is listed with a link, the market first, then the paper's five groups",
+                        groups == ["Prediction market", "Station MOS", "Blend", "Human-edited", "Artificial intelligence",
+                                   "Raw numerical weather prediction"]
+                        and sys_links >= 26 and any(k.startswith("Deterministic") for k in kinds)
                         and any(k.startswith("Probabilistic") for k in kinds),
                         f"groups={groups} links={sys_links}")
                 heads = page.eval_on_selector_all("table.acc-sources:not(.acc-feeds) thead th", "e => e.map(x => x.textContent.trim())")
                 recs = page.eval_on_selector_all("table.acc-sources td.rec", "e => e.map(x => x.textContent.trim())")
                 chk.add(f"{scheme} sources: the table carries grid, time step, updates and a filled record for every row",
                         heads == ["System", "What it is", "Kind", "Grid", "Time step", "Updates", "Record"]
-                        and len(recs) >= 21 and all(r.startswith("From ") for r in recs),
+                        and len(recs) >= 26 and all(r.startswith("From ") for r in recs),
                         f"heads={heads} unfilled={[r for r in recs if not r.startswith('From ')][:3]}")
                 chk.add(f"{scheme} sources: the feed table moved to the accuracy page",
                         page.locator("#sources").count() == 1 and "aviationweather.gov METAR" in acc_src, "")
                 # every name in the table is a name the figures use
                 names = page.eval_on_selector_all("table.acc-sources td.sys a", "e => e.map(x => x.textContent.trim())")
-                known = set(page.evaluate("Object.values(WXAcc.NAME)")) | {"American Ensemble", "Canadian Ensemble", "German Ensemble"}
-                chk.add(f"{scheme} sources: the table names each system as the figures do",
+                known = set(page.evaluate("WXAcc.ORDER().map(WXAcc.name)"))
+                chk.add(f"{scheme} sources: the table names each series as the figures do",
                         all(n in known for n in names), str([n for n in names if n not in known]))
                 page.goto(f"{srv.url}/about.html"); page.wait_for_timeout(400)
                 about_txt = page.locator(".wrap").inner_text()
@@ -2268,13 +2560,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} scorecard: the standings are not on it, and it says where they are",
                         page.locator("#standings").count() == 0
                         and page.locator("a[href='accuracy.html']").count() >= 1, "")
-                chk.add(f"{scheme} map: the color key sits under the map and carries nothing else",
+                chk.add(f"{scheme} map: the legend sits under the map and says what a dot's number, color and size are",
                         page.evaluate("""() => { const m = document.querySelector('#map').getBoundingClientRect();
-                          const k = document.querySelector('#dotKey');
+                          const k = document.querySelector('#legend');
                           if (!k || document.querySelector('.how')) return false;
                           const t = k.textContent;
-                          return k.getBoundingClientRect().top - m.bottom < 200
-                                 && t.includes('running warmer') && t.includes('running cooler'); }"""), "")
+                          return k.getBoundingClientRect().top - m.bottom < 200 && t.includes('warmer') && t.includes('cooler')
+                                 && t.includes('The number is the') && t.includes('Color and size'); }"""), "")
                 chk.add(f"{scheme} scorecard: the map keeps its own status strip",
                         page.locator("#pageStatus .status").count() >= 1, "")
                 chk.add(f"{scheme} roster: Colorado Springs is off the map",
@@ -2298,7 +2590,14 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             len(page.locator("body").inner_text().strip()) > 40, path)
                 del errs[:]
                 # the SW contract page: history under SETTLEMENT BASIS, then the
-                # month in progress, then the classic ladder listing
+                # month in progress, then the classic ladder listing.
+                # The month in progress is the browser clock's month, and the
+                # samples list the SW ladder for August to October 2026 only. On
+                # the wall clock from 1 November the block drew no ladder and the
+                # page one svg fewer, so the page is read on a date inside the
+                # samples. The weather page's ladder check uses the same date.
+                SW_NOW = dt.datetime(2026, 10, 15, 12, 0, tzinfo=dt.timezone.utc)
+                page_wall, page = page, fixture_page(SW_NOW)
                 page.goto(f"{srv.url}/contract.html?id=SWTUS"); page.wait_for_timeout(1500)
                 cb = page.locator("#cBody").inner_text()
                 chk.add(f"{scheme} severe contract: history then the month in progress",
@@ -2306,6 +2605,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         and cb.index("SETTLEMENT BASIS") < cb.index("MONTH IN PROGRESS")
                         and page.locator("#cBody svg").count() >= 3, str(page.locator("#cBody svg").count()))
                 chk.add(f"{scheme} severe contract: no script errors", not errs, "; ".join(errs)[:300])
+                page.context.close(); page = page_wall
                 del errs[:]
                 # ---- the map opens on the board that is trading
                 #
@@ -2350,9 +2650,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         warm > 0 and cool > 0, f"warm={warm} cool={cool}")
                 leg = page.locator("#legend").inner_text()
                 chk.add(f"{scheme} map color: the legend states the typical gap it centered on",
-                        "typical gap today" in leg.lower() and "°" in leg, leg[:110])
+                        "typical gap of" in leg.lower() and "°" in leg, leg[:110])
                 chk.add(f"{scheme} map color: the legend says color is distance from typical, not from zero",
-                        "not from zero" in leg and "raw gap" not in leg, leg[-90:])
+                        "measured from the typical gap" in leg and "raw gap" not in leg, leg[-90:])
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_enc = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} map hover: no dot-encoding block and nothing claiming to expect a high",
@@ -2361,14 +2661,15 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # m1 is today's highs, m2 tomorrow's. The current-day hover names the
                 # forecast the office issued and what the station has recorded, and
                 # attributes neither to an expectation of the page's own.
-                chk.add(f"{scheme} map: the current-day view names the issued forecast and the record so far",
-                        "NWS high issued for today" in t_enc and "Observed high so far" in t_enc, t_enc[-140:])
+                chk.add(f"{scheme} map: the current-day view names each model's run from before the day and the record so far",
+                        "Weather Service (" in t_enc and "Observed high so far" in t_enc
+                        and "issued before the day began" in t_enc, t_enc[-160:])
                 page.locator("#m2").click(); page.wait_for_timeout(400)
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_tmw = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} map: the day-ahead view names the forecasts standing for that day",
-                        "NWS high" in t_tmw and "Blend of Models" in t_tmw
-                        and "Expected" not in t_tmw, t_tmw[-140:])
+                        "Weather Service (" in t_tmw and "Blend of Models (" in t_tmw and "newest run" in t_tmw
+                        and "Expected" not in t_tmw, t_tmw[-160:])
                 page.locator("#m3").click(); page.wait_for_timeout(400)
                 page.locator("#map g.dot").first.hover(force=True); page.wait_for_timeout(200)
                 t_lo = page.locator("#tip").inner_text()
@@ -2398,7 +2699,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   return out;
                 }""")
                 chk.add(f"{scheme} map tip: the exchange's number leads",
-                        tt["todayHigh"].split("\n")[1].startswith("Implied high"), tt["todayHigh"][:90])
+                        tt["todayHigh"].split("\n")[1].startswith(("ForecastEx high", "Placeholder high")), tt["todayHigh"][:90])
                 chk.add(f"{scheme} map tip: only the side and day the buttons select",
                         "low" not in tt["todayHigh"].lower().replace("Implied high", "")
                         and "tomorrow" not in tt["todayHigh"].lower().replace("today", "")
@@ -2413,8 +2714,55 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} map tip: the countdown counts down, and stops at zero",
                         tt["cdFuture"] is not None and "h " in tt["cdFuture"] and tt["cdPast"] is None,
                         f"future={tt['cdFuture']} past={tt['cdPast']}")
-                chk.add(f"{scheme} map: today's lows name the issued forecast and what has been recorded",
-                        "NWS low issued for today" in t_lo and "Observed low so far" in t_lo
+                # ---- the number in a dot is the ForecastEx value its hover leads with (owner, 2026-10-20),
+                # and the names beside the dots carry no number
+                page.locator("#m1").click(); page.wait_for_timeout(400)
+                dv = page.evaluate("""() => {
+                  const pairs = [];
+                  document.querySelectorAll('#map g.dot').forEach(g => {
+                    const t = g.querySelector('text.dotv'); if (!t) return;
+                    const r = g.getBoundingClientRect();
+                    g.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}));
+                    pairs.push([t.textContent, document.querySelector('#tip').innerText.split('\\n')[2]]);
+                  });
+                  return { pairs, labels: [...document.querySelectorAll('#map text.lbl')].map(x => x.textContent) };
+                }""")
+                chk.add(f"{scheme} map: the number in each dot is the ForecastEx value its hover gives",
+                        len(dv["pairs"]) >= 10 and all(b == a + "°" for a, b in dv["pairs"]), str(dv["pairs"][:4]))
+                chk.add(f"{scheme} map: the names beside the dots carry no number",
+                        bool(dv["labels"]) and not any(re.search(r"\d", l) for l in dv["labels"]), str(dv["labels"][:4]))
+                # ---- the hover's forecasts are the city chart's level lines, number for number
+                def _map_rows(btn):
+                    page.locator("#" + btn).click(); page.wait_for_timeout(400)
+                    return page.evaluate("""() => {
+                      const g = document.querySelector('#map g.dot[data-station="KSFO"]'); const r = g.getBoundingClientRect();
+                      g.dispatchEvent(new MouseEvent('mousemove', {bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2}));
+                      const out = {};
+                      document.querySelectorAll('#tip .tk').forEach(k => { const v = k.nextElementSibling;
+                        if (/\\(\\d{1,2}[ap] /.test(k.textContent) && v) out[k.textContent.trim()] = v.textContent.trim(); });
+                      return out;
+                    }""")
+                mrows = {b: _map_rows(b) for b in ("m1", "m3", "m2", "m4")}
+                def _chart_levels(tomorrow):
+                    page.goto(f"{srv.url}/city.html?station=KSFO"); page.wait_for_timeout(1800)
+                    if tomorrow:
+                        page.locator("#dayTomorrow").click(); page.wait_for_timeout(900)
+                    names = page.eval_on_selector_all("#chart text.lvlnm", "e=>e.map(x=>x.textContent)")
+                    vals = page.eval_on_selector_all("#chart text.lvlval", "e=>e.map(x=>x.textContent)")
+                    out = {}
+                    for n_, v_ in zip(names, vals):
+                        out.setdefault(n_, []).append(int(v_))
+                    return out
+                ct, cm = _chart_levels(False), _chart_levels(True)
+                def _same(rows, chart, pick):
+                    return bool(rows) and all(n_ in chart and v_ == "%d°" % pick(chart[n_]) for n_, v_ in rows.items())
+                chk.add(f"{scheme} map hover: each model's number is the city chart's level line, today and tomorrow",
+                        _same(mrows["m1"], ct, max) and _same(mrows["m3"], ct, min)
+                        and _same(mrows["m2"], cm, max) and _same(mrows["m4"], cm, min) and len(mrows["m1"]) >= 4,
+                        str({k: mrows[k] for k in ("m1", "m2")})[:200] + " | " + str(ct)[:120])
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
+                chk.add(f"{scheme} map: today's lows name each model's run and what has been recorded",
+                        "Weather Service (" in t_lo and "Observed low so far" in t_lo
                         and "Expected low" not in t_lo, t_lo[:200])
                 page.locator("#m1").click(); page.wait_for_timeout(400)
                 # observed-versus-issued is not a market gap and keeps the plain sign
@@ -2433,12 +2781,43 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} map: the legend no longer repeats the color key below it",
                         "Warmer than the board" not in page.locator("#legend").inner_text(),
                         page.locator("#legend").inner_text()[:80])
-                # every view shades now, not only the day-ahead ones
+                # every view shades with NDFD as the NWS issued it (owner, 2026-10-20), and the
+                # legend under the map carries the NWS color scale and when the issuance was made
+                _days = page.evaluate("""async () => { const s = await fetch('data/snapshots/summary.json').then(r => r.json());
+                  const c = s.cities.find(x => x.onConus); return [c.markers.day, c.markers.tomorrow]; }""")
+                _nd = ndfd_route({"hiT": _days[0], "loT": _days[0], "hi": _days[1], "lo": _days[1]})
+                page.route("**/data/snapshots/ndfd/**", _nd)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1200)
                 for bid in ("m1", "m2", "m3", "m4"):
-                    page.locator("#" + bid).click(); page.wait_for_timeout(400)
-                    chk.add(f"{scheme} map: {bid} draws the forecast field",
-                            page.locator("#map rect[data-i]").count() > 1500,
-                            str(page.locator("#map rect[data-i]").count()))
+                    page.locator("#" + bid).click(); page.wait_for_timeout(500)
+                    lf = page.locator("#legendField").inner_text()
+                    chk.add(f"{scheme} map: {bid} draws NDFD's shading under the dots, with its scale and issuance below",
+                            page.locator("#map image.ndfd").count() == 1 and page.locator("#legendField svg.lgbar").count() == 1
+                            and "National Digital Forecast Database" in lf and "issued" in lf
+                            and ("before the day began" in lf) == (bid in ("m1", "m3")),
+                            lf[:160])
+                # a cell's hover reads that cell's own number, never a blended one: the centre row of
+                # the test view is 95 - 60 * 75 / 149 = 64.8, so 65
+                fhov = page.evaluate("""() => {
+                  const img = document.querySelector('#map image.ndfd'), svg = document.querySelector('#map');
+                  if (!img) return null;
+                  const pt = svg.createSVGPoint(); pt.x = 480; pt.y = 302;
+                  const q = pt.matrixTransform(svg.getScreenCTM());
+                  img.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: q.x, clientY: q.y }));
+                  return document.querySelector('#tip').innerText;
+                }""")
+                chk.add(f"{scheme} map: a shading cell's hover gives NDFD's value there and when it was issued",
+                        bool(fhov and "NDFD" in fhov and "65°" in fhov and "Issued" in fhov), str(fhov)[:160])
+                page.unroute("**/data/snapshots/ndfd/**", _nd)
+                # a view for another day is left unshaded rather than shown for the wrong day
+                _nd2 = ndfd_route({"hiT": "2026-01-01", "loT": "2026-01-01", "hi": "2026-01-02", "lo": "2026-01-02"})
+                page.route("**/data/snapshots/ndfd/**", _nd2)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1200)
+                chk.add(f"{scheme} map: an NDFD view for another day is not drawn",
+                        page.locator("#map image.ndfd").count() == 0
+                        and "No NWS forecast shading" in page.locator("#legendField").inner_text(), "")
+                page.unroute("**/data/snapshots/ndfd/**", _nd2)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
                 page.locator("#m1").click(); page.wait_for_timeout(400)
                 wl = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
                 chk.add(f"{scheme} map: the international stations are named on the world canvas",
@@ -2457,6 +2836,73 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 page.locator("#m2").click(); page.wait_for_timeout(400)
                 chk.add(f"{scheme} map tomorrow view: still available and shaded",
                         "TOMORROW" in page.locator("#mapTitle").inner_text().upper(), page.locator("#mapTitle").inner_text()[:60])
+
+                # ---- the surface analysis loop under the landing map (owner, 2026-10-20): the Weather
+                # Prediction Center's analysis over satellite imagery, every three hours for the last 24,
+                # copied into the bucket by pipeline/floater.py and shown whole; a loop whose newest
+                # analysis is more than eight hours old is not shown
+                _cn_now = dt.datetime.now(dt.timezone.utc).replace(minute=0, second=0, microsecond=0)
+                # the loop's frame, floater.wpc_frame(): the map's width, all of WPC's picture (its unit tests pin it)
+                WPC_W, WPC_H = 960, 583
+                def _wpc_frames(age_h):
+                    t_last = _cn_now - dt.timedelta(hours=age_h + _cn_now.hour % 3)
+                    return [{"t": (t_last - dt.timedelta(hours=3 * (7 - i))).strftime("%Y-%m-%dT%H:%MZ"),
+                             "key": "wpcsfc/%s-%dx%d.png" % ((t_last - dt.timedelta(hours=3 * (7 - i))).strftime("%Y%m%d%H"),
+                                                             WPC_W, WPC_H),
+                             "w": WPC_W, "h": WPC_H} for i in range(8)]
+                _cn = {"frames": _wpc_frames(2)}
+                def _wpc(route):
+                    if route.request.url.endswith("/wpcsfc/index.json"):
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                            "schema": 1, "asof": _cn_now.strftime("%Y-%m-%dT%H:%M:%SZ"), "frames": _cn["frames"],
+                            "product": "Analysis/Satellite Composite (CONUS)"}))
+                    return route.fulfill(status=200, content_type="image/png", body=tiny_png((60, 100, 150)))
+                cn_read = lambda: page.evaluate("""() => {
+                  const host = document.querySelector('#conusLoop'), c = host && host.querySelector('.loopcard');
+                  if (!c) return { hidden: host ? host.hidden : null, card: false };
+                  const m = document.querySelector('#map').getBoundingClientRect(), im = c.querySelector('img.loopimg').getBoundingClientRect();
+                  return { hidden: host.hidden, card: true, title: (host.querySelector('.pickttl') || {}).textContent,
+                           after: (host.previousElementSibling || {}).id, src: c.querySelector('img.loopimg').getAttribute('src'),
+                           time: c.querySelector('.looptime').textContent, sub: c.querySelector('.lsub').textContent,
+                           credit: c.querySelector('.lsrc').textContent, cropped: !!c.querySelector('.loopcrop'),
+                           mapW: m.width, mapH: m.height, mapL: m.left, imgW: im.width, imgH: im.height, imgL: im.left,
+                           bg: getComputedStyle(c.querySelector('img.loopimg')).backgroundColor };
+                }""")
+                page.route("**/data/snapshots/wpcsfc/**", _wpc)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1500)
+                page.locator("#conusLoop").scroll_into_view_if_needed(); page.wait_for_timeout(300)
+                cn0 = cn_read()
+                chk.add(f"{scheme} surface analysis: WPC's loop sits under the map's legend, newest first, dated, credited",
+                        bool(cn0["card"] and not cn0["hidden"] and cn0["title"] == "SURFACE ANALYSIS" and cn0["after"] == "legend"
+                             and cn0["src"].endswith("/" + _cn["frames"][-1]["key"]) and "latest" in cn0["time"]
+                             and re.search(r"\w{3} \d{1,2}\)", cn0["time"]) and "last 8 analyses" in cn0["sub"]
+                             and "Weather Prediction Center" in cn0["credit"] and not cn0["cropped"]), str(cn0)[:300])
+                cn_seen = set()
+                for _ in range(18):                                   # the loop holds the newest frame 1.4 s a turn
+                    cn_seen.add(page.evaluate("() => (document.querySelector('#conusLoop .looptime') || {}).textContent || ''").split(" ")[0])
+                    page.wait_for_timeout(150)
+                # the analysis is drawn on the map's projection at the scale that holds all of WPC's picture
+                # (owner, 2026-10-20), so it spans the map's width in its frame's own proportions, never a
+                # square (it was one, stretched, at first), and its fan-shaped margins show the page behind
+                chk.add(f"{scheme} surface analysis: the picture spans the map's width in its own proportions, margins clear",
+                        bool(cn0["card"] and abs(cn0["imgW"] - cn0["mapW"]) <= 2 and abs(cn0["imgL"] - cn0["mapL"]) <= 2
+                             and abs(cn0["imgH"] - cn0["imgW"] * WPC_H / WPC_W) <= 2
+                             and cn0["bg"] in ("rgba(0, 0, 0, 0)", "transparent") and "redrawn on this map" in cn0["credit"]),
+                        str({k: (round(cn0[k], 1) if isinstance(cn0.get(k), float) else cn0.get(k))
+                             for k in ("mapW", "imgW", "imgH", "bg")}))
+                chk.add(f"{scheme} surface analysis: the loop plays while it is on screen",
+                        len(cn_seen) >= 2 and cn_seen <= {f["t"][11:16] + "Z" for f in _cn["frames"]}, str(sorted(cn_seen)))
+                _cn["frames"] = _wpc_frames(9)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1500)
+                cn_old = cn_read()
+                chk.add(f"{scheme} surface analysis: a loop whose newest analysis is more than eight hours old is not shown",
+                        cn_old["hidden"] is True and not cn_old["card"], str(cn_old)[:120])
+                page.unroute("**/data/snapshots/wpcsfc/**", _wpc)
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1200)
+                cn_none = cn_read()
+                chk.add(f"{scheme} surface analysis: no index, no loop, and the map draws as before",
+                        cn_none["hidden"] is True and not cn_none["card"] and page.locator("#map circle").count() > 0,
+                        str(cn_none)[:120])
 
                 # ---- market overlay: on by config on the standalone site; off reserves no space
                 page.goto(f"{srv.url}/city.html?station=KLGA&market=off")
@@ -2515,7 +2961,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         "Yes bid" in t_chip and "No bid" in t_chip and "quoted" in t_chip, t_chip[-90:])
                 chk.add(f"{scheme} hover: a ladder bar states what each side pays", "pays" in t_chip and "×" in t_chip, t_chip[:120])
                 t_lvl = tip_after(page.locator("#chart text.lvlnm").first)
-                chk.add(f"{scheme} hover: level label names the source, cycle and value", "forecast" in t_lvl and "Cycle" in t_lvl and "Value" in t_lvl, t_lvl[:80])
+                chk.add(f"{scheme} hover: level label names the source, its run, its hours and value",
+                        "forecast" in t_lvl and "Run" in t_lvl and "Hours" in t_lvl and "Value" in t_lvl, t_lvl[:120])
                 t_pick = tip_after(page.locator("#pick g").nth(3))
                 chk.add(f"{scheme} hover: picker dot shows tomorrow and today", "tomorrow" in t_pick and "Observed so far today" in t_pick, t_pick[:80])
                 box = page.locator("#chart").bounding_box()
@@ -2616,31 +3063,56 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 BASE = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
                 HOURS = [0, 6, 12, 24, 30, 36]
 
-                def _ledger(interim, final):
+                def _ledger(interim, final, late=False, ruled=False, hours=None, interim_after=None, final_gusts=None):
                     # a distinct recorded price per delivery, so scrubbing back has to
                     # move the square rather than leave today's price under an old ladder
+                    hours = hours or HOURS
                     steps = []
-                    for k, hh in enumerate(HOURS):
+                    for k, hh in enumerate(hours):
                         t0 = BASE + dt.timedelta(hours=hh)
-                        steps.append({"id": t0.strftime("%Y%m%d%H"), "kind": "livecyc",
-                                      "at": t0.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": "t",
+                        # late: each file stamped as recorded, five hours after its cycle,
+                        # and the first day's 12Z recorded after the next day's 00Z, the
+                        # way Isaias's 00Z was filed after its 06Z on 7 October
+                        ts = "t"
+                        if late:
+                            rec = (t0 + dt.timedelta(hours=5) if k != 2
+                                   else BASE + dt.timedelta(hours=hours[3] + 5, minutes=30))
+                            ts = rec.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        # the fourth delivery carries the reading the vendor lane keeps while a
+                        # file is the newest (owner, 2026-10-09), so the page has one to pair with
+                        if k == 3:
+                            end = {"pricesEnd": {"BR": {str(t): 61.0 for t in THR}}}
+                        else:
+                            end = {}
+                        steps.append({**end, "id": t0.strftime("%Y%m%d%H"), "kind": "livecyc",
+                                      "at": t0.strftime("%Y-%m-%dT%H:%M:%SZ"), "ts": ts,
                                       "sites": _lad(0.2 + 0.1 * k),
                                       "siteMeta": {"BR": {"name": "Brownsville"}, "GA": {"name": "Galveston"}},
                                       "pwin": {"BR": 80.0, "GA": 20.0},
                                       "prices": {"BR": {str(t): 10.0 + 5 * k for t in THR}}})
                     # stamped the way the pipeline stamps it, the vendor's time and the
-                    # moment it was recorded, so it takes its place on the axis by arrival
+                    # moment it was recorded, so it takes its place on the axis by arrival.
+                    # It lands a few hours after the last cycle, as Isaias's did once its
+                    # cycles had stopped, whatever the number of cycles before it, or after
+                    # the cycle at interim_after hours, with the later cycles landing after it.
                     if interim:
-                        steps.append({"id": "INT", "kind": "interim", "at": "2026-09-02T14:50:56Z", "ts": "2026-09-02T14:54:48Z",
+                        t_int = BASE + dt.timedelta(hours=hours[-1] if interim_after is None else interim_after,
+                                                    minutes=170, seconds=56)
+                        steps.append({"id": "INT", "kind": "interim", "at": t_int.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                      "ts": (t_int + dt.timedelta(minutes=3, seconds=52)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                                       "sites": _lad(0.95, [0, 0, 0, 0, 0, 0]),
                                       "siteMeta": {"BR": {"name": "Brownsville", "covered": True},
                                                    "GA": {"name": "Galveston", "covered": True}},
                                       "pwin": {"BR": 99.0, "GA": 1.0},
                                       "prices": {"BR": {str(t): 44.0 for t in THR}}})
-                    return {"schema": 2, "name": "Erin", "year": 2026, "attribution": "Powered by Reask", "thresholds": THR,
+                    return {**({"pricesFrom": "override"} if ruled else {}),
+                            "schema": 2, "name": "Erin", "year": 2026, "attribution": "Powered by Reask", "thresholds": THR,
                             "steps": steps, "sites": {"BR": {"name": "Brownsville", "firstStep": "2026090100"},
                                                       "GA": {"name": "Galveston", "firstStep": "2026090100"}},
-                            "final": {"BR": 96.0, "GA": 41.0} if final else None}
+                            # the whole final file, as the vendor lane files it in the ledger: every
+                            # location the parser kept (a blank is dropped, a zero is a figure)
+                            "final": (final_gusts or dict({"BR": 96.0, "GA": 41.0, "JA": 0.0},
+                                                          **{k: 20.0 - i * 0.1 for i, k in enumerate(FILLERS)})) if final else None}
 
                 def _index_for(interim):
                     storm = {"name": "Erin", "year": 2026,
@@ -2683,14 +3155,63 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                              for i, k in enumerate(FILLERS)})}
                     return ix
 
+                # NHC's advisories for a storm, as pipeline/advisories.py files them: Erin's run
+                # one every six hours from the 18Z before the vendor's first cycle, through the
+                # 18Z it missed, to one a day after its last, northwest across the Gulf
+                ADV_HOURS = [-6, 0, 6, 12, 18, 24, 30, 36, 54]
+
+                def _adv_doc(sid="al052026", name="Erin", basin="AL", hours=ADV_HOURS, start=(-90.0, 22.0), step=(-0.6, 0.45)):
+                    advs = []
+                    for n, hh in enumerate(hours, start=1):
+                        t0 = BASE + dt.timedelta(hours=hh)
+                        lon, lat = start[0] + step[0] * n, start[1] + step[1] * n
+                        pts = [{"tau": tau, "t": (t0 + dt.timedelta(hours=tau)).strftime("%Y-%m-%dT%H:%MZ"),
+                                "lon": round(lon - 0.05 * tau, 2), "lat": round(lat + 0.04 * tau, 2),
+                                "kt": 50 + 5 * n, "gust": 65 + 5 * n, "type": "TS" if n < 5 else "HU"}
+                               for tau in (0, 12, 24, 36, 48)]
+                        e = pts[-1]
+                        cone = [[lon, lat - 0.3], [e["lon"] + 1.6, e["lat"]], [e["lon"], e["lat"] + 1.6],
+                                [e["lon"] - 1.6, e["lat"]], [lon - 0.3, lat], [lon, lat - 0.3]]
+                        advs.append({"adv": "%03d" % n, "issued": (t0 + dt.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%MZ"),
+                                     "t0": t0.strftime("%Y-%m-%dT%H:%MZ"), "name": name if n > 2 else "Five", "basin": basin,
+                                     "points": pts, "cone": [cone], "track": [[[p_["lon"], p_["lat"]] for p_ in pts]]})
+                    return {"schema": 1, "id": sid, "basin": basin, "year": 2026, "name": name,
+                            "names": ["Five", name], "advisories": advs, "missing": {}}
+
+                def _adv_index(docs):
+                    return {"schema": 1, "storms": {d["id"]: {"name": d["name"], "names": d["names"], "year": d["year"],
+                                                             "basin": d["basin"], "n": len(d["advisories"]),
+                                                             "first": d["advisories"][0]["t0"], "last": d["advisories"][-1]["t0"],
+                                                             "seen": None, "complete": True} for d in docs}}
+
                 def _storm_routes(interim, final, index_final=False, drop_hlf=False, drop_pool=False,
-                                  placeholder_pool=False):
+                                  placeholder_pool=False, late=False, ruled=False, hours=None, interim_after=None,
+                                  final_gusts=None, drop_l=False, advisories=None, roster_extra=None,
+                                  markets_extra=None, index_extra=None):
                     def handler(route):
                         u = route.request.url
+                        if advisories is not None and "/snapshots/advisories/" in u:
+                            if u.endswith("/advisories/index.json"):
+                                return route.fulfill(status=200, content_type="application/json", body=json.dumps(_adv_index(advisories)))
+                            want = u.rsplit("/", 1)[-1].split("?")[0][:-len(".json")]
+                            doc_ = next((d for d in advisories if d["id"] == want), None)
+                            return (route.fulfill(status=200, content_type="application/json", body=json.dumps(doc_)) if doc_
+                                    else route.fulfill(status=404, body=""))
+                        if roster_extra and u.endswith("/snapshots/hurricane.json"):
+                            resp = route.fetch()
+                            h_ = json.loads(resp.text())
+                            h_["storms"] = (h_.get("storms") or []) + roster_extra
+                            return route.fulfill(response=resp, body=json.dumps(h_))
                         if u.endswith("/reask.json"):
-                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_index_ff(interim, index_final)))
+                            ix_ = _index_ff(interim, index_final)
+                            ix_["storms"] = ix_["storms"] + (index_extra or [])
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(ix_))
                         if "/storm/Erin_2026.json" in u:
-                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(interim, final)))
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(_ledger(interim, final, late, ruled, hours, interim_after, final_gusts)))
+                        if u.endswith("/lhl/index.json"):
+                            return route.fulfill(status=200, content_type="application/json", body=json.dumps(
+                                {"schema": 1, "pools": {"LHLERG": {"name": "Erin \u2014 highest wind, Gulf Coast",
+                                                                   "listed": not drop_pool}}}))
                         if u.endswith("/lhl/LHLERG.json"):
                             pts = [{"t": "2026-09-0%dT%02d:00:00Z" % (1 + hh // 24, hh % 24),
                                     "p": {"Brownsville": 30 + hh, "Galveston": 40 - hh, "Corpus Christi": 12}}
@@ -2717,8 +3238,12 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                     {"spec": "2026.9", "expiryLabel": "September 2026", "strike": "Brownsville",
                                      "label": "Brownsville", "numeric": False, "bid": 0.4, "ask": 0.46, "mid": 0.43,
                                      "conid": 999200001, "conidYes": 999200001}]}]
+                            m["markets"] = m["markets"] + (markets_extra or [])
                             if drop_pool:
                                 m["markets"] = [x for x in m["markets"] if x.get("symbol") != "LHLERG"]
+                            if drop_l:
+                                # the exchange drops a settled storm's location contracts as well
+                                m["markets"] = [x for x in m["markets"] if x.get("symbol") != "LERBR"]
                             if placeholder_pool:
                                 # the exchange's placeholder for nothing resting, which
                                 # this site has called an empty book since 3 September
@@ -2736,24 +3261,37 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     page.route("**/data/snapshots/**", _storm_routes(_interim, _final))
                     page.goto(f"{srv.url}/hurricane.html")
                     page.wait_for_timeout(1400)
-                    n_del = 6 + (1 if _interim else 0)          # deliveries on the timeline
+                    n_del = 6 + (1 if _interim else 0)          # deliveries
+                    # the replay's steps (owner, 2026-10-20): with no advisories on file for the
+                    # storm they are its deliveries, then the final once it has landed
+                    n_st = n_del + (1 if _final else 0)
                     ncards = page.locator("#liveStorms .scardwrap").count()
                     chk.add(f"{scheme} storm ({tag}): a card per signalled location", ncards >= 1, f"cards={ncards}")
+                    lines = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('#liveStorms .scardwrap')]
+                      .map(c => [c.querySelector('.lt').textContent, (c.querySelector(':scope > .cap') || {}).textContent || '']))""")
+                    if not _final:
+                        chk.add(f"{scheme} storm ({tag}): a listed location names its contract, an unlisted one says none yet",
+                                lines.get("Brownsville (BR)") == "contracts listed · LERBR"
+                                and lines.get("Galveston (GA)") == "no contracts listed for this location yet", str(lines)[:200])
                     labels = page.eval_on_selector_all("#liveStorms .scardwrap text", "els => els.map(e => e.textContent)")
                     # the pending columns: the next file, the interim and the final
                     # hold their places while the storm runs; once settled the final
                     # column is real and nothing is still to come
-                    pend = [t for t in labels if t in ("next", "Metryc", "Interim", "final")]
+                    pend = [t for t in labels if t in ("next", "Metryc", "Interim", "final", "Final")]
                     if _final:
                         chk.add(f"{scheme} storm ({tag}): the settled axis ends on the real settlement columns",
-                                "Metryc" in labels and "Interim" in labels and "final" in labels and "next" not in labels, str(pend))
+                                "Interim" in labels and "Final" in labels and "next" not in labels, str(pend))
                     elif _interim:
                         # once the interim has landed the storm waits on the final and nothing else
                         chk.add(f"{scheme} storm ({tag}): after the interim only the final is still to come",
-                                "Interim" in labels and "final" in labels and "next" not in labels, str(pend))
+                                "Interim" in labels and "Final" in labels and "next" not in labels, str(pend))
                     else:
                         chk.add(f"{scheme} storm ({tag}): the next file, the interim and the final hold their columns",
-                                "next" in labels and "Metryc" in labels and "Interim" in labels and "final" in labels, str(pend))
+                                "next" in labels and "Interim" in labels and "Final" in labels, str(pend))
+                    # one word each under the Metryc columns, the shading's key naming them Metryc
+                    chk.add(f"{scheme} storm ({tag}): the Metryc columns are labeled Interim and Final, one word each",
+                            "Metryc" not in labels and "final" not in labels
+                            and labels.count("Interim") == labels.count("Final") == ncards, str(pend)[:120])
                     ticks = len([t for t in labels if re.fullmatch(r"\d\dZ", t)])
                     days = len([t for t in labels if re.fullmatch(r"\d\d/\d\d", t)])
                     ets = len([t for t in labels if re.fullmatch(r"\d{1,2}:\d\d[ap]", t)])
@@ -2764,6 +3302,45 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     marks = len([t for t in labels if t in ("\u2713", "\u2715")])
                     chk.add(f"{scheme} storm ({tag}): outcome marks appear only once settled",
                             (marks > 0) == _final, f"marks={marks} settled={_final}")
+                    # Each chart is shaded by what its columns measure (owner, 2026-10-12):
+                    # LiveCyc looks forward from its cycle, the Metryc interim and final
+                    # count the whole storm, so a line that sinks through the cycles and
+                    # rises at the interim reads as a change of measure. Held to by where
+                    # the drawn bands fall under the axis labels and by the colours they
+                    # resolve to in this scheme, on the cards and on the pool's series.
+                    ph = page.evaluate("""() => {
+                      const read = svg => {
+                        if (!svg) return null;
+                        const bands = [...svg.querySelectorAll('rect.phase')].map(r => ({
+                          cls: r.classList.contains('phase-cum') ? 'cum' : 'fwd', b: r.getBoundingClientRect(),
+                          fill: getComputedStyle(r).fill }));
+                        const at = px => { const z = bands.find(q => px >= q.b.left - 0.5 && px <= q.b.right + 0.5); return z ? z.cls : 'none'; };
+                        const texts = [...svg.querySelectorAll('text')];
+                        const mid = e => { const b = e.getBoundingClientRect(); return b.left + b.width / 2; };
+                        const cyc = texts.filter(e => /^\\d\\dZ$/.test(e.textContent)).map(e => at(mid(e)));
+                        const met = texts.filter(e => e.textContent === 'Interim' || e.textContent === 'Final').map(e => at(mid(e)));
+                        const fills = {};
+                        bands.forEach(q => { fills[q.cls] = q.fill; });
+                        return { cyc, met, fills, n: bands.length,
+                                 key: texts.map(e => e.textContent).filter(t => t === 'LiveCyc, forward-looking' || t === 'Metryc, cumulative') };
+                      };
+                      return { card: read(document.querySelector('#liveStorms svg.scard')),
+                               pool: read(document.querySelector('#liveStorms svg.lhlserie')) };
+                    }""")
+                    def _phase_ok(r):
+                        if not r:
+                            return False
+                        f = r["fills"]
+                        seen = lambda c: bool(c) and c not in ("none", "rgba(0, 0, 0, 0)", "transparent")
+                        return (len(r["cyc"]) >= 2 and all(v == "fwd" for v in r["cyc"])
+                                and len(r["met"]) >= 2 and all(v == "cum" for v in r["met"])
+                                and seen(f.get("fwd")) and seen(f.get("cum")) and f.get("fwd") != f.get("cum")
+                                and len(r["key"]) == 2)
+                    chk.add(f"{scheme} storm ({tag}): a card is shaded forward under its cycles and cumulative under Metryc",
+                            _phase_ok(ph and ph["card"]), str(ph and ph["card"])[:300])
+                    if ph and ph["pool"]:
+                        chk.add(f"{scheme} storm ({tag}): the pool's series carries the same shading",
+                                _phase_ok(ph["pool"]), str(ph["pool"])[:300])
                     plad = page.evaluate("""() => {
                       const svg = document.querySelector('#liveStorms .plad');
                       if (!svg) return null;
@@ -2790,9 +3367,43 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             "need not add to one hundred" in poolsay
                             and "registry when the pool was listed" in poolsay
                             and "may list further locations" in poolsay, poolsay[:150])
-                    chk.add(f"{scheme} storm ({tag}): the pool ladder draws the site's Yes/No bars and no tick of the site's own",
-                            bool(plad and plad["rows"] >= 1 and plad["yes"] >= 1 and plad["no"] >= 1
-                                 and plad["calcTicks"] == 0), str(plad))
+                    # the newest figures as bars come first and the deliveries through
+                    # time under them (owner, 2026-10-07): the vendor's latest file and
+                    # a pool card above the cards, a listed pool's own series below
+                    lay2 = page.evaluate("""() => {
+                      const host = document.querySelector('#liveStorms');
+                      const before = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+                      const file = host.querySelector('.filehd');
+                      const cards = host.querySelector('.scards');
+                      const strip = host.querySelector('svg.stimeline');
+                      const card = [...host.querySelectorAll('.ladder')].find(x => !x.closest('.cwrap') && /highest wind/i.test(x.textContent));
+                      const ser = [...host.querySelectorAll('.cwrap')].find(x => /highest wind/i.test(x.textContent));
+                      return { file: !!file, cards: !!cards, fileFirst: before(file, cards) && before(file, strip),
+                               card: !!card, cardFirst: !card || before(card, cards),
+                               series: !!ser, seriesAfter: !ser || before(cards, ser) };
+                    }""")
+                    chk.add(f"{scheme} storm ({tag}): the newest file's bars and the pool card sit above the series through time",
+                            bool(lay2 and lay2["file"] and lay2["cards"] and lay2["fileFirst"] and lay2["cardFirst"]
+                                 and lay2["seriesAfter"] and (lay2["card"] or lay2["series"])), str(lay2))
+                    if not _final:
+                        chk.add(f"{scheme} storm ({tag}): the pool ladder draws the site's Yes/No bars and no tick of the site's own",
+                                bool(plad and plad["rows"] >= 1 and plad["yes"] >= 1 and plad["no"] >= 1
+                                     and plad["calcTicks"] == 0), str(plad))
+                    else:
+                        # once the final is in the panel beside the chart says how the pool
+                        # resolved (owner, 2026-10-13): each candidate's gust and the side
+                        # that pays, with no price and no contract to open
+                        resolved = page.evaluate("""() => {
+                          const lad = document.querySelector('#liveStorms svg.lhlserie g.plad');
+                          if (!lad) return null;
+                          const t = [...lad.querySelectorAll('text')].map(e => e.textContent);
+                          return { title: t.includes('How it resolved'), rows: t.filter(x => / · (Yes|No)$/.test(x)),
+                                   cents: t.filter(x => /¢$/.test(x)).length,
+                                   links: lad.querySelectorAll('rect[data-contract-url]').length };
+                        }""")
+                        chk.add(f"{scheme} storm ({tag}): once settled the pool's panel says how it resolved, the gust and the side that pays",
+                                bool(resolved and resolved["title"] and "96 mph · Yes" in resolved["rows"]
+                                     and resolved["cents"] == 0 and resolved["links"] == 0), str(resolved))
                     # Both of a storm's contracts read their price off the exchange and
                     # open that contract on the exchange when clicked, the same as every
                     # other board on this site. The two are listed only while a storm
@@ -2804,10 +3415,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         .map(r => r.getAttribute('data-contract-url'))[0] || '';
                       return { cents, rowUrl };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): the pool ladder prints the exchange's price in cents",
-                            bool(prices and "43¢" in prices["cents"] and "57¢" in prices["cents"]), str(prices["cents"])[:80])
-                    chk.add(f"{scheme} storm ({tag}): a pool ladder row opens that contract on the exchange",
-                            "conid_yes=999200001" in prices["rowUrl"], prices["rowUrl"][:110])
+                    if not _final:
+                        chk.add(f"{scheme} storm ({tag}): the pool ladder prints the exchange's price in cents",
+                                bool(prices and "43¢" in prices["cents"] and "57¢" in prices["cents"]), str(prices["cents"])[:80])
+                        chk.add(f"{scheme} storm ({tag}): a pool ladder row opens that contract on the exchange",
+                                "conid_yes=999200001" in prices["rowUrl"], prices["rowUrl"][:110])
                     # the pool chart: the exchange's price solid on the delivery
                     # axis, and nothing of the site's own behind it, since the pool's
                     # calculation is the desk's and reaches the exchange through
@@ -2839,8 +3451,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             bool(lhl and lhl["priceSolid"] >= 1 and lhl["calcDashed"] == 0
                                  and lhl["calcDots"] == 0 and lhl["legend"]
                                  and "(LHL" in lhl["title"]), str(lhl))
-                    chk.add(f"{scheme} storm ({tag}): the market's ladder sits to the right of the chart",
-                            bool(lhl and lhl["ladderRows"] >= 1 and lhl["ladderTitle"]), str(lhl))
+                    if not _final:
+                        chk.add(f"{scheme} storm ({tag}): the market's ladder sits to the right of the chart",
+                                bool(lhl and lhl["ladderRows"] >= 1 and lhl["ladderTitle"]), str(lhl))
                     chk.add(f"{scheme} storm ({tag}): the pool's axis names the NHC cycle and the file's arrival in ET",
                             bool(lhl and lhl["cycleTicks"] >= 2 and lhl["etTicks"] >= 2 and lhl["axisNote"]), str(lhl))
                     # The one caption this panel may carry is the contract's own
@@ -2862,8 +3475,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     leg = page.locator("#liveStorms div:not(.xhdr) > .slegend")
                     leg_t = leg.first.inner_text() if leg.count() else ""
                     chk.add(f"{scheme} storm ({tag}): one key names the strikes' colors and the two line styles",
-                            leg.count() == 1 and "≥70" in leg_t and "Forecasts from Reask" in leg_t
-                            and "exchange price" in leg_t
+                            leg.count() == 1 and "≥70" in leg_t and "Reask LiveCyc, the fair-value reference" in leg_t
+                            and "exchange price" in leg_t and "Metryc interim" in leg_t
+                            and ("how each strike settled" in leg_t) == _final
                             and "NHC cycle" in leg_t and "ET" in leg_t, leg_t[:100])
                     tog = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphtog button")
                     note_l = page.locator("#liveStorms div:not(.xhdr) > .emphrow .emphnote")
@@ -2871,14 +3485,21 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     chk.add(f"{scheme} storm ({tag}): the switch offers the two series and the note explains why they differ",
                             tog.count() == 2 and "forward-looking forecast only" in note_t
                             and "entire course of the storm" in note_t, f"buttons={tog.count()} {note_t[:60]}")
-                    emph = lambda: page.evaluate("() => [...document.querySelectorAll('#liveStorms svg.scard, #liveStorms svg.lhlserie')].map(s => s.classList.contains('emph-livecyc') ? 'L' : s.classList.contains('emph-exchange') ? 'X' : '?').join('')")
-                    chk.add(f"{scheme} storm ({tag}): the exchange's price stands forward by default",
-                            emph() and set(emph()) == {"X"}, emph())
+                    # LiveCyc, the fair-value reference, stands forward by default on every location
+                    # card (owner, 2026-10-09); the pool chart draws only the exchange's price and
+                    # keeps it forward whatever the switch says
+                    emph = lambda: page.evaluate("() => [...document.querySelectorAll('#liveStorms svg.scard')].map(s => s.classList.contains('emph-livecyc') ? 'L' : s.classList.contains('emph-exchange') ? 'X' : '?').join('')")
+                    pool = lambda: page.evaluate("() => [...document.querySelectorAll('#liveStorms svg.lhlserie')].map(s => s.classList.contains('emph-exchange') ? 'X' : '?').join('')")
+                    leg = page.locator("#liveStorms .slegend").first.inner_text()
+                    chk.add(f"{scheme} storm ({tag}): LiveCyc, the fair-value reference, stands forward by default",
+                            emph() and set(emph()) == {"L"} and set(pool() or "X") == {"X"}
+                            and tog.nth(0).inner_text().strip() == "LiveCyc" and "fair-value reference" in leg, f"{emph()} {pool()} {leg[-80:]}")
                     tog.nth(1).click(); page.wait_for_timeout(120)
-                    chk.add(f"{scheme} storm ({tag}): the switch brings LiveCyc forward on every chart at once",
-                            emph() and set(emph()) == {"L"} and tog.nth(1).evaluate("b => b.classList.contains('on')"), emph())
+                    chk.add(f"{scheme} storm ({tag}): the switch brings the exchange's price forward on every card at once",
+                            emph() and set(emph()) == {"X"} and set(pool() or "X") == {"X"}
+                            and tog.nth(1).evaluate("b => b.classList.contains('on')"), emph())
                     tog.nth(0).click(); page.wait_for_timeout(120)
-                    chk.add(f"{scheme} storm ({tag}): and back", emph() and set(emph()) == {"X"}, emph())
+                    chk.add(f"{scheme} storm ({tag}): and back", emph() and set(emph()) == {"L"}, emph())
                     # ---- both series, dashed and solid, in the strike's color
                     styles = page.evaluate("""() => {
                       const svg = document.querySelector('#liveStorms svg.scard');
@@ -2890,6 +3511,50 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     }""")
                     chk.add(f"{scheme} storm ({tag}): LiveCyc dashed and the exchange solid, one color per strike",
                             styles["dashed"] >= 3 and styles["solid"] >= 3 and styles["same"], str(styles))
+                    # ---- the Metryc files stand apart from LiveCyc (owner, 2026-10-15): LiveCyc looks
+                    # forward and the interim and final count the whole storm, so no line joins them.
+                    # The interim is a square per strike in the strike's color, a dotted line runs from
+                    # it to the final's dot at 100 or 0, every LiveCyc reading and every square carries
+                    # a check or a cross once the final is in, and the settled gust stands in the title
+                    mk = page.evaluate(r"""() => {
+                      const svg = document.querySelector('#liveStorms .scardwrap[data-sid="BR"] svg.scard');
+                      if (!svg) return null;
+                      const mid = r => +r.getAttribute('x') + (+r.getAttribute('width')) / 2;
+                      const bands = [...svg.querySelectorAll('rect.hband')];
+                      const lcEnd = Math.max(...[...svg.querySelectorAll('path.lcline')].map(p =>
+                        Math.max(...(p.getAttribute('d').match(/[ML]-?[\d.]+/g) || []).map(c => +c.slice(1)))));
+                      const sq = [...svg.querySelectorAll('rect.intmk')];
+                      return { lastLc: bands[5] ? mid(bands[5]) : null, intX: bands[6] ? mid(bands[6]) : null, lcEnd,
+                               sqX: sq.map(mid), sqColored: sq.every(r => /^hsl/.test(r.getAttribute('stroke') || '')),
+                               glyphs: [...svg.querySelectorAll('text.rsmk')].map(t => t.textContent),
+                               dots: svg.querySelectorAll('circle.ldot').length,
+                               finFrom: [...svg.querySelectorAll('path.finline')].map(p => +(p.getAttribute('d').match(/^M(-?[\d.]+)/) || [0, NaN])[1]),
+                               finY: [...svg.querySelectorAll('circle.findot')].map(c => +c.getAttribute('cy')),
+                               mph: [...svg.querySelectorAll('text')].filter(t => / mph$/.test(t.textContent)).length,
+                               title: svg.closest('.scardwrap').querySelector('.lt').textContent };
+                    }""")
+                    near = lambda a, b, tol=1.5: a is not None and b is not None and abs(a - b) < tol
+                    if not _interim:
+                        chk.add(f"{scheme} storm ({tag}): before the interim there are no squares and no checks",
+                                bool(mk and not mk["sqX"] and not mk["glyphs"] and not mk["finY"] and mk["dots"] > 0
+                                     and mk["title"] == "Brownsville (BR)"), str(mk)[:240])
+                    else:
+                        chk.add(f"{scheme} storm ({tag}): the LiveCyc lines stop at the last cycle and the interim is a square per strike in its color",
+                                bool(mk and near(mk["lcEnd"], mk["lastLc"]) and len(mk["sqX"]) == 5 and mk["sqColored"]
+                                     and all(near(v, mk["intX"]) for v in mk["sqX"])), str(mk)[:240])
+                    if _interim and not _final:
+                        chk.add(f"{scheme} storm ({tag}): until the final there is no check, no line to it and no gust in the title",
+                                bool(mk and not mk["glyphs"] and not mk["finFrom"] and not mk["finY"] and mk["dots"] > 0
+                                     and mk["title"] == "Brownsville (BR)"), str(mk)[:240])
+                    if _final:
+                        # Brownsville settles at 96 mph: Yes at 70, 80 and 90, No at 100 and 110
+                        chk.add(f"{scheme} storm ({tag}): once settled every reading carries a check or a cross and no dot is left",
+                                bool(mk and mk["glyphs"] and set(mk["glyphs"]) == {"✓", "✕"} and mk["dots"] == 0), str(mk)[:240])
+                        chk.add(f"{scheme} storm ({tag}): the dotted lines run from the interim squares alone, to 100 or 0",
+                                bool(mk and len(mk["finFrom"]) == 5 and all(near(v, mk["intX"]) for v in mk["finFrom"])
+                                     and sorted(round(v) for v in mk["finY"]) == [16, 16, 16, 150, 150]), str(mk)[:240])
+                        chk.add(f"{scheme} storm ({tag}): the settled gust stands in the title and not on the panel",
+                                bool(mk and mk["title"] == "Brownsville (BR) · final 96 mph" and mk["mph"] == 0), str(mk)[:240])
                     # ---- the hover: the strikes down the side, both series across
                     # six cycles and the interim are delivered columns; once settled the
                     # final is a delivered column too. The table's headers render in
@@ -2897,54 +3562,75 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     bands = page.locator("#liveStorms .scardwrap").first.locator("rect.hband")
                     chk.add(f"{scheme} storm ({tag}): a hover band per delivered column, none for a pending one",
                             bands.count() == n_del + (1 if _final else 0), f"bands={bands.count()}")
-                    bands.nth(5).hover(force=True)
+                    # three figures a row (owner, 2026-10-08): LiveCyc to the whole percent,
+                    # the exchange's Yes midpoint, and the difference between the two as printed
+                    heads = lambda: page.evaluate("() => [...document.querySelectorAll('#tip table.l3 th')].map(t => t.textContent.trim().toLowerCase())")
+                    want_h = lambda second: ["strike", second, "exchange"] + (["settled"] if _final else [])
+                    bands.nth(4).hover(force=True)
                     page.wait_for_timeout(150)
                     t_px = page.locator("#tip").inner_text()
-                    low = t_px.lower()
-                    chk.add(f"{scheme} storm ({tag}): the hover reads LiveCyc and the exchange's price side by side",
-                            "livecyc" in low and "exchange" in low and "≥70 mph" in t_px and "%" in t_px and "35¢" in t_px, t_px[:120])
-                    # the price now belongs beside the newest delivery: the last cycle while
-                    # cycles are coming, the interim once it has landed
+                    h_px = heads()
+                    # the fifth cycle: Brownsville 60% at 70 mph against 35c, the price standing while
+                    # that file was the newest, read as the sixth landed (owner, 2026-10-08: its own
+                    # reading, 30c, was taken before the market maker had moved to it)
+                    chk.add(f"{scheme} storm ({tag}): the hover reads LiveCyc, the fair-value reference, beside the exchange's midpoint",
+                            h_px == want_h("livecyc") and "≥70 mph" in t_px and "60%" in t_px and "35¢" in t_px
+                            and "30¢" not in t_px and "60.0%" not in t_px and "fair-value reference" in t_px, f"{h_px} {t_px[:140]}")
+                    # a delivery with a kept reading pairs with it: the fourth cycle, Brownsville
+                    # 50% at 70 mph, against the 61c the lane kept while that file was the newest
+                    bands.nth(3).hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_px3 = page.locator("#tip").inner_text()
+                    chk.add(f"{scheme} storm ({tag}): a delivery pairs with the price kept while it was the newest",
+                            "61¢" in t_px3 and "while this file was the newest" in t_px3, t_px3[:160])
+                    # the newest delivery reads the midpoint standing now (43c), the one the
+                    # panel beside the map quotes: the last cycle while cycles are coming, the
+                    # interim once it has landed; any earlier one reads the midpoint as it stood
+                    bands.nth(5).hover(force=True)
+                    page.wait_for_timeout(150)
+                    t_px5 = page.locator("#tip").inner_text()
                     if not _interim:
-                        chk.add(f"{scheme} storm ({tag}): the newest cycle carries the price now",
-                                "now" in low and "43¢" in t_px and "(latest)" in t_px, t_px[:160])
+                        chk.add(f"{scheme} storm ({tag}): the newest cycle reads the midpoint standing now",
+                                heads() == want_h("livecyc") and "43¢" in t_px5 and "(latest)" in t_px5, t_px5[:160])
                     else:
-                        chk.add(f"{scheme} storm ({tag}): a cycle before the newest delivery carries no price now",
-                                "now" not in low, t_px[:160])
+                        chk.add(f"{scheme} storm ({tag}): a cycle before the newest delivery reads the midpoint standing as the next file landed",
+                                heads() == want_h("livecyc") and "44¢" in t_px5 and "43¢" not in t_px5, t_px5[:160])
                         bands.nth(6).hover(force=True)
                         page.wait_for_timeout(150)
                         t_int = page.locator("#tip").inner_text()
-                        chk.add(f"{scheme} storm ({tag}): the interim column is named and priced as it stood",
-                                "metryc interim" in t_int.lower() and "44¢" in t_int and "(latest)" in t_int, t_int[:120])
-                        chk.add(f"{scheme} storm ({tag}): the newest delivery also carries the price now",
-                                "now" in t_int.lower() and "43¢" in t_int, t_int[:160])
+                        chk.add(f"{scheme} storm ({tag}): the interim column is named and, as the newest delivery, priced now",
+                                heads() == want_h("metryc interim") and "43¢" in t_int and "95%" in t_int
+                                and "(latest)" in t_int, t_int[:160])
                         if _final:
                             chk.add(f"{scheme} storm ({tag}): once settled the hover says how each strike resolved",
-                                    "settled" in t_int.lower() and "✓ Yes" in t_int, t_int[:160])
-                    # ---- the interim's zero is a figure: Galveston's dashed line runs on
-                    # to the interim column at zero rather than stopping at the last
-                    # cycle, the hover names the file and prints the zero, and the
-                    # vendor table carries the interim's row under the cycle's
+                                    "✓ Yes" in t_int, t_int[:160])
+                    # ---- the interim's zero is a figure: Galveston's LiveCyc line stops at
+                    # the last cycle and the interim's zero stands as squares in the interim
+                    # column, the hover names the file and prints the zero, and the vendor
+                    # table carries the interim's row under the cycle's
                     ga = page.evaluate(r"""() => {
                       const card = document.querySelector('#liveStorms .scardwrap[data-sid="GA"]');
                       if (!card) return null;
                       const svg = card.querySelector('svg.scard');
                       const bands = [...svg.querySelectorAll('rect.hband')];
                       const labels = [...svg.querySelectorAll('text')].map(t => t.textContent);
-                      const order = labels.filter(t => /^(next|Interim|final)$/.test(t)).join(' ');
+                      const order = labels.filter(t => /^(next|Interim|Final)$/.test(t)).join(' ');
                       const int = bands[6], line = svg.querySelector('path.lcline');
                       if (!int || !line) return { bands: bands.length, line: !!line, order };
-                      const colX = +int.getAttribute('x') + (+int.getAttribute('width')) / 2;
+                      const mid = r => +r.getAttribute('x') + (+r.getAttribute('width')) / 2;
                       const d = line.getAttribute('d');
                       const m = d.match(/([\d.]+),([\d.]+)$/) || [0, NaN, NaN];
-                      return { endX: +m[1], endY: +m[2], colX, bands: bands.length, order };
+                      const sq = [...svg.querySelectorAll('rect.intmk')].map(r =>
+                        [mid(r), +r.getAttribute('y') + (+r.getAttribute('height')) / 2]);
+                      return { endX: +m[1], endY: +m[2], colX: mid(int), lastX: mid(bands[5]), sq, bands: bands.length, order };
                     }""")
-                    want = "next Interim final" if not _interim else "Interim final"
+                    want = "next Interim Final" if not _interim else "Interim Final"
                     chk.add(f"{scheme} storm ({tag}): the columns still to come follow the deliveries in order",
                             bool(ga and ga["order"] == want), str(ga and ga["order"]))
                     if _interim:
-                        chk.add(f"{scheme} storm ({tag}): the dashed line runs on to the interim column at the zero it published",
-                                bool(ga and abs(ga["endX"] - ga["colX"]) < 1.5 and abs(ga["endY"] - 150) < 0.6), str(ga))
+                        chk.add(f"{scheme} storm ({tag}): the LiveCyc line stops at the last cycle and the interim's zero is a square per strike",
+                                bool(ga and abs(ga["endX"] - ga["lastX"]) < 1.5 and len(ga["sq"]) == 3
+                                     and all(abs(q[0] - ga["colX"]) < 1.5 and abs(q[1] - 150) < 0.6 for q in ga["sq"])), str(ga))
                         page.locator('#liveStorms .scardwrap[data-sid="GA"] rect.hband').nth(6).hover(force=True)
                         page.wait_for_timeout(150)
                         t_ga = page.locator("#tip").inner_text().lower()
@@ -3018,17 +3704,14 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                 bool(pool and pool["dots"] and pool["lines"] >= 1
                                      and all(abs(d - 26) < 0.6 or abs(d - 186) < 0.6 for d in pool["dots"])
                                      and min(pool["dots"]) < 30), str(pool))
-                        # the vendor publishes a full float; the settled figure reads to a tenth
-                        gust = page.evaluate("""() => {
-                          const t = [...document.querySelectorAll('#liveStorms svg.scard text')]
-                            .map(e => e.textContent).filter(x => / mph$/.test(x));
-                          return t;
-                        }""")
-                        one_dp = lambda g: (g.endswith(" mph") and g.count(".") == 1
-                                            and len(g[:-4].split(".")[1]) == 1
-                                            and g[:-4].replace(".", "").isdigit())
-                        chk.add(f"{scheme} storm ({tag}): the settled gust reads to one decimal place",
-                                bool(gust) and all(one_dp(g) for g in gust), str(gust)[:100])
+                        # the vendor publishes a full float; the contracts resolve on whole
+                        # miles an hour (owner, 2026-10-12), so that is how the figure reads in
+                        # each card's title (owner, 2026-10-15)
+                        gust = page.evaluate("""() => [...document.querySelectorAll('#liveStorms .scardwrap .lt .ltfin')]
+                          .map(e => e.textContent)""")
+                        chk.add(f"{scheme} storm ({tag}): the settled gust reads in whole miles an hour",
+                                bool(gust) and all(re.fullmatch(r" · final \d+ mph", g) for g in gust)
+                                and " · final 96 mph" in gust and " · final 41 mph" in gust, str(gust)[:100])
                     # ---- a card opened to fill the window brings the key and the switch with it
                     page.locator("#liveStorms .scardwrap .zb.ex").first.click(); page.wait_for_timeout(200)
                     full = page.locator("#liveStorms .scardwrap.full")
@@ -3054,42 +3737,58 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     attrib = page.locator("#liveStorms .attrib").first.inner_text()
                     chk.add(f"{scheme} storm ({tag}): the attribution carries the vendor's mark and no claim about whose numbers they are",
                             attrib.strip() == "Powered by Reask", attrib)
+                    # the location cards' prices open the exchange, and the section says so under them
+                    stn = page.evaluate("""() => [...document.querySelectorAll('#liveStorms p.tradenote')].map(n => ({
+                      text: n.textContent, prev: n.previousElementSibling ? n.previousElementSibling.className : null }))""")
+                    # (and one under the latest file's ladders, a priced panel of its own, while that panel is shown)
+                    chk.add(f"{scheme} storm ({tag}): a line under the location cards says a price opens the exchange",
+                            any(n["prev"] == "scards" for n in stn) and len(stn) <= 2
+                            and all(n["prev"] in ("scards", "ladders vgrid") for n in stn)
+                            and all(n["text"] == "Click on any price to trade contracts through IBKR Prediction Markets" for n in stn),
+                            str(stn))
                     # ---- the cursor, and scrubbing across deliveries
                     ticks = page.locator("#liveStorms svg.stimeline circle, #liveStorms svg.stimeline rect").count()
-                    chk.add(f"{scheme} storm ({tag}): one tick per delivery on the timeline", ticks == n_del, f"ticks={ticks}")
+                    chk.add(f"{scheme} storm ({tag}): one tick per step on the timeline", ticks == n_st, f"ticks={ticks}")
                     strip = page.locator("#liveStorms svg.stimeline").first
                     read = lambda: page.locator("#liveStorms svg.stimeline text").first.text_content()
-                    chk.add(f"{scheme} storm ({tag}): the cursor starts at the newest delivery",
-                            f"delivery {n_del} of {n_del}" in read() and "(latest)" in read(), read())
+                    chk.add(f"{scheme} storm ({tag}): the cursor starts at the newest step",
+                            f"step {n_st} of {n_st}" in read() and "(latest)" in read(), read())
                     cx = lambda: page.eval_on_selector("#liveStorms .scardwrap line.scur", "e => e.getAttribute('x1')")
                     was = cx()
-                    page.get_by_title("the delivery before this one").first.click()
+                    page.get_by_title("the step before this one").first.click()
                     page.wait_for_timeout(120)
-                    chk.add(f"{scheme} storm ({tag}): stepping back names the delivery it lands on",
-                            f"delivery {n_del - 1} of {n_del}" in read() and "(latest)" not in read(), read())
+                    chk.add(f"{scheme} storm ({tag}): stepping back names the step it lands on",
+                            f"step {n_st - 1} of {n_st}" in read() and "(latest)" not in read(), read())
                     chk.add(f"{scheme} storm ({tag}): the cursor line moves with the step", cx() != was, f"{was} -> {cx()}")
-                    # a past delivery is priced as it stood then: the cursor's hollow square
-                    # sits at that delivery's recorded price, and the dot on the vendor's line
+                    # one more step back from the interim on a settled storm, to a cycle, whose
+                    # line the cursor marks (the interim's own squares mark its readings)
+                    if _final:
+                        page.get_by_title("the step before this one").first.click(); page.wait_for_timeout(120)
+                    # the cursor marks the vendor's line at the delivery it stands on, and no
+                    # box: neither the cursor's square over the price nor the price-now square
+                    # beside the newest column is drawn (owner, 2026-10-08); the exchange's own
+                    # small squares mark its readings
                     cur = page.evaluate("""() => {
                       const svg = document.querySelector('#liveStorms svg.scard');
                       const g = svg.querySelector('line.scur').nextElementSibling;
-                      return { dots: g.querySelectorAll('circle').length, squares: g.querySelectorAll('rect').length };
+                      return { dots: g.querySelectorAll('circle').length, squares: g.querySelectorAll('rect').length,
+                               now: svg.querySelectorAll('rect.pxnow').length, readings: svg.querySelectorAll('rect.pxdot').length };
                     }""")
-                    chk.add(f"{scheme} storm ({tag}): the cursor marks both series at the delivery it stands on",
-                            cur["dots"] >= 1 and cur["squares"] >= 1, str(cur))
+                    chk.add(f"{scheme} storm ({tag}): the cursor marks the vendor's line and draws no box",
+                            cur["dots"] >= 1 and cur["squares"] == 0 and cur["now"] == 0 and cur["readings"] >= 6, str(cur))
                     box = strip.bounding_box()
                     page.mouse.move(box["x"] + box["width"] * 0.05, box["y"] + box["height"] / 2)
                     page.mouse.down()
                     page.mouse.move(box["x"] + box["width"] * 0.30, box["y"] + box["height"] / 2, steps=6)
                     page.mouse.up()
                     page.wait_for_timeout(120)
-                    chk.add(f"{scheme} storm ({tag}): dragging the strip scrubs to another delivery",
-                            f"of {n_del}" in read() and f"delivery {n_del} of {n_del}" not in read(), read())
+                    chk.add(f"{scheme} storm ({tag}): dragging the strip scrubs to another step",
+                            f"of {n_st}" in read() and f"step {n_st} of {n_st}" not in read(), read())
                     strip.press("ArrowLeft"); page.wait_for_timeout(100)
                     mid = read()
                     strip.press("End"); page.wait_for_timeout(120)
                     chk.add(f"{scheme} storm ({tag}): the arrow keys step and End returns to the latest",
-                            mid != read() and f"delivery {n_del} of {n_del}" in read(), f"{mid} -> {read()}")
+                            mid != read() and f"step {n_st} of {n_st}" in read(), f"{mid} -> {read()}")
                     # ---- a cycle the vendor never delivered
                     ngap = page.locator("#liveStorms .scardwrap rect.sgap").count()
                     ncards2 = page.locator("#liveStorms .scardwrap").count()
@@ -3108,31 +3807,62 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     t_gap = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} storm ({tag}): the gap box counts the hours and the missing cycles",
                             "missing here" in t_gap and "12 hours" in t_gap and "6 hours" in t_gap, t_gap[:160])
-                    # ---- the map: a signalled location goes to its card in the storm section
+                    if tag == "live":
+                        # ---- the side panel beside the map: two slots that say what they
+                        # will hold until a red location is hovered, then that location's
+                        # ladder and its series (owner, 2026-10-07)
+                        side = page.evaluate("""() => {
+                          const s = document.getElementById('mapSide');
+                          return { shown: !!s && !s.hidden && getComputedStyle(s).display !== 'none',
+                                   empty: document.querySelectorAll('#mapSide .msbox .msempty').length,
+                                   quick: document.querySelectorAll('#mapSide .msquick button').length };
+                        }""")
+                        chk.add(f"{scheme} storm ({tag}): the side panel stands beside the map with its two slots empty",
+                                bool(side and side["shown"] and side["empty"] == 2 and side["quick"] >= 1), str(side))
+                        page.locator("#basin circle[role='button']").first.hover(force=True)
+                        page.wait_for_timeout(600)
+                        filled = page.evaluate("""() => ({
+                          ladder: document.querySelectorAll('#msLadder .vloc').length,
+                          series: document.querySelectorAll('#msSeries svg.scard').length,
+                          sel: document.querySelectorAll('#basin circle.msel').length,
+                          name: (document.querySelector('#msLadder .lt') || {}).textContent || '' })""")
+                        chk.add(f"{scheme} storm ({tag}): hovering a red location fills the panel with its ladder and its series",
+                                bool(filled and filled["ladder"] == 1 and filled["series"] == 1 and filled["sel"] == 1
+                                     and "Brownsville" in filled["name"]), str(filled))
+                        # the dot's own box is the contract to trade there (owner, 2026-10-08):
+                        # Brownsville reads 60, 30, 10, 3% at 70, 80, 90, 100 mph, so the highest
+                        # listed rung with at least a ten percent chance is 90, Yes 46c and No 60c
+                        t_box = page.locator("#tip").inner_text()
+                        chk.add(f"{scheme} storm ({tag}): a location's box offers the highest listed rung with a ten percent chance, as Yes and No prices",
+                                "buy yes" in t_box.lower() and "buy no" in t_box.lower() and "Above 90" in t_box
+                                and "46\u00a2" in t_box and "60\u00a2" in t_box and "10%" in t_box
+                                and "\u2265 70 mph" not in t_box, t_box[:200])
+                        page.mouse.move(2, 2); page.wait_for_timeout(150)
+                        kept = page.locator("#msLadder .vloc").count()
+                        chk.add(f"{scheme} storm ({tag}): the panel keeps the location after the pointer leaves",
+                                kept == 1, f"ladder cards={kept}")
+                    # ---- the map: a click on a signalled location pins its box, and the box's
+                    # prices then open the contract on IBKR (owner, 2026-10-08)
                     dot = page.locator("#basin circle[role='button']")
                     chk.add(f"{scheme} storm ({tag}): the signalled location is clickable on the map",
                             dot.count() >= 1, f"dots={dot.count()}")
                     if dot.count():
                         dot.first.scroll_into_view_if_needed()
                         dot.first.click(force=True)
-                        # the scroll is animated, so the card is given a moment to arrive
-                        inview = False
-                        for _ in range(12):
-                            page.wait_for_timeout(200)
-                            inview = page.evaluate("""() => {
-                              const c = document.querySelector('#liveStorms .scardwrap.flash');
-                              if (!c) return false;
-                              const r = c.getBoundingClientRect();
-                              return r.top >= 0 && r.bottom <= innerHeight;
-                            }""")
-                            if inview:
-                                break
-                        flash = page.locator("#liveStorms .scardwrap.flash")
-                        chk.add(f"{scheme} storm ({tag}): clicking a location scrolls to its card below and marks it",
-                                flash.count() == 1 and inview, f"flash={flash.count()} inview={inview}")
-                        chk.add(f"{scheme} storm ({tag}): the card it goes to is that location's",
-                                flash.first.get_attribute("data-sid") == "BR" if flash.count() else False, "")
-                        chk.add(f"{scheme} storm ({tag}): clicking the dot pins no box on the way",
+                        page.wait_for_timeout(250)
+                        pin = page.evaluate("""() => {
+                          const t = document.getElementById('tip');
+                          const a = [...t.querySelectorAll('a.tp')];
+                          return { pinned: t.dataset.pinned || '', links: a.length,
+                                   href: a.every(x => /conid_yes=/.test(x.getAttribute('href')) && x.target === '_blank'),
+                                   sides: a.map(x => x.textContent.toLowerCase().indexOf('buy ' + (x.classList.contains('yes') ? 'yes' : 'no')) >= 0),
+                                   clickable: getComputedStyle(t).pointerEvents };
+                        }""")
+                        chk.add(f"{scheme} storm ({tag}): clicking a location pins its box with both prices linked to the contract",
+                                bool(pin and pin["pinned"] == "1" and pin["links"] == 2 and pin["href"]
+                                     and all(pin["sides"]) and pin["clickable"] == "auto"), str(pin))
+                        page.mouse.click(4, 4); page.wait_for_timeout(150)
+                        chk.add(f"{scheme} storm ({tag}): a click elsewhere lets the pinned box go",
                                 page.locator("#tip").evaluate("e => e.dataset.pinned || ''") == "", "")
                         chk.add(f"{scheme} storm ({tag}): no panel is drawn under the map any more",
                                 page.locator("#sitePanel, .spanel").count() == 0, "")
@@ -3174,6 +3904,243 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
                     page.unroute("**/data/snapshots/**")
 
+                # ---- the settled gust is rounded half up to a whole mile an hour, the figure the
+                # wind contracts resolve on (owner, 2026-10-12): a final of 99.5 mph prints 100 and
+                # clears the 100 mph strike, 110 mph does not, and 99.4 would have printed 99.
+                # Galveston settles Yes at 70 mph where its interim printed zero, as Gulfport's
+                # 60 mph did for Isaias, so its stacked squares have a misread one to show
+                page.route("**/data/snapshots/**", _storm_routes(True, True, final_gusts={"BR": 99.5, "GA": 75.0}))
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1400)
+                card = page.locator("#liveStorms .scardwrap").first
+                g_lab = card.evaluate("c => c.querySelector('.lt').textContent")
+                card.locator("rect.hband").last.hover(force=True); page.wait_for_timeout(150)
+                g_rows = page.evaluate("() => [...document.querySelectorAll('#tip table.l3 tr')].map(r => [...r.cells].map(c => c.textContent.trim()))")
+                res = {r[0]: r[-1] for r in g_rows if r}
+                g_fn = page.evaluate("() => [WXC.settleMph(99.5), WXC.settleMph(99.4), WXC.settleMph(144.158), WXC.settleMph(null)]")
+                chk.add(f"{scheme} storm: a settled gust is rounded half up to a whole mile an hour, and the strikes settle on it",
+                        g_lab == "Brownsville (BR) · final 100 mph" and res.get("≥100 mph") == "✓ Yes" and res.get("≥110 mph") == "✕ No"
+                        and g_fn == [100, 99, 144, None], f"labels={g_lab} rows={res} fn={g_fn}")
+                # where interim squares stack, the strike nearest the line between Yes and No
+                # stands on top: Galveston's three at zero show the 70 mph square and its check
+                stack = page.evaluate("""() => {
+                  const svg = document.querySelector('#liveStorms .scardwrap[data-sid="GA"] svg.scard');
+                  const sq = svg ? [...svg.querySelectorAll('rect.intmk')] : [];
+                  const top = sq[sq.length - 1];
+                  return top ? { n: sq.length, stroke: top.getAttribute('stroke'),
+                                 glyph: (top.nextElementSibling || {}).textContent || '' } : null;
+                }""")
+                chk.add(f"{scheme} storm: where interim squares stack, the strike nearest Yes and No stands on top",
+                        bool(stack and stack["n"] == 3 and stack["stroke"] == "hsl(210 70% 45%)" and stack["glyph"] == "\u2713"),
+                        str(stack))
+                page.unroute("**/data/snapshots/**")
+
+                # ---- a settled storm whose pool the exchange has dropped from its listing (Isaias,
+                # 2026-10-13): the section draws the pool's kept series and how it resolved, found
+                # through the index of kept series, and no card saying no pool is carried
+                page.route("**/data/snapshots/**", _storm_routes(True, True, drop_pool=True, drop_l=True))
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1600)
+                lines = page.evaluate("""() => Object.fromEntries([...document.querySelectorAll('#liveStorms .scardwrap')]
+                  .map(c => [c.querySelector('.lt').textContent, (c.querySelector(':scope > .cap') || {}).textContent || '']))""")
+                chk.add(f"{scheme} storm: once settled and delisted, a card still names the contract it traded and none says yet",
+                        lines.get("Brownsville (BR) · final 96 mph") == "contracts listed · LERBR"
+                        and lines.get("Galveston (GA) · final 41 mph") == "no contracts listed for this location"
+                        and not any("yet" in v for v in lines.values()), str(lines)[:200])
+                gone = page.evaluate("""() => {
+                  const host = document.querySelector('#liveStorms');
+                  const svg = host.querySelector('svg.lhlserie');
+                  const wrap = svg && svg.closest('.cwrap');
+                  const t = svg ? [...svg.querySelectorAll('g.plad text')].map(e => e.textContent) : [];
+                  return { series: !!svg, title: wrap ? ((wrap.querySelector('.lt') || {}).textContent || '') : '',
+                           lines: svg ? svg.querySelectorAll('path.pxline').length : 0,
+                           resolved: t.includes('How it resolved'), rows: t.filter(x => / · (Yes|No)$/.test(x)),
+                           dots: svg ? [...svg.querySelectorAll('circle.setdot')].map(c => Math.round(+c.getAttribute('cy'))) : [],
+                           vague: /not carrying a pool/.test(host.textContent) };
+                }""")
+                chk.add(f"{scheme} storm: a settled storm whose pool has left the listing still draws its series and how it resolved",
+                        bool(gone["series"] and "(LHLERG)" in gone["title"] and gone["lines"] >= 1 and gone["resolved"]
+                             and "96 mph · Yes" in gone["rows"] and "41 mph · No" in gone["rows"]
+                             and 26 in gone["dots"] and not gone["vague"]), str(gone)[:300])
+                page.unroute("**/data/snapshots/**")
+
+                # ---- the end of a long storm's delivery axis. Isaias settled with fourteen
+                # cycles, so its cards' sixteen columns stood closer together than the two
+                # Metryc labels were wide, and the labels printed over each other (owner,
+                # 2026-10-12). Held to by the boxes the labels are drawn in. Interim and
+                # Final must not meet each other or any other label on the axis, and must
+                # stay inside the chart, on a card 450 px wide and on the card opened to
+                # fill the window. The storms are one of Isaias's length and one three times
+                # as long, settled and folded shut as Isaias is, the long one with cycles
+                # still landing after its interim, which sets the Interim label among
+                # theirs, and the long one while it still runs, when the next cycle's column
+                # stands beside the two. Each case first proves its columns are too close
+                # for the labels to sit centered on their ticks, so the check cannot pass
+                # on an axis with room to spare.
+                AXIS_END = r"""sel => {
+                  const svg = document.querySelector(sel);
+                  if (!svg) return null;
+                  const vb = svg.viewBox.baseVal;
+                  // a pool chart's ladder stands to the right of its axis, and the labels stop short of it
+                  const lad = svg.querySelector('g.plad');
+                  const fence = lad ? lad.getBBox().x : vb.width;
+                  const labs = [...svg.querySelectorAll('text.axl')].map(t => {
+                    const b = t.getBBox();
+                    return { t: t.textContent, x0: b.x, x1: b.x + b.width, y0: b.y, y1: b.y + b.height };
+                  });
+                  const I = labs.find(l => l.t === 'Interim'), F = labs.find(l => l.t === 'Final');
+                  const meet = (p, q) => p.x0 < q.x1 && q.x0 < p.x1 && p.y0 < q.y1 && q.y0 < p.y1;
+                  // the ticks under the columns, the short vertical strokes on the axis line
+                  const ticks = [...svg.querySelectorAll('line')].filter(l => l.getAttribute('x1') === l.getAttribute('x2')
+                      && +l.getAttribute('y2') > +l.getAttribute('y1') && +l.getAttribute('y2') - +l.getAttribute('y1') <= 4)
+                    .map(l => ({ x: +l.getAttribute('x1'), dashed: !!l.getAttribute('stroke-dasharray') }))
+                    .sort((a, b) => a.x - b.x);
+                  const span = l => l.x1 - l.x0;
+                  const dTick = ticks.length > 1 ? ticks[ticks.length - 1].x - ticks[ticks.length - 2].x : 0;
+                  // a label above or below one of the two would read as part of it, so any
+                  // label sharing their stretch of the axis counts, not only those on their row
+                  const crowd = labs.filter(o => o !== I && o !== F && [I, F].some(m => m && o.x0 < m.x1 && m.x0 < o.x1));
+                  const nx = labs.find(l => l.t === 'next');
+                  const firstPending = ticks.find(q => q.dashed);
+                  return { width: Math.round(svg.getBoundingClientRect().width),
+                           interim: I ? [+I.x0.toFixed(1), +I.x1.toFixed(1)] : null,
+                           final: F ? [+F.x0.toFixed(1), +F.x1.toFixed(1)] : null,
+                           tight: !!(I && F) && (span(I) + span(F)) / 2 > dTick, dTick: +dTick.toFixed(1),
+                           apart: !!(I && F) && !meet(I, F) && I.x1 <= F.x0,
+                           crowd: crowd.map(o => o.t),
+                           inside: labs.every(l => l.x0 >= 0 && l.x1 <= Math.min(vb.width, fence)),
+                           // the next cycle's label, where it is drawn, stands over its own column
+                           nextOver: !nx || !firstPending || (nx.x0 <= firstPending.x && firstPending.x <= nx.x1),
+                           next: !!nx, cycles: labs.filter(l => /^\d\dZ$/.test(l.t)).length };
+                }"""
+                def _axis_end_ok(r):
+                    return bool(r and r["tight"] and r["apart"] and not r["crowd"] and r["inside"]
+                                and r["nextOver"] and r["cycles"] >= 2)
+                for tag, hrs, _settled, after in (("Isaias's length, settled", [6 * i for i in range(14)], True, None),
+                                                  ("three times as long, settled", [6 * i for i in range(42)], True, None),
+                                                  ("three times as long, cycles after the interim", [6 * i for i in range(42)], True, 120),
+                                                  ("three times as long, still running", [6 * i for i in range(42)], False, None)):
+                    page.route("**/data/snapshots/**", _storm_routes(_settled, _settled, index_final=_settled, hours=hrs,
+                                                                     interim_after=after))
+                    page.goto(f"{srv.url}/hurricane.html")
+                    page.wait_for_timeout(1400)
+                    if _settled:
+                        # folded shut with the storms that have finished, and opened the way a reader opens it
+                        page.locator("#liveStorms details.stormdone summary").first.click()
+                        page.wait_for_timeout(1200)
+                    page.evaluate("() => document.querySelectorAll('#liveStorms svg.scard').forEach(s => { s.style.width = '450px'; })")
+                    page.wait_for_timeout(100)
+                    at450 = page.evaluate(AXIS_END, "#liveStorms svg.scard")
+                    page.evaluate("() => document.querySelectorAll('#liveStorms svg.scard').forEach(s => { s.style.width = ''; })")
+                    chk.add(f"{scheme} storm ({tag}): Interim and Final stand apart on a card 450 px wide",
+                            _axis_end_ok(at450) and at450["width"] == 450, str(at450)[:300])
+                    page.locator("#liveStorms .scardwrap .zb.ex").first.click(); page.wait_for_timeout(250)
+                    full = page.evaluate(AXIS_END, "#liveStorms .scardwrap.full svg.scard")
+                    chk.add(f"{scheme} storm ({tag}): and on the card opened to fill the window",
+                            _axis_end_ok(full) and full["width"] > 900, str(full)[:300])
+                    page.keyboard.press("Escape"); page.wait_for_timeout(150)
+                    # the pool's chart shares the axis, and its labels stop short of its ladder
+                    pool_end = page.evaluate(AXIS_END, "#liveStorms svg.lhlserie")
+                    chk.add(f"{scheme} storm ({tag}): the pool's axis keeps the two apart and clear of its ladder",
+                            bool(pool_end and pool_end["apart"] and not pool_end["crowd"] and pool_end["inside"]
+                                 and pool_end["nextOver"]), str(pool_end)[:300])
+                    chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
+                    page.unroute("**/data/snapshots/**")
+
+                # ---- a cycle recorded after a later one keeps its place in cycle order
+                # (Reask, 7 October: Isaias's 00Z read after its 06Z for an hour once the
+                # 00Z was filed after the 06Z), and the pool's price still walks forward
+                page.route("**/data/snapshots/**", _storm_routes(False, False, late=True))
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(1400)
+                lo = page.evaluate("""() => {
+                  const card = document.querySelector('#liveStorms .scardwrap');
+                  if (!card) return null;
+                  const cyc = [...card.querySelectorAll('text')].filter(t => /^[0-9][0-9]Z$/.test(t.textContent))
+                    .map(t => [+t.getAttribute('x'), t.textContent]).sort((a, b) => a[0] - b[0]).map(q => q[1]);
+                  // every x along the pool's price line, in the order the path draws them
+                  const xs = [...document.querySelectorAll('#liveStorms path.pxline')].map(p =>
+                    (p.getAttribute('d').match(/[ML]-?[0-9.]+/g) || []).map(c => +c.slice(1)));
+                  return { cyc, lines: xs.length,
+                           back: xs.filter(a => a.some((v, i) => i && v < a[i - 1] - 0.05)).length };
+                }""")
+                chk.add(f"{scheme} storm: a cycle recorded after a later one keeps its place in cycle order",
+                        bool(lo) and lo["cyc"][:6] == ["00Z", "06Z", "12Z", "00Z", "06Z", "12Z"], str(lo))
+                chk.add(f"{scheme} storm: the pool's price never walks backwards when a cycle was recorded late",
+                        bool(lo) and lo["lines"] >= 1 and lo["back"] == 0, str(lo))
+                # ---- a link that names a reference location (?loc=BR: the exchange's research
+                # button reaches it through config/category_aliases.json) opens with that
+                # location in the panel beside the map once the ledgers land, and on a screen
+                # too narrow for the panel brings the location's card below into view
+                page.route("**/data/snapshots/**", _storm_routes(False, False))
+                page.goto(f"{srv.url}/hurricane.html?loc=BR")
+                page.wait_for_timeout(1800)
+                fl = page.evaluate("""() => {
+                  const lad = document.getElementById('msLadder');
+                  return { ladder: !!(lad && lad.classList.contains('filled')),
+                           named: !!(lad && /Brownsville/.test(lad.textContent)),
+                           ring: !!document.querySelector('#basin circle.msel[data-loc="BR"]') };
+                }""")
+                chk.add(f"{scheme} hurricane: a link naming a location opens with it in the panel beside the map",
+                        bool(fl and fl["ladder"] and fl["named"] and fl["ring"]), str(fl))
+                nctx = browser.new_context(color_scheme=scheme, viewport={"width": 760, "height": 900})
+                npg = nctx.new_page()
+                npg.route("**/data/snapshots/**", _storm_routes(False, False))
+                npg.goto(f"{srv.url}/hurricane.html?loc=BR")
+                npg.wait_for_timeout(2600)
+                nr = npg.evaluate("""() => {
+                  const c = document.querySelector('#liveStorms .scardwrap[data-sid="BR"]');
+                  if (!c) return null;
+                  const r = c.getBoundingClientRect();
+                  return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: innerHeight, y: Math.round(scrollY),
+                           side: getComputedStyle(document.getElementById('mapSide')).display };
+                }""")
+                chk.add(f"{scheme} hurricane: on a narrow screen a link naming a location scrolls to its card",
+                        bool(nr and nr["side"] == "none" and nr["y"] > 0 and nr["top"] < nr["h"] and nr["bottom"] > 0), str(nr))
+                nctx.close()
+                # ---- the exchange's category aliases (IBKR, 2026-10-07): its research button
+                # opens /<category id>.html, and the page moves the reader on, carrying what
+                # the link adds while the destination's own terms win a clash
+                page.goto(f"{srv.url}/g138154.html?theme=dark#top")
+                page.wait_for_timeout(700)
+                u1 = page.url
+                chk.add(f"{scheme} aliases: a city's category lands on its station page with the link's parameters",
+                        u1.endswith("/detroit-kdtw.html?theme=dark#top"), u1)
+                page.goto(f"{srv.url}/g2876055.html?basin=AL")
+                page.wait_for_timeout(1200)
+                u2 = page.url
+                pac = page.locator("#b2.on").count()
+                chk.add(f"{scheme} aliases: a Hawaii location lands on the Pacific view, its own ocean winning over the link's",
+                        "/hurricane.html?basin=EP&loc=HL" in u2 and pac == 1, f"{u2} pacific={pac}")
+                # ---- a storm under the owner's ruling carries the desk's figure for each
+                # delivery as that delivery's own price, so nothing is moved between columns
+                page.route("**/data/snapshots/**", _storm_routes(False, False, ruled=True))
+                page.goto(f"{srv.url}/hurricane.html")
+                page.wait_for_timeout(1400)
+                rb = page.locator("#liveStorms .scardwrap").first.locator("rect.hband")
+                rb.nth(4).hover(force=True); page.wait_for_timeout(150)
+                t_rul = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} storm: a ruled storm's delivery keeps its own recorded figure",
+                        "30¢" in t_rul and "35¢" not in t_rul and "recorded for this delivery" in t_rul, t_rul[:160])
+                # ---- the dots are sized at the lowest threshold no location has saturated (owner,
+                # 2026-10-09): a storm that takes Brownsville and Galveston to 97% and 85% at 90 mph
+                # is sized at 100 mph, where they read 70% and 40% and their dots come apart
+                def _saturated(route):
+                    ix = _index_for(False)
+                    ix["storms"][0]["livecyc"]["sites"] = {"BR": {"name": "Brownsville", "p": [100, 99, 97, 70, 30, 5]},
+                                                           "GA": {"name": "Galveston", "p": [100, 98, 85, 40, 10, 1]}}
+                    return route.fulfill(status=200, content_type="application/json", body=json.dumps(ix))
+                sz_key = lambda: page.evaluate("""() => ([...document.querySelectorAll('#basinKey .bkitem')]
+                    .map(e => e.textContent).find(t => /sized by/.test(t)) || '')""")
+                sz_r = lambda sid: page.evaluate("sid => +(document.querySelector('#basin circle[data-loc=\"' + sid + '\"]') || {getAttribute: () => 0}).getAttribute('r')", sid)
+                page.route("**/data/snapshots/**", _storm_routes(False, False))
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1400)
+                k_plain = sz_key()
+                page.route("**/data/snapshots/reask.json", _saturated)
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1400)
+                k_sat, r_br, r_ga = sz_key(), sz_r("BR"), sz_r("GA")
+                chk.add(f"{scheme} hurricane: the dots are sized at the lowest threshold no location has saturated",
+                        "70 mph or more" in k_plain and "100 mph or more" in k_sat and r_br > r_ga * 1.15,
+                        f"plain={k_plain!r} saturated={k_sat!r} BR={r_br} GA={r_ga}")
+                page.unroute("**/data/snapshots/reask.json", _saturated)
                 # ---- the vendor's final file, which the index carries once it lands.
                 # It is a different quantity from the ladder: the gust each location
                 # recorded, in miles per hour, and it supersedes every earlier file.
@@ -3200,9 +4167,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         str([vf["map"], vf["tables"], vf["source"][:60]])[:160])
                 chk.add(f"{scheme} vendor: one dot per location that recorded a gust, and none for the rest",
                         vf.get("dots") == 22, str(vf.get("dots")))
-                chk.add(f"{scheme} vendor: the strongest places carry their gust, to a tenth of a mile an hour",
-                        any(l.startswith("96.0 Brownsville") for l in vf.get("labels", []))
-                        and any(l.startswith("41.0 Galveston") for l in vf.get("labels", []))
+                chk.add(f"{scheme} vendor: the strongest places carry their gust, in whole miles an hour",
+                        any(l.startswith("96 Brownsville") for l in vf.get("labels", []))
+                        and any(l.startswith("41 Galveston") for l in vf.get("labels", []))
+                        and not any(re.match(r"\d+\.\d", l) for l in vf.get("labels", []))
                         and any("Peak gust recorded, mph" == l for l in vf.get("labels", [])),
                         str([l for l in vf.get("labels", []) if "Brownsville" in l or "Galveston" in l])[:120])
                 chk.add(f"{scheme} vendor: a location the vendor published no value for, or a zero, is not drawn",
@@ -3213,8 +4181,19 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} vendor: the map's caption says the file spans the whole list",
                         "all 26 locations on the vendor" in vf["caps"]
                         and "outside the view" in vf["caps"], vf["caps"][-170:])
-                                # ---- the two oceans are partitioned: nothing Atlantic on the Pacific
-                # view, and what the owner says is coming but is not listed yet is named
+                # ---- the two oceans are partitioned: nothing Atlantic on the Pacific
+                # view, and what the owner says is coming but is not listed yet is named.
+                # The coming listing is the check's own, added to config.js, so the check
+                # does not depend on what config/site.json happens to carry
+                def _expected_cfg(route):
+                    resp = route.fetch()
+                    return route.fulfill(response=resp, body=resp.text() + "\nwindow.WX.expected = " + json.dumps({
+                        "landfall": [], "storms": [{"basin": "EP", "name": "Lowell",
+                                                    "products": ["wind gust contracts", "a highest-wind pool"],
+                                                    "locations": ["Honolulu", "Hilo", "Kahului", "Kapa'a"]}]}) + ";\n")
+                _cfg_url = re.compile(r"/config\.js(\?|$)")          # the build adds ?v=<hash>
+                page.route(_cfg_url, _expected_cfg)
+                page.reload(); page.wait_for_timeout(1500)
                 page.locator("#b2").click(); page.wait_for_timeout(700)
                 part = page.evaluate("""() => {
                   const t = id => (document.querySelector(id) || {}).textContent || "";
@@ -3247,6 +4226,191 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 back = page.evaluate('() => ((document.querySelector("#liveStorms") || {}).textContent || "")')
                 chk.add(f"{scheme} basins: switching back restores the Atlantic storm",
                         "Erin" in back and "Lowell" not in back, back[:90])
+                page.unroute(_cfg_url, _expected_cfg)
+                page.unroute("**/data/snapshots/**")
+
+                # ---- the replay (owner, 2026-10-20): the storm's map steps through NHC's
+                # advisories with the section's timeline, each place carrying the median gust
+                # of the vendor's newest cycle at that hour, then the interim's median and the
+                # gusts recorded. Erin's ladders put Brownsville at 70, 77 and 83 mph on her
+                # last three cycles and 93 on the interim; Galveston stays under 70 throughout.
+                ERIN_ADV = _adv_doc()
+                page.route("**/data/snapshots/**", _storm_routes(True, True, True, advisories=[ERIN_ADV]))
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1400)
+                page.evaluate("""() => { const d = document.querySelector('#liveStorms details.stormdone'); if (d) d.open = true; }""")
+                page.wait_for_timeout(1400)
+                rp = lambda: page.evaluate("""() => {
+                  const d = document.querySelector('#liveStorms details.stormdone[open]');
+                  const m = d && d.querySelector('svg.replay');
+                  if (!m) return null;
+                  return { step: +m.getAttribute('data-step'), cone: m.querySelectorAll('path.rcone').length,
+                           path: m.querySelectorAll('path.rpath').length, now: m.querySelectorAll('circle.rnow').length,
+                           dots: m.querySelectorAll('circle.gdot').length, rings: m.querySelectorAll('circle.gring').length,
+                           labels: [...m.querySelectorAll('text.glbl')].map(t => t.textContent),
+                           key: (m.querySelector('text.gkey') || {}).textContent || '',
+                           cap: (d.querySelector('.replaycap') || {}).textContent || '',
+                           tl: (d.querySelector('svg.stimeline text.ax') || {}).textContent || '',
+                           ticks: d.querySelectorAll('svg.stimeline .tk').length,
+                           own: d.querySelectorAll('svg.stimeline .tk-own').length,
+                           carry: d.querySelectorAll('svg.stimeline .tk-carry').length,
+                           season: [...document.querySelectorAll('#liveStorms .stormseason')].map(e => e.textContent)[0] || '',
+                           cur: [...d.querySelectorAll('.scardwrap line.scur')]
+                             .map(l => l.getAttribute('visibility') === 'hidden' ? null : l.getAttribute('x1')) };
+                }""")
+                back = lambda k=1: [page.locator("#liveStorms details.stormdone[open]").get_by_title("the step before this one").first.click()
+                                    for _ in range(k)]
+                r_ = rp()
+                chk.add(f"{scheme} replay: one step per NHC advisory, then the interim and the final",
+                        bool(r_ and r_["ticks"] == 11 and r_["own"] == 6 and r_["carry"] == 3),
+                        str(r_ and {k: r_[k] for k in ("ticks", "own", "carry")}))
+                chk.add(f"{scheme} replay: a settled storm opens on the final, its recorded gusts along the whole path and no cone",
+                        bool(r_ and r_["step"] == 10 and r_["cone"] == 0 and r_["path"] == 1 and r_["now"] == 0
+                             and r_["key"] == "Peak gust recorded, mph" and any(l.startswith("96 Brownsville") for l in r_["labels"])),
+                        str(r_ and {k: r_[k] for k in ("step", "cone", "path", "now", "key")}))
+                chk.add(f"{scheme} replay: the storms that have run sit under their season",
+                        bool(r_ and r_["season"] == "2026 season"), str(r_ and r_["season"]))
+                back(); r_ = rp()
+                chk.add(f"{scheme} replay: the interim's step carries the median of its ladder",
+                        bool(r_ and r_["key"] == "Metryc interim median gust, mph" and any(l.startswith("93 Brownsville") for l in r_["labels"])),
+                        str(r_ and [r_["key"], r_["labels"]])[:160])
+                back(); r_ = rp()
+                chk.add(f"{scheme} replay: an advisory a day after the vendor's last cycle carries no figure, and says so",
+                        bool(r_ and "no LiveCyc since 09/02 12Z" in r_["tl"] and "No LiveCyc cycle since 12Z 2 Sep" in r_["cap"]
+                             and r_["dots"] == 0 and r_["rings"] == 2 and r_["cone"] == 1 and r_["now"] == 1
+                             and r_["cur"] and all(c is None for c in r_["cur"])),
+                        str(r_ and {k: r_[k] for k in ("tl", "dots", "rings", "cur")})[:220])
+                back(); r_ = rp()
+                chk.add(f"{scheme} replay: each place carries the median gust of the advisory's own cycle, in whole miles an hour",
+                        bool(r_ and r_["tl"].startswith("Advisory 8 · 09/02 12Z") and "83 Brownsville" in r_["labels"]
+                             and r_["rings"] == 1 and "LiveCyc cycle of 12Z 2 Sep" in r_["cap"]
+                             and "NHC advisory 8, issued 15Z 2 Sep" in r_["cap"]),
+                        str(r_ and [r_["tl"], r_["labels"], r_["rings"], r_["cap"][:90]])[:240])
+                chk.add(f"{scheme} replay: the cards' cursors stand on the delivery the step carries",
+                        bool(r_ and r_["cur"] and r_["cur"][0] is not None and len(set(r_["cur"])) == 1), str(r_ and r_["cur"]))
+                at8 = r_["cur"][0] if r_ and r_["cur"] else None
+                back(3); at5 = rp()
+                back(); at4 = rp()
+                chk.add(f"{scheme} replay: an advisory whose cycle the vendor missed carries the cycle before it",
+                        bool(at5 and at4 and at5["tl"].startswith("Advisory 5 · 09/01 18Z · LiveCyc 09/01 12Z")
+                             and at4["cur"] == at5["cur"] and at5["cur"] and at5["cur"][0] != at8),
+                        str([at5 and at5["tl"], at5 and at5["cur"], at4 and at4["cur"]])[:220])
+                strip_r = page.locator("#liveStorms details.stormdone[open] svg.stimeline").first
+                strip_r.press("Home"); page.wait_for_timeout(150)
+                r1 = rp()
+                strip_r.press("ArrowRight"); strip_r.press("ArrowRight"); page.wait_for_timeout(150)
+                r3 = rp()
+                chk.add(f"{scheme} replay: before the vendor's first cycle the map carries the advisory and no figure",
+                        bool(r1 and "no LiveCyc yet" in r1["tl"] and r1["cone"] == 1 and r1["dots"] == 0
+                             and r1["cur"] and all(c is None for c in r1["cur"]) and "No LiveCyc cycle yet" in r1["cap"]),
+                        str(r1 and [r1["tl"], r1["cur"], r1["cap"][:60]])[:200])
+                chk.add(f"{scheme} replay: the path so far grows with the steps",
+                        bool(r1 and r3 and r1["path"] == 0 and r3["path"] == 1), str([r1 and r1["path"], r3 and r3["path"]]))
+                # the map zooms and pans as the basin map does, and its places keep their size on
+                # screen at every zoom (owner, 2026-10-20)
+                zq = lambda: page.evaluate("""() => {
+                  const d = document.querySelector('#liveStorms details.stormdone[open]');
+                  const m = d && d.querySelector('svg.replay');
+                  if (!m) return null;
+                  const c = m.querySelector('circle.gdot, circle.gring'), b = m.getBoundingClientRect();
+                  return { vb: m.getAttribute('viewBox'), lvl: (d.querySelector('.rzoom .cap') || {}).textContent || '',
+                           r: c ? +c.getBoundingClientRect().width.toFixed(1) : null, box: [b.x, b.y, b.width, b.height] };
+                }""")
+                vw = lambda z: float(z["vb"].split()[2]) if z and z.get("vb") else None
+                z0 = zq()
+                zbar = page.locator("#liveStorms details.stormdone[open] .rzoom").first
+                zbar.get_by_title("zoom the storm map in").click(); zbar.get_by_title("zoom the storm map in").click()
+                page.wait_for_timeout(400)
+                z1 = zq()
+                chk.add(f"{scheme} replay: the map zooms in, and its places keep their size on screen",
+                        bool(z0 and z1 and vw(z1) < vw(z0) * 0.5 and "×" in z1["lvl"] and z0["r"] and z1["r"]
+                             and abs(z1["r"] - z0["r"]) <= 1.5),
+                        str([z0 and z0["vb"], z1 and z1["vb"], z0 and z0["r"], z1 and z1["r"], z1 and z1["lvl"]]))
+                back(); page.wait_for_timeout(150)
+                z2 = zq()
+                chk.add(f"{scheme} replay: the zoom holds while the timeline steps",
+                        bool(z1 and z2 and z2["vb"] == z1["vb"]), str([z1 and z1["vb"], z2 and z2["vb"]]))
+                # the pointer has to reach the map, so it is brought on screen first
+                page.locator("#liveStorms details.stormdone[open] svg.replay").first.scroll_into_view_if_needed()
+                page.wait_for_timeout(150)
+                z2 = zq() or z2
+                if z2:
+                    bx_ = z2["box"]
+                    page.mouse.move(bx_[0] + bx_[2] * 0.5, bx_[1] + bx_[3] * 0.5); page.mouse.down()
+                    page.mouse.move(bx_[0] + bx_[2] * 0.3, bx_[1] + bx_[3] * 0.4, steps=6); page.mouse.up()
+                    page.wait_for_timeout(250)
+                    z3 = zq()
+                    page.mouse.move(bx_[0] + bx_[2] * 0.5, bx_[1] + bx_[3] * 0.5); page.mouse.wheel(0, 240)
+                    page.wait_for_timeout(400)
+                    z4 = zq()
+                else:
+                    z3 = z4 = None
+                chk.add(f"{scheme} replay: a drag pans the zoomed map and the wheel zooms it",
+                        bool(z2 and z3 and z4 and z3["vb"].split()[:2] != z2["vb"].split()[:2] and vw(z4) > vw(z3)),
+                        str([z2 and z2["vb"], z3 and z3["vb"], z4 and z4["vb"]]))
+                zbar.get_by_title("back to the storm map’s whole view").click(); page.wait_for_timeout(300)
+                z5 = zq()
+                chk.add(f"{scheme} replay: Whole view puts the whole map back",
+                        bool(z0 and z5 and z5["vb"] == z0["vb"] and z5["lvl"] == "whole view"), str(z5 and [z5["vb"], z5["lvl"]]))
+                # the view holds the advisories that carried LiveCyc figures, the storm's contract period,
+                # so an advisory long after the vendor's last cycle runs off the edge (owner, 2026-10-20:
+                # Nolo's whole track ran a hundred degrees of longitude and left Hawaii a few pixels wide)
+                far = json.loads(json.dumps(ERIN_ADV))
+                t_far = BASE + dt.timedelta(hours=120)
+                far["advisories"].append({"adv": "010", "issued": (t_far + dt.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%MZ"),
+                                          "t0": t_far.strftime("%Y-%m-%dT%H:%MZ"), "name": "Erin", "basin": "AL",
+                                          "points": [{"tau": 0, "t": t_far.strftime("%Y-%m-%dT%H:%MZ"), "lon": -60.0, "lat": 40.0,
+                                                      "kt": 40, "gust": 50, "type": "TS"}],
+                                          "cone": [[[-61.0, 39.0], [-59.0, 39.0], [-59.0, 41.0], [-61.0, 41.0], [-61.0, 39.0]]],
+                                          "track": [[[-60.0, 40.0], [-58.0, 41.0]]]})
+                page.route("**/data/snapshots/**", _storm_routes(True, True, True, advisories=[far]))
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1400)
+                page.evaluate("""() => { const d = document.querySelector('#liveStorms details.stormdone'); if (d) d.open = true; }""")
+                page.wait_for_timeout(1400)
+                view = page.evaluate("""() => { const m = document.querySelector('#liveStorms details.stormdone[open] svg.replay');
+                  return m ? m.getAttribute('data-view') : ''; }""") or ""
+                vb = [float(v) for v in view.split(",")] if view.count(",") == 3 else None
+                chk.add(f"{scheme} replay: the view holds the storm's contract period, and an advisory long after it runs off the edge",
+                        bool(vb and vb[1] < -70 and vb[0] < -97.5 < vb[1] and vb[2] < 25.9 < vb[3]), view)
+                # a storm the exchange lists before the vendor's first file gets its section and its
+                # map from that moment: Fay is on NHC's roster with a contract at Miami, and the
+                # vendor has published nothing for her
+                FAY_ADV = _adv_doc("al062026", "Fay", hours=[0, 6, 12], start=(-76.0, 22.0), step=(-0.8, 0.5))
+                fay_roster = [{"id": "al062026", "bin": "AT2", "name": "Fay", "classification": "TS", "intensityKt": 45,
+                               "basin": "AL", "lat": 23.5, "lon": -78.4, "advisory": "003",
+                               "points": [], "track": [], "cone": [], "past": []}]
+                fay_mk = [{"symbol": "LFAMI", "name": "Tropical Storm Fay Wind Gusts in Miami", "productConid": 999000003,
+                           "contracts": [{"spec": "2026.9", "expiryLabel": "September 2026", "strike": 70, "label": "Above 70",
+                                          "numeric": True, "bid": 0.05, "ask": 0.09, "mid": 0.07,
+                                          "conid": 999300070, "conidYes": 999300070}]}]
+                page.route("**/data/snapshots/**", _storm_routes(False, False, advisories=[ERIN_ADV, FAY_ADV],
+                                                                 roster_extra=fay_roster, markets_extra=fay_mk))
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1600)
+                page.evaluate("""() => { const b = [...document.querySelectorAll('#liveStorms .bar button')]
+                  .find(x => x.textContent === 'Fay'); if (b) b.click(); }""")
+                page.wait_for_timeout(1200)
+                fr = page.evaluate("""() => {
+                  const host = document.querySelector('#liveStorms');
+                  const m = host.querySelector('svg.replay');
+                  return { tabs: [...host.querySelectorAll('.bar button')].map(x => x.textContent), map: !!m,
+                           rings: m ? m.querySelectorAll('circle.gring').length : 0, cone: m ? m.querySelectorAll('path.rcone').length : 0,
+                           ticks: host.querySelectorAll('svg.stimeline .tk').length,
+                           cap: (host.querySelector('.replaycap') || {}).textContent || '' };
+                }""")
+                chk.add(f"{scheme} replay: a storm listed before the vendor's first file gets its section, its map and its timeline",
+                        bool("Fay" in fr["tabs"] and fr["map"] and fr["ticks"] == 3 and fr["rings"] >= 1 and fr["cone"] == 1
+                             and "No LiveCyc cycle yet" in fr["cap"]), str(fr)[:240])
+                # a settled Pacific storm stays on the Pacific view once NHC's roster has let it go
+                NOLO_ADV = _adv_doc("ep152026", "Nolo", basin="EP", hours=[0, 6], start=(-150.0, 15.0), step=(-0.8, 0.3))
+                nolo_ix = [{"name": "Nolo", "year": 2026, "livecyc": {"forecastTime": "2026-09-28T18:00Z",
+                                                                     "lastModified": "2026-09-28T22:40:00Z", "thresholds": THR, "sites": {}}}]
+                page.route("**/data/snapshots/**", _storm_routes(False, False, advisories=[ERIN_ADV, NOLO_ADV], index_extra=nolo_ix))
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1500)
+                al_txt = page.evaluate("() => (document.querySelector('#liveStorms') || {}).textContent || ''")
+                page.locator("#b2").click(); page.wait_for_timeout(1200)
+                ep_txt = page.evaluate("() => (document.querySelector('#liveStorms') || {}).textContent || ''")
+                chk.add(f"{scheme} replay: a settled Pacific storm stays on the Pacific view after NHC's roster lets it go",
+                        "Nolo" not in al_txt and "Nolo" in ep_txt, str(["Nolo" in al_txt, "Nolo" in ep_txt]))
+                page.locator("#b1").click(); page.wait_for_timeout(400)
                 page.unroute("**/data/snapshots/**")
 
                 # ---- the page's order, the standing links, and a storm that
@@ -3393,15 +4557,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(pend and pend["note"] and pend["pending"] and pend["explains"]), str(pend))
                 chk.add(f"{scheme} hurricane: the running storm keeps the full display",
                         bool(mix and mix["erinCards"] >= 1), str(mix and mix["erinCards"]))
-                # two storms signal on one location: the dot's box carries both
-                # ladders, each under its own name and cycle, hottest first
+                # two storms signal on one location: the dot's box gives each its own
+                # block, hottest first, with the vendor's chance at the rung in play
+                # (Alpha 15% at 70 mph, Beta 28% at 60, to the whole percent), neither listed here
                 dot2 = page.locator("#basin circle[role='button']").first
                 dot2.hover(force=True); page.wait_for_timeout(200)
                 t_two = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hurricane: a location two storms signal on shows both ladders",
+                chk.add(f"{scheme} hurricane: a location two storms signal on shows each storm's own figure",
                         "Alpha" in t_two and "Beta" in t_two
                         and t_two.index("Alpha") < t_two.index("Beta")
-                        and "50.1%" in t_two and "27.8%" in t_two
+                        and "15%" in t_two and "28%" in t_two and "15.2%" not in t_two and "50%" not in t_two
                         and "each storm is its own hazard" in t_two, t_two[:160])
                 # the LiveCyc countdown aims at the expected file arrival, the
                 # cycle plus four and a half hours, because every 2026 file has
@@ -3535,9 +4700,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                              and abs(zm["screen1"] - zm["screen0"]) < zm["screen0"] * 0.05),
                         str(zm))
                 page.locator("#b1").click(); page.wait_for_timeout(700)
-                dots = page.locator("#basin circle").count()
+                # the reference locations by their own mark: the city names layer draws dots too
+                dots = page.locator("#basin circle[data-loc]").count()
                 chk.add(f"{scheme} hurricane: reference locations drawn", dots >= 100, f"circles={dots}")
-                page.locator("#basin circle").nth(40).hover(force=True); page.wait_for_timeout(120)
+                page.locator("#basin circle[data-loc]").nth(40).hover(force=True); page.wait_for_timeout(120)
                 t_dot = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: reference location names itself and the lane state", "Country" in t_dot and ("probabilities" in t_dot), t_dot[:80])
                 # the Pacific view carries the vendor's Hawaii reference locations, which is
@@ -3547,7 +4713,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 haw = page.evaluate("""() => {
                   const svg = document.querySelector('#basin');
                   const W = 980, Hh = 600, b0 = -180, b1 = -85, la0 = 0, la1 = 40;
-                  const pts = [...svg.querySelectorAll('circle')].map((c, i) => ({ i,
+                  const pts = [...svg.querySelectorAll('circle[data-loc]')].map((c, i) => ({ i,
                       lon: b0 + (+c.getAttribute('cx')) * (b1 - b0) / W,
                       lat: la1 - (+c.getAttribute('cy')) * (la1 - la0) / Hh }))
                     .filter(p => p.lon > -161 && p.lon < -154 && p.lat > 18 && p.lat < 23);
@@ -3557,7 +4723,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} hurricane: the Pacific view draws the Hawaii reference locations",
                         bool(haw and haw["n"] == 4 and haw["hilo"] >= 0), str(haw))
                 if haw and haw["hilo"] >= 0:
-                    page.locator("#basin circle").nth(haw["hilo"]).hover(force=True); page.wait_for_timeout(120)
+                    page.locator("#basin circle[data-loc]").nth(haw["hilo"]).hover(force=True); page.wait_for_timeout(120)
                     t_haw = page.locator("#tip").inner_text()
                     chk.add(f"{scheme} hover: a Hawaii reference location names itself",
                             "Hilo" in t_haw and "HL" in t_haw and "Country" in t_haw, t_haw[:80])
@@ -3723,11 +4889,29 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 bah_fill, bah_tip = "", ""
                 if bah.count():
                     bah_fill = bah.first.get_attribute("fill") or ""
-                    try:
-                        bah.first.hover(force=True, timeout=2000); page.wait_for_timeout(80)
+                    # The islands are scattered, so the middle of their outline is open
+                    # water; the pointer goes to a point that is on the region itself, and
+                    # the box is cleared first so text left by an earlier hover cannot pass
+                    page.locator("#basin").scroll_into_view_if_needed()
+                    page.mouse.move(2, 2); page.wait_for_timeout(60)
+                    page.evaluate("() => { const t = document.getElementById('tip'); if (t) t.textContent = ''; }")
+                    pt = page.evaluate("""() => {
+                      const p = document.querySelector('#basin path[aria-label*="Bahamas"]');
+                      if (!p) return null;
+                      const svg = p.ownerSVGElement, n = p.getTotalLength();
+                      for (let k = 0; k < 600; k++) {
+                        const q = p.getPointAtLength(n * k / 600);
+                        for (const [dx, dy] of [[0, 0], [0.35, 0], [-0.35, 0], [0, 0.35], [0, -0.35]]) {
+                          const v = svg.createSVGPoint(); v.x = q.x + dx; v.y = q.y + dy;
+                          const sc = v.matrixTransform(svg.getScreenCTM());
+                          if (document.elementFromPoint(sc.x, sc.y) === p) return { x: sc.x, y: sc.y };
+                        }
+                      }
+                      return null;
+                    }""")
+                    if pt:
+                        page.mouse.move(pt["x"], pt["y"]); page.wait_for_timeout(100)
                         bah_tip = page.locator("#tip").inner_text()
-                    except Exception:
-                        pass
                 chk.add(f"{scheme} empty book: its map region is left unshaded and says no price",
                         bah.count() >= 1 and bah_fill == "var(--map-land)" and "no price" in bah_tip,
                         f"n={bah.count()} fill={bah_fill} tip={bah_tip[:90]}")
@@ -3754,15 +4938,229 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         (page.get_by_title("zoom out").click() or page.wait_for_timeout(150) or
                          page.locator("#basin").get_attribute("viewBox")) == vb0,
                         page.locator("#basin").get_attribute("viewBox"))
-                chk.add(f"{scheme} hurricane link: the caption says the map is clickable",
-                        "clicking a shaded region" in page.locator("#basinCap").inner_text(),
-                        page.locator("#basinCap").inner_text()[:80])
+                # the caption carries only what the key and the boxes cannot: whether the
+                # basin has a storm, why a cone is missing, and where the layers come from
                 cap_txt = page.locator("#basinCap").inner_text()
-                chk.add(f"{scheme} hurricane: the map caption says what a click does",
-                        ("opens its probability series below the" in cap_txt
-                         and "opens its wind contract" in cap_txt
-                         and "00, 06, 12, and 18 UTC" not in cap_txt),
-                        cap_txt[-120:])
+                chk.add(f"{scheme} hurricane: the map caption is one short paragraph naming its sources",
+                        page.locator("#basinCap p").count() == 1 and len(cap_txt) < 320
+                        and "National Hurricane Center" in cap_txt and "within 50 miles" not in cap_txt,
+                        f"{len(cap_txt)} chars: {cap_txt[:160]}")
+                # ---- a storm in the basin on view: the map opens on its cone and track
+                # rather than the whole ocean, a button returns to it, and the whole
+                # basin is one click away (owner, 2026-10-07)
+                def _storm_here(route):
+                    resp = route.fetch()
+                    hj = json.loads(resp.text())
+                    hj["storms"] = (hj.get("storms") or []) + [{
+                        "id": "al042026", "name": "Delta", "basin": "AL", "classification": "HU", "advisory": "9",
+                        "intensityKt": 85, "lat": 24.0, "lon": -88.0, "updated": "2026-09-01T09:00:00Z",
+                        "cone": [[[[-89.0, 23.5], [-86.0, 26.0], [-84.5, 30.5], [-87.0, 31.0], [-90.0, 26.0], [-89.0, 23.5]]]],
+                        "track": [[[-88.0, 24.0], [-87.2, 27.0], [-86.4, 30.0]]],
+                        "points": [{"lon": -88.0, "lat": 24.0, "kt": 85, "type": "HU", "tau": 0, "label": "1:00 AM Wed"},
+                                   {"lon": -87.2, "lat": 27.0, "kt": 95, "type": "HU", "tau": 24, "label": "1:00 AM Thu"},
+                                   {"lon": -86.4, "lat": 30.0, "kt": 70, "type": "HU", "tau": 48, "label": "1:00 AM Fri"}],
+                        "past": [], "windProbs": []}]
+                    return route.fulfill(response=resp, body=json.dumps(hj))
+                page.route("**/data/snapshots/hurricane.json", _storm_here)
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1200)
+                zread = lambda: page.evaluate("""() => {
+                  const b = document.getElementById('basinStorm');
+                  const lbl = [...document.querySelectorAll('#basin text.slbl')];
+                  const vb = document.getElementById('basin').getAttribute('viewBox').split(' ').map(Number);
+                  // a storm label is placed inside the window, so none of them crosses its edge
+                  const out = lbl.filter(t => { const r = t.getBBox();
+                    return r.x < vb[0] - 1 || r.x + r.width > vb[0] + vb[2] + 1 || r.y < vb[1] - 1 || r.y + r.height > vb[1] + vb[3] + 1; }).length;
+                  return { vb, btn: b && !b.hidden ? b.textContent : '', lvl: (document.getElementById('basinZoomLevel') || {}).textContent || '',
+                           title: lbl.some(t => /Delta/.test(t.textContent)), cut: out };
+                }""")
+                z0 = zread()
+                chk.add(f"{scheme} storm view: the map opens on the active storm, not the whole basin",
+                        bool(z0 and z0["vb"][2] < 980 and z0["btn"] == "Delta" and "Delta" in z0["lvl"]), str(z0))
+                chk.add(f"{scheme} storm view: the storm's labels are drawn inside the window on view",
+                        bool(z0 and z0["title"] and z0["cut"] == 0), str(z0))
+                # a plain click on a zoomed map reaches the location under it: the pan used
+                # to capture the pointer on the press, so the map took every click
+                zc = page.evaluate("""() => {
+                  const vb = document.getElementById('basin').getAttribute('viewBox').split(' ').map(Number);
+                  const d = [...document.querySelectorAll('#basin circle[data-loc]')].find(c => {
+                    const x = +c.getAttribute('cx'), y = +c.getAttribute('cy');
+                    if (x < vb[0] + vb[2] * 0.1 || x > vb[0] + vb[2] * 0.9 || y < vb[1] + vb[3] * 0.1 || y > vb[1] + vb[3] * 0.9) return false;
+                    const r = c.getBoundingClientRect();
+                    return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === c;
+                  });
+                  if (!d) return null;
+                  const r = d.getBoundingClientRect();
+                  return { x: r.left + r.width / 2, y: r.top + r.height / 2, id: d.getAttribute('data-loc') };
+                }""")
+                zpin = ""
+                if zc:
+                    page.mouse.move(zc["x"], zc["y"]); page.wait_for_timeout(80)
+                    page.mouse.click(zc["x"], zc["y"]); page.wait_for_timeout(200)
+                    zpin = page.locator("#tip").evaluate("e => e.dataset.pinned || ''")
+                    page.mouse.click(4, 4); page.wait_for_timeout(120)
+                chk.add(f"{scheme} storm view: a click on a location reaches it on the zoomed map",
+                        bool(zc) and zpin == "1", f"{zc} pinned={zpin!r}")
+                page.get_by_title("back to the whole basin").click(); page.wait_for_timeout(250)
+                z1 = zread()
+                chk.add(f"{scheme} storm view: the whole basin is one click away",
+                        bool(z1 and z1["vb"] == [0, 0, 980, 600] and z1["lvl"] == "whole basin"), str(z1))
+                roads_basin = page.locator("#basin path.roads1").count()
+                page.locator("#basinStorm").click(); page.wait_for_timeout(250)
+                z2 = zread()
+                chk.add(f"{scheme} storm view: the storm's button returns to it",
+                        bool(z2 and z0 and z2["vb"] == z0["vb"]), str(z2))
+                # ---- roads and city names (Natural Earth, owner's decision 2026-10-07): the
+                # main roads under the cone from the storm's view inward and none on the whole
+                # basin, the names drawn after the storm and kept off its labels and inside the
+                # window, none of it in the pointer's way, one switch for both
+                rd = lambda: page.evaluate("""() => {
+                  const svg = document.getElementById('basin');
+                  const r1 = svg.querySelector('path.roads1');
+                  const cone = svg.querySelector('path[fill="rgba(100,116,139,.14)"]');
+                  const g2 = svg.querySelector('g.places');
+                  const vb = svg.getAttribute('viewBox').split(' ').map(Number);
+                  const storm = [...svg.querySelectorAll('text.slbl')].map(t => t.getBBox());
+                  const names = [...svg.querySelectorAll('g.places text.plbl')].map(t => t.getBBox());
+                  const hit = (a, b) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+                  const last = storm.length ? [...svg.querySelectorAll('text.slbl')].pop() : null;
+                  // the middle of each signalled reference dot: a name may graze a dot's rim, never
+                  // cross it (a largest city's name may graze a small grey one, by design)
+                  const dots = [...svg.querySelectorAll('circle[data-loc][stroke="#fff"]')].map(c => {
+                    const r = +c.getAttribute('r') * 0.6;
+                    return { x: +c.getAttribute('cx') - r, y: +c.getAttribute('cy') - r, width: 2 * r, height: 2 * r }; });
+                  return { roads: svg.querySelectorAll('path.roads1').length,
+                           onDot: names.filter(b => dots.some(d => hit(b, d))).length,
+                           under: !!(r1 && cone && (r1.compareDocumentPosition(cone) & Node.DOCUMENT_POSITION_FOLLOWING)),
+                           after: !!(g2 && last && (last.compareDocumentPosition(g2) & Node.DOCUMENT_POSITION_FOLLOWING)),
+                           pe: [r1 ? r1.getAttribute('pointer-events') : null, g2 ? g2.getAttribute('pointer-events') : null],
+                           names: names.length, groups: svg.querySelectorAll('g.places').length,
+                           onStorm: names.filter(b => storm.some(s => hit(b, s))).length,
+                           cut: names.filter(r => r.x < vb[0] - 1 || r.x + r.width > vb[0] + vb[2] + 1
+                                                  || r.y < vb[1] - 1 || r.y + r.height > vb[1] + vb[3] + 1).length };
+                }""")
+                f0 = rd()
+                chk.add(f"{scheme} roads: the main roads are drawn under the cone at the storm's view and none on the whole basin",
+                        bool(f0 and f0["roads"] == 1 and f0["under"] and roads_basin == 0), f"{f0} basin={roads_basin}")
+                chk.add(f"{scheme} cities: names are drawn after the storm, off its labels and the reference dots, inside the window",
+                        bool(f0 and f0["names"] >= 1 and f0["after"] and f0["onStorm"] == 0 and f0["onDot"] == 0
+                             and f0["cut"] == 0), str(f0))
+                chk.add(f"{scheme} roads and cities: neither takes the pointer",
+                        bool(f0 and f0["pe"] == ["none", "none"]), str(f0 and f0["pe"]))
+                page.locator("#basinRoads").click(); page.wait_for_timeout(250)
+                f_off = rd()
+                page.locator("#basinRoads").click(); page.wait_for_timeout(400)
+                f_back = rd()
+                chk.add(f"{scheme} roads and cities: the switch hides and restores both",
+                        bool(f_off and f_back and f_off["roads"] == 0 and f_off["groups"] == 0
+                             and f_back["roads"] == 1 and f_back["names"] == f0["names"]),
+                        f"off={f_off and (f_off['roads'], f_off['groups'])} back={f_back and (f_back['roads'], f_back['names'])}")
+                page.unroute("**/data/snapshots/hurricane.json", _storm_here)
+                # ---- a satellite loop for each storm on view (owner, 2026-10-10): STAR's floater
+                # frames, copied into the bucket by pipeline/floater.py, under the map; the newest
+                # frame shows at once, the loop plays while the card is on screen, and a storm the
+                # index does not carry, or one in the other ocean, gets no card. The frames are
+                # stamped relative to now, because a loop whose newest frame is more than two
+                # hours old is not drawn
+                _png = tiny_png
+                _fl_t0 = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0) - dt.timedelta(minutes=40)
+                _fl_t0 -= dt.timedelta(minutes=_fl_t0.minute % 10)
+                _fl_frames = [{"key": "floater/AL042026/%s.jpg" % (_fl_t0 + dt.timedelta(minutes=10 * i)).strftime("%Y%j%H%M"),
+                               "t": (_fl_t0 + dt.timedelta(minutes=10 * i)).strftime("%Y-%m-%dT%H:%MZ")} for i in range(4)]
+                def _floater(route):
+                    u = route.request.url
+                    if u.endswith("/floater/index.json"):
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                            "schema": 1, "asof": "2026-09-01T09:35:00Z",
+                            "storms": {"AL042026": {"name": "Delta", "basin": "AL", "satellite": "GOES-19", "product": "GeoColor",
+                                                    "frames": _fl_frames}}}))
+                    return route.fulfill(status=200, content_type="image/png", body=_png((40, 90, 160)))
+                page.route("**/data/snapshots/hurricane.json", _storm_here)
+                page.route("**/data/snapshots/floater/**", _floater)
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1200)
+                page.locator("#stormLoops").scroll_into_view_if_needed(); page.wait_for_timeout(300)
+                fl0 = page.evaluate("""() => {
+                  const c = document.querySelector('#stormLoops .loopcard');
+                  if (!c) return null;
+                  return { cards: document.querySelectorAll('#stormLoops .loopcard').length, head: c.querySelector('.lhd').textContent,
+                           src: c.querySelector('img.loopimg').getAttribute('src'), time: c.querySelector('.looptime').textContent,
+                           credit: c.querySelector('.lsrc').textContent };
+                }""")
+                lt = lambda: page.evaluate("() => (document.querySelector('#stormLoops .looptime') || {}).textContent || ''")
+                seen = set()
+                for _ in range(18):                                   # the loop holds the newest frame 1.4 s a turn
+                    seen.add(lt().split(" ")[0]); page.wait_for_timeout(150)
+                chk.add(f"{scheme} storm loop: a storm on view gets a satellite loop under the map, newest frame first, credited",
+                        bool(fl0 and fl0["cards"] == 1 and fl0["head"].startswith("Delta") and fl0["src"].endswith("/" + _fl_frames[-1]["key"])
+                             and "latest" in fl0["time"] and "NOAA/NESDIS STAR" in fl0["credit"]), str(fl0))
+                chk.add(f"{scheme} storm loop: the loop plays while the card is on screen",
+                        len(seen) >= 2 and seen <= {f["t"][11:16] + "Z" for f in _fl_frames}, str(sorted(seen)))
+                page.locator("#stormLoops button.loopbtn", has_text="Pause").first.click(); page.wait_for_timeout(100)
+                fl1 = lt()
+                page.locator("#stormLoops button.loopbtn[title='the frame before']").first.click(); page.wait_for_timeout(100)
+                fl2 = lt()
+                page.wait_for_timeout(700)
+                fl3 = lt()
+                chk.add(f"{scheme} storm loop: pause holds a frame and the arrows step through them",
+                        fl2 == fl3 and fl2 != fl1, f"{fl1} -> {fl2} -> {fl3}")
+                page.click("#b2"); page.wait_for_timeout(500)
+                n_ep = page.locator("#stormLoops .loopcard").count()
+                chk.add(f"{scheme} storm loop: the other ocean's view carries no card for this storm",
+                        n_ep == 0 and page.locator("#stormLoops").evaluate("e => e.hidden"), f"cards={n_ep}")
+                page.unroute("**/data/snapshots/floater/**", _floater)
+                page.unroute("**/data/snapshots/hurricane.json", _storm_here)
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(900)
+                chk.add(f"{scheme} storm loop: no storm, no loop",
+                        page.locator("#stormLoops .loopcard").count() == 0, "")
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(900)
+                # ---- the sea surface temperature anomaly: under the land, named in the key
+                # and the caption with its day, read by hovering the sea, and switched off
+                # and on from the zoom bar (owner, 2026-10-07)
+                sst_s = page.evaluate("""() => {
+                  const img = document.querySelector('#basin image.sstlayer');
+                  const land = document.querySelector('#basin path');
+                  return { img: !!img,
+                           under: !!(img && land && (img.compareDocumentPosition(land) & Node.DOCUMENT_POSITION_FOLLOWING)),
+                           key: (document.getElementById('basinKey') || {}).textContent || '',
+                           cap: (document.getElementById('basinCap') || {}).textContent || '' };
+                }""")
+                chk.add(f"{scheme} sea temperature: the anomaly is drawn under the land, its day in the key and the caption",
+                        bool(sst_s and sst_s["img"] and sst_s["under"] and "Sea temperature anomaly, " in sst_s["key"]
+                             and "Coral Reef Watch" in sst_s["cap"]), str({k: (v[:60] if isinstance(v, str) else v) for k, v in (sst_s or {}).items()}))
+                gulf = page.evaluate("""() => {
+                  const svg = document.getElementById('basin'), img = svg.querySelector('image.sstlayer');
+                  if (!img) return null;
+                  // the middle of the Gulf of America, on the whole-basin box
+                  const x = (-90 + 101) * 980 / 61, y = (48 - 25) * 600 / 44;
+                  const pt = svg.createSVGPoint(); pt.x = x; pt.y = y;
+                  const q = pt.matrixTransform(svg.getScreenCTM());
+                  return { x: q.x, y: q.y };
+                }""")
+                t_sst = ""
+                if gulf:
+                    page.mouse.move(gulf["x"], gulf["y"]); page.wait_for_timeout(150)
+                    page.mouse.move(gulf["x"] + 3, gulf["y"] + 2); page.wait_for_timeout(150)
+                    t_sst = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} sea temperature: hovering the sea reads the anomaly there",
+                        "Sea surface temperature anomaly" in t_sst and "°C" in t_sst and "°F" in t_sst, t_sst[:120])
+                page.mouse.move(2, 2)
+                page.locator("#basinSst").click(); page.wait_for_timeout(250)
+                off = page.locator("#basin image.sstlayer").count()
+                page.locator("#basinSst").click(); page.wait_for_timeout(250)
+                back = page.locator("#basin image.sstlayer").count()
+                chk.add(f"{scheme} sea temperature: the switch hides and restores it",
+                        off == 0 and back == 1, f"off={off} back={back}")
+                # ---- the hill shading: over the land, under the storms, never in the pointer's way
+                rel = page.evaluate("""() => {
+                  const r = document.querySelector('#basin image.relieflayer');
+                  return { on: !!r, pe: r ? r.getAttribute('pointer-events') : null };
+                }""")
+                chk.add(f"{scheme} relief: the hill shading is drawn and takes no pointer events",
+                        bool(rel and rel["on"] and rel["pe"] == "none"), str(rel))
+                page.locator("#basinRelief").click(); page.wait_for_timeout(250)
+                r_off = page.locator("#basin image.relieflayer").count()
+                page.locator("#basinRelief").click(); page.wait_for_timeout(600)
+                r_back = page.locator("#basin image.relieflayer").count()
+                chk.add(f"{scheme} relief: the switch hides and restores it", r_off == 0 and r_back == 1, f"off={r_off} back={r_back}")
                 page.locator("#ladders .lrow").first.hover(force=True); page.wait_for_timeout(120)
                 t_row = page.locator("#tip").inner_text()
                 chk.add(f"{scheme} hover: count ladder row shows the book and settlement", "Yes bid" in t_row and "Settles" in t_row, t_row[:80])
@@ -3772,6 +5170,33 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     t = page.locator("#tip").inner_text()
                     if "Landfall contract" in t: found = t; break
                 chk.add(f"{scheme} hover: a shaded landfall region shows its contract", "Yes bid" in found, found[:80])
+                # ---- a county the desk adds for a storm is drawn: the geometry carries every
+                # coastal county and the map outlines the ones the exchange lists (Isaias's
+                # eight, 2026-10-07, were listed and priced but had no shape to draw)
+                def _hlf_county(route):
+                    resp = route.fetch()
+                    mj = json.loads(resp.text())
+                    for x in mj.get("markets") or []:
+                        if x.get("symbol") == "HLF" and x.get("contracts"):
+                            c0 = dict(x["contracts"][0])
+                            c0.update({"label": "Escambia, Florida", "strike": 99.0, "bid": 0.14, "ask": 0.2, "mid": 0.17,
+                                       "conid": 999300001, "conidYes": 999300001})
+                            x["contracts"] = x["contracts"] + [c0]
+                    return route.fulfill(response=resp, body=json.dumps(mj))
+                page.route("**/data/snapshots/market/hurricane.json", _hlf_county)
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1200)
+                page.get_by_title("back to the whole basin").click(); page.wait_for_timeout(200)
+                ink = page.locator('#basin path[stroke="var(--ink)"]')
+                n_ink, esc_tip = ink.count(), ""
+                for i in range(min(n_ink, 20)):
+                    ink.nth(i).hover(force=True); page.wait_for_timeout(40)
+                    t = page.locator("#tip").inner_text()
+                    if "Escambia, Florida" in t:
+                        esc_tip = t; break
+                # the six counties the samples list, plus Escambia, and none of the other 209
+                chk.add(f"{scheme} landfall: a county the exchange lists is outlined and priced, an unlisted one is not drawn",
+                        n_ink == 7 and "Landfall contract" in esc_tip and "17" in esc_tip, f"outlined={n_ink} tip={esc_tip[:90]}")
+                page.unroute("**/data/snapshots/market/hurricane.json", _hlf_county)
                 # ---- the Pacific view: a landfall region there (Hawaii, as the exchange lists it) is
                 # listed, drawn and priced on that view and kept off the Atlantic one
                 lf_txt = page.locator("#landfall").inner_text()
@@ -3806,8 +5231,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 }""")
                 chk.add(f"{scheme} pacific hover: the Hawaii region shows its landfall contract",
                         "Landfall contract" in ep_tip and "Yes bid" in ep_tip and "Hawaii" in ep_tip, ep_tip[:110])
-                chk.add(f"{scheme} pacific: the map caption says the regions are shaded",
-                        "within 50 miles of its border" in page.locator("#basinCap").inner_text(), page.locator("#basinCap").inner_text()[:80])
+                chk.add(f"{scheme} pacific: the key names the landfall shading",
+                        "Landfall contract" in page.locator("#basinKey").inner_text(), page.locator("#basinKey").inner_text()[:80])
                 # ---- a storm whose cone service has stopped updating: the superseded
                 # cone and forecast track are not drawn, and the storm is placed and
                 # labeled from the roster's own advisory instead
@@ -3866,6 +5291,138 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 t_note = page.locator("#panels .panel .note").first.inner_text()
                 chk.add(f"{scheme} climate: the trend fit reports crossings",
                         "per decade" in t_note and "crosses" in t_note, t_note[:90])
+                # ---- the world GDP contract's page (owner, 2026-11-02): the article with its figures
+                # drawn live by the contract's model, the controls re-running it, each view's chance
+                # of Yes marked as not a price, and the proposed ladder carrying no link until the
+                # exchange lists the contract
+                chk.add(f"{scheme} climate: a card leads to the world GDP contract's page",
+                        page.locator("a#gdpCard[href='climate-gdp.html']").count() == 1, "")
+                gdp_model = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/elnino/model.json").read().decode())
+                gdp_pub = gdp_model["published"]["contract"]
+
+                def _gdp_state():
+                    return page.evaluate("""() => ({
+                      status: (document.querySelector('#gdpRunStatus') || {}).textContent || '',
+                      strip: (document.querySelector('#pageStatus .status') || {}).textContent || '',
+                      tiles: [...document.querySelectorAll('.gdp-tile .tv')].map(e => e.textContent),
+                      notPrice: [...document.querySelectorAll('.gdp-tile.null .ts, .gdp-tile.paper .ts')]
+                        .every(e => /not a price/.test(e.textContent)),
+                      nav: [...document.querySelectorAll('header.site nav a.on')].map(a => a.textContent),
+                      figs: [...document.querySelectorAll('figure.gdp-fig > .card > svg')].map(s => s.childElementCount),
+                      notes: document.querySelectorAll('button.accnote-btn').length,
+                      hatched: document.querySelectorAll('#gdpMain rect[fill="url(#gdpHatch)"]').length,
+                      marks: document.querySelectorAll('#gdpMain line.gdp-mark').length,
+                      cents: [...document.querySelectorAll('#gdpMain text.ladtxt')].length,
+                      links: [...document.querySelectorAll('[data-contract-url]')].map(e => e.getAttribute('data-contract-url')),
+                      note: [...document.querySelectorAll('p.tradenote')].map(n => (n.previousElementSibling
+                        && n.previousElementSibling.querySelector('#gdpMain')) ? 'after-figure' : 'elsewhere'),
+                      ladderSub: ([...document.querySelectorAll('#gdpMain text.ax')].find(t => /strikes|prices|end year/i.test(t.textContent)) || {}).textContent || '',
+                      listing: (document.querySelector('#gdpListing') || {}).textContent || '',
+                      hash: location.hash })""")
+                page.goto(f"{srv.url}/climate-gdp.html"); page.wait_for_timeout(2500)
+                g0 = _gdp_state()
+                chk.add(f"{scheme} gdp: the page runs the contract's model on every path and dates the run",
+                        "50,000 paths" in g0["status"] and "Data as of" in g0["strip"], g0["status"] + " | " + g0["strip"][:60])
+                chk.add(f"{scheme} gdp: the page belongs to the Climate Change category",
+                        g0["nav"] == ["Climate & Weather", "Climate Change"], str(g0["nav"]))
+                gdp_p = [int(t.rstrip("%")) for t in g0["tiles"][:2] if t.endswith("%")]
+                chk.add(f"{scheme} gdp: at the article's settings the two chances are the published run's",
+                        len(gdp_p) == 2 and abs(gdp_p[0] - 100 * (1 - gdp_pub["false_positive"])) <= 3
+                        and abs(gdp_p[1] - 100 * (1 - gdp_pub["sensitivity"])) <= 3 and g0["notPrice"], str(g0["tiles"]))
+                chk.add(f"{scheme} gdp: seven live figures, each with its details of calculation",
+                        len(g0["figs"]) == 7 and min(g0["figs"] or [0]) > 10 and g0["notes"] == 8, f"figs={g0['figs']} notes={g0['notes']}")
+                chk.add(f"{scheme} gdp: until it lists, the ladder is the proposed strikes, hatched, with two marks and no link",
+                        g0["hatched"] == len(gdp_model["ladder"]["strikes"]) and g0["marks"] == 2 * g0["hatched"]
+                        and not g0["links"] and not g0["note"] and "Not listed yet" in g0["listing"],
+                        f"hatched={g0['hatched']} marks={g0['marks']} links={len(g0['links'])} notes={g0['note']}")
+                page.locator("#gdpMain rect[fill='url(#gdpHatch)']").first.hover(force=True); page.wait_for_timeout(150)
+                chk.add(f"{scheme} gdp: a strike's box gives both chances and says they are not prices",
+                        "Not prices" in page.locator("#tip").inner_text() and "lists" in page.locator("#tip").inner_text(),
+                        page.locator("#tip").inner_text()[:120])
+                page.locator("#gdpMainMethod button.accnote-btn").click(); page.wait_for_timeout(200)
+                gn = page.evaluate("""() => { const b = document.querySelector('#gdpMainMethod .accnote');
+                  return { open: !!b && !b.hidden, tex: b ? b.querySelectorAll('.katex').length : 0,
+                           code: b ? [...b.querySelectorAll('.code a')].map(a => a.href) : [] }; }""")
+                chk.add(f"{scheme} gdp: the contract's note opens with its equations typeset and its code linked",
+                        gn["open"] and gn["tex"] >= 3 and len(gn["code"]) >= 3
+                        and all(u.startswith(gdp_model["code"]["repo"] + "/blob/") for u in gn["code"]), str(gn)[:160])
+                page.evaluate("""() => { const i = [...document.querySelectorAll('#gdpPanel input[type=range]')]
+                    .find(x => x.getAttribute('aria-label') === 'Share of the paper’s effect that is real');
+                  i.value = 0.5; i.dispatchEvent(new Event('input', { bubbles: true })); }""")
+                page.wait_for_timeout(1200)
+                g1 = _gdp_state()
+                chk.add(f"{scheme} gdp: a control re-runs the model, moves the paper's chance and goes in the address",
+                        "share=0.5" in g1["hash"] and g1["tiles"][1] != g0["tiles"][1] and g1["tiles"][0] == g0["tiles"][0],
+                        f"{g0['tiles']} -> {g1['tiles']} {g1['hash']}")
+                page.locator("#gdpPanelBar button", has_text="Reset").click(); page.wait_for_timeout(1200)
+                g2 = _gdp_state()
+                chk.add(f"{scheme} gdp: reset returns to the article's settings", g2["tiles"] == g0["tiles"] and g2["hash"] == "",
+                        f"{g2['tiles']} {g2['hash']}")
+                page.goto(f"{srv.url}/climate-gdp.html#baseline=frozen&irf=PWT_panel"); page.wait_for_timeout(3000)
+                g3 = _gdp_state()
+                chk.add(f"{scheme} gdp: a shared address loads its settings, fetching what they need",
+                        "50,000 paths" in g3["status"] and g3["tiles"][:2] != g0["tiles"][:2]
+                        and page.locator(".gdp-figstate.mine").count() == 7, f"{g3['status']} {g3['tiles']}")
+                # listed: the check's own product, added to config.js, and its terms and quotes, so the
+                # check does not depend on what the exchange or config/site.json carry. The exchange
+                # lists its own strikes, so the check carries a ladder of six rather than the article's one.
+                gdp_strikes = [0.5, 0.8, 1.1, 1.4, 1.7, 2.0]
+                gdp_end = gdp_model["defaults"]["endYear"]
+                gdp_terms = {"id": "WGDPT", "name": "World GDP per Capita Growth", "marketName": "World GDP per Capita Growth",
+                             "state": "listed", "productConid": 990001, "asof": "2026-11-02T12:00:00Z",
+                             "contracts": [{"strike": s_, "numeric": True, "label": "Above %.1f" % s_, "spec": str(gdp_end),
+                                            "expiryLabel": str(gdp_end), "conidYes": 990100 + i_, "conidNo": 990200 + i_}
+                                           for i_, s_ in enumerate(gdp_strikes)]}
+                gdp_book = [(0.9, 0.93), (0.8, 0.84), (0.55, 0.6), (0.3, 0.36), (0.12, 0.16), (0.01, 0.99)]
+                gdp_quotes = {"schema": 1, "id": "WGDPT", "asof": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                              "rows": [{"strike": s_, "spec": str(gdp_end), "bid": b_, "ask": a_, "mid": round((b_ + a_) / 2, 4),
+                                        "bidSize": 10.0, "askSize": 10.0, "from": "yes", "conidYes": 990100 + i_}
+                                       for i_, (s_, (b_, a_)) in enumerate(zip(gdp_strikes, gdp_book))]}
+
+                def _gdp_cfg(route):
+                    resp = route.fetch()
+                    return route.fulfill(response=resp, body=resp.text() + "\nwindow.WX.gdpContract = {product: 'WGDPT'};\n")
+
+                def _gdp_cat(route):
+                    u = route.request.url
+                    if u.endswith("/catalogue/product/WGDPT.json"):
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps(gdp_terms))
+                    if u.endswith("/catalogue/price/WGDPT.json"):
+                        return route.fulfill(status=200, content_type="application/json", body=json.dumps(gdp_quotes))
+                    return route.continue_()
+                gdp_cfg_url = re.compile(r"/config\.js(\?|$)")
+                page.route(gdp_cfg_url, _gdp_cfg)
+                page.route("**/data/snapshots/catalogue/**", _gdp_cat)
+                page.goto(f"{srv.url}/climate-gdp.html"); page.wait_for_timeout(2500)
+                g4 = _gdp_state()
+                chk.add(f"{scheme} gdp: once listed, each priced strike opens its contract, Yes green and No red, the marks kept",
+                        len(g4["links"]) == 2 * (len(gdp_strikes) - 1) and all("conid_yes=9901" in u for u in g4["links"])
+                        and g4["marks"] == 2 * len(gdp_strikes) and g4["cents"] >= 3
+                        and g4["listing"].startswith("Listed on ForecastEx as World GDP per Capita Growth"),
+                        f"links={len(g4['links'])} marks={g4['marks']} cents={g4['cents']} {g4['listing'][:50]}")
+                chk.add(f"{scheme} gdp: the price line sits under the contract's figure, once",
+                        g4["note"] == ["after-figure"], str(g4["note"]))
+                chk.add(f"{scheme} gdp: an empty book is drawn hatched, with no price and no link",
+                        g4["hatched"] == 1, f"hatched={g4['hatched']}")
+                page.locator("#gdpMain rect[data-contract-url]").first.hover(force=True); page.wait_for_timeout(150)
+                t_gdp = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} gdp: a price's box gives the standing book and both chances, not prices",
+                        "Standing Yes bid" in t_gdp and "Chance of Yes" in t_gdp and "Not prices" in t_gdp, t_gdp[:140])
+                page.evaluate("""() => { const i = [...document.querySelectorAll('#gdpPanel input[type=range]')]
+                    .find(x => x.getAttribute('aria-label') === 'Last year of the growth period');
+                  i.value = Number(i.value) - 1; i.dispatchEvent(new Event('input', { bubbles: true })); }""")
+                page.wait_for_timeout(1400)
+                g5 = _gdp_state()
+                chk.add(f"{scheme} gdp: at another end year the listed prices are not drawn, and the line goes with them",
+                        not g5["links"] and not g5["note"] and str(gdp_end) in g5["ladderSub"], f"{len(g5['links'])} {g5['note']} {g5['ladderSub']}")
+                page.unroute(gdp_cfg_url, _gdp_cfg)
+                page.unroute("**/data/snapshots/catalogue/**", _gdp_cat)
+                # a phone keeps the page inside its width; each figure scrolls inside its own card
+                page.set_viewport_size({"width": 375, "height": 800})
+                page.goto(f"{srv.url}/climate-gdp.html"); page.wait_for_timeout(2500)
+                gw_ = page.evaluate("() => [document.scrollingElement.scrollWidth, document.scrollingElement.clientWidth]")
+                chk.add(f"{scheme} gdp: no sideways scroll on a phone", gw_[0] <= gw_[1] + 1, str(gw_))
+                page.set_viewport_size({"width": 1200, "height": 900})
                 # ---- agriculture: the same panel, one per crop, in sequence on
                 # the tab itself rather than behind a listing link
                 page.goto(f"{srv.url}/agriculture.html")
@@ -4034,7 +5591,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # ---- the SW severe displays: the history as a series panel and
                 #      the month in progress in the hurricane shape, for all
                 #      three phenomena, listed or not
-                sw = page.evaluate("""() => {
+                sw_js = """() => {
                   const t = document.querySelector('#panels').innerText;
                   const blocks = [...document.querySelectorAll('#panels .panel')]
                     .filter(p => /in progress/.test(p.textContent) && /report count/.test(p.textContent));
@@ -4045,9 +5602,18 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                            bigFig: blocks.some(p => /so far/.test(p.textContent)),
                            ladder: blocks.some(p => /market.s ladder/i.test(p.textContent)),
                            probs: blocks.some(p => /fair value|probability/i.test(p.textContent)) };
-                }""")
+                }"""
+                sw = page.evaluate(sw_js)
                 chk.add(f"{scheme} severe: all three phenomena draw the history series",
                         sw["series"] >= 3, str(sw))
+                # The blocks are read a second time on the contract page check's
+                # date (SW_NOW), since the samples list no SW ladder for the wall
+                # clock's month from November 2026. The ladder check and the
+                # probability check read that copy.
+                page_wall, page = page, fixture_page(SW_NOW)
+                page.goto(f"{srv.url}/weather.html"); page.wait_for_timeout(1400)
+                sw_listed = page.evaluate(sw_js)
+                page.context.close(); page = page_wall
                 # ---- the live station map: KSFO's sample carries a regional
                 #      frame and nearby readings, so the overlay must draw
                 page.goto(f"{srv.url}/city.html?station=KSFO"); page.wait_for_timeout(1800)
@@ -4179,6 +5745,34 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         str(ex and {k: round(ex[k]) for k in ('collapsed', 'expanded', 'closed')}))
                 chk.add(f"{scheme} locator: the overlay stays on the image when expanded",
                         bool(ex and ex["aligned"]), str(ex and ex["aligned"]))
+                # a variable wind: the nearby reports carry the METAR's own "VRB", which has no
+                # direction to draw a staff toward
+                def _vrb_route(route):
+                    if route.request.url.endswith("/obs/KSFO.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        for n in d.get("nearby") or []:
+                            n["wdir"], n["wspd"] = "VRB", 8
+                        if d.get("nearbySelf"):
+                            d["nearbySelf"]["wdir"], d["nearbySelf"]["wspd"] = "VRB", 6
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+                page.route("**/data/snapshots/**", _vrb_route)
+                errs_v = len(errs)
+                page.goto(f"{srv.url}/city.html?station=KSFO"); page.wait_for_timeout(2000)
+                vr = page.evaluate("""() => {
+                  const svg = document.querySelector('#locator svg.locov');
+                  if (!svg) return null;
+                  const nan = [...svg.querySelectorAll('line, path, circle')]
+                    .filter(e => [...e.attributes].some(a => /NaN/.test(a.value))).length;
+                  const hits = [...svg.querySelectorAll("circle[fill='transparent']")].filter(c2 => +c2.getAttribute('r') < 17);
+                  if (!hits.length) return { nan, tip: null };
+                  hits[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 300, clientY: 300 }));
+                  return { nan, tip: document.querySelector('#tip').innerText };
+                }""")
+                page.unroute("**/data/snapshots/**")
+                chk.add(f"{scheme} locator: a variable wind draws no staff, reads as variable and throws nothing",
+                        bool(vr and vr["nan"] == 0 and vr["tip"] and "variable at" in vr["tip"]) and len(errs) == errs_v,
+                        str(vr)[:160] + " " + "; ".join(errs[errs_v:])[:160])
                 # a station's own page: the thing a search result and a shared
                 # link point at, which has to say which station it is before any
                 # script has run and still draw that station's chart
@@ -4245,9 +5839,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   const before = dots();
                   const dashes = new Set([...svg().querySelectorAll('path')]
                     .map(pp => pp.getAttribute('stroke-dasharray')).filter(Boolean));
+                  const TOOLC = ['var(--nws)', 'var(--nbm)', 'var(--lamp)', 'var(--mav)', 'var(--hrrr)'];
+                  const toolPaths = () => [...svg().querySelectorAll('path')].filter(pp => TOOLC.includes(pp.getAttribute('stroke')));
+                  const todaySolid = toolPaths().filter(pp => !pp.getAttribute('stroke-dasharray')).length;
                   document.querySelector('#advYday').click();
                   await new Promise(r => setTimeout(r, 400));
                   const yday = dots();
+                  const ydaySolid = toolPaths().filter(pp => !pp.getAttribute('stroke-dasharray')).length;
                   const cap = (document.querySelector('#advCap') || {}).textContent || '';
                   document.querySelector('#advToday').click();
                   // the chart's day-ahead button carries the panels with it
@@ -4266,7 +5864,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   return { nws: texts.indexOf('Weather Service') >= 0, tmwSynced, toolDots,
                            temps: texts.filter(t => t === 'TEMPERATURE').length,
                            mph: texts.some(t => / mph$/.test(t)),
-                           styles: [...dashes].sort(),
+                           styles: [...dashes].sort(), todaySolid, ydaySolid,
                            today: before, yday,
                            noCap: cap.trim() === '',
                            discBeside: !!disc,
@@ -4283,9 +5881,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(av and av["temps"] == 1), str(av and av["temps"]))
                 chk.add(f"{scheme} advanced: wind speed reads in mph",
                         bool(av and av["mph"]), "")
-                chk.add(f"{scheme} advanced: the tools keep the main chart's line styles",
-                        bool(av and "5 4" in av["styles"] and "1 3" in av["styles"]),
-                        str(av and av["styles"]))
+                chk.add(f"{scheme} advanced: newest runs solid and earlier runs dotted, as on the main chart",
+                        bool(av and av["styles"] == ["2 3"] and av["todaySolid"] >= 12 and av["ydaySolid"] == 0),
+                        str(av and {k: av[k] for k in ("styles", "todaySolid", "ydaySolid")}))
                 chk.add(f"{scheme} advanced: the chart's day-ahead button carries the panels with it",
                         bool(av and av["tmwSynced"]), str(av and av["tmwSynced"]))
                 chk.add(f"{scheme} advanced: every line carries dots at its own readings",
@@ -4370,9 +5968,15 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   await new Promise(r => setTimeout(r, 900));
                   const lv = texts().filter(t => /^\d{2,3}$/.test(t)).map(Number);
                   document.querySelector('#dayToday').click();
+                  // tomorrow's level is the newest NWS run's highest row inside it; today's is
+                  // pinned to the run issued before today began
+                  const ds = Date.parse(fc.markers.dayStart), de = Date.parse(fc.markers.dayEnd);
+                  const top = (rs, a, b) => Math.max(...rs.filter(r => r.tempF != null
+                    && Date.parse(r.t) >= a && Date.parse(r.t) < b).map(r => r.tempF));
                   return { word, tags: tags.length, sample: tags[0] || null,
                            tomorrowLevels: lv,
-                           wantTomorrow: fc.nws.highTomorrow, dontWantToday: fc.nws.highToday };
+                           wantTomorrow: top(fc.nws.hourly, de, de + 864e5),
+                           dontWantToday: top(fc.asIssued.nws.rows, ds, de) };
                 }""")
                 chk.add(f"{scheme} chart: a cycle label is an hour, a or p, and T or Y",
                         bool(tg and not tg["word"] and tg["tags"] >= 3),
@@ -4382,6 +5986,128 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                              and (tg["dontWantToday"] == tg["wantTomorrow"]
                                   or tg["dontWantToday"] not in tg["tomorrowLevels"])),
                         str(tg and {k: tg[k] for k in ('wantTomorrow', 'dontWantToday')}))
+                # ---- the price panels follow the board on screen (owner, 2026-10-16): the day-ahead
+                # view draws no prices and no strikes while tomorrow's board is unlisted, and once it
+                # lists, tomorrow's own prices
+                px = page.evaluate("""async () => {
+                  const svg = document.querySelector('#chart');
+                  const count = () => ({ px: svg.querySelectorAll('path.pxline').length,
+                                         pk: svg.querySelectorAll('line.pkline').length,
+                                         note: [...svg.querySelectorAll('text')].filter(t => t.textContent === 'not listed yet').length });
+                  const today = count();
+                  document.querySelector('#dayTomorrow').click();
+                  await new Promise(r => setTimeout(r, 700));
+                  const tmw = count();
+                  document.querySelector('#dayToday').click();
+                  await new Promise(r => setTimeout(r, 500));
+                  return { today, tmw };
+                }""")
+                chk.add(f"{scheme} chart: an unlisted day-ahead board draws no prices and no strikes",
+                        bool(px and px["today"]["px"] >= 1 and px["today"]["pk"] >= 1 and px["tmw"]["px"] == 0
+                             and px["tmw"]["pk"] == 0 and px["tmw"]["note"] >= 3), str(px))
+
+                def _tmw_route(route):
+                    if route.request.url.endswith("/market/KSFO.json"):
+                        resp = route.fetch(); d = json.loads(resp.text())
+                        mk = d.get("markers") or {}
+                        day, tmw = mk.get("day"), mk.get("tomorrow")
+                        if day and tmw and day in (d.get("days") or {}):
+                            d["days"][tmw] = json.loads(json.dumps(d["days"][day]))
+                            # tomorrow's board quoted 33 / 35 at every sample, which today's never shows,
+                            # a day later than today's samples so they fall inside the day-ahead window
+                            hist = (d.get("history") or {}).get(day) or {}
+                            d.setdefault("history", {})[tmw] = {sd: {k: [[q[0] + 1440, 33, 35] for q in v] for k, v in rows.items()}
+                                                                for sd, rows in hist.items()}
+                        return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.continue_()
+                page.route("**/data/snapshots/**", _tmw_route)
+                page.goto(_ksfo); page.wait_for_timeout(2200)
+                pl = page.evaluate("""async () => {
+                  const svg = document.querySelector('#chart');
+                  document.querySelector('#dayTomorrow').click();
+                  await new Promise(r => setTimeout(r, 700));
+                  const out = { px: svg.querySelectorAll('path.pxline').length, pk: svg.querySelectorAll('line.pkline').length,
+                                ends: [...svg.querySelectorAll('text')].map(t => t.textContent).filter(t => /^[<>]\\d+° \\d+¢$/.test(t)) };
+                  document.querySelector('#dayToday').click();
+                  await new Promise(r => setTimeout(r, 500));
+                  return out;
+                }""")
+                page.unroute("**/data/snapshots/**")
+                page.goto(_ksfo); page.wait_for_timeout(1600)
+                chk.add(f"{scheme} chart: a listed day-ahead board draws its own prices, not today's",
+                        bool(pl and pl["px"] >= 1 and pl["pk"] >= 1 and pl["ends"]
+                             and all(e.endswith(" 34¢") for e in pl["ends"])), str(pl))
+                # ---- runs by model (owner, 2026-10-16): each model's newest run solid, every run it
+                # superseded dotted; a level line is pinned to the run issued before the day began and
+                # runs across exactly the hours its rows cover inside the day; the crosshair lists runs
+                # model by model, the newest first
+                rv = page.evaluate("""async () => {
+                  const svg = document.querySelector('#chart');
+                  const COLS = { nws: 'var(--nws)', nbm: 'var(--nbm)', lamp: 'var(--lamp)', mav: 'var(--mav)', hrrr: 'var(--hrrr)' };
+                  const byCol = Object.fromEntries(Object.entries(COLS).map(([k, c]) => [c, k]));
+                  const paths = [...svg.querySelectorAll('path')].filter(p => byCol[p.getAttribute('stroke')]);
+                  const dash = [...new Set(paths.map(p => p.getAttribute('stroke-dasharray') || 'solid'))].sort();
+                  const solidBy = {};
+                  paths.filter(p => !p.getAttribute('stroke-dasharray')).forEach(p => {
+                    const k = byCol[p.getAttribute('stroke')]; solidBy[k] = (solidBy[k] || 0) + 1; });
+                  // the chart's own time scale, read off its midnight and day-end marks
+                  const mark = nm => { const t = [...svg.querySelectorAll('text')].find(e => e.textContent === nm);
+                                       return t ? +t.getAttribute('x') : null; };
+                  const fc = (await WXD.get('forecast/KSFO.json')).data;
+                  const ds = Date.parse(fc.markers.dayStart), de = Date.parse(fc.markers.dayEnd);
+                  const xm = mark('midnight'), xe = mark('day end');
+                  const X = t => xm + (t - ds) / (de - ds) * (xe - xm);
+                  const H = 36e5, want = {}, got = {};
+                  // today's levels are pinned to the run issued before the day began
+                  Object.keys(COLS).forEach(k => {
+                    const f = (fc.asIssued || {})[k]; if (!f) return;
+                    const r = (f.rows || []).concat(f.ext || []).filter(q => q.tempF != null).map(q => Date.parse(q.t)).sort((a, b) => a - b);
+                    const inday = r.filter(t => t >= ds && t < de); if (!inday.length) return;
+                    const i = r.indexOf(inday[inday.length - 1]);
+                    const step = Math.min(3 * H, Math.max(H, i + 1 < r.length ? r[i + 1] - r[i] : (i ? r[i] - r[i - 1] : H)));
+                    want[k] = [X(inday[0]), X(Math.min(de, inday[inday.length - 1] + step))];
+                  });
+                  [...svg.querySelectorAll('line.lvlline')].forEach(l => {
+                    const k = byCol[l.getAttribute('stroke')];
+                    (got[k] = got[k] || []).push([+l.getAttribute('x1'), +l.getAttribute('x2')]);
+                  });
+                  const spanOk = Object.keys(want).length >= 3 && Object.keys(want).every(k =>
+                    (got[k] || []).length === 2 && got[k].every(([a, b]) => Math.abs(a - want[k][0]) < 0.6 && Math.abs(b - want[k][1]) < 0.6));
+                  const starts = new Set(Object.values(got).flat().map(([a]) => Math.round(a)));
+                  // the crosshair, three quarters of the way into the day
+                  const r0 = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+                  const xq = X(ds + 0.75 * (de - ds)), yq = 200;
+                  svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true,
+                    clientX: r0.left + xq * r0.width / vb.width, clientY: r0.top + yq * r0.height / vb.height }));
+                  await new Promise(r => setTimeout(r, 120));
+                  // the five minute band's row belongs to the observation's group
+                  const ORDER = ['Observed', 'Range between reports', 'NWS', 'NBM', 'LAMP', 'MOS', 'HRRR'];
+                  const GROUP = m => (m === 'Range between reports' ? 'Observed' : m);
+                  const tipRows = [...document.querySelectorAll('#tip .tk')].map(e => ({
+                    m: ORDER.find(o => e.textContent.trim().startsWith(o)),
+                    dotted: !!e.querySelector('svg.swl line[stroke-dasharray]'), gs: e.classList.contains('gs'),
+                    text: e.textContent.trim() }));
+                  svg.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+                  const idx = tipRows.map(r => ORDER.indexOf(r.m));
+                  const grouped = idx.length > 3 && idx.every((v, i) => v >= 0 && (!i || v >= idx[i - 1]));
+                  // no solid row after a dotted one: the newest run leads its model's group
+                  const newestFirst = ORDER.every(m => { const g = tipRows.filter(r => r.m === m);
+                    const d = g.findIndex(r => r.dotted); return d < 0 || g.slice(d).every(r => r.dotted); });
+                  const twoRuns = ORDER.some(m => tipRows.filter(r => r.m === m).length >= 2);
+                  const breaks = tipRows.filter((r, i) => i && GROUP(r.m) !== GROUP(tipRows[i - 1].m)).every(r => r.gs);
+                  return { dash, solidBy, spanOk, want, got, starts: starts.size, grouped, newestFirst, twoRuns, breaks,
+                           rows: tipRows.map(r => (r.dotted ? '..' : '--') + r.text) };
+                }""")
+                chk.add(f"{scheme} chart: each model's newest run is solid and every run it superseded dotted",
+                        bool(rv and rv["dash"] == ["2 3", "solid"] and len(rv["solidBy"]) >= 3
+                             and all(n == 1 for n in rv["solidBy"].values())),
+                        str(rv and {k: rv[k] for k in ("dash", "solidBy")}))
+                chk.add(f"{scheme} chart: a level line is pinned to the run issued before the day and spans its rows' hours",
+                        bool(rv and rv["spanOk"] and rv["starts"] >= 2),
+                        str(rv and {k: rv[k] for k in ("want", "got")})[:300])
+                chk.add(f"{scheme} chart: the crosshair lists runs model by model, the newest first",
+                        bool(rv and rv["grouped"] and rv["newestFirst"] and rv["twoRuns"] and rv["breaks"]),
+                        str(rv and rv["rows"])[:300])
                 # the postmortem asks for the reasoning that stood when it scores
                 pm = page.evaluate("""async () => {
                   document.querySelector('#advYday').click();
@@ -4501,11 +6227,12 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         and (sw["bigFig"] or not sw_live),
                         str(sw) + (" monthHasData=" + str(sw_live)))
                 chk.add(f"{scheme} severe: the running month carries the market's ladder where one is listed",
-                        sw["ladder"], str(sw))
+                        sw_listed["ladder"], str(sw_listed))
                 chk.add(f"{scheme} severe: the caption names the settlement number",
                         sw["settle"], str(sw))
                 chk.add(f"{scheme} severe: no probability or fair value appears on the count blocks",
-                        not sw["probs"], "")
+                        not sw["probs"] and not sw_listed["probs"],
+                        f"wall={sw['probs']} pinned={sw_listed['probs']}")
                 # a covered link is a broken promise: the element under the
                 # center of a strike link rect must be the rect itself
                 hit = page.evaluate('''() => {
@@ -4558,96 +6285,116 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # lows are a tab on every figure; the lead curve and the grid are the two proven
                 lead_before = page.locator("#accLead").inner_html()
                 page.locator("#accLeadBar button", has_text="Lows").first.click(); page.wait_for_timeout(500)
-                grid_heads = page.eval_on_selector_all("#accGrid thead th", "e=>e.map(x=>x.textContent)")
+                grid_heads = page.eval_on_selector_all("#accGrid table.acc-t3 thead th", "e=>e.map(x=>x.textContent)")
                 chk.add(f"{scheme} accuracy: the lows tab redraws the lead curve",
                         page.locator("#accLead").inner_html() != lead_before, "")
-                # the scorecard needs no lows tab: it prints both metrics at once
+                # the scorecard is the paper's Tables 3 and 4 at its six leads
                 heads_t = [t.strip() for t in grid_heads]
                 grid_bar = page.locator("#accGridBar").inner_text()
-                chk.add(f"{scheme} accuracy: the scorecard puts MAE and mean error, high and low, under each of three leads",
-                        heads_t[:1] == ["System"] and [t for t in heads_t if t.endswith(" h")] == ["30 h", "18 h", "12 h"]
-                        and heads_t.count("MAE") == 3 and heads_t.count("Mean error") == 3
-                        and heads_t.count("High") == 6 and heads_t.count("Low") == 6
-                        and page.locator("#accGridBar button", has_text="Lows").count() == 0, str(heads_t[:12]))
+                chk.add(f"{scheme} accuracy: the scorecard carries the paper's six leads with the 18 h mean error, the offset and the record",
+                        heads_t[:1] == ["Series"] and heads_t.count("Hours before the end of the day") == 1
+                        and heads_t.count("Hours before the extreme") == 1 and "ME 18 h" in heads_t and "Offset" in heads_t
+                        and "Record since" in heads_t and [t for t in heads_t if t in ("30 h", "18 h", "12 h", "6 h")][:6] == ["30 h", "18 h", "12 h", "18 h", "12 h", "6 h"],
+                        str(heads_t[:14]))
                 chk.add(f"{scheme} accuracy: the scorecard has no CSV or newsletter controls",
                         "CSV" not in grid_bar and "Newsletter" not in grid_bar, grid_bar.replace("\n", " | ")[:100])
-                # every deterministic section opens in the own-target frame, and the METAR
-                # settle frame moves only the National Weather Service forecast's line
-                on_target = [page.locator(f"{bar} button.vbtn.on", has_text="Own target").count() for bar in ("#accLeadBar", "#accGridBar", "#accMapBar")]
-                chk.add(f"{scheme} accuracy: the error curve, the scorecard and the map open in the own-target frame",
-                        on_target == [1, 1, 1], str(on_target))
-                lead_target = page.locator("#accLead").inner_html()
-                page.locator("#accLeadBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(600)
-                lead_settle = page.locator("#accLead").inner_html()
-                page.locator("#accLeadBar button", has_text="Own target").first.click(); page.wait_for_timeout(600)
-                chk.add(f"{scheme} accuracy: the METAR settle frame redraws the error curve and Own target restores it",
-                        lead_settle != lead_target and page.locator("#accLead").inner_html() == lead_target, "")
-                def nws_cells():
-                    row = page.locator("#accGrid tr", has_text="National Weather Service").first
-                    return row.inner_text() if row.count() else ""
-                nws_target = nws_cells()
-                page.locator("#accGridBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(500)
-                nws_settle = nws_cells()
-                lamp_settle = page.locator("#accGrid tr", has_text="Aviation Forecast").first.inner_text()
-                page.locator("#accGridBar button", has_text="Own target").first.click(); page.wait_for_timeout(500)
-                lamp_target = page.locator("#accGrid tr", has_text="Aviation Forecast").first.inner_text()
-                chk.add(f"{scheme} accuracy: the scorecard's National Weather Service row changes with the frame and the Aviation Forecast's does not",
-                        bool(nws_target) and nws_target != nws_settle and lamp_target == lamp_settle,
-                        f"nws target={nws_target[:60]!r} settle={nws_settle[:60]!r}")
-                # the climate-report frame is offered on the lead curve as it is on the map
-                lead_metar = page.locator("#accLead").inner_html()
-                page.locator("#accLeadBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(600)
-                chk.add(f"{scheme} accuracy: the lead curve redraws in the climate-report frame",
-                        page.locator("#accLead").inner_html() != lead_metar, "")
-                page.locator("#accLeadBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(400)
-                # the map earns a color only where the paired interval clears zero
+                page.locator("#accLeadBar button", has_text="Highs").first.click(); page.wait_for_timeout(300)
+                grid_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/grid.json").read().decode())
+                gblk = grid_file["metric"]["high"]["cohorts"]["all"]
+                page.locator("#accGridBar button", has_text="Highs").first.click(); page.wait_for_timeout(300)
+                grp_rows = page.eval_on_selector_all("#accGrid table.acc-t3 tr.acc-g-group td:first-child", "e => e.map(x => x.textContent.trim())")
+                first = page.eval_on_selector_all("#accGrid table.acc-t3 tbody tr", "e => e.slice(0, 1).map(x => x.textContent)")
+                rec = page.eval_on_selector_all("#accGrid table.acc-t3 tbody tr:not(.acc-g-group) td:last-child", "e => e.map(x => x.textContent.trim())")
+                chk.add(f"{scheme} accuracy: the scorecard opens on the market, then the groups in the file's order, and dates every record",
+                        grp_rows == [g["title"] for g in gblk["groups"]] and len(grp_rows) == 5
+                        and first and first[0].startswith("ForecastEx") and len(rec) >= 20
+                        and all(re.match(r"^[A-Z][a-z]{2} \d+ \d{4}$", t) or t == "—" for t in rec),
+                        f"groups={grp_rows} first={first[:1]}")
+                t4 = page.locator("#accGrid table.acc-t4 tbody tr").count()
+                sig = page.locator("#accGrid table.acc-t3 .pi.sig").count()
+                chk.add(f"{scheme} accuracy: Table 4 gives the market and the four ensembles, and Holm-significant improvements are bold",
+                        t4 == 5 and sig >= 20, f"table4={t4} bold={sig}")
+                before = page.locator("#accGrid").inner_html()
+                page.locator("#accGridBar button", has_text="As issued").first.click(); page.wait_for_timeout(400)
+                iss = page.locator("#accGrid").inner_html()
+                page.locator("#accGridBar button", has_text="Bias-corrected").first.click(); page.wait_for_timeout(300)
+                page.locator("#accGridBar button", has_text="Balanced sample").first.click(); page.wait_for_timeout(400)
+                bal = page.locator("#accGrid").inner_html()
+                page.locator("#accGridBar button", has_text="Every day on record").first.click(); page.wait_for_timeout(300)
+                chk.add(f"{scheme} accuracy: the scorecard redraws as issued and on the balanced sample",
+                        iss != before and bal != before and "acc-t4" not in bal, "")
+                # the map: the paper's four leads, a color on every scored station, a bold outline where Holm holds
                 fills = page.eval_on_selector_all("#accMap circle", "e=>e.map(x=>x.getAttribute('fill')||'')")
                 colored = sum(1 for f in fills if f.startswith("color-mix("))
-                chk.add(f"{scheme} accuracy: the map colors at least three stations", colored >= 3, f"colored={colored}")
-                page.locator("#accMapBar button", has_text="NWS climate report").first.click(); page.wait_for_timeout(500)
-                fills = page.eval_on_selector_all("#accMap circle", "e=>e.map(x=>x.getAttribute('fill')||'')")
-                dashed = page.locator("#accMap circle[stroke-dasharray]").count()
-                grey = sum(1 for f in fills if f == "var(--line)")
-                chk.add(f"{scheme} accuracy: the map greys or hollows a station whose interval covers zero or that the frame excludes",
-                        grey + dashed >= 1, f"grey={grey} hollow={dashed}")
-                # in the own-target frame the forecast is not scored at Buckley Field, which has no report of its own
-                page.locator("#accMapBar button", has_text="Own target").first.click(); page.wait_for_timeout(500)
-                map_target_hollow = page.locator("#accMap circle[stroke-dasharray]").count()
-                page.locator("#accMapBar button", has_text="METAR settle").first.click(); page.wait_for_timeout(500)
-                map_settle_hollow = page.locator("#accMap circle[stroke-dasharray]").count()
-                page.locator("#accMapBar button", has_text="Own target").first.click(); page.wait_for_timeout(500)
-                chk.add(f"{scheme} accuracy: the own-target map hollows Buckley Field for the National Weather Service forecast",
-                        map_target_hollow >= map_settle_hollow + 1, f"target={map_target_hollow} settle={map_settle_hollow}")
-                # a row per system in the matched cohort, the market first
-                grid_file = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/accuracy/grid.json").read().decode())
-                matched = [r["id"] for r in grid_file.get("cohorts", {}).get("own", []) if r.get("id")]
-                grid_sys = page.eval_on_selector_all("#accGrid tbody td.acc-grid-sys", "e=>e.map(x=>x.textContent)")
-                head = page.locator("table.acc-grid-table thead th").all_inner_texts()
-                col = page.locator("table.acc-grid-table tbody td.acc-grid-start").all_inner_texts()
-                chk.add(f"{scheme} accuracy: the grid dates every row's own record in every cohort",
-                        any(t.strip().lower() == "record since" for t in head) and len(col) >= 6
-                        and all(re.match(r"^[A-Z][a-z]{2} \d+", t.strip()) for t in col),
-                        f"head={'Record since' in head} rows={len(col)}")
-                chk.add(f"{scheme} accuracy: the grid carries a row per system, the market first",
-                        len(grid_sys) == len(matched) and len(matched) >= 6 and grid_sys[:1] == ["ForecastEx"],
-                        f"rows={len(grid_sys)} file={len(matched)} first={grid_sys[:1]}")
-                # every system with a distribution carries a CRPS under both error cells at every lead
-                crps_rows = page.eval_on_selector_all("#accGrid tbody tr:not(.acc-grid-grp)", """e => e.map(tr => [
-                    tr.querySelector('td.acc-grid-sys').firstChild.nextSibling.textContent.trim(),
-                    Array.from(tr.querySelectorAll('.acc-grid-n')).filter(x => x.textContent.startsWith('CRPS')).length])""")
-                with_crps = {n: k for n, k in crps_rows if k}
-                chk.add(f"{scheme} accuracy: the scorecard gives every probabilistic system a CRPS, and only those",
-                        set(with_crps) == {"ForecastEx", "European AI Ensemble Mean", "American Ensemble", "Canadian Ensemble", "German Ensemble"}
-                        and all(k == 6 for k in with_crps.values()), str(with_crps))
-                # the grid and the systems table share one grouping and one order
-                grid_groups = page.eval_on_selector_all("#accGrid tr.acc-grid-grp th", "e=>e.map(x=>x.textContent.trim())")
-                table_groups = page.eval_on_selector_all("table.acc-sources tr.grp th", "e => e.map(x => x.firstChild.textContent.trim())")
-                table_names = page.eval_on_selector_all("table.acc-sources td.sys a", "e => e.map(x => x.textContent.trim())")
-                grid_names = [re.sub(r"reference row$", "", n).strip() for n in grid_sys]
-                chk.add(f"{scheme} accuracy: the scorecard groups and orders its rows as the systems table does",
-                        grid_groups == [g for g in table_groups if g in grid_groups]
-                        and grid_names == [n for n in table_names if n in grid_names],
-                        f"grid={grid_groups} names={grid_names[:4]}")
+                bold = page.locator("#accMap circle[stroke-width='2.4']").count()
+                chk.add(f"{scheme} accuracy: the map colors the stations and outlines in bold where the difference holds after Holm",
+                        colored >= 3 and bold >= 1, f"colored={colored} bold={bold}")
+                lead_tabs = page.eval_on_selector_all("#accMapBar .tabgroup button", "e=>e.map(x=>x.textContent)")
+                before = page.locator("#accMap").inner_html()
+                page.locator("#accMapBar button", has_text="12 h before the extreme").first.click(); page.wait_for_timeout(500)
+                chk.add(f"{scheme} accuracy: the map offers the paper's four single leads and redraws on each",
+                        all(t in lead_tabs for t in ("30 h", "18 h", "18 h before the extreme", "12 h before the extreme"))
+                        and page.locator("#accMap").inner_html() != before, str(lead_tabs))
+                page.locator("#accMapBar button", has_text="30 h").first.click(); page.wait_for_timeout(400)
+                # the forecast scored against the climate report has no value at Buckley Field; LAMP has one
+                ndfd_hollow = page.locator("#accMap circle[stroke-dasharray]").count()
+                page.select_option("#accMapBar select", "LAMP"); page.wait_for_timeout(500)
+                lamp_hollow = page.locator("#accMap circle[stroke-dasharray]").count()
+                page.select_option("#accMapBar select", "NDFD"); page.wait_for_timeout(300)
+                chk.add(f"{scheme} accuracy: the map hollows Buckley Field for a series scored against the climate report",
+                        ndfd_hollow >= lamp_hollow + 1, f"ndfd={ndfd_hollow} lamp={lamp_hollow}")
+
+                # ---- every priced chart or board says its prices open the exchange (owner,
+                # 2026-10-22): under a chart or board, or once above a page of many panels, and
+                # never where nothing on the page opens a contract
+                def _tn():
+                    return page.evaluate("""() => [...document.querySelectorAll('p.tradenote')].map(n => {
+                      const p_ = n.previousElementSibling, q_ = n.nextElementSibling;
+                      return { text: n.textContent, prev: p_ ? (p_.id || p_.className) : null,
+                               next: q_ ? (q_.id || q_.className) : null, host: n.parentNode.id || n.parentNode.className }; })""")
+                for tn_path, tn_want in (("city.html?station=KATL", [{"prev": "bar"}]),
+                                         ("hurricane.html", [{"prev": "basinCap"}, {"prev": "laddersCap"}, {"host": "cat4"}, {"host": "landfall"}]),
+                                         ("contract.html?id=HCAB", [{"host": "cBody", "prev": "ladder"}]),
+                                         ("fossil-fuels.html", [{"next": "panels"}]),
+                                         ("climate.html", [{"next": "panels"}])):
+                    page.goto(f"{srv.url}/{tn_path}"); page.wait_for_timeout(2600)
+                    got = _tn()
+                    ok_ = len(got) == len(tn_want) and all(g["text"] == "Click on any price to trade contracts through IBKR Prediction Markets" for g in got)
+                    for g, want_ in zip(got, tn_want):
+                        if any(g.get(k_) != v_ for k_, v_ in want_.items()):
+                            ok_ = False
+                    chk.add(f"{scheme} price links ({tn_path}): the line sits by the prices it describes", ok_, str(got)[:300])
+                for tn_path in ("city.html?station=KATL&market=off", "index.html"):
+                    page.goto(f"{srv.url}/{tn_path}"); page.wait_for_timeout(2200)
+                    chk.add(f"{scheme} price links ({tn_path}): nothing opens a contract here, so no line",
+                            page.locator("p.tradenote").count() == 0 and page.locator("[data-contract-url]").count() == 0,
+                            str(page.locator("p.tradenote").count()))
+
+                # ---- the wind-only shore stations are scored by the pipeline but carry no
+                # temperature market, so the scorecard's figure leaves them out, on the landing
+                # page and on the scorecard page alike (owner, 2026-10-20). Nantucket is put into
+                # both files here, a copy of the first scored station, so it would have a row.
+                _first = {}
+                def _wind_only(route):
+                    resp = route.fetch()
+                    d_ = json.loads(resp.text())
+                    if route.request.url.split("?")[0].endswith("/summary.json"):
+                        c0 = dict(d_["cities"][0]); c0.update({"station": "KACK", "city": "Nantucket", "windOnly": True})
+                        d_["cities"] = d_["cities"] + [c0]
+                    else:
+                        sid0, st0 = next(iter(d_["stations"].items()))
+                        _first["city"] = st0.get("city")
+                        d_["stations"]["KACK"] = dict(st0, city="Nantucket")
+                    return route.fulfill(response=resp, body=json.dumps(d_))
+                _wo_url = re.compile(r"/data/snapshots/(summary|scorecard)\.json(\?|$)")
+                page.route(_wo_url, _wind_only)
+                for _wo_page in ("index.html", "scorecard.html"):
+                    page.goto(f"{srv.url}/{_wo_page}"); page.wait_for_timeout(1600)
+                    wo_labels = page.eval_on_selector_all("#divsvg text", "e=>e.map(x=>x.textContent)")
+                    chk.add(f"{scheme} scorecard ({_wo_page}): a wind-only station is scored but left off the figure",
+                            "Nantucket" not in wo_labels and _first.get("city") in wo_labels,
+                            str(["Nantucket" in wo_labels, _first.get("city") in wo_labels]))
+                page.unroute(_wo_url, _wind_only)
 
                 # ---- the scorecard grid: a row per station, a column per system
                 page.goto(f"{srv.url}/scorecard.html"); page.wait_for_timeout(1400)
@@ -4715,22 +6462,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # which it did until it ran past five one evening and failed.
                 opened_today = page.locator("#m1.on").count() == 1
                 chk.add(f"{scheme} hover: map dot shows the board on screen, not both days",
-                        (("today" in t_md and "Observed high so far" in t_md
-                          and "Blend of Models" not in t_md) if opened_today
-                         else ("tomorrow" in t_md and "Blend of Models" in t_md
-                               and "Observed high so far" not in t_md)),
+                        (("today" in t_md and "Observed high so far" in t_md and "issued before the day began" in t_md)
+                         if opened_today else
+                         ("tomorrow" in t_md and "newest run" in t_md and "Observed high so far" not in t_md)),
                         ("today " if opened_today else "tomorrow ") + t_md[:100])
                 wdots = page.locator("#mapW g.dot").count()
                 chk.add(f"{scheme} map: the international stations sit on a world canvas below", wdots >= 10, f"dots={wdots}")
-                # the reference field is interpolated for tomorrow only, so the
-                # shading exists on the day-ahead views and nowhere else
-                page.locator("#m2").click(); page.wait_for_timeout(400)
-                page.locator("#map rect[data-i]").nth(600).hover(force=True); page.wait_for_timeout(120)
-                t_cell = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} hover: shading cell names the derived field value", "NWS forecast field" in t_cell, t_cell[:80])
-                page.locator("#m1").click(); page.wait_for_timeout(300)
-                chk.add(f"{scheme} map: the current-day view is shaded too, not only the day ahead",
-                        page.locator("#map rect[data-i]").count() > 1500, str(page.locator("#map rect[data-i]").count()))
+                # with no NDFD issuance for the samples' day the map draws its land and says so
+                chk.add(f"{scheme} map: without an NDFD view for the day the land is drawn plain and the legend says so",
+                        page.locator("#map image.ndfd").count() == 0 and page.locator("#map path.land").count() == 1
+                        and "No NWS forecast shading" in page.locator("#legendField").inner_text(), "")
                 # the headline cards are written by the pipeline; absent snapshot must simply draw none
                 cards = page.locator("#cards .tile").count()
                 chk.add(f"{scheme} map: headline cards render, or none when the snapshot is absent", cards == 0 or cards >= 2, f"cards={cards}")
@@ -4942,20 +6683,22 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
             PAGES_PROSE = ["index.html", "city.html?station=KLAX", "hurricane.html", "allocator.html",
                            "climate.html", "weather.html", "agriculture.html", "scorecard.html",
                            "accuracy.html", "about.html", "fossil-fuels.html", "electricity-renewables.html",
-                           "analysis-resolution.html"]
+                           "analysis-resolution.html", "climate-gdp.html"]
             # the owner's own copy, which the style rules do not touch
             OWNER = ("faq.html", "daily-temperature-markets.html")
             bad_title, bad_colon, bad_not = [], [], []
+            # the world GDP page's article is the owner's own copy too; its method notes are the page's
+            OWNS = "e=>e.filter(x=>!(x.closest('#gdpArticle') && !x.closest('.accnote')))"
             for path in PAGES_PROSE:
-                page.goto(f"{srv.url}/{path}"); page.wait_for_timeout(1100)
+                page.goto(f"{srv.url}/{path}"); page.wait_for_timeout(2500 if path.startswith("climate-gdp") else 1100)
                 titles = page.eval_on_selector_all(".wrap .secttl, .wrap h2, .wrap h3",
-                                                   "e=>e.map(x=>x.textContent.trim())")
+                                                   "e=>(" + OWNS + ")(e).map(x=>x.textContent.trim())")
                 for t in titles:
                     if re.match(r"^(the|a|an)\s", t, re.I):
                         bad_title.append(f"{path}: {t}")
                 # the accuracy page's method notes are page copy too, so they take the same rules
                 body = page.eval_on_selector_all(".wrap p, .wrap li, .wrap .accnote .rule, .wrap .accnote .nt",
-                                                 "e=>e.map(x=>x.textContent)")
+                                                 "e=>(" + OWNS + ")(e).map(x=>x.textContent)")
                 for t in body:
                     if re.search(r"[a-z)][:]\s+[a-z]", t):
                         bad_colon.append(f"{path}: {t[:70]}")

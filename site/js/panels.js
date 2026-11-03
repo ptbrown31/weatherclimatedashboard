@@ -203,11 +203,13 @@ window.WXPanels = (() => {
       laddered++;
     }
 
+    // above the panels rather than among them, so the first panel stays the first child
+    WXM.tradeNote(host, host, true);
     const foot = $('#foot');
     if (foot) {
       foot.textContent = (opts.source ? opts.source + ' ' : '')
         + (WXM.on() ? (WXM.live()
-            ? 'Markers are the exchange\'s listed contracts at the Yes midpoint, colored by price; click one to open it on IBKR. '
+            ? 'Markers are the exchange\'s listed contracts at the Yes midpoint, colored by price. '
             : 'Markers are placeholders, not market values. ') : '')
         + drawn + ' of these are drawn against their published series, '
         + evented + ' resolve on an event and are listed as ladders, '

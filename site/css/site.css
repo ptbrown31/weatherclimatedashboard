@@ -5,39 +5,48 @@
 :root{
   --ground:#F6F7F9; --panel:#FFFFFF; --ink:#1A2330; --muted:#5E6B7A; --line:#D8DEE6; --rule:#B8C1CC;
   --navy:#0B2545; --accent:#1E5AA0; --accent-ink:#FFFFFF;
-  --obs:#111111; --nws:#2E7D32; --nbm:#B45309; --lamp:#6B4FBB; --mav:#5C6F8A; --sust:#8A8F98;
-  --warm:#B2182B; --cool:#2166AC; --yes:#1E7A4F; --no:#B2182B; --fcst:#7B4FA8; --vbar:#CF6A14;
-  --night:#EEF1F6; --shade:#F4F7FB; --map-land:#EEF1F5; --map-sea:#F6F9FC; --map-line:#FFFFFF;
+  --obs:#111111; --nws:#2E7D32; --nbm:#B45309; --lamp:#6B4FBB; --mav:#5C6F8A; --hrrr:#B02E7C; --sust:#8A8F98;
+  --dot-ink:#FFFFFF; --warm:#B2182B; --cool:#2166AC; --yes:#1E7A4F; --no:#B2182B; --fcst:#7B4FA8; --vbar:#CF6A14;
+  --night:#EEF1F6; --shade:#F4F7FB; --map-land:#EEF1F5; --map-sea:#F6F9FC; --map-line:#FFFFFF; --map-road:rgba(140,90,40,.55); --map-road2:rgba(140,90,40,.3); --map-place:#4A5563;
   --chip:#EEF2F7; --warn:#8A5A00; --warn-soft:#FFF4DC; --bad:#A6452B; --bad-soft:#F8E5DF; --ok:#2E6B3F; --ok-soft:#E3EFE6;
   --tip-bg:#12161C; --tip-ink:#FFFFFF;
   /* the archive's PDF viewer, the same in both themes as it is there */
   --viewer:#404040; --viewer-line:#2E2E2E;
+  /* the working paper's five groups on the accuracy page, the palette of the brief at its top */
+  --g-mos:#1B7D3A; --g-blend:#12A4B6; --g-human:#E8850C; --g-ai:#7B3294; --g-raw:#B79E70;
   --ana-rtma:#B8722C; --cell-line:#111111;
-  --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t12:#3F6B45; --t13:#8F5530; --t14:#57499A; --t15:#245A76; --t16:#6E5730; --t17:#8A3F58; --t18:#47657E; --t-extra:#9AA3AD;
+  --t-extra:#9AA3AD;
+  /* a live storm's cards, shaded by what each column of the vendor's is: LiveCyc looks forward from
+     its cycle, Metryc counts the highest gust over the whole storm (owner, 2026-10-12) */
+  --ph-fwd:rgba(30,90,160,.075); --ph-cum:rgba(214,140,30,.13); --ph-cum-ink:#9A5B0C;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --ground:#0F141A; --panel:#161C24; --ink:#E4E9F0; --muted:#98A4B3; --line:#2A3440; --rule:#3A4656;
     --navy:#9DB8E3; --accent:#7FB0EA; --accent-ink:#0F141A;
-    --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC; --sust:#7E8695; --sust:#7E8695;
-    --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F; --fcst:#B98FE0; --vbar:#E0A070;
-    --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
+    --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC; --hrrr:#E88AC5; --sust:#7E8695; --sust:#7E8695;
+    --dot-ink:#0F141A; --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F; --fcst:#B98FE0; --vbar:#E0A070;
+    --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A; --map-road:rgba(226,204,168,.4); --map-road2:rgba(226,204,168,.22); --map-place:#B7C0CC;
     --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
     --tip-bg:#E4E9F0; --tip-ink:#0F141A;
+    --g-mos:#5FBF7A; --g-blend:#3FC4D4; --g-human:#F0A04A; --g-ai:#B98AE0; --g-raw:#A8957A;
     --ana-rtma:#E8A85C; --cell-line:#0B0F14;
-    --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t12:#9FD4AA; --t13:#EDB98C; --t14:#BDB2EC; --t15:#8CC6E3; --t16:#DBC088; --t17:#E7A3BB; --t18:#AEC8E0; --t-extra:#8C97A3;
+    --t-extra:#8C97A3;
+    --ph-fwd:rgba(127,176,234,.13); --ph-cum:rgba(232,170,80,.15); --ph-cum-ink:#E8AA50;
   }
 }
 :root[data-theme="dark"]{
   --ground:#0F141A; --panel:#161C24; --ink:#E4E9F0; --muted:#98A4B3; --line:#2A3440; --rule:#3A4656;
   --navy:#9DB8E3; --accent:#7FB0EA; --accent-ink:#0F141A;
-  --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC; --sust:#7E8695;
-  --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F; --fcst:#B98FE0; --vbar:#E0A070;
-  --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A;
+  --obs:#F2F4F7; --nws:#6FCF76; --nbm:#F0A048; --lamp:#A995E8; --mav:#9FB3CC; --hrrr:#E88AC5; --sust:#7E8695;
+  --dot-ink:#0F141A; --warm:#E4606F; --cool:#6FA8E6; --yes:#4FB37C; --no:#E4606F; --fcst:#B98FE0; --vbar:#E0A070;
+  --night:#141B24; --shade:#18212C; --map-land:#1F2833; --map-sea:#131A22; --map-line:#0F141A; --map-road:rgba(226,204,168,.4); --map-road2:rgba(226,204,168,.22); --map-place:#B7C0CC;
   --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
   --tip-bg:#E4E9F0; --tip-ink:#0F141A;
+  --g-mos:#5FBF7A; --g-blend:#3FC4D4; --g-human:#F0A04A; --g-ai:#B98AE0; --g-raw:#A8957A;
   --ana-rtma:#E8A85C; --cell-line:#0B0F14;
-  --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t12:#9FD4AA; --t13:#EDB98C; --t14:#BDB2EC; --t15:#8CC6E3; --t16:#DBC088; --t17:#E7A3BB; --t18:#AEC8E0; --t-extra:#8C97A3;
+  --t-extra:#8C97A3;
+  --ph-fwd:rgba(127,176,234,.13); --ph-cum:rgba(232,170,80,.15); --ph-cum-ink:#E8AA50;
 }
 *{box-sizing:border-box}
 html{color-scheme:light dark}
@@ -99,17 +108,28 @@ text{font-family:inherit}
 .tip .tk{opacity:.75;white-space:nowrap}
 .tip .tv{text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .tip .tf{margin-top:4px;opacity:.75;font-size:11px}
+/* the standing book under a price box, set off from the rows above it */
+.tip .tq{margin-top:5px;padding-top:4px;border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)}
+/* a ranking of the accuracy page's 26 series needs a little more room than a row of values */
+.tip:has(table.l3){max-width:430px}
 .tip[data-pinned="1"]{pointer-events:auto;user-select:text;outline:1px solid var(--accent)}
 .tip .sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px;box-shadow:0 0 0 1px rgba(128,128,128,.7)}
+.tip .swl{display:inline-block;margin-right:5px;vertical-align:1px}
+.tip .tg .gs{margin-top:5px}
 /* The hover box is drawn in the opposite theme to the page, dark on a light
    page and light on a dark one, so a system's swatch inside it takes the
    other theme's value of its color; the page's own value would sit dark on
    dark or light on light. The ForecastEx row is set in bold. */
-.tip{--accent:#7FB0EA; --t1:#7FBF8C; --t2:#E0A070; --t3:#A99BE0; --t4:#6FB3D6; --t5:#C9AA6A; --t6:#D98AA6; --t7:#93B4D3; --t8:#B4C46A; --t9:#E0A868; --t10:#8FC5C5; --t11:#C29AC2; --t12:#9FD4AA; --t13:#EDB98C; --t14:#BDB2EC; --t15:#8CC6E3; --t16:#DBC088; --t17:#E7A3BB; --t18:#AEC8E0; --t-extra:#8C97A3;}
+.tip{--g-mos:#5FBF7A; --g-blend:#3FC4D4; --g-human:#F0A04A; --g-ai:#B98AE0; --g-raw:#A8957A;}
 @media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]) .tip{--accent:#1E5AA0; --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t12:#3F6B45; --t13:#8F5530; --t14:#57499A; --t15:#245A76; --t16:#6E5730; --t17:#8A3F58; --t18:#47657E; --t-extra:#9AA3AD;}
+  :root:not([data-theme="light"]) .tip{--g-mos:#1B7D3A; --g-blend:#12A4B6; --g-human:#E8850C; --g-ai:#7B3294; --g-raw:#B79E70;}
 }
-:root[data-theme="dark"] .tip{--accent:#1E5AA0; --t1:#4F7F5A; --t2:#A6693A; --t3:#6E5FA8; --t4:#2F6F8F; --t5:#8A6D3B; --t6:#A34F6B; --t7:#5B7C99; --t8:#7A8B3F; --t9:#B0763F; --t10:#5F8E8E; --t11:#8C6A8C; --t12:#3F6B45; --t13:#8F5530; --t14:#57499A; --t15:#245A76; --t16:#6E5730; --t17:#8A3F58; --t18:#47657E; --t-extra:#9AA3AD;}
+:root[data-theme="dark"] .tip{--g-mos:#1B7D3A; --g-blend:#12A4B6; --g-human:#E8850C; --g-ai:#7B3294; --g-raw:#B79E70;}
+.tip{--accent:#7FB0EA; --t-extra:#8C97A3;}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .tip{--accent:#1E5AA0; --t-extra:#9AA3AD;}
+}
+:root[data-theme="dark"] .tip{--accent:#1E5AA0; --t-extra:#9AA3AD;}
 @media (prefers-reduced-motion: reduce){.tip{transition:none}}
 /* city page */
 /* The two maps side by side, finishing at the same height.
@@ -190,6 +210,7 @@ svg.cpanel{width:100%;height:auto;display:block}
 .scards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px}
 .scardwrap{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 10px}
 .scardwrap .lt{font-size:12.5px;font-weight:700;color:var(--navy)}
+.scardwrap .lt .ltfin{color:var(--ph-cum-ink)}
 svg.scard{width:100%;height:auto;display:block}
 svg.stimeline{width:100%;height:auto;display:block;cursor:ew-resize;touch-action:none;margin:2px 0 6px}
 svg.stimeline:focus{outline:2px solid var(--accent);outline-offset:2px}
@@ -210,6 +231,53 @@ td.num.lnk{text-decoration:underline;text-decoration-style:dotted;text-underline
 td.num.lnk:hover{text-decoration-style:solid}
 .tile.lnk:hover{border-color:var(--accent)}
 svg path[role="link"],svg rect[role="link"]{cursor:pointer}
+/* The basin map with its side panel while a storm is running: the panel holds
+   one location's ladder and series, filled from the map. On a wide screen the
+   pair widens past the text column so the map keeps its size; below that the
+   panel is left off, since the storm section under the map holds the same
+   cards. */
+.mapwrap .mside{display:none}
+@media (min-width:1100px){
+  .card.mapwrap.has-side{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;align-items:start;
+    width:min(1380px,calc(100vw - 60px));margin-left:calc(50% - min(690px,50vw - 30px));padding:8px 12px 8px 4px;overflow:visible}
+  .card.mapwrap.has-side .mside{display:block}
+}
+.mside{font-size:12px;border-left:1px solid var(--line);padding:2px 0 4px 12px;min-width:0}
+/* a satellite loop per storm on view, under the map */
+#stormLoops{margin:14px 0 4px}
+.loops{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,400px));gap:14px}
+.loopcard{padding:10px 12px;margin:0}
+.loopcard .lhd{font-weight:700;color:var(--navy);font-size:13.5px}
+.loopcard .lsub{font-size:11.5px;color:var(--muted);margin:1px 0 7px}
+.loopcard .loopimg{display:block;width:100%;height:auto;aspect-ratio:1/1;border-radius:6px;background:#0b0f14}
+.loopcard .lbar{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:12px}
+.loopcard .looptime{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+.loopcard .lsrc{font-size:10.5px;color:var(--muted);margin-top:4px}
+/* the lower 48 under the landing map: the map card's padding, so the picture is the map's width */
+#conusLoop{margin:16px 0 4px}
+.loopcard.wide{padding:8px 4px 6px}
+.loopcard.wide .lsub,.loopcard.wide .lbar,.loopcard.wide .lsrc{padding:0 8px}
+.loopcard .loopcrop{position:relative;width:100%;overflow:hidden;border-radius:6px;background:#0b0f14}
+.loopcard .loopcrop .loopimg{position:absolute;max-width:none;aspect-ratio:auto;border-radius:0}
+/* the surface analysis is drawn on the landing map's projection in a frame of its own shape, and the
+   fan-shaped margins outside WPC's picture are transparent, so they show the card rather than a dark box */
+.loopcard.wpc .loopimg{aspect-ratio:auto;background:none}
+.mside .mshd{font-size:12.5px;font-weight:700;color:var(--navy);margin:2px 0 3px}
+.mside .msbox{border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin:9px 0;min-height:118px}
+.mside .msbox.filled{border:none;padding:0;min-height:0}
+.mside .msbox.filled .vloc,.mside .msbox.filled .scardwrap{margin:0}
+.mside .mslbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 5px}
+.mside .msempty{color:var(--muted);line-height:1.5}
+.mside .msquick{margin-top:4px;color:var(--muted);line-height:1.9}
+.mside .msquick button{font-size:11.5px;padding:1px 7px;margin:0 4px 0 0}
+#basinKey{gap:8px 18px;align-items:center}
+#basinKey .bkitem{display:inline-flex;align-items:center;gap:6px}
+#basinKey .bkitem b{font-weight:600;color:var(--ink)}
+#basinKey .bkramp{display:inline-flex;align-items:center;gap:5px}
+#basinKey .bkbar{display:inline-block;width:120px;height:9px;border:1px solid var(--line);border-radius:2px;margin:0}
+#basinKey .bkdot{display:inline-block;width:8px;height:8px;border-radius:50%;border:1.4px solid var(--muted);margin:0}
+#basinKey .bkdot.live{width:11px;height:11px;background:rgba(192,57,43,.75);border:1px solid #fff}
+svg#basin circle.msel{stroke:var(--ink);stroke-width:2.4px;vector-effect:non-scaling-stroke}
 svg#basin{touch-action:none}
 svg#basin.grab{cursor:grab}
 svg#basin.grabbing{cursor:grabbing}
@@ -274,6 +342,13 @@ svg.serieschart{width:100%;height:auto;display:block}
   border-color:color-mix(in srgb, var(--yes) 45%, transparent);color:var(--yes)}
 .tip .tp.no{background:color-mix(in srgb, var(--no) 16%, transparent);
   border-color:color-mix(in srgb, var(--no) 45%, transparent);color:var(--no)}
+/* a price that links to its contract, live once the box is pinned */
+.tip a.tp{text-decoration:none}
+.tip[data-pinned="1"] a.tp:hover{border-color:currentColor;filter:brightness(1.06)}
+.tip[data-pinned="1"] a.tp:focus-visible{outline:2px solid currentColor;outline-offset:1px}
+/* a hint that reads one way on hover and another once the box is pinned */
+.tip .tyes,.tip[data-pinned="1"] .tnot{display:none}
+.tip[data-pinned="1"] .tyes{display:inline}
 
 
 /* A panel opened to fill the window. Everything in it is the panel's own code
@@ -456,6 +531,15 @@ details.stormdone>div{padding:6px 14px 12px}
 /* the vendor's latest file, inside the storm it belongs to */
 .filehd{font-size:12.5px;font-weight:700;color:var(--navy);margin:14px 0 2px}
 svg.gustmap{width:100%;height:auto;display:block}
+/* the storm's replay map and the season headings over the storms that have run */
+.replaycap{margin:4px 0 0}
+/* the line under a priced chart or board that says its prices open the exchange */
+p.tradenote{margin:4px 0 8px;color:var(--accent)}
+/* the replay map pans only once zoomed, so a swipe over it at full view still scrolls the page */
+svg.replay.grab{cursor:grab;touch-action:none}
+svg.replay.grabbing{cursor:grabbing}
+.rzoom{margin:2px 0 6px}
+.stormseason{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:14px 0 4px}
 .scardwrap.flash{outline:2px solid var(--accent);outline-offset:2px}
 svg.scard rect.plotlink,svg.lhlserie rect.plotlink{cursor:pointer}
 .scardwrap.full,.cwrap.full{position:fixed;inset:0;z-index:40;margin:0;padding:18px 22px 22px;border:0;border-radius:0;
@@ -477,12 +561,19 @@ svg.scard rect.plotlink,svg.lhlserie rect.plotlink{cursor:pointer}
 .slegend .kk{margin-left:4px}
 .slegend .kl{display:inline-block;width:22px;border-top:2.4px solid var(--ink);margin-right:5px;vertical-align:middle}
 .slegend .kl.dash{border-top-style:dashed;border-top-width:2px}
-svg.scard .pxline,svg.scard .pxdot,svg.scard .pxnow,svg.scard .lcline,svg.scard .ldot,
+.slegend .ph{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;border:1px solid var(--line)}
+.slegend .ph.fwd{background:var(--ph-fwd)} .slegend .ph.cum{background:var(--ph-cum)}
+.slegend .kq{display:inline-block;width:8px;height:8px;border:1.4px solid var(--ink);background:var(--panel);margin-right:5px;vertical-align:-1px}
+svg.scard .pxline,svg.scard .pxdot,svg.scard .lcline,svg.scard .ldot,svg.scard .intmk,svg.scard .intdot,
+svg.scard .rsmk,svg.scard .finline,svg.scard .findot,
 svg.lhlserie .pxline,svg.lhlserie .pxdot,svg.lhlserie .calcline,svg.lhlserie .cdot{transition:opacity .2s}
 svg.lhlserie .pxband{opacity:.16;transition:opacity .2s}
-svg.emph-livecyc .pxline,svg.emph-livecyc .pxdot,svg.emph-livecyc .pxnow{opacity:.22}
+svg.emph-livecyc .pxline,svg.emph-livecyc .pxdot{opacity:.22}
 svg.emph-livecyc .pxband{opacity:.05}
-svg.emph-exchange .lcline,svg.emph-exchange .ldot,svg.emph-exchange .calcline,svg.emph-exchange .cdot{opacity:.32}
+svg.emph-exchange .lcline,svg.emph-exchange .ldot,svg.emph-exchange .calcline,svg.emph-exchange .cdot,
+svg.emph-exchange .intmk,svg.emph-exchange .intdot,svg.emph-exchange .rsmk,svg.emph-exchange .finline,svg.emph-exchange .findot{opacity:.32}
+/* a check or cross keeps a thin halo of the panel, so it reads where a dashed line runs through it */
+svg.scard .rsmk{paint-order:stroke;stroke:var(--panel);stroke-width:2px;stroke-linejoin:round}
 @media (prefers-reduced-motion: reduce){svg.scard *,svg.lhlserie *{transition:none}}
 /* the page's tables sit on the panel color; a table inside the hover box has
    to take the box's own ink and ground or it vanishes against them */
@@ -532,12 +623,12 @@ tr.meanrow td{border-top:2px solid var(--rule);font-weight:700}
   box-shadow:0 1px 2px rgba(0,0,0,.16),0 5px 16px rgba(0,0,0,.12)}
 html:has(.pf-dlg[open]){overflow:hidden}
 
-/* The accuracy page. The system colors are the tokens --t1 to --t18 above,
-   one per panel tool in the order of docs/accuracy.md, muted so the market's
-   accent line is the one a reader finds first; --t-extra is the single gray
-   the six own-span sources share. Everything else here is the furniture the
-   five figures have in common: a bar of tab groups, a legend, and the
-   method note with its equation set as written. */
+/* The accuracy page. A series takes its group's color, the tokens --g-mos to
+   --g-raw above (the working paper's groups, the palette of the brief at the
+   top of the page), so the market's accent line is the one a reader finds
+   first; --t-extra is the gray for a series no group names. Everything else
+   here is the furniture the four figures have in common: a bar of tab groups,
+   a legend, and the method note with its equation set as written. */
 .bar.acccontrols{gap:6px 16px;min-height:10px;margin-bottom:8px}
 .tabgroup{display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap}
 .tabgroup[hidden]{display:none}
@@ -613,6 +704,26 @@ table.acc-grid-table tr.acc-grid-grp th{text-align:left;background:var(--shade);
 .acc-grid-sw{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-2px;border:1px solid var(--line)}
 .acc-grid-foot{font-size:11.5px;color:var(--muted);line-height:1.5;margin:6px 6px 2px}
 .acc-grid-foot.acc-grid-top{margin:0 6px 6px}
+
+/* The scorecard: the working paper's Tables 3 and 4. A group's row is shaded and set in its title,
+   each series carries its qualifier under its name, and an improvement that holds after Holm is bold. */
+.acc-grid-wrap{overflow-x:auto;margin:4px 0 10px}
+.acc-grid{font-size:12.5px;min-width:760px}
+.acc-grid th{font-size:11.5px;font-weight:650;color:var(--muted);text-align:right;white-space:nowrap}
+.acc-grid th:first-child{text-align:left}
+.acc-grid td{text-align:right;white-space:nowrap;padding:5px 8px;vertical-align:top}
+.acc-grid td:first-child{text-align:left;white-space:normal;min-width:220px}
+.acc-grid td.na{color:var(--muted)}
+.acc-grid .pi{color:var(--muted);font-size:11.5px}
+.acc-grid .pi.sig{color:var(--ink);font-weight:700}
+.acc-grid tr.acc-g-group td{background:var(--shade);font-weight:650;color:var(--navy)}
+.acc-grid tr.acc-g-fx td{font-weight:650}
+.acc-g-name{display:block}
+.acc-g-qual{display:block;font-size:10.5px;color:var(--muted);margin-left:16px}
+.acc-rel-sum{margin-top:8px;font-size:12.5px}
+.acc-rel-sum th{font-size:11.5px;font-weight:650;color:var(--muted);text-align:right;white-space:nowrap}
+.acc-rel-sum th:first-child,.acc-rel-sum td:first-child{text-align:left}
+.acc-rel-sum td{white-space:nowrap;text-align:right}
 
 /* The source tables at the foot of the accuracy page. A group row names the
    family and says in a line what sets it apart; the kind is a small chip so a
@@ -770,3 +881,15 @@ table.anahours tr:nth-child(odd) td{box-shadow:inset 0 0 0 9999px rgba(127,127,1
 .anadl dt{font-weight:600;color:var(--navy)}
 .anadl dd{margin:0;line-height:1.55;color:var(--ink)}
 @media (max-width:640px){.anadl{grid-template-columns:1fr}.anadl dd{margin-bottom:6px}}
+
+/* the landing map's legend: what a dot's number, color and size mean, and the NWS color scale under them */
+.maplegend{display:flex;flex-direction:column;gap:8px;margin:10px 2px 12px;font-size:12px;color:var(--muted)}
+.maplegend .lgrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px}
+.maplegend .lgi{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:var(--ink)}
+.maplegend .lgdot{display:inline-block;vertical-align:middle}
+.maplegend .lgt{flex-basis:100%;line-height:1.45}
+.maplegend .lgfield{max-width:560px}
+.maplegend .lgbar{display:block;width:100%;height:12px;border:1px solid var(--line);border-radius:2px}
+.maplegend .lgticks{position:relative;height:15px;margin-bottom:3px;font-size:10.5px;font-variant-numeric:tabular-nums}
+.maplegend .lgticks span{position:absolute;top:1px;transform:translateX(-50%)}
+#map image.ndfd{cursor:default}

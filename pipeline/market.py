@@ -246,7 +246,11 @@ def _station_snapshot(c: dict, now: dt.datetime, markets: dict, days: dict, prev
     keep = {mk["yesterday"], mk["day"], mk["tomorrow"], mk["dayAfter"]}
     implied = {}
     for day, sides in days.items():
-        implied[day] = {side: ex.implied_median(rows, side) for side, rows in sides.items()}
+        # the daily temperature sides carry the accuracy paper's whole-degree
+        # central value (owner, 2026-10-20), so every page shows the number the
+        # paper scores; the wind ladder keeps the plain crossing
+        implied[day] = {side: (ex.central_value(rows, side) if side in ("high", "low") else ex.implied_median(rows, side))
+                        for side, rows in sides.items()}
     hours = hours or {}
     return {"schema": SCHEMA, "station": c["station"], "city": c.get("city"), "unit": c.get("unit"), "tz": c.get("tz"),
             "source": SOURCE, "asof": _iso(now), "written": _iso(now),
@@ -373,6 +377,51 @@ def _lhl_series(store: Storage, now: dt.datetime, items: List[dict]) -> None:
         store.put(key, json.dumps({"schema": 1, "symbol": m["symbol"], "name": m.get("name"),
                                    "asof": stamp, "points": pts},
                                   separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
+
+
+LHL_INDEX = "snapshots/lhl/index.json"
+
+
+def _lhl_index(store: Storage, now: dt.datetime, items: List[dict]) -> bool:
+    """Every pool series this site holds, by symbol, with the exchange's name for it.
+
+    The exchange drops a pool from its listing once the storm settles, and the
+    listing was the only place the page learned the pool's symbol, so a settled
+    storm lost the chart of its pool the day after it resolved (Isaias,
+    2026-10-13). The symbol cannot be worked out from the storm's name, because
+    Nolo's pool is LHLNL, so the page finds a delisted pool here by the storm's
+    name in the pool's, the same test it uses on the listing. The index is built
+    from the series themselves, so a series written before it existed is in it,
+    and a series is read again only when its pool leaves the listing."""
+    try:
+        old = json.loads(store.get(LHL_INDEX) or b"null") or {}
+    except (ValueError, TypeError):
+        old = {}
+    known = old.get("pools") or {}
+    listed = {str(m.get("symbol")): m for m in items if str(m.get("symbol", "")).startswith("LHL")}
+    pools = {}
+    for key in store.list("snapshots/lhl/"):
+        sym = key.rsplit("/", 1)[-1]
+        if not sym.endswith(".json") or key == LHL_INDEX:
+            continue
+        sym = sym[:-5]
+        if sym in listed:
+            pools[sym] = {"name": listed[sym].get("name") or (known.get(sym) or {}).get("name"), "listed": True}
+            continue
+        prev = known.get(sym)
+        if prev and not prev.get("listed"):
+            pools[sym] = prev
+            continue
+        try:
+            doc = json.loads(store.get(key) or b"null") or {}
+        except (ValueError, TypeError):
+            doc = {}
+        pools[sym] = {"name": doc.get("name") or (prev or {}).get("name"), "listed": False, "asof": doc.get("asof")}
+    if pools == known and old.get("schema") == 1:
+        return False
+    store.put(LHL_INDEX, json.dumps({"schema": 1, "asof": _iso(now), "pools": pools}, separators=(",", ":")).encode(),
+              "application/json", SNAP_CACHE)
+    return True
 
 
 def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadline: Optional[arch.Deadline] = None) -> dict:
@@ -632,7 +681,9 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             for side in ("high", "low", "wind"):
                 im = (snap["implied"].get(day) or {}).get(side) or {}
                 row[f"implied{side.capitalize()}{when}"] = im.get("value")
-                row[f"implied{side.capitalize()}{when}Edge"] = im.get("edge")
+                # why there is no value: the side the ladder sits on, or "gap"
+                # where two or more unpriced strikes sit at the crossing
+                row[f"implied{side.capitalize()}{when}Edge"] = im.get("edge") or ("gap" if im.get("gap") else None)
                 rs = (st["days"].get(day) or {}).get(side) or []
                 row[f"quoted{side.capitalize()}{when}"] = sum(1 for r in rs if r.get("mid") is not None)
         summary_rows.append(row)
@@ -646,6 +697,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
         store.put(f"{PREFIX}{name}.json", json.dumps(_group_snapshot(name, now, items), separators=(",", ":")).encode(), "application/json", SNAP_CACHE)
         if name == "hurricane":
             _lhl_series(store, now, items)
+            _lhl_index(store, now, items)
     summary = {"schema": SCHEMA, "source": SOURCE, "asof": _iso(now), "written": _iso(now), "quoted": quoted, "failed": failed,
                "listErrors": list_errors[:20], "unmatched": unmatched, "partialKept": partial_kept,
                "deadline": bool(partial_kept), "cities": summary_rows}
