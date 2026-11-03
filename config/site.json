@@ -51,9 +51,9 @@
   "api_key": "",
   "mg_url": "",
   "mg_key": "desk/mg.json",
-  "mg_publish": true
+  "mg_publish": false
  },
- "_desk_note": "the desk's own figures, shown only where the exchange is not quoting and always labelled as estimates: pool figures while a storm has no listed pool (lhl_url), and wind ladders for a station-day with no open MG board (mg_url, or mg_key to read the file from this site's own storage instead of fetching it). Values come from the environment (WX_DESK_LHL_URL, WX_DESK_MG_URL, WX_DESK_MG_KEY, WX_DESK_API_KEY) and each lane is off when its url and key are both empty. Anything written under mg_key is served by the CDN and is therefore public.",
+ "_desk_note": "the desk's own figures, shown only where the exchange is not quoting and always labelled as estimates: pool figures while a storm has no listed pool (lhl_url), and wind ladders for a station-day with no open MG board (mg_url, or mg_key to read the file from this site's own storage instead of fetching it). Values come from the environment (WX_DESK_LHL_URL, WX_DESK_MG_URL, WX_DESK_MG_KEY, WX_DESK_API_KEY) and each lane is off when its url and key are both empty. Anything written under mg_key is served by the CDN and is therefore public. The owner switched the MG lane off on 3 November 2026 (mg_publish false), so no desk figure reaches a page.",
  "season_forecast": {
   "named": 9,
   "hurricanes": 4,
