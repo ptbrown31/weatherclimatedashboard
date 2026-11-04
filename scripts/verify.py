@@ -1748,26 +1748,28 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
 
                 sd_at = lambda s_: dt.datetime.fromisoformat(s_.replace("Z", "+00:00"))
 
-                # the hourly contract in words, as the owner set them on 2026-11-04,
-                # worked out here from the lane's state, basis, moment and cut-off
+                # the hourly contract in words, as the owner set them on 2026-11-04 and
+                # put plainly that evening, worked out here from the lane's state, basis,
+                # moment and cut-off
                 def sd_htext(hr, F_=None):
-                    cut_ = sd_clock(sd_at(hr["cut"]), True)
+                    three_ = sd_clock(sd_at(hr["cut"]), True) + ", three hours after the hour"
                     if hr["state"] == "final" and hr["basis"] == "nomads":
-                        return ("final at " + sd_clock(sd_at(hr["at"]), True) + ", when NOMADS published the file"
-                                + (". The value shown is NOAA Open Data’s copy." if hr.get("src") == "nodd" else ""))
+                        return ("final at " + sd_clock(sd_at(hr["at"]), True) + ", when NOMADS published the file. The value is "
+                                + ("NOAA Open Data" if hr.get("src") == "nodd" else "NOMADS") + "’s copy.")
                     if hr["state"] == "final" and hr["basis"] == "cutoff":
-                        return "final at the hourly cut-off, " + sd_clock(sd_at(hr["at"] or hr["cut"]), True) + ", from NOAA Open Data’s copy"
+                        return "final at " + three_ + ", from NOAA Open Data’s copy, because NOMADS had not published the file by then."
                     if hr["state"] == "final" and hr["basis"] == "norecord":
-                        return "final by the hourly cut-off, " + cut_ + " (NOMADS’s copy is not on record before 3 Nov 15:13 UTC)"
+                        return "final at " + three_ + ", from NOAA Open Data’s copy. NOMADS’s publication time for this hour is not on record."
                     if hr["state"] == "review" and hr.get("basis") == "norecord":
                         od_ = ((F_ or {}).get("nodd") or {}).get("lm")
-                        return ("no value: " + ("NOAA Open Data published it after the hourly cut-off, " if od_ else "not published by the hourly cut-off, ")
-                                + cut_ + ", and NOMADS’s copy is not on record. Under review.")
+                        return ("no value: " + ("NOAA Open Data published the file after " + three_ + ", and NOMADS’s time is not on record."
+                                                if od_ else "neither server is on record with the file by " + three_ + ".") + " Under review.")
                     if hr["state"] == "review":
-                        return "no value: not published by the hourly cut-off, " + cut_ + ", under review"
-                    return "provisional, until NOMADS publishes the file or the hourly cut-off, " + cut_
+                        return "no value: neither server had published the file by " + three_ + ". Under review."
+                    return "provisional, until NOMADS publishes the file, or until " + three_ + ", when NOAA Open Data’s copy counts."
 
-                SD_WORD = {"nomads": "final", "cutoff": "final at the cut-off", "norecord": "final by the cut-off"}
+                # the every-hour table's few words for a final hour: whose copy the value is
+                sd_word = lambda hr: "final (NOMADS)" if hr.get("src") == "nomads" else "final (Open Data)"
                 SD_SRV = {"nodd": "NOAA Open Data", "nomads": "NOMADS"}
                 # the file's first publication on either server, as the replay and the table take it
                 sd_pub = lambda F_: min(sd_at(F_[s_]["lm"]) for s_ in ("nodd", "nomads") if F_.get(s_) and F_[s_].get("lm"))
@@ -1807,8 +1809,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                           for r_ in sd_rows]
                 chk.add(f"{scheme} settlement display: the hour table has a row per hour, its running total ends on the day's, and it gives each analysis's publication time and hourly contract",
                         tb["n"] == sd_sum["of"] == len(sd_rows) and tb["last"] == f"{sd_sum['precip']['value']:.2f}" and tb["hi"] == str(sd_sum["high"]["value"])
-                        and [sd_n2(a_) for a_ in tb["arr"]] == tb_arr and "resolves on" in tb["foot"]
-                        and [[w_, sd_n2(t_)] for w_, t_ in tb["hst"]] == [[SD_WORD[r_["rtma"]["hourly"]["basis"]], sd_htext(r_["rtma"]["hourly"], r_["rtma"].get("anlFile"))] for r_ in sd_rows],
+                        and [sd_n2(a_) for a_ in tb["arr"]] == tb_arr and "resolves on" in tb["foot"] and "two servers" in tb["foot"]
+                        and [[w_, sd_n2(t_)] for w_, t_ in tb["hst"]] == [[sd_word(r_["rtma"]["hourly"]), sd_htext(r_["rtma"]["hourly"], r_["rtma"].get("anlFile"))] for r_ in sd_rows],
                         str([tb["n"], tb["last"], tb["arr"][:2], tb["hst"][:1]])[:300])
                 # a final day's replay runs to a quarter hour past the last hour's
                 # hourly cut-off, so the 11 PM hour shows final; at the old end, a
@@ -1824,7 +1826,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} settlement display: a final day's replay runs to a quarter hour past the last hour's hourly cut-off, where the 11 PM hour is final",
                         not sd_end["slider"] and sd_end["max"] == int(sd_e15.timestamp() * 1000) and sd_lastcut > sd_cut
                         and sd_n2(sd_end["when"]) == sd_clock(sd_e15) + " " + sd_e15.astimezone(sd_tz).tzname()
-                        and sd_end["last"] == [SD_WORD[sd_rows[-1]["rtma"]["hourly"]["basis"]], "final"] and sd_mid == ["provisional", "Final"],
+                        and sd_end["last"] == [sd_word(sd_rows[-1]["rtma"]["hourly"]), "final"] and sd_mid == ["provisional", "Final"],
                         str([sd_end["max"], sd_end["when"], sd_end["last"], sd_mid]))
                 # the replay: half past the hour after the 11 AM analysis, when the
                 # hours from midnight to 11 AM are in at their files' own times; the
@@ -1853,7 +1855,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # became final, provisional before, nothing for an hour to come
                 sd_h0, sd_p0 = sd_rows[0]["rtma"]["hourly"], sd_rows[sd_k + 1]["rtma"]["hourly"]
                 chk.add(f"{scheme} settlement display: in a replay each hour's hourly contract shows as it stood, provisional until it became final",
-                        len(rp["hst"]) == len(sd_rows) and rp["hst"][0][0] == SD_WORD[sd_h0["basis"]] and rp["hst"][sd_k + 1][0] == "provisional"
+                        len(rp["hst"]) == len(sd_rows) and rp["hst"][0][0] == sd_word(sd_h0) and rp["hst"][sd_k + 1][0] == "provisional"
                         and sd_n2(rp["hst"][sd_k + 1][1]) == sd_htext(dict(sd_p0, state="provisional"))
                         and all(h_[0] == "" for h_ in rp["hst"][sd_k + 2:]), str(rp["hst"][sd_k:sd_k + 3]))
                 page.click("#anaLatest")
@@ -1879,7 +1881,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 def sd_srv_txt(F_, s_, valid_):
                     v_ = F_.get(s_)
                     if not v_ or not (v_.get("lm") or v_.get("seen")):
-                        return "not on record before 3 Nov 15:13 UTC" if s_ == "nomads" and valid_ < dt.datetime(2026, 11, 3, 15, 13, tzinfo=dt.timezone.utc) else "not on record"
+                        return "not on record before 10:00 UTC on 3 Nov" if s_ == "nomads" and valid_ < dt.datetime(2026, 11, 3, 10, tzinfo=dt.timezone.utc) else "not on record"
                     return ", ".join(x_ for x_ in ("published " + sd_clock(sd_at(v_["lm"]), True) if v_.get("lm") else "",
                                                    "found " + sd_clock(sd_at(v_["seen"]), True) if v_.get("seen") else "") if x_)
 
@@ -2061,11 +2063,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 sd_html.append(page.evaluate("() => document.documentElement.outerHTML"))
                 fx_rows = sd_v3["hours"]
                 fx_hw = [[w_, sd_n2(t_)] for w_, t_ in page.evaluate("() => [...document.querySelectorAll('#anaHours td.hst')].map(t => [t.textContent, t.title])")]
-                fx_want = [[SD_WORD[r_["rtma"]["hourly"]["basis"]], sd_htext(r_["rtma"]["hourly"], r_["rtma"]["anlFile"])] for r_ in fx_rows]
+                fx_want = [[sd_word(r_["rtma"]["hourly"]), sd_htext(r_["rtma"]["hourly"], r_["rtma"]["anlFile"])] for r_ in fx_rows]
                 fx_b = {i_: fx_rows[i_]["rtma"]["hourly"] for i_ in (0, 6, 7, 10)}
                 chk.add(f"{scheme} settlement display: the hourly contract reads as each basis words it, NOMADS, NOMADS with Open Data's value, the hourly cut-off and NOMADS not on record",
                         fx_hw == fx_want and [(h_["basis"], h_["src"]) for h_ in fx_b.values()] == [("nomads", "nomads"), ("nomads", "nodd"), ("cutoff", "nodd"), ("norecord", "nodd")]
-                        and fx_hw[6][1].endswith(". The value shown is NOAA Open Data’s copy.") and "identical" not in " ".join(t_ for _, t_ in fx_hw),
+                        and fx_hw[6][1].endswith(". The value is NOAA Open Data’s copy.") and "identical" not in " ".join(t_ for _, t_ in fx_hw),
                         str([(i_, fx_hw[i_][1][:70]) for i_ in fx_b]))
                 fx_t = sd_tip("anaTemp", 0, len(fx_rows))
                 fx_t_want = sd_tip_want("temp", fx_rows[0], sd_at(fx_rows[0]["t"]))
@@ -2110,7 +2112,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         and not c_r["bad"] and c_r["n"] == 24, str([fx_rv, fx_rv0, tip_r[-160:], c_r["bad"][:1]])[:300])
                 chk.add(f"{scheme} settlement display: an hour NOAA Open Data published after its hourly cut-off, with NOMADS's copy not on record, says so under review in the table, the hover and the CSV",
                         fx_h16["hourly"]["basis"] == "norecord" and fx_h16["hourly"]["state"] == "review"
-                        and fx_l_txt.startswith("no value: NOAA Open Data published it after the hourly cut-off, ") and fx_l_txt.endswith(", and NOMADS’s copy is not on record. Under review.")
+                        and fx_l_txt.startswith("no value: NOAA Open Data published the file after ") and fx_l_txt.endswith(", and NOMADS’s time is not on record. Under review.")
                         and fx_l[0] == "under review" and sd_n2(fx_l[1]) == fx_l_txt and fx_l[2] == str(fx_h16["show"]["temp"])
                         and ("Hourly contract\n" + fx_l_txt) in tip_l and not c_r["bad"],
                         str([fx_l, tip_l[-200:], fx_l_txt])[:300])

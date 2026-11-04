@@ -725,8 +725,9 @@ NOAA Open Data's earliest Last-Modified from its read log for 1,127 analysis and
 precipitation files from 2026-08-29 to 2026-10-14 (and NOMADS's for the analysis of 2026-09-23 19Z,
 which never reached the bucket), with no first sighting, since its read times were its own and
 some of them catch-up reads, and NOMADS's Last-Modified and first sighting from its timing probe
-for the 25 analysis and 26 precipitation files from 2026-11-03 15:13 UTC to the copies' start on
-2026-11-04, with no first sighting for the five of each already on NOMADS when the probe began.
+for the 25 analysis and 26 precipitation files from 10:00 UTC on 2026-11-03 to the copies' start
+on 2026-11-04, the probe having begun at 15:13 UTC, with no first sighting for the five of each
+already on NOMADS when it began.
 `scripts/build_analysis_file_times.py` builds it from the engine's CSV (columns `kind`, `file_utc`,
 `server`, `last_modified`, `first_seen`) and refuses a row that is not one file on one server at the
 top of an hour; `scripts/package_lambda.py` ships it, and `load_file_times` reads it once a process.
@@ -1040,29 +1041,38 @@ focused chart. For each value on the chart it gives the value as stored (`raw`, 
 the converted value before rounding (`x`, as the lane writes it) and the rounded value (`show`); for
 temperature the hourly contract's value and state; the day so far after that hour, rounded (`run`)
 and before rounding (`runX`); and the file: its name, each server's Last-Modified time
-("published") and the lane's first find ("found"), or "not on record" ("not on record before 3 Nov
-15:13 UTC" for NOMADS before the timing probe began), the copy used and whether the hour counts. A
+("published") and the lane's first find ("found"), or "not on record" ("not on record before 10:00
+UTC on 3 Nov" for NOMADS before the timing probe's earliest file), the copy used and whether the
+hour counts. A
 file published after the cut-off and counted under the rule before 14 October 2026 (`counts` and
 `afterCut` both true; one real case, the precipitation hour ending 2026-09-30T07:00Z for western
 places on 29 September) says "published after the cut-off, counted under the rule before 14
 October 2026", never not counted.
 
 **Hourly contract.** Each hour's temperature has its own state, from the row's `hourly`, in the
-owner's wording of 2026-11-04, with times on the place's clock to the second.
+owner's wording of 2026-11-04, put plainly the same evening at his request so that a reader who has
+never heard of either server can follow it, with times on the place's clock to the second. The
+every-hour table's cell says whose copy the value is, "final (NOMADS)" or "final (Open Data)", and its
+title, the hover and the temperature CSV give the sentence. The note under the table explains the two
+servers: NOAA publishes every file on NOAA Open Data and on NOMADS, the page reads both, the copies
+are normally identical, the NOMADS copy counts where they differ if it was published in time, and
+NOMADS's publication times are on record only from 10:00 UTC on 3 November.
 
-- Basis `nomads` reads "final at {at}, when NOMADS published the file", `at` being NOMADS's
-  Last-Modified time, followed by "The value shown is NOAA Open Data's copy." when the copy used is
-  NOAA Open Data's, as for some hours of 3 and 4 November read before both servers were.
-- Basis `cutoff` reads "final at the hourly cut-off, {at}, from NOAA Open Data's copy".
-- Basis `norecord` reads "final by the hourly cut-off, {cut} (NOMADS's copy is not on record before
-  3 Nov 15:13 UTC)".
-- State `review` reads "no value: not published by the hourly cut-off, {cut}, under review". With basis
-  `norecord`, a file read before both servers were, it reads "no value: NOAA Open Data published it
-  after the hourly cut-off, {cut}, and NOMADS's copy is not on record. Under review." when NOAA Open
-  Data has a copy on record, as for 2026-09-23 at 23Z, and "no value: not published by the hourly
-  cut-off, {cut}, and NOMADS's copy is not on record. Under review." when it has none.
-- State `provisional` reads "provisional, until NOMADS publishes the file or the hourly cut-off,
-  {cut}".
+- Basis `nomads` reads "final at {at}, when NOMADS published the file. The value is NOMADS's copy.",
+  `at` being NOMADS's Last-Modified time, or "The value is NOAA Open Data's copy." when that is the
+  copy used, as for some hours of 3 and 4 November read before both servers were.
+- Basis `cutoff` reads "final at {cut}, three hours after the hour, from NOAA Open Data's copy,
+  because NOMADS had not published the file by then."
+- Basis `norecord` reads "final at {cut}, three hours after the hour, from NOAA Open Data's copy.
+  NOMADS's publication time for this hour is not on record."
+- State `review` reads "no value: neither server had published the file by {cut}, three hours after
+  the hour. Under review." With basis `norecord`, a file read before both servers were, it reads "no
+  value: NOAA Open Data published the file after {cut}, three hours after the hour, and NOMADS's time
+  is not on record. Under review." when NOAA Open Data has a copy on record, as for 2026-09-23 at
+  23Z, and "no value: neither server is on record with the file by {cut}, three hours after the hour.
+  Under review." when it has none.
+- State `provisional` reads "provisional, until NOMADS publishes the file, or until {cut}, three hours
+  after the hour, when NOAA Open Data's copy counts."
 
 In a replay an hour shows final only from `at` on and provisional before it, and an hour under
 review shows provisional until its cut-off. A row with an hourly state and no daily value is no data

@@ -51,9 +51,10 @@ window.WXSettle = (() => {
   // is fetched for as long, since the lane's next pass settles it
   const CHASE = 30 * MIN;
   const SRC = { nodd: 'NOAA Open Data', nomads: 'NOMADS' };
-  // NOMADS keeps no history, and its copies are on record from 15:13 UTC on
-  // 3 November 2026, when the timing probe started
-  const NOMADS_FROM = Date.parse('2026-11-03T15:13:00Z');
+  // NOMADS keeps no history, and its times are on record from the files of
+  // 10:00 UTC on 3 November 2026, the earliest the engine's timing probe found
+  // still on NOMADS when it started at 15:13 UTC
+  const NOMADS_FROM = Date.parse('2026-11-03T10:00:00Z');
   // a file published after the cut-off that the rule before 14 October still
   // counted; one real case, the precipitation hour ending 2026-09-30T07:00Z
   // for western places on 29 September
@@ -227,39 +228,39 @@ window.WXSettle = (() => {
     if (hr.state === 'review') return o.hcut != null && T >= o.hcut ? 'review' : 'provisional';
     return 'provisional';
   }
-  // the hourly contract's state in words (owner's wording of 2026-11-04);
+  // the hourly contract's state in words (owner's wording of 2026-11-04, put
+  // so that a reader who has never heard of either server can follow it);
   // `q` is the apostrophe, typographic on the page and plain in a CSV file
   function hourlyText(o, T, tz, q) {
     const st = hourlyAt(o, T);
     if (!st) return '';
     const hr = o.hourly, ap = q || '’';
-    const cut = o.hcut != null ? clockS(tz, o.hcut) : 'not on record';
+    const three = (o.hcut != null ? clockS(tz, o.hcut) : 'a time not on record') + ', three hours after the hour';
     if (st === 'final') {
       if (hr.basis === 'nomads') {
-        return 'final at ' + (o.hat != null ? clockS(tz, o.hat) : 'a time not on record') + ', when NOMADS published the file'
-          + (hr.src && hr.src !== 'nomads' && SRC[hr.src] ? '. The value shown is ' + SRC[hr.src] + ap + 's copy.' : '');
+        return 'final at ' + (o.hat != null ? clockS(tz, o.hat) : 'a time not on record') + ', when NOMADS published the file. The value is '
+          + (hr.src && hr.src !== 'nomads' && SRC[hr.src] ? SRC[hr.src] : 'NOMADS') + ap + 's copy.';
       }
-      if (hr.basis === 'cutoff') return 'final at the hourly cut-off, ' + clockS(tz, o.hat != null ? o.hat : o.hcut) + ', from NOAA Open Data' + ap + 's copy';
-      if (hr.basis === 'norecord') return 'final by the hourly cut-off, ' + cut + ' (NOMADS' + ap + 's copy is not on record before 3 Nov 15:13 UTC)';
-      return 'final at ' + clockS(tz, o.hat != null ? o.hat : o.hcut);
+      if (hr.basis === 'cutoff') return 'final at ' + three + ', from NOAA Open Data' + ap + 's copy, because NOMADS had not published the file by then.';
+      if (hr.basis === 'norecord') return 'final at ' + three + ', from NOAA Open Data' + ap + 's copy. NOMADS' + ap + 's publication time for this hour is not on record.';
+      return 'final at ' + clockS(tz, o.hat != null ? o.hat : o.hcut) + '.';
     }
     if (st === 'review') {
       // a file read before both servers were (basis norecord) may be on NOAA
-      // Open Data, published after the cut-off, with no NOMADS copy on record
+      // Open Data, published after the cut-off, with no NOMADS time on record
       if (hr.basis === 'norecord') {
         const od = o.anlFile && o.anlFile.nodd && o.anlFile.nodd.lm;
-        return 'no value: ' + (od ? 'NOAA Open Data published it after the hourly cut-off, ' : 'not published by the hourly cut-off, ') + cut
-          + ', and NOMADS' + ap + 's copy is not on record. Under review.';
+        return 'no value: ' + (od ? 'NOAA Open Data published the file after ' + three + ', and NOMADS' + ap + 's time is not on record.'
+          : 'neither server is on record with the file by ' + three + '.') + ' Under review.';
       }
-      return 'no value: not published by the hourly cut-off, ' + cut + ', under review';
+      return 'no value: neither server had published the file by ' + three + '. Under review.';
     }
-    return 'provisional, until NOMADS publishes the file or the hourly cut-off, ' + cut;
+    return 'provisional, until NOMADS publishes the file, or until ' + three + ', when NOAA Open Data' + ap + 's copy counts.';
   }
-  // the same, in the every-hour table's few words
-  const HOURLY_WORD = { nomads: 'final', cutoff: 'final at the cut-off', norecord: 'final by the cut-off' };
+  // the same, in the every-hour table's few words: whose copy the value is
   function hourlyWord(o, T) {
     const st = hourlyAt(o, T);
-    if (st === 'final') return HOURLY_WORD[o.hourly.basis] || 'final';
+    if (st === 'final') return o.hourly.src === 'nomads' ? 'final (NOMADS)' : 'final (Open Data)';
     return st === 'review' ? 'under review' : st || '';
   }
 
@@ -729,7 +730,7 @@ window.WXSettle = (() => {
         if (!F && pubSrcOnly && by === s && at != null) v = { lm: isoZ(at) };
         const lm = v ? when(v.lm) : null, seen = v ? when(v.seen) : null;
         let txt;
-        if (lm == null && seen == null) txt = s === 'nomads' && validMs < NOMADS_FROM ? 'not on record before 3 Nov 15:13 UTC' : 'not on record';
+        if (lm == null && seen == null) txt = s === 'nomads' && validMs < NOMADS_FROM ? 'not on record before 10:00 UTC on 3 Nov' : 'not on record';
         else txt = [lm != null ? 'published ' + clockS(tz, lm) : '', seen != null ? 'found ' + clockS(tz, seen) : ''].filter(Boolean).join(', ');
         rows.push(kv(SRC[s], esc(txt)));
       });
@@ -920,8 +921,12 @@ window.WXSettle = (() => {
           + 'The hourly amounts are rounded for display, so they can add up to a slightly different figure than the total. The running total is summed from NOAA’s own numbers before rounding and rounded once, and it is the column the contract resolves on. '
         : 'This file carries each hour as stored, temperature, wind and gust to a thousandth and precipitation to a ten-thousandth of an inch, cut rather than rounded, and no running total. ')
         + 'Each row is the ' + NAME + ' analysis at the top of the hour in ' + tz + ' and the precipitation over the hour that starts then, which NOAA files under the hour it ends. '
-        + 'The hourly contract is each hour’s own value, final once NOMADS has the file or at its own cut-off three hours after the hour. '
-        + 'Each publication time is the server’s own, the earlier of the two, and a time not on record is said to be.'
+        + 'NOAA publishes every file on two servers, NOAA Open Data (on Amazon’s cloud) and NOMADS (the National Centers for Environmental Prediction’s own server), and this page reads both. '
+        + 'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time. '
+        + 'The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file. '
+        + 'If NOMADS has not published it three hours after the hour, NOAA Open Data’s copy becomes final then, and with neither copy the hour has no value and goes to review. '
+        + 'NOMADS’s publication times are on record only from 10:00 UTC on 3 November, so earlier hours show as final three hours after the hour, from NOAA Open Data’s copy. '
+        + 'The publication time shown is the earlier of the two servers’ own times, and the table says so where neither is on record.'
         + (anyLate ? ' A dimmed value was published after the cut-off and is not counted.' : '');
     }
 
