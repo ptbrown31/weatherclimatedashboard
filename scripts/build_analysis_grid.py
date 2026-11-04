@@ -16,7 +16,8 @@ the scheduled job reads the outputs and never projects anything itself.
                                      section 1, cell geometry): its centre
                                      (<grid>Px), its outline (<grid>Box) and
                                      the local basis (<grid>Basis) the page
-                                     lays the window cells out with
+                                     lays the window cells out with, and
+                                     ForecastEx's location code (code)
     config/analysis_lattice.json     the map lattice of docs/analysis.md section
                                      1: for each of 320 x 200 screen points, the
                                      grid cell under it on each grid, or -1 off
@@ -95,8 +96,23 @@ def read_centres(path: str = CSV_PATH) -> list:
         out.append({"id": r["id"].strip(), "name": r["name"].strip(), "state": r["state"].strip(),
                     "metro": r["metro"].strip(), "metroRank": int(r["metro_rank"]), "basis": r["basis"].strip(),
                     "position": r["position"].strip(), "lat": float(r["lat"]), "lon": float(r["lon"]),
-                    "i": int(r["i"]), "j": int(r["j"]), "tz": r["tz"].strip(), "note": (r.get("note") or "").strip()})
+                    "i": int(r["i"]), "j": int(r["j"]), "tz": r["tz"].strip(), "note": (r.get("note") or "").strip(),
+                    "code": (r.get("code") or "").strip()})
     return out
+
+
+def check_codes(centres: list) -> None:
+    """Every place has its ForecastEx location code and no two share one,
+    since the display names a place by it; the build stops otherwise."""
+    missing = [c["id"] for c in centres if not c.get("code")]
+    if missing:
+        raise SystemExit(f"no location code for {missing}")
+    seen: dict = {}
+    for c in centres:
+        seen.setdefault(c["code"], []).append(c["id"])
+    shared = {code: ids for code, ids in seen.items() if len(ids) > 1}
+    if shared:
+        raise SystemExit(f"location codes shared: {shared}")
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -203,7 +219,7 @@ def build_locations(centres: list, tr: basemap.Transform) -> list:
         if haversine_km(glat, wrap_lon(glon), clat, clon) > G184_TOL_KM:
             raise SystemExit(f"{c['id']}: the G184 point is not the wexp point on the ground")
         px, py = tr.project(c["lon"], c["lat"])
-        row = {k: v for k, v in c.items() if k not in ("i", "j")}
+        row = {k: v for k, v in c.items() if k not in ("i", "j", "code")}
         cell = {"wexp": list(wexp), "g184": list(g184),
                 "centre": [round(clat, 4), round(clon, 4)],
                 "distanceKm": round(haversine_km(c["lat"], c["lon"], clat, clon), 2)}
@@ -218,6 +234,8 @@ def build_locations(centres: list, tr: basemap.Transform) -> list:
         # across, so rounding to a tenth (up to 0.07 units) put the dot across
         # the outline at three places; a thousandth is 0.002 cells
         row.update({"px": round(px, 3), "py": round(py, 3), "cell": cell})
+        # last, where it was added on 2026-11-04, so the keys before it keep their order
+        row["code"] = c["code"]
         out.append(row)
     return out
 
@@ -293,6 +311,7 @@ def main() -> int:
     centres = read_centres()
     if len(centres) != EXPECTED:
         raise SystemExit(f"expected {EXPECTED} settlement locations, read {len(centres)}")
+    check_codes(centres)
     locations = build_locations(centres, tr)
     lattice = build_lattice(tr)
     worst = sanity(locations, lattice, tr)

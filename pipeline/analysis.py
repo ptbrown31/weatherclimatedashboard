@@ -76,7 +76,14 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     up to that row. The page draws them and never adds or averages a value of
     its own, because rounded hours do not add up to the day (Boston on
     2026-09-28, 0.83 in from its rounded hours against the 0.84 it resolved
-    on).
+    on). Since 2026-11-04 (rowShape 3, the owner's approval of display v3)
+    each row also carries its stored values as strings, its values converted
+    before rounding and the day so far before rounding as exact strings, both
+    files' publication times on each server, and the hourly temperature
+    contract of its hour (Patrick's ruling of 4 November), whose own cut-off
+    is three hours after the hour. It is final once NOMADS's copy published
+    by then is in, otherwise at the first ten-minute pass after that cut-off
+    on NOAA Open Data's copy published by then, and under review with neither.
 
 Reads   noaa-rtma-pds and NOMADS, every file from both, through
         pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
@@ -136,6 +143,7 @@ import math
 import os
 import time
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
+from fractions import Fraction
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
@@ -157,6 +165,10 @@ SCHEMA = "analysis/2"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCATIONS_PATH = os.path.join(ROOT, "config", "analysis_locations.json")
 LATTICE_PATH = os.path.join(ROOT, "config", "analysis_lattice.json")
+# NOAA's own publication times of files the lane read before it kept each
+# server's copy (2026-11-03), from the engine's read log and its NOMADS probe,
+# written by scripts/build_analysis_file_times.py. Shown only, never counted
+FILE_TIMES_PATH = os.path.join(ROOT, "config", "analysis_file_times.json")
 
 PREFIX = "snapshots/analysis2/"
 INDEX_KEY = PREFIX + "index.json"
@@ -276,13 +288,19 @@ PRODUCTS = {
 # on 2026-11-03 each row of a place file gained its value as the contract
 # shows it and the day's values so far, for the settlement display; then the
 # raw CSV file gained each server's copy of each file, and on 2026-11-04 each
-# row the pass at which its copies became final)
-LAYOUT = "copies-2026-11-04"
+# row the pass at which its copies became final, then the exact strings, both
+# files' times on each server and the hourly contract of rowShape 3)
+LAYOUT = "v3-2026-11-04"
 # the shape of a place file's rows, stamped on the file as `rowShape` so the
 # page can tell a file whose rows carry `show`, `run` and the publication
-# times from one written before them, which it still draws, with no running
-# figures
-ROW_SHAPE = 2
+# times (2) and the exact strings, the files and the hourly contract (3) from
+# one written before them, which it still draws, with no running figures
+ROW_SHAPE = 3
+# the hourly temperature contract's own cut-off (Patrick's ruling of 4
+# November, the draft specification's section 6) is three hours after its
+# hour, the same in every zone, and the daily 12:45 AM cut-off does not apply
+# to it. One analysis file serves the hourly contracts of its hour at every place
+HOURLY_CUT_AFTER = dt.timedelta(hours=3)
 # the three messages read from the analysis file, by the .idx sidecar's names
 MESSAGES = (("temp", "TMP", "2 m above ground"), ("wind", "WIND", "10 m above ground"),
             ("gust", "GUST", "10 m above ground"))
@@ -320,6 +338,16 @@ HOUR_UNIT = {"temp": DAY_UNIT["high"], "wind": DAY_UNIT["wind"], "gust": DAY_UNI
 MPH_PER_MS = 2.2369362921
 MM_PER_INCH = 25.4
 K0_DEC, MPH_DEC, MM_DEC = Decimal("273.15"), Decimal("2.2369362921"), Decimal("25.4")
+# the exact strings of rowShape 3 (owner's approval of display v3, 2026-11-04)
+# are computed in exact rational arithmetic, never a Decimal division. A
+# converted hour is written to TEXT_PLACES (a thousandth of a degree, exact from
+# hundredths of a kelvin; twelve places of a mile an hour, exact from hundredths
+# of a metre per second times the ten places of 2.2369362921), and a value whose
+# decimal does not end, which is every inch figure but a few, is cut toward zero
+# at CUT_PLACES. A stored value finer than the file's precision is written exact
+K0_FRAC, MPH_FRAC, MM_FRAC = Fraction("273.15"), Fraction("2.2369362921"), Fraction("25.4")
+TEXT_PLACES = {"temp": 3, "wind": 12, "gust": 12, "precip": 10}
+CUT_PLACES = 10
 
 LATTICE_PITCH = 3
 LATTICE_COLS, LATTICE_ROWS = 320, 200
@@ -439,6 +467,16 @@ CONVENTIONS = {
     "hourly": "Each row is the analysis at the top of the hour and the precipitation over the hour that starts "
               "then, which NOAA files under the hour it ends. Station report conventions (the last report in "
               "the hour, specials, the tenths group) have no analogue here.",
+    "hourlyContract": "Each hour's temperature is also the hourly temperature contract's value, whole degrees "
+                      "Fahrenheit rounded once, half up, away from zero (owner's ruling 2026-11-04). Its cut-off is "
+                      "three hours after the hour in every zone, and the daily 12:45 AM cut-off does not apply to "
+                      "it. It is final once NOMADS's copy of the analysis is in, if published by that cut-off; "
+                      "otherwise at the first ten-minute pass after the cut-off, on NOAA Open Data's copy if "
+                      "published by then; with neither, there is no value and the hour is marked for review. A copy "
+                      "read after that pass is recorded and never used. An hour read before the lane kept each "
+                      "server's copy is final at the cut-off on the copy read, or at NOMADS's publication time where "
+                      "one by the cut-off is on record, and in review where NOAA Open Data published after the "
+                      "cut-off.",
     "cell": "The settlement grid cell approved on 2026-09-29: the 2.5 km cell whose square contains the main "
             "city's City Hall (in Miami the nearest land cell to the city's administration building, whose own "
             "cell counts as water). The value is the analysis at the cell, never an average over the "
@@ -536,6 +574,80 @@ def exact(var: str, raw) -> Optional[Decimal]:
     if var in ("wind", "gust"):
         return d * MPH_DEC
     return d / MM_DEC
+
+
+def _frac(raw) -> Fraction:
+    """A stored value as an exact fraction of the decimal the lane reads it as (_dec)."""
+    return Fraction(_dec(raw))
+
+
+def exact_frac(var: str, raw) -> Optional[Fraction]:
+    """exact(), in rational arithmetic, so a quotient that does not end in
+    decimal (millimetres to inches) is held exactly and cut once when written."""
+    if raw is None:
+        return None
+    v = _frac(raw)
+    if var == "temp":
+        return (v - K0_FRAC) * 9 / 5 + 32
+    if var in ("wind", "gust"):
+        return v * MPH_FRAC
+    return v / MM_FRAC
+
+
+def _ends(fr: Fraction) -> bool:
+    """Whether a fraction's decimal ends, which it does when its denominator has no prime but 2 and 5."""
+    d = fr.denominator
+    for p in (2, 5):
+        while d % p == 0:
+            d //= p
+    return d == 1
+
+
+def _digits(fr: Fraction, places: int) -> str:
+    """A fraction cut toward zero to `places` decimals, written with exactly that many."""
+    n = abs(fr.numerator) * 10 ** places // fr.denominator
+    s = str(n).rjust(places + 1, "0")
+    return ("-" if fr < 0 and n else "") + (s[:-places] + "." + s[-places:] if places else s)
+
+
+def cut_text(fr: Optional[Fraction], places: int = CUT_PLACES) -> Optional[str]:
+    """A value cut toward zero at `places`, as the mean wind and every
+    inch figure are written whether or not their decimal ends."""
+    return None if fr is None else _digits(fr, places)
+
+
+def fixed_text(fr: Optional[Fraction], places: int) -> Optional[str]:
+    """A value written exactly where its decimal ends, with at least `places`
+    decimals and more only for a stored value finer than the file's, and cut
+    toward zero at CUT_PLACES where it does not end."""
+    if fr is None:
+        return None
+    if not _ends(fr):
+        return _digits(fr, CUT_PLACES)
+    need = places
+    while (fr * 10 ** need).denominator != 1:
+        need += 1
+    return _digits(fr, need)
+
+
+def raw_text(var: str, raw) -> Optional[str]:
+    """A stored value as the file holds it, in its own unit: kelvin and
+    metres per second to two decimals, the hundredths they are packed to,
+    and millimetres with no trailing zeros, "0" for none."""
+    if raw is None:
+        return None
+    d = _dec(raw)
+    if var == "precip":
+        return "0" if d == 0 else format(d.normalize(), "f")
+    if d.as_tuple().exponent >= -2:
+        return format(d.quantize(Decimal("0.01")), "f")
+    return format(d.normalize(), "f")
+
+
+def x_text(var: str, raw) -> Optional[str]:
+    """A stored value converted to the contract's unit before rounding, as
+    an exact string (TEXT_PLACES), the hover's and the CSV files' figure."""
+    return fixed_text(exact_frac(var, raw), TEXT_PLACES[var])
 
 
 def k_to_f(k: float) -> float:
@@ -671,6 +783,26 @@ def _in_time(published: Optional[str], cutoff_iso: str) -> bool:
     return published is None or published <= cutoff_iso
 
 
+def _counted(product_hours: dict, tz: str, day_iso: str) -> Tuple[list, str, list, list, list]:
+    """A place-day's hours as day_summary counts them: the day's hours, its
+    cut-off, the hours read, and of those the analyses that count (published
+    by the cut-off) and the accumulations that count (a value, published by
+    the cut-off), each a list of (hour, record) in time order. Whether an hour
+    counts is its own file's matter, so the hours that count up to any hour
+    are these up to it, which `running` and `running_texts` both rely on."""
+    hours = local_day_hours(day_iso, tz)
+    cut_iso = _iso(day_cutoff(day_iso, tz))
+    read = []
+    for h in hours:
+        rec = product_hours.get(_iso(h))
+        if rec is not None:
+            read.append((h, rec))
+    anl_rows = [(h, rec) for h, rec in read if rec.get("anl", True) and _in_time(rec.get("pub"), cut_iso)]
+    pcp_rows = [(h, rec) for h, rec in read
+                if rec.get("precip") is not None and _in_time(rec.get("pcpPub"), cut_iso)]
+    return hours, cut_iso, read, anl_rows, pcp_rows
+
+
 def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, prior: Optional[dict] = None,
                 missing: Optional[set] = None, pmissing: Optional[set] = None, pending: bool = False) -> Optional[dict]:
     """One product-day at a place, from its exact hourly values.
@@ -706,19 +838,10 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     the backfill has yet to reach the day, so a day shown final never changes
     (owner's ruling). `prior`, `missing` and `pmissing` are accepted from
     callers that still pass them and are no longer used."""
-    hours = local_day_hours(day_iso, tz)
-    cut_iso = _iso(day_cutoff(day_iso, tz))
+    hours, cut_iso, read, anl_rows, pcp_rows = _counted(product_hours, tz, day_iso)
     at_cutoff = now >= day_cutoff(day_iso, tz) and not pending
-    read = []
-    for h in hours:
-        rec = product_hours.get(_iso(h))
-        if rec is not None:
-            read.append((h, rec))
     if not read:
         return None
-    anl_rows = [(h, rec) for h, rec in read if rec.get("anl", True) and _in_time(rec.get("pub"), cut_iso)]
-    pcp_rows = [(h, rec) for h, rec in read
-                if rec.get("precip") is not None and _in_time(rec.get("pcpPub"), cut_iso)]
     n = len(anl_rows)
     expected = len(hours)
     complete = n == expected
@@ -795,6 +918,52 @@ def running(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, throug
     p = s.get("precip") or {}
     return {"hours": s["hours"], "high": s["high"], "low": s["low"], "gust": s["gust"], "wind": s["wind"],
             "precip": None if p.get("value") is None else {"value": p["value"], "exact": p["exact"], "hours": p["hours"]}}
+
+
+def running_texts(product_hours: dict, tz: str, day_iso: str) -> Dict[str, dict]:
+    """Each read hour's `runX` (rowShape 3), keyed by its UTC stamp, which is
+    the day's values so far before rounding, as exact strings, over the hours `running`
+    counts (_counted, day_summary's own rule), in one pass in time order. The
+    high and low are exact to a thousandth and the peak gust to twelve places;
+    the mean wind and the precipitation total are cut toward zero at ten, the
+    total converted once from the summed millimetres as day_summary does. A
+    value is None while nothing counts for it, as in `run`."""
+    _, _, read, anl_rows, pcp_rows = _counted(product_hours, tz, day_iso)
+    anl = {_iso(h): rec for h, rec in anl_rows}
+    pcp = {_iso(h): rec for h, rec in pcp_rows}
+    hi = lo = peak = None
+    wind, winds = Fraction(0), 0
+    mm, inch, all_mm, wet = Fraction(0), Fraction(0), True, 0
+    out = {}
+    for h, _ in read:
+        k = _iso(h)
+        a = anl.get(k)
+        if a is not None:
+            if a.get("temp") is not None:
+                v = _frac(a["temp"])
+                hi = v if hi is None or v > hi else hi
+                lo = v if lo is None or v < lo else lo
+            if a.get("gust") is not None:
+                v = _frac(a["gust"])
+                peak = v if peak is None or v > peak else peak
+            if a.get("wind") is not None:
+                wind += _frac(a["wind"])
+                winds += 1
+        p = pcp.get(k)
+        if p is not None:
+            wet += 1
+            inch += _frac(p["precip"])
+            if p.get("mm") is None:
+                all_mm = False
+            else:
+                mm += _frac(p["mm"])
+        total = None
+        if wet:
+            total = fixed_text(mm / MM_FRAC, CUT_PLACES) if all_mm else cut_text(inch)
+        out[k] = {"high": fixed_text(hi, TEXT_PLACES["temp"]), "low": fixed_text(lo, TEXT_PLACES["temp"]),
+                  "gust": fixed_text(peak, TEXT_PLACES["gust"]),
+                  "wind": cut_text(wind / winds) if winds else None, "precip": total}
+    return out
 
 
 def resolves(var: str, value, strike) -> Optional[bool]:
@@ -888,6 +1057,16 @@ def pcp_url(product: str, t: dt.datetime, nomads: bool = False) -> str:
     p = PRODUCTS[product]
     t = t.astimezone(dt.timezone.utc)
     return f"{_base(product, nomads)}/{p['dir']}.{t:%Y%m%d}/{p['pcp'].format(ymdh=f'{t:%Y%m%d%H}')}"
+
+
+def file_name(product: str, kind: str, t: dt.datetime) -> str:
+    """A file's name as NCEP names it, under its day directory, the same on
+    both servers: hour t's analysis, or the precipitation file of the hour
+    that ends at t (anl_url and pcp_url end with it)."""
+    p = PRODUCTS[product]
+    t = t.astimezone(dt.timezone.utc)
+    name = p["anl"].format(hh=f"{t:%H}") if kind == "anl" else p["pcp"].format(ymdh=f"{t:%Y%m%d%H}")
+    return f"{p['dir']}.{t:%Y%m%d}/{name}"
 
 
 def settled_after(product: str, t: dt.datetime) -> dt.datetime:
@@ -1462,6 +1641,11 @@ def choose(copies: dict, cut_iso: str) -> Optional[str]:
     return "nodd" if nod is not None else None
 
 
+def hourly_cut(t: dt.datetime) -> dt.datetime:
+    """The hourly contracts' cut-off for hour t's analysis, at every place."""
+    return t + HOURLY_CUT_AFTER
+
+
 def place_cuts(kind: str, t: dt.datetime, locs: list) -> Dict[str, str]:
     """The cut-off of the day each place's row of a file falls on, by place."""
     by_tz: Dict[str, str] = {}
@@ -1485,10 +1669,11 @@ def _cut_entry(copies: dict, held: list, cut_iso: str, at: str) -> dict:
 
 
 def settled_doc(product: str, kind: str, t: dt.datetime, copies: dict, cutoffs: dict, picks: dict,
-                now: dt.datetime) -> dict:
+                now: dt.datetime, hourly: Optional[dict] = None) -> dict:
     """A file's settled record, with how it settled for each cut-off of its
-    days (`cutoffs`), the copy each place settled on and its value, and each
-    server's first copy's times and hashes as they stood."""
+    days (`cutoffs`) and, for an analysis, for the hourly cut (`hourly`), the
+    copy each place settled on for its day and its value, and each server's
+    first copy's times and hashes as they stood."""
     values = {lid: (_value_at(copies.get(server), kind, lid) if server else None) for lid, server in picks.items()}
     used = sorted({s for s in picks.values() if s})
     doc = {"schema": SCHEMA, "product": product, "kind": kind, "valid": _iso(t), "settled": _iso(now),
@@ -1500,6 +1685,8 @@ def settled_doc(product: str, kind: str, t: dt.datetime, copies: dict, cutoffs: 
     if kind == "pcp":
         doc["missing"] = sorted(lid for lid, v in values.items() if v is None)
         doc.update({"read": True, "complete": not doc["missing"]})
+    if hourly is not None:
+        doc["hourly"] = hourly
     return doc
 
 
@@ -1513,9 +1700,19 @@ def settle_cuts(store: Storage, product: str, kind: str, t: dt.datetime, slots: 
     in `slots["cutoffs"]`, and a copy read later never changes it. A file
     carried over from before 2026-11-03 (`slots["migrated"]`) settles on no
     copy for every cut-off that passed before then, since its days were
-    final already. Once every cut-off has settled the file's settled record
-    is written, once, the archive hour or the precipitation key, even with no
-    copy at all. Returns True when a cut-off settled."""
+    final already. An analysis file has one more cut, the hourly contracts'
+    (hourly_cut, Patrick's ruling of 4 November), kept apart from the daily
+    ones in `slots["hourly"]` in the same shape and settled by the same rules:
+    at the pass at which both copies are in, or on a ten-minute pass once it
+    has passed, on the copies in hand, and on no copy for a carried-over file
+    whose hourly cut passed before then. Once every cut-off and, for an
+    analysis, the hourly cut have settled, the file's settled record is
+    written, once, the archive hour or the precipitation key, even with no
+    copy at all. At 10 and 11 PM in a zone the hourly cut is later than the
+    day's, so where no zone's cut-off is later still (never with the
+    sixty-seven places) the record waits for it, and the file stays open till
+    then. The daily cut-offs settle as they did. Returns True when a cut-off
+    settled."""
     copies = copies_of(store, product, kind, t, cache)
     held = [s for s in SERVERS if copies.get(s) is not None]
     by_place = place_cuts(kind, t, locs)
@@ -1534,9 +1731,17 @@ def settle_cuts(store: Storage, product: str, kind: str, t: dt.datetime, slots: 
         changed = True
     if changed:
         slots["cutoffs"] = done
-    if by_place and all(c in done for c in by_place.values()):
+    if kind == "anl" and "hourly" not in slots:
+        hc = _iso(hourly_cut(t))
+        if migrated and hc <= migrated:
+            slots["hourly"] = _cut_entry(copies, [], hc, migrated)
+        elif len(held) == len(SERVERS) or (freeze and _iso(now) >= hc):
+            slots["hourly"] = _cut_entry(copies, held, hc, _iso(now))
+        changed = changed or "hourly" in slots
+    if by_place and all(c in done for c in by_place.values()) and (kind != "anl" or "hourly" in slots):
         picks = {lid: done[c]["src"] for lid, c in by_place.items()}
-        doc = settled_doc(product, kind, t, {s: copies.get(s) for s in SERVERS}, dict(done), picks, now)
+        doc = settled_doc(product, kind, t, {s: copies.get(s) for s in SERVERS}, dict(done), picks, now,
+                          hourly=slots.get("hourly"))
         store.put_if_absent(hour_key(product, t) if kind == "anl" else precip_key(product, t), _gz(doc),
                             "application/gzip")
         cache[("anl" if kind == "anl" else "precip", product, _iso(t))] = doc
@@ -1593,6 +1798,151 @@ def file_view(store: Storage, product: str, kind: str, t: dt.datetime, lid: str,
     return {"value": value, "src": src, "pub": pub, "pubSrc": pub_src, "settled": settled,
             "late": _late(src, held, copies), "copies": copies,
             "later": {s: get_later(store, product, kind, s, t, cache) for s in SERVERS}}
+
+
+# ------------------------------------------------------------------ the files and the hourly contract (2026-11-04)
+_FILE_TIMES: Dict[str, dict] = {}
+
+
+def load_file_times(path: Optional[str] = None) -> dict:
+    """NOAA's publication times of the files read before the lane kept each
+    server's copy, {kind: {file_utc: {server: {lm, seen}}}} with a
+    precipitation file under the hour it ends (FILE_TIMES_PATH), read once a
+    process. It is shown only, and no day's figure, count, late flag or state
+    reads it."""
+    path = path or FILE_TIMES_PATH
+    if path not in _FILE_TIMES:
+        with open(path) as fh:
+            _FILE_TIMES[path] = json.load(fh)
+    return _FILE_TIMES[path]
+
+
+def table_times(kind: str, t: dt.datetime, src: Optional[str], pub: Optional[str], times: dict) -> dict:
+    """Each server's times for a file read before the lane kept each server's
+    copy: the Last-Modified (`lm`) the record kept for the server it was read
+    from, or else the table's, and when it was first found there (`seen`)
+    only where the table has it. None for a server with neither, since an
+    estimated time is never shown."""
+    row = ((times or {}).get(kind) or {}).get(_iso(t)) or {}
+    out = {}
+    for s in SERVERS:
+        tab = row.get(s) or {}
+        lm = (pub if s == src else None) or tab.get("lm")
+        out[s] = {"lm": lm, "seen": tab.get("seen")} if lm or tab.get("seen") else None
+    return out
+
+
+def file_doc(product: str, kind: str, t: dt.datetime, view: Optional[dict], counts: bool, cut_iso: str,
+             times: dict) -> dict:
+    """A row's file as rowShape 3 carries it (`anlFile`, `pcpFile`): its name
+    as NCEP names it, each server's Last-Modified (`lm`) and when the lane
+    first found its copy there (`seen`), None for a server with no record,
+    whose copy the row uses (`src`), whether the hour counts for the day
+    (`counts`, false when the row's value is marked late or it has none), and
+    whether the first publication shown is after the day's cut-off
+    (`afterCut`). A file read before 2026-10-14 can be both, since the day
+    counted every file read until then. A file read before the lane kept each
+    server's copy takes its times from table_times, and a file nothing of
+    which was read has none."""
+    copies = (view or {}).get("copies")
+    if view is None:
+        servers = {s: None for s in SERVERS}
+    elif copies is not None:
+        servers = {s: ({"lm": copies[s].get("published"), "seen": copies[s].get("seen")} if copies.get(s) else None)
+                   for s in SERVERS}
+    else:
+        servers = table_times(kind, t, view.get("src"), view.get("pub"), times)
+    lms = [v["lm"] for v in servers.values() if v and v.get("lm")]
+    return {"name": file_name(product, kind, t), "nodd": servers["nodd"], "nomads": servers["nomads"],
+            "src": (view or {}).get("src"), "counts": counts, "afterCut": bool(lms) and min(lms) > cut_iso}
+
+
+def hourly_file(store: Storage, product: str, t: dt.datetime, slots: Optional[dict], cache: dict,
+                now: dt.datetime, times: dict) -> dict:
+    """The hourly temperature contract of hour t's analysis file, which every
+    place shares (Patrick's ruling of 4 November): its cut (`cut`), its state
+    (final, provisional or review), when it became final or went to review
+    (`at`), on what (`basis`), the copy it reads (`src`) and that copy's
+    values (`values`), whether a copy was read after its cut settled
+    (`late`), and whether anything of the file is known (`known`: a copy, a
+    record or a settled cut).
+
+    It is final at NOMADS's copy's Last-Modified (basis nomads) once that copy
+    is in, published by the cut and read before the cut settled. Otherwise,
+    once the cut has settled (settle_cuts), it is final at the cut itself on
+    the copy choose() takes, published by the cut (basis cutoff), as a day's
+    finalAt is its cut-off, or under review at the cut with no copy published
+    by then; until then it is provisional on the copy in hand. A copy read
+    after the cut settled is recorded, flagged and never used. A record
+    settled before the hourly cut existed (from 2026-11-03 to 2026-11-04) is
+    read as settling it with the record, on the copies it was written with,
+    as file_view reads a cut-off a record does not name.
+
+    A file read before the lane kept each server's copy has no NOMADS copy on
+    record (basis norecord): final at the cut on the copy read, or at NOMADS's
+    Last-Modified where the table or the record has one by the cut (basis
+    nomads, the copy read still the one used, as the engine's probe found the
+    two servers' copies the same in every file it compared), and under review
+    at the cut where NOAA Open Data's Last-Modified is after it. The table is
+    shown times only, so it never moves a day's figures; here it can make an
+    hour's state."""
+    hc = _iso(hourly_cut(t))
+    out = {"cut": hc, "state": "provisional", "at": None, "basis": None, "src": None, "late": False,
+           "values": {}, "known": False}
+    rec = get_anl(store, product, t, cache)
+    if rec is not None and "settled" not in rec:
+        src = rec.get("source")
+        lm = {s: (v or {}).get("lm") for s, v in table_times("anl", t, src, rec.get("published"), times).items()}
+        if lm["nomads"] and lm["nomads"] <= hc:
+            out.update(state="final", at=lm["nomads"], basis="nomads", src=src)
+        elif _iso(now) < hc:
+            out.update(src=src)
+        elif lm["nodd"] and lm["nodd"] > hc:
+            out.update(state="review", at=hc, basis="norecord")
+        else:
+            out.update(state="final", at=hc, basis="norecord", src=src)
+        out.update(values=(rec.get("values") or {}) if out["src"] else {}, known=True)
+        return out
+    copies = copies_of(store, product, "anl", t, cache)
+    entry = (rec or slots or {}).get("hourly")
+    if rec is not None and entry is None:
+        entry = _cut_entry(copies, sorted(rec.get("servers") or {}), hc, rec.get("settled"))
+    if entry is None and not any(copies.values()):
+        return out
+    held = (entry.get("with") or []) if entry is not None else [s for s in SERVERS if copies.get(s) is not None]
+    sub = {s: copies.get(s) for s in held}
+    nom = sub.get("nomads")
+    if nom is not None and _pub(nom) <= hc:
+        out.update(state="final", at=_pub(nom), basis="nomads", src="nomads")
+    elif entry is not None:
+        src = choose(sub, hc)
+        if src is not None and _pub(sub[src]) <= hc:
+            out.update(state="final", at=hc, basis="cutoff", src=src)
+        else:
+            out.update(state="review", at=hc, basis="cutoff")
+    else:
+        src = choose(sub, hc)
+        out["src"] = src if src is not None and _pub(sub[src]) <= hc else None
+    out["late"] = entry is not None and any(copies.get(s) is not None and s not in held for s in SERVERS)
+    out.update(values=((copies.get(out["src"]) or {}).get("values") or {}) if out["src"] else {}, known=True)
+    return out
+
+
+def hourly_row(hv: dict, lid: str) -> dict:
+    """One place's hourly contract from its file's (hourly_file): the value,
+    whole degrees Fahrenheit rounded once, half up, away from zero, and its
+    exact string, from the place's temperature in the copy the contract reads.
+    A copy that counts with no temperature at the place leaves the place no
+    value, which is a review at the cut, the choice being per file (owner's
+    ruling 2026-11-04)."""
+    k = ((hv.get("values") or {}).get(lid) or {}).get("temp")
+    out = {key: hv[key] for key in ("cut", "state", "at", "basis", "src")}
+    if out["state"] == "final" and k is None:
+        out.update(state="review", at=hv["cut"])
+    out["value"] = half_up(exact("temp", k), 1) if k is not None else None
+    out["x"] = x_text("temp", k)
+    out["late"] = hv["late"]
+    return out
 
 
 # ------------------------------------------------------------------ writing
@@ -1761,17 +2111,34 @@ def _has_copy(view: Optional[dict]) -> bool:
     return bool(view and view.get("copies") and any(view["copies"].values()))
 
 
+def _hourly(memo: dict, store: Storage, product: str, t: dt.datetime, slots: Optional[dict], cache: dict,
+            now: dt.datetime, times: dict) -> dict:
+    """hourly_file once per file in a build, since every place shares it."""
+    key = (product, _iso(t))
+    if key not in memo:
+        memo[key] = hourly_file(store, product, t, slots, cache, now, times)
+    return memo[key]
+
+
 def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.datetime, state: dict,
-              only: Optional[set] = None, raw: Optional[list] = None) -> Tuple[dict, dict]:
+              only: Optional[set] = None, raw: Optional[list] = None, times: Optional[dict] = None) -> Tuple[dict, dict]:
     """The days/ document for one local date and the loc/ documents of the
     places in `only` (all of them when None), from the archive hours. With
     `raw`, the day's rows in the files' own units are appended to it for the
     raw CSV. A place-day turns final, or goes to event review, at its cut-off
-    once no file of its rows may still change for it (_pending)."""
+    once no file of its rows may still change for it (_pending). Each row of a
+    place file with a value carries rowShape 3's fields beside `show` and
+    `run`, and a row with none whose hourly contract has a state carries that
+    state and its files; `times` is the table of load_file_times, which they
+    alone read."""
+    if times is None:
+        times = load_file_times()
     day_doc: dict = {"schema": SCHEMA, "day": day_iso, "asof": None, "written": _iso(now), "locations": {}}
     loc_docs: dict = {}
     asof = None
     waiting: Dict[str, bool] = {}
+    rows_of: Dict[str, list] = {}
+    hourly: dict = {}
     # one listing of the copies the day's hours have, in every zone
     span = [h for tz in sorted({loc["tz"] for loc in locs}) for h in local_day_hours(day_iso, tz)]
     if span:
@@ -1782,9 +2149,13 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
         hours = local_day_hours(day_iso, tz)
         entry: dict = {}
         rows = [{"local": hour_label(h, tz), "t": _iso(h)} for h in hours]
+        rows_of[lid] = rows
         cut_iso = _iso(day_cutoff(day_iso, tz))
+        wanted = only is None or lid in only
+        valued: set = set()
         for product in PRODUCTS:
             product_hours = {}
+            views: dict = {}
             pending = False
             opened = (((state or {}).get("products") or {}).get(product) or {}).get("open") or {}
             # no file for an hour that has not begun (an analysis) or ended (an
@@ -1815,6 +2186,17 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                         raw.append([day_iso, lid, hour_label(h, tz), _iso(h), None, None, None, None, _iso(end),
                                     None, fp["src"] if fp is not None else None, None,
                                     fp["pub"] if fp is not None else None] + raw_copy_columns(fa, fp, lid))
+                    # an hour with no value for the day whose hourly contract
+                    # has a state (a file on neither server by the hourly cut,
+                    # or one too late for the day and in time for the hourly
+                    # contract) still carries it and its files, and nothing else
+                    if wanted and h <= latest:
+                        hv = _hourly(hourly, store, product, h, sa, cache, now, times)
+                        if hv["known"]:
+                            row[product] = {"hourly": hourly_row(hv, lid),
+                                            "anlFile": file_doc(product, "anl", h, fa, False, cut_iso, times),
+                                            "pcpFile": (file_doc(product, "pcp", end, fp, False, cut_iso, times)
+                                                        if end <= latest else None)}
                     continue
                 rec = {var: exact(var, (va or {}).get(var)) for var in ANALYSIS_VARS}
                 rec["precip"] = exact("precip", vp)
@@ -1829,6 +2211,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 rec["pub"] = fa["pub"] if va is not None else None
                 rec["pcpPub"] = fp["pub"] if fp is not None else None
                 product_hours[_iso(h)] = rec
+                views[_iso(h)] = (fa, fp, va, vp, sa)
                 # the hourly values in the contract's units, cut to a
                 # thousandth (precipitation a ten-thousandth of an inch)
                 row[product] = {var: cut(rec[var], HOUR_SHOW[var]) for var in HOURLY_VARS}
@@ -1874,18 +2257,39 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
             # each row with a value carries it as the contract shows it, and
             # the day's values over the hours up to it, which the settlement
             # display steps through; only the place files carry them
-            if only is None or lid in only:
+            if wanted:
+                texts = running_texts(product_hours, tz, day_iso)
                 for h, row in zip(hours, rows):
                     rec = product_hours.get(_iso(h))
                     if rec is None or row[product] is None:
                         continue
-                    row[product]["show"] = {var: half_up(rec[var], HOUR_UNIT[var]) for var in HOURLY_VARS}
-                    row[product]["run"] = running(product_hours, tz, day_iso, now, h)
+                    cell = row[product]
+                    cell["show"] = {var: half_up(rec[var], HOUR_UNIT[var]) for var in HOURLY_VARS}
+                    cell["run"] = running(product_hours, tz, day_iso, now, h)
+                    # rowShape 3 (owner's approval of display v3, 2026-11-04):
+                    # the day so far and the hour before rounding as exact
+                    # strings, the stored values as the file holds them, both
+                    # files with their times on each server, and the hour's
+                    # hourly contract, so the page computes nothing
+                    fa, fp, va, vp, sa = views[_iso(h)]
+                    end = h + dt.timedelta(hours=1)
+                    stored = {var: (va or {}).get(var) for var in ANALYSIS_VARS}
+                    stored["precip"] = vp
+                    cell["runX"] = texts.get(_iso(h))
+                    cell["raw"] = {var: raw_text(var, v) for var, v in stored.items()}
+                    cell["x"] = {var: x_text(var, v) for var, v in stored.items()}
+                    cell["anlFile"] = file_doc(product, "anl", h, fa, va is not None and _in_time(rec["pub"], cut_iso),
+                                               cut_iso, times)
+                    cell["pcpFile"] = (file_doc(product, "pcp", end, fp,
+                                                vp is not None and _in_time(rec["pcpPub"], cut_iso), cut_iso, times)
+                                       if end <= latest else None)
+                    cell["hourly"] = hourly_row(_hourly(hourly, store, product, h, sa, cache, now, times), lid)
+            valued |= set(product_hours)
         if not entry:
             continue
         day_doc["locations"][lid] = entry
-        if only is None or lid in only:
-            loc_asof = max((r["t"] for r in rows if any(r.get(p) for p in PRODUCTS)), default=None)
+        if wanted:
+            loc_asof = max((r["t"] for r in rows if r["t"] in valued), default=None)
             loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "rowShape": ROW_SHAPE,
                              "asof": loc_asof, "written": _iso(now), "hours": rows, "summary": entry}
     # a place with no hour read by its cut-off goes to event review, on a day
@@ -1899,12 +2303,10 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
             entry = {product: review_entry(day_iso, tz) for product in PRODUCTS}
             day_doc["locations"][lid] = entry
             if only is None or lid in only:
-                rows = [{"local": hour_label(h, tz), "t": _iso(h)} for h in local_day_hours(day_iso, tz)]
-                for r in rows:
-                    for product in PRODUCTS:
-                        r[product] = None
+                # the rows the loop above made, with no value at any hour, and
+                # the hourly contract where an hour's has a state
                 loc_docs[lid] = {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "rowShape": ROW_SHAPE,
-                                 "asof": None, "written": _iso(now), "hours": rows, "summary": entry}
+                                 "asof": None, "written": _iso(now), "hours": rows_of[lid], "summary": entry}
     day_doc["asof"] = _iso(asof) if asof else None
     return day_doc, loc_docs
 

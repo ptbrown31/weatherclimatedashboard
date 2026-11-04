@@ -32,7 +32,11 @@ the copies read by then, or earlier once both servers' copies are in; a copy rea
 recorded and flagged and never used, and **a day shown final never changes**. The same ruling
 keeps the choice per file (a place the copy that counts has no value for has none that hour), and
 a download whose message fails the check is a server's copy only when a second download returns
-the same bytes. 2026-09-30: **URMA is dropped from the lane and the page**, since
+the same bytes. Later on 2026-11-04 (owner's approval of display v3): **each row of a place file
+carries its figures as exact strings, both files' publication times on each server and the hourly
+temperature contract of its hour** (`rowShape` 3, section 4), so the settlement display computes
+nothing, and **the hourly contract has its own cut-off, three hours after its hour**, by Patrick's
+ruling of 4 November (section 1). 2026-09-30: **URMA is dropped from the lane and the page**, since
 it does not resolve. The lane read it for comparison until then; it reads RTMA only now, the
 published days, place files and CSV files were rewritten without it (`LAYOUT`, section 5),
 and its archive and frames under `archive/analysis2/{hours,precip}/urma/` and
@@ -127,6 +131,46 @@ Open Data first and NOMADS only for a file NOAA Open Data lacked (half an hour a
 usually lands, and a precipitation file 27 minutes after its hour ends), so it never compared the
 two copies.
 
+**The hourly contract (Patrick's ruling of 4 November).** Each hour's temperature is also the value
+of an hourly temperature contract on that hour, whole °F rounded once, half up, away from zero.
+Its cut-off is three hours after the hour (`HOURLY_CUT_AFTER`), the same in every zone, and the
+day's 12:45 AM cut-off does not apply to it. One analysis file serves the hourly contracts of its
+hour at every place, and the file settles for the hourly cut apart from the days' cut-offs
+(`settle_cuts`, under `hourly` beside `cutoffs`) by the same rules: at the pass at which both
+servers' copies are in, or at the first ten-minute pass after the cut, on the copies in hand. The
+contract is:
+
+- final once NOMADS's copy is in, if it was published by the cut and read before the cut settled,
+  at that copy's Last-Modified (basis `nomads`);
+- otherwise, once the cut has settled, final at the cut itself on the copy `choose` takes with the
+  cut as its cut-off, if that was published by the cut (basis `cutoff`), as a day's `finalAt` is
+  its cut-off;
+- under review at the cut, with no value, when the cut settled with no copy published by then;
+- provisional until then, on the copy in hand.
+
+A copy read after the hourly cut settled, whatever its Last-Modified, is recorded and flagged
+(`late`) and never used. Since the two cut-offs differ, an hour can count for its hourly contract
+and not for its day, or the reverse. New York's 23:00 has its day's cut-off at 12:45 AM and its
+hourly cut at 2:00 AM, so a file published at 1:10 AM counts only for the hourly contract, and a
+file published four hours after an afternoon hour counts only for the day. Where both count the
+value is the same, unless NOMADS's copy first appears between the two cut-offs and differs from
+NOAA Open Data's. A place the copy that counts has no temperature for is under review at the cut,
+the choice being per file. The settled record waits for the hourly cut as well as the days'
+cut-offs; with the sixty-seven places some zone's cut-off is always the later, at least 4 h 45 min
+after the hour, so the record is written when it was before, and a test holds a day's figures,
+states and CSV files byte-identical to the lane's before the change. A record settled before this
+change has no `hourly` and is read as settling it with the record, on the copies it was written
+with, as a cut-off a record does not name is read.
+
+An hour read before the lane kept each server's copy has no NOMADS copy on record. It is final at
+the cut on the copy read (basis `norecord`), or at NOMADS's Last-Modified where the engine's probe or
+the record has one by the cut (basis `nomads`, the copy read still the one used; the probe found the
+two servers' copies the same in every file it compared), and under review at the cut where NOAA Open
+Data's Last-Modified is after it. Of the files from 2026-08-29 to 2026-10-14 only the analysis of
+2026-09-23 23Z is in review, on NOAA Open Data at 02:06:41Z, and the analysis of 2026-09-23 19Z,
+which never reached NOAA Open Data, is final at NOMADS's 19:46:54Z. The times come from
+`config/analysis_file_times.json` (section 4), which no day's figure, count or state reads.
+
 **Where each variable comes from.**
 
 | variable | RTMA file and message |
@@ -166,7 +210,8 @@ nearest land cell settles (1.72 km from the position). The list's water rule was
 URMA's significant wave height analysis of 2026-09-27 12Z, which RTMA's files do not carry
 (checked 2026-09-30); the approved cells are frozen, so the rule is not applied again. The list is vendored in
 `geo/settlement_locations.csv` (columns id, name, state, metro, metro_rank, basis, position,
-lat, lon, i, j, tz, note), with the approved cell given, never recomputed;
+lat, lon, i, j, tz, note, and from 2026-11-04 code, ForecastEx's location code, which the
+display's header and CSV files name), with the approved cell given, never recomputed;
 `scripts/build_analysis_grid.py` derives `config/analysis_locations.json` from it and refuses to
 write a cell that is not the one containing the position unless the list records why (Miami).
 Time zones are from the National Weather Service points service. Location ids are slugs of
@@ -422,7 +467,7 @@ place with no hours yet is absent until its cut-off. `high`, `low`, `gust`, `win
 
 ```
 { "schema": "analysis/2", "id": "new-york-ny", "day": "2026-09-26", "tz": "America/New_York",
-  "rowShape": 2, "asof": ..., "written": ...,
+  "rowShape": 3, "asof": ..., "written": ...,
   "hours": [ {"local": "00", "t": "2026-09-26T04:00:00Z",
               "rtma": {"temp": 63.14, "wind": 18.223, "gust": 33.506, "precip": 0.0197,
                        "pub": "2026-09-26T04:48:31Z", "pcpPub": "2026-09-26T05:17:02Z",
@@ -431,7 +476,19 @@ place with no hours yet is absent until its cut-off. `high`, `low`, `gust`, `win
                        "run": {"hours": 1,
                                "high": {"value": 63, "exact": 63.14, "at": "2026-09-26T04:00:00Z"},
                                "low": {...}, "gust": {...}, "wind": {"value": 18, "exact": 18.223},
-                               "precip": {"value": 0.02, "exact": 0.0197, "hours": 1}}}}, ... ],
+                               "precip": {"value": 0.02, "exact": 0.0197, "hours": 1}},
+                       "runX": {"high": "63.140", "low": "63.140", "gust": "33.506...", "wind": "18.223...",
+                                "precip": "0.0197007874"},
+                       "raw": {"temp": "290.45", "wind": "...", "gust": "...", "precip": "0.5004"},
+                       "x": {"temp": "63.140", "wind": "18.223...", "gust": "33.506...", "precip": "0.0197007874"},
+                       "anlFile": {"name": "rtma2p5.20260926/rtma2p5.t04z.2dvaranl_ndfd.grb2_wexp",
+                                   "nodd": {"lm": "2026-09-26T04:48:31Z", "seen": "2026-09-26T04:50:12Z"},
+                                   "nomads": {"lm": "2026-09-26T04:49:40Z", "seen": "2026-09-26T04:50:02Z"},
+                                   "src": "nomads", "counts": true, "afterCut": false},
+                       "pcpFile": {"name": "rtma2p5.20260926/rtma2p5.2026092605.pcp.184.grb2", ...},
+                       "hourly": {"cut": "2026-09-26T07:00:00Z", "state": "final", "at": "2026-09-26T04:49:40Z",
+                                  "basis": "nomads", "src": "nomads", "value": 63, "x": "63.140",
+                                  "late": false}}}, ... ],
   "summary": { ...the same object as this location's entry in days/YYYY-MM-DD.json... } }
 ```
 
@@ -476,6 +533,49 @@ rounded hours against the 0.84 it resolved on).
   the row keeps, having been published after the cut-off (section 1). They change no value,
   count or state. An hour whose files gave its row no value has no place-file row to carry them,
   and the raw CSV records it.
+
+From 2026-11-04 (`rowShape: 3`, the owner's approval of display v3) every row with a value
+carries six more, so the display shows every figure and time as the lane wrote it and computes
+none. Every time is ISO UTC with Z, and a missing figure is `null`.
+
+- `raw` is each value as stored, a string in the file's own unit: kelvin and metres per second to
+  two decimals, millimetres with no trailing zeros and `"0"` for none, `null` for a variable the
+  row has no value for.
+- `x` is each value converted before rounding, an exact string (`TEXT_PLACES`): a thousandth of a
+  degree, twelve places of a mile an hour (hundredths of a metre per second times the ten places of
+  2.2369362921), and inches cut toward zero at ten places, since their decimal seldom ends (0.0123
+  mm is written 0.0004842519, where rounding would give 0.0004842520). It is computed in rational
+  arithmetic, never a Decimal division. A stored value finer than the file's precision would be
+  written exactly, at more places, as would an inch figure whose decimal ends past ten places; the
+  analysis is packed to hundredths and the archive keeps millimetres to six places, so none is.
+- `runX` is the day so far after the row before rounding, over exactly the hours `run` counts
+  (`running_texts`, on day_summary's own rule, `_counted`): the high and low to a thousandth and the
+  peak gust to twelve places, exact, and the mean wind and precipitation total cut at ten places,
+  the total converted once from the summed millimetres.
+- `anlFile` and `pcpFile` are the row's analysis file and its precipitation file: `name` as NCEP
+  names it under its day directory (`file_name`, the ending of `anl_url` and `pcp_url`); `nodd` and
+  `nomads`, each server's `lm` (its Last-Modified) and `seen` (when the lane first found its copy
+  there), `null` for a server with no record; `src`, whose copy the row uses; `counts`, whether the
+  hour counts for the day, false when the row's value is marked late or it has none; and
+  `afterCut`, whether the first publication shown, the earliest `lm`, is after the day's cut-off.
+  `pcpFile` is `null` until the precipitation hour has ended. A file read before the lane kept each
+  server's copy takes the Last-Modified its record kept for the server it was read from, or else
+  the table's (`table_times`, below), with `seen` only where the table has it; a file nothing of
+  which was read has no times. Such a file read before 2026-10-14 can have `counts` and `afterCut`
+  both true, as it counted under the rule then. The precipitation of the hour ending
+  2026-09-30T07Z, on NOAA Open Data at 08:01:44Z, after the 07:45Z cut-off of 29 September at Los
+  Angeles and Phoenix, is the one such file, and it stays counted.
+- `hourly` is the hour's hourly contract (section 1): `cut`; `state`, `final`, `provisional` or
+  `review`; `at`, NOMADS's Last-Modified for basis `nomads` and the cut for `cutoff`, `norecord`
+  and a review, `null` while provisional; `basis`, `nomads`, `cutoff` or `norecord`, `null` while
+  provisional; `src`, the copy it reads, `null` in review; `value`, whole °F, and `x`, its exact
+  string; and `late`, a copy read after its cut settled.
+
+A row with no value for the day whose hourly contract has a state (a file on neither server by
+the hourly cut, or one too late for the day and in time for the hourly contract) carries `hourly`,
+`anlFile` and `pcpFile` and no value fields, and a row of which nothing is known stays `null`. A
+place with no value yet for its day has no place file to carry them until its first value or its
+cut-off. The day files, both CSV files and every field of before are unchanged.
 
 A file without `rowShape` was written before these fields. The page still draws it, as the file
 stands, with no running figures and no replay; the lane reads nothing from place files, and the
@@ -575,10 +675,11 @@ appended to the copy's `.later.json.gz` beside it, with when the lane saw it, it
 time and its hashes, and is never used.
 `archive/analysis2/hours/<product>/YYYYMMDDTHHZ.json.gz` and
 `archive/analysis2/precip/<product>/YYYYMMDDTHHZ.json.gz` are each the file's settled record,
-written once when it has settled for every cut-off of its days (section 1): `settled` (that
-pass), `cutoffs` (for each cut-off, the pass it settled at, `at`, the servers whose copies were
-in hand, `with`, the copy chosen, `src`, and the first publication of those copies and its
-server, `published` and `pubSrc`), `picks` (the server each place's row uses, `null` for
+written once when it has settled for every cut-off of its days, and an analysis for its hourly
+cut too (section 1): `settled` (that pass), `cutoffs` (for each cut-off, the pass it settled at,
+`at`, the servers whose copies were in hand, `with`, the copy chosen, `src`, and the first
+publication of those copies and its server, `published` and `pubSrc`), for an analysis from
+2026-11-04 `hourly` (the hourly cut's entry in the same shape), `picks` (the server each place's row uses, `null` for
 none), `values` (that copy's values), `source` (the one server every place settled on, `null`
 when they differ or none), `published`, `servers` (each server's copy's `seen`, `published` and
 `sha256` at the time) and `hashMatch`, and for the precipitation `missing`, `read` and
@@ -592,8 +693,9 @@ value. Together they let any day file be rebuilt from the archive without re-rea
 live walk has opened stamps), `since` (when the lane first looked), `open` (the stamps whose
 files have not settled, or have settled while a server's copy is still to come, each file with,
 per server, when it was last looked at, `tried`, and the download that last failed the check,
-`bad`, its hashes and reasons, and how the file has settled so far, `cutoffs`, and for a file
-carried over from before 2026-11-03 since when, `migrated`), `rechecked` (the newest hour whose
+`bad`, its hashes and reasons, and how the file has settled so far, `cutoffs` and, for an
+analysis, `hourly`, and for a file carried over from before 2026-11-03 since when, `migrated`),
+`rechecked` (the newest hour whose
 copies were looked at again), `reads` and `lastRead` (when a pass last read an hour); per
 product
 the backfill `cursor`, `oldest`, `done` and queued catch-up spans; `layout`, the `LAYOUT` the
@@ -614,6 +716,23 @@ A precipitation key without an archive hour is the precipitation of an hour whos
 file never landed. `archive/_meta/health_analysis.json` is the lane's own failure
 streak file, written through `archive.update_health` under the market lane's convention so
 this lane's streaks never collide with another lane's. Pages never read `archive/`.
+
+**`config/analysis_file_times.json`** (from 2026-11-04) holds NOAA's own publication times of
+the files the lane read before it kept each server's copy, which it kept no Last-Modified for
+before 2026-10-14 and no NOMADS copy for at all, as `{kind: {file_utc: {server: {"lm", "seen"}}}}`
+with a precipitation file under the hour it ends, one file to a line. The engine extracted them read-only,
+NOAA Open Data's earliest Last-Modified from its read log for 1,127 analysis and 1,128
+precipitation files from 2026-08-29 to 2026-10-14 (and NOMADS's for the analysis of 2026-09-23 19Z,
+which never reached the bucket), with no first sighting, since its read times were its own and
+some of them catch-up reads, and NOMADS's Last-Modified and first sighting from its timing probe
+for the 25 analysis and 26 precipitation files from 2026-11-03 15:13 UTC to the copies' start on
+2026-11-04, with no first sighting for the five of each already on NOMADS when the probe began.
+`scripts/build_analysis_file_times.py` builds it from the engine's CSV (columns `kind`, `file_utc`,
+`server`, `last_modified`, `first_seen`) and refuses a row that is not one file on one server at the
+top of an hour; `scripts/package_lambda.py` ships it, and `load_file_times` reads it once a process.
+Only `anlFile`, `pcpFile` and the hourly contract of an hour read before the copies read it (section
+1); no day's figure, count, late flag or state does, so a time after a cut-off changes what is shown
+and nothing else.
 
 ## 5. The job
 
@@ -701,10 +820,11 @@ takes five or six calls of the forty.
    counts, the first copy kept and NOMADS's where its bytes differ, while no cut-off of the file
    has settled and when it was published by the first one. The file then settles as far as it
    can (`settle_cuts`, section 1), for every cut-off once both copies are in, and on the
-   ten-minute pass for each cut-off that has passed, on the copies in hand. Every open file is
+   ten-minute pass for each cut-off that has passed, on the copies in hand, an analysis's hourly
+   cut among them. Every open file is
    worked on the ten-minute pass, and once the deadline is near it is settled without a read, so
    none misses the first ten-minute pass after its cut-off. Its settled record is written once it
-   has settled for every cut-off, and it leaves the open list once both servers' copies are kept,
+   has settled for every cut-off and its hourly cut, and it leaves the open list once both servers' copies are kept,
    or `RECHECK_AFTER_HOURS = 26` after its hour, when every zone's cut-off has passed; so the
    second copy of a file that settled on the first is kept too, and recorded as late when it came
    after. A file that settled on no copy leaves the hour without it and goes on the state's
@@ -743,13 +863,14 @@ takes five or six calls of the forty.
    that lack either CSV file and the days still in `relayout`. When `LAYOUT` changes (it was
    set to `rtma-only-2026-09-30` when URMA was dropped, `cutoff-2026-10-14` with the cut-off
    rule, `running-2026-11-03` when the place files gained `show`, `run` and the publication
-   times, and `copies-2026-11-04` when the raw CSV gained each server's copy and the rows the pass
-   their copies became final at) the first pass
+   times, `copies-2026-11-04` when the raw CSV gained each server's copy and the rows the pass
+   their copies became final at, and `v3-2026-11-04` when the rows took `rowShape` 3) the first pass
    queues every listed day,
    so the listed days (sixty at most) are rewritten within about two hours; a day with no archive hours
    writes nothing and leaves the queue. The running values cost about 0.3 s of computing a day of
    sixty-seven places on a laptop (0.41 s against 0.10 s without them), inside the same deadline
-   checks as every other rebuild.
+   checks as every other rebuild, and `rowShape` 3 about as much again (1.14 s against 0.58 s for a
+   sample day, measured 2026-11-04).
 5. **Recheck.** Each first copy is looked at once more `RECHECK_AFTER_HOURS = 26` after its hour,
    when every zone's cut-off has passed, by its server's Last-Modified time from a HEAD request
    (`recheck_lane`, `gov_weather.fetch_head`), `RECHECK_HOURS_PER_PASS = 4` hours a pass at most,
@@ -818,168 +939,191 @@ uploaded, so the live lane started with its backfill done.
 ## 6. The page
 
 `analysis-resolution.html`, unlisted (`noindex`, not in `config/contracts.json`, not in
-`REF`), built from the same skeleton as `wind-markets.html`: title, `p.sub` carrying the
-statement, a `.bar` with the controls and `#pageStatus`, the location panel, `p#anaPick` (a line
-asking for a place, shown while none is picked), the map card, the method prose, `p.cap#foot`.
-Scripts: common, data, `js/analysis-settle.js` (the settlement display, `WXSettle`), then
-`js/analysis.js`; `WXAnalysis.init()`. The panel sits above the map since the settlement display
-went in (owner's approval of 2026-11-03), so a picked place opens its day first.
+`REF`), shows version 3 of the settlement display, the prototype the owner approved on
+2026-11-04. It is built from the same skeleton as
+`wind-markets.html`: title, `p.sub` carrying the statement, a `.bar` with the day's CSV links,
+`#pageStatus` and the newest analysis hour, the calendar and the map (`#anaPickers`), the open
+place's header (`#anaHead`), `p#anaPick` (a line asking for a place, shown while none is open),
+the place-day (`#locPanel`), the method prose and `p.cap#foot`. Scripts: common, data,
+`js/analysis-settle.js` (the place-day, `WXSettle`), then `js/analysis.js` (the rest,
+`WXAnalysis.init()`). The page computes nothing. Every value, converted value, running figure and
+time it shows or saves is one the lane wrote, and the page only compares times, for the replay and
+the countdowns, and places pixels.
 
-**Controls.** The top bar holds a day button, a place button, **Zoom to the cell** and the day's
-CSV links. They replaced the five variable buttons and the day and place selects on 2026-11-03, at
-the owner's request, since the settlement display shows every variable at once; the variable is
-switched on the map (below). The day button (`#anaDayBtn`) shows the day, labelled with the
-weekday and with its state when it is not final, and opens a month calendar (`#anaCal`, a
-non-modal dialog holding a `role="grid"` table). Only the days in `index.days` can be picked, and
-every other day is greyed, `aria-disabled` and out of the tab order. Each listed day carries a mark
-for its state from `index.dayStatus`, by the rule the day select used: final once every place has
-resolved (a solid dot), provisional (a ring), event review when its unresolved places are all in
-event review (a diamond), or closed on a file written before 2026-10-14 (a square). An index without
-the field gives no mark. The month arrows, and Page Up and Page Down, step only among the months
-that hold listed days. The arrow keys move between listed days, a week at a time up and down, Home
-and End go to the first and last listed day of the month on view, Enter picks, and Escape closes the
-calendar and returns the focus to the button, as a pick does. A click outside it or the focus
-moving out of it closes it too. The place button (`#anaLocBtn`) shows the open place's name and
-opens a small map of the sixty-seven places (`#anaPlaces`), drawn on the page's own projection and
-`basemap.json` outlines, with a box to type a name. A click on a dot, or within 12 screen pixels of
-one, opens that place. The box is a combobox over an alphabetical listbox of the places: typing
-narrows the list and dims the other dots (a name that starts with the text first, then a word in it
-that does, then any name or state that holds it), the arrows move through the matches, Enter opens
-the highlighted match, which is the first until the arrows move on, and Escape closes the popover
-and returns the focus to the button. The small map is hidden from assistive technology, since the
-box reaches every place. Both popovers open under their buttons and move left as far as they must to
-stay inside the page, so a 390 px phone never scrolls sideways, and only one is open at a time. The
-main map's dots still open a place, and Zoom to the cell sits beside the place button. An hour
-stepper sits under the map (◀ ▶ Play, the valid hour in UTC and in the selected location's zone when
-one is picked). State lives in the URL: `?var=high&day=2026-09-26&hour=16&loc=new-york-ny`
-(an address from before 2026-09-30 with `product=` opens on RTMA and loses the parameter).
-With no `day` in the address the page opens on `index.lastResolvedDay` (owner's request
-2026-09-28), the newest local date on which every one of the sixty-seven places has its RTMA
-day final and its precipitation total resolved (`dayStatus.resolved == dayStatus.places`); an
-index without the field opens on the newest day. The job keeps each day's status in its state
-as it rebuilds the day and fills a status it lacks from the day's file. An RTMA day resolves
-within about an hour of its local end, so the page typically opens on yesterday.
+**Calendar and map.** Both are always on the page, side by side at the top on a wide screen (the
+calendar 300 px wide) and stacked on a phone, never behind a button. They replaced the day and place
+buttons and their popovers on 2026-11-04.
 
-**Map.** The 960 × 600 SVG with `assets/basemap.json` state paths, the hour's frame drawn
-onto a 320 × 200 canvas with the variable's fixed ramp and placed as an `<image>` filling the
-viewBox with `image-rendering: pixelated`, clipped to the state outlines; the sixty-seven
-location dots sized and coloured by that day's value of the selected variable, solid once it
-has resolved, dashed at fill-opacity .55 while provisional, hollow when the day has no value
-yet; hover
-reads the cell under the pointer from the frame and the dot's daily value; click opens the
-location panel. Zoom and pan as in `varmap.js`. Ramps are pinned: temperature −20 to 110 °F
-on the site's nine-stop ramp, gust 0 to 60 mph, wind 0 to 30 mph, precipitation 0 to 2 in
-with zero transparent. A legend under the map states the ramp and the subsample. The map's own
-bar carries the variable switch beside the zoom buttons (`#anaVar`, since 2026-11-03), a radio group
-of High, Low, Gust, Wind and Precip with one tab stop, whose arrow keys, Home and End move the
-choice. It sets the variable, which is what the map shades, the hypothetical ladder under the
-settlement display, the highlighted card and `var=`. A click on a card in the settlement display sets
-it as well, so the switch, the cards and `var=` stay in step.
+- The calendar (`#anaCal`, a `role="grid"` table) shows the month of the open date, filled in the
+  accent. Only the days in `index.days` can be chosen, and every other day is greyed,
+  `aria-disabled` and out of the tab order. Each listed day carries a mark for its state from
+  `index.dayStatus`: final once every place has resolved (a solid dot), provisional (a ring), under
+  review when its unresolved places are all under review (a diamond), or closed on a file written
+  before 2026-10-14 (a square). Choosing a date opens it for the same place. The grid has one tab
+  stop. The arrows move between listed days, a week at a time up and down, Page Up and Page Down
+  and the month arrows step only among the months that hold listed days, Home and End go to the
+  first and last listed day of the month on view, and Enter or Space opens the day with the focus
+  kept on it.
+- The map (`#anaPlaceMap`) is the page's only map, on its own projection and `basemap.json`
+  outlines. Every place carries a label with its value on the open date for the chosen variable, a
+  pill in one of nine colours on the variable's pinned range (high 20 to 100 °F, low 10 to 90 °F,
+  gust 0 to 50 mph, wind 0 to 25 mph, precipitation 0 to 1.5 in with a dry day clear), solid once
+  the place's day is final and dashed while provisional, and a hollow dot marks a place with no
+  value. The open place is ringed and named. A click or a tap on a label, or within 12 screen pixels
+  of a place, opens it on the same date, and the pointer reads its value. The labels keep about
+  10.5 px on screen and are drawn again when the map's width changes. The colours are the tokens
+  `--ana-r0` to `--ana-r8` and `--ana-b0` to `--ana-b8` in all three theme blocks of `site.css`,
+  the approved design's ramps, with `--ana-ink-dk` for the label on the three deepest blues.
+- The box under the map (`#anaPlaceQ`) finds a place by name for the keyboard, a screen reader and
+  a phone, so the map is hidden from assistive technology. It is a combobox over a list of the
+  matches that opens as the reader types, a name that starts with the text first, then a word in it
+  that does, then any name, state or code that holds it, each match with its value on the map. The
+  arrows move through the matches, Enter opens the highlighted one, which is the first until the
+  arrows move on, and Escape or the focus leaving the box closes the list.
+- The variable switch (`#anaVar`) above the map is a radio group of High, Low, Gust, Wind and Precip
+  with one tab stop, whose arrows, Home and End move the choice. It sets what the map labels, the
+  pressed card and `var=`, and a click on a value card sets it in turn.
+- A legend under the map names the variable and the day, "so far" until the day is final, and shows
+  the nine colours.
 
-**Cell mode.** Once the zoom makes a resolving cell at least 12 screen pixels wide, the map
-changes what it draws: the lattice raster is hidden (a 3 px lattice block would be a flat
-patch far larger than a cell, and the caption says the field is hidden at this zoom), every
-place in view draws its 21 × 21 window as parallelograms from its basis, coloured on the same
-ramp, and its resolving cell with a dark border (`--ink`, 2 px, `vector-effect:
-non-scaling-stroke`); the position (the City Hall) is a small dot; the place's value leaves the dot and
-floats in a label outside the cell at a fixed screen offset (up and to the right, flipped when it
-would leave the map), on a `--panel` background, with a leader line from the label to the centre
-of the cell. The label, the cell and the window cells all open the panel on click and answer
-hover with the cell's value and its `i, j`. A pan takes the pointer only once it has moved
-more than 4 screen pixels, so a plain click while zoomed reaches whatever is under it (taking
-pointer capture on pointerdown sent every click to the svg and nothing opened while zoomed; the
-wind and hourly maps share the fix in `site/js/varmap.js`). A window cell whose value is zero or
-`null` is drawn clear (no fill, no stroke) so hover still answers, with the value for a dry cell,
-"off the grid" when the cell index leaves the grid and "missing in this hour" for a bitmap gap,
-and the precipitation caption says dry cells are left clear. Keyboard focus on a mark outlines
-the resolving cell in the accent at a fixed 1.5 px and leaves the position dot alone. A place
-whose index entry has no cell geometry keeps its plain dot and value in cell mode, with Zoom to
-the cell disabled. Below that zoom the dots draw as before, with the value text in `--ink` (it
-was `--muted`, faint on the dark theme). The zoom range is raised so
-the cell reaches about 40 px (`MAXZ = 96`), and a **Zoom to the cell** button in the panel and
-beside the place button sets the view so the picked cell is about 30 px wide and centred; the
-URL carries the view when zoomed (`?z=<factor>&cx=<x>&cy=<y>` in viewBox units) so a zoomed cell
-can be linked.
+State lives in the URL, as `?var=high&day=2026-09-26&loc=new-york-ny`. An address from before
+2026-11-04 may carry `hour=` and the map's view (`z`, `cx`, `cy`), which went with the frames, and
+the page opens it and drops them; one from before 2026-09-30 with `product=` opens on RTMA. With no
+`day` in the address the page opens on `index.lastResolvedDay` (owner's request 2026-09-28), the
+newest local date on which every one of the sixty-seven places has its RTMA day final and its
+precipitation total resolved (`dayStatus.resolved == dayStatus.places`); an index without the field
+opens on the newest day. The job keeps each day's status in its state as it rebuilds the day and
+fills a status it lacks from the day's file. An RTMA day resolves within about an hour of its local
+end, so the page typically opens on yesterday. The page reads `index.json`, the day files and the
+place files, and no longer the grid index or the frames, which the lane still writes.
 
-**Location panel** (`#locPanel`, shown on pick or `?loc=`, above the map): the name, state,
-the day and zone, Zoom to the cell, previous and next day buttons and Close; the statement; the
-settlement display below; the hourly chart for the selected variable on a hypothetical ladder,
-a 960-wide `svg.ts` in a `.card` in the style of `WXK.plot`: local hours on the x axis, midnight
-and the day end marked, the RTMA hourly series solid in `--ana-rtma` (for precipitation the
-lane's running total at each hour, exact, so the last counted hour sits on the day's total, and
-no line on a file without `rowShape`), the day's value as the file stands as a horizontal line,
-and a ladder column of hypothetical rungs at whole units around the value (precip at 0.01,
-0.05, 0.10, 0.25, 0.50, 1.00, 2.00): Yes in `--yes`, No in `--no`, hatched with `#wxHatch`,
-labelled "Yes" and "No", never cents, never linked; the cell note (cell centre, distance from
-the position and its building, the grid cell on both grids, the ruling when present). Two tokens
-are added to all three theme blocks of `site.css`: `--ana-rtma` and, for the rain bars,
-`--ana-rain-soft`.
+**Header** (`#anaHead`, shown once a place is open). The place's name, with its code in brackets
+when the index carries one (`code`, ForecastEx's three-character code), the date, previous and next
+day buttons and Close; its analysis grid point and Grid 184 point (i, j), the centre of its grid
+square and its zone, from the index's location list; the statement; and how far the centre is from
+the position, with the position itself and any ruling.
 
-**Settlement display** (`#anaSettle`, `js/analysis-settle.js`; the prototype the owner approved
-on 2026-11-03, built without its design notes and its sample picker, on the page's own place and
-day selection). It draws only the lane's figures and computes none. The page never adds,
-averages or rounds a value, and its only sums are of times and pixels. In order:
+**The place-day** (`#anaSettle`, `js/analysis-settle.js`), in the specification's order:
 
-- the day's state, one pill and one line: Provisional with the analyses in so far and the
-  cut-off, Final with the hours it resolved on, Event review when no hour was published by the
-  cut-off, and Closed on a file written before 2026-10-14;
-- the clock: the time the day is shown as of (local and UTC), the replay slider, Play the day
-  (a minute every 30 ms) and Latest, the Show exact values toggle, and a note when arrival times
-  are estimates;
-- two countdowns, to the next analysis and to the next hour's precipitation, each in one of
-  four states: counting down, due now, late, and missed once the cut-off has passed. They run
-  to NOAA's own publication times over the two weeks to 2026-11-03, the analysis a median 49
-  minutes after its hour and usually by 52, the precipitation a median 17 minutes after the hour
-  ends and usually by 18 (`LAG` in the script). Late means the file is not in yet past the time
-  it is usually out by, and its note gives that time and says the file counts if published by
-  the cut-off. Until 2026-11-03 the lane read an hour's precipitation file with the next
-  analysis, so that countdown read late for about half an hour each hour and its note said so;
-  the lane now reads each file within about two minutes of its publication inside the arrival
-  windows, the precipitation as soon as it lands (section 5), and the note says nothing of the
-  next analysis;
-- five value cards, High, Low, Peak gust, Mean wind and Precipitation, each the lane's running
-  value at the last counted hour in (`run`), with the hour of the extreme or the hours counted,
-  "so far" until the day is final, and the exact figure under the toggle; a place in event
-  review shows no value and says no hour was published by the 12:45 AM cut-off. The card of the
-  variable the map shows is highlighted, and a click on a card sets that variable;
+- the day's state, one pill and one line: Provisional with the hours in so far and the cut-off,
+  Final with the hours it resolved on, Under review when no hour was published by the cut-off
+  (event review until 2026-11-04), and Closed on a file written before 2026-10-14;
+- two countdowns, to the next analysis and to the next hour's precipitation, each in one of four
+  states: counting down, due now, late, and missed once the cut-off has passed. They run to NOAA's
+  own publication times over the two weeks to 2026-11-03, the analysis a median 49 minutes after its
+  hour and usually by 52, the precipitation a median 17 minutes after the hour ends and usually by
+  18 (`LAG` in the script). Late means the file is not in yet past the time it is usually out by,
+  and its note gives that time and says the file counts if published by the cut-off. They are the
+  page's only expected times, and only for files not in yet;
+- five value cards, High, Low, Peak gust, Mean wind and Precipitation, each the lane's running value
+  at the last counted hour in (`run`), with the hour of the extreme or the hours counted and "so
+  far" until the day is final. A place under review shows no value and says no hour was published by
+  the 12:45 AM cut-off. Each card is a button, the card of the variable the map shows is pressed,
+  and a click on one sets that variable;
 - three charts on one time axis, local midnight to midnight: temperature with the High and Low
-  marked, sustained wind and gust with the running mean as a dashed line and the peak gust
-  marked, and hourly precipitation bars with the running total as a step line. Each shades the
-  hours still to come, draws a now line at the clock and a dashed line at the next hour due, and
-  answers hover with the hour's values, its exact values under the toggle and when its file was
-  first published, and on which server (`pubSrc`, or `src` on a file written before 2026-11-03);
-- every hour in a table, the shown or exact values, the running precipitation total and the
-  analysis's publication time (≈ where estimated), with a footnote that the rounded hours can
-  add up to a different figure than the total, which is the column the contract resolves on.
+  marked, sustained wind and gust with the running mean as a dashed line and the peak gust marked,
+  and hourly precipitation bars with the running total as a step line. Each shades the hours still
+  to come and draws a now line at the clock and a dashed line at the next hour due, and under each
+  is a CSV file for each value on it;
+- every hour in a table: local and UTC time, each value as the contract shows it, the hour's hourly
+  contract in a few words with its full wording on hover, the running precipitation total, and the
+  analysis file's publication time and server or "not on record", with a footnote that the rounded
+  hours can add up to a different figure than the total, which is the column the contract resolves
+  on;
+- the replay, last: the time the day is shown as of, local and UTC, a slider, Play the day (a minute
+  every 30 ms) and Latest. It is held at the foot of the screen while the day is on it, so the
+  charts it moves stay in view.
 
-The replay runs from the day's local midnight to the clock on a live day, and to a quarter hour
-past the cut-off on a day past it. An hour comes in at its file's publication time (`pub`,
-`pcpPub`), or before 14 October, when none was kept, at the usual lag, marked ≈. A counted hour
-enters the day's values once every counted hour before it has arrived, since its running values
-cover them. A file published after the cut-off is shown dimmed once the cut-off has passed and
-never counted. While the day is live and the tab is visible, the display follows the clock,
-and each minute from :44 to :54 and from :14 to :20 past the hour, about when the analysis and
-the precipitation land, it fetches the place file and the day file again with `?b=` and a
-stamp that changes once a minute (`WXD.get`'s `bust`), so the day fills in without a reload.
-It does the same each minute while a countdown reads late, for up to half an hour past the
-file's usual time (`CHASE`), so a file the lane reads late, on its ten-minute pass outside the
-windows, reaches the page a minute or two after the read and late ends when the file is in;
-past that half hour the windows fetch the day twice an hour. The site's CloudFront snapshot
-policy keeps query strings out of its cache key (`ops/aws/template.yaml`), so the stamp
-reaches past the browser's cache but not the CDN's, and a refetch can still be up to the CDN's
-60-second lifetime old. Since 2026-11-03 it is no older than that, because the live files
-carry no `stale-while-revalidate` (section 4); with it the first fetch after the minute could
-be about six minutes old.
+**Hover.** Pointing at an hour, or tapping it on a phone, opens a box for that hour. A tap or a
+click pins it until a tap elsewhere or Escape, and the arrow keys step through the hours of a
+focused chart. For each value on the chart it gives the value as stored (`raw`, in K, m/s or mm),
+the converted value before rounding (`x`, as the lane writes it) and the rounded value (`show`); for
+temperature the hourly contract's value and state; the day so far after that hour, rounded (`run`)
+and before rounding (`runX`); and the file: its name, each server's Last-Modified time
+("published") and the lane's first find ("found"), or "not on record" ("not on record before 3 Nov
+15:13 UTC" for NOMADS before the timing probe began), the copy used and whether the hour counts. A
+file published after the cut-off and counted under the rule before 14 October 2026 (`counts` and
+`afterCut` both true; one real case, the precipitation hour ending 2026-09-30T07:00Z for western
+places on 29 September) says "published after the cut-off, counted under the rule before 14
+October 2026", never not counted.
+
+**Hourly contract.** Each hour's temperature has its own state, from the row's `hourly`, in the
+owner's wording of 2026-11-04, with times on the place's clock to the second.
+
+- Basis `nomads` reads "final at {at}, when NOMADS published the file", `at` being NOMADS's
+  Last-Modified time, followed by "The value shown is NOAA Open Data's copy." when the copy used is
+  NOAA Open Data's, as for some hours of 3 and 4 November read before both servers were.
+- Basis `cutoff` reads "final at the hourly cut-off, {at}, from NOAA Open Data's copy".
+- Basis `norecord` reads "final by the hourly cut-off, {cut} (NOMADS's copy is not on record before
+  3 Nov 15:13 UTC)".
+- State `review` reads "no value: not published by the hourly cut-off, {cut}, under review". With basis
+  `norecord`, a file read before both servers were, it reads "no value: NOAA Open Data published it
+  after the hourly cut-off, {cut}, and NOMADS's copy is not on record. Under review." when NOAA Open
+  Data has a copy on record, as for 2026-09-23 at 23Z, and "no value: not published by the hourly
+  cut-off, {cut}, and NOMADS's copy is not on record. Under review." when it has none.
+- State `provisional` reads "provisional, until NOMADS publishes the file or the hourly cut-off,
+  {cut}".
+
+In a replay an hour shows final only from `at` on and provisional before it, and an hour under
+review shows provisional until its cut-off. A row with an hourly state and no daily value is no data
+for the charts and the cards, and the table, the hover and the CSV show its state.
+
+**CSV files.** The temperature chart has a temperature file under it, the wind chart a wind speed
+and a wind gust file, and the precipitation chart a precipitation file, each for the open place and
+date and named as the prototype names them (`2026-09-28 NYC temperature.csv`, with the place's id
+where the index has no code). Each has a row for every row of the place file, the whole place-day
+whatever the replay shows, in the prototype's columns: `location_code, location, contract_date,
+time_zone, local_time` (with its UTC offset and zone), `valid_utc` (for precipitation the end of
+the hour), `file, copy_used, nodd_first_found, nodd_last_modified, nomads_first_found,
+nomads_last_modified, stored_value, stored_unit, converted_unrounded, unit, rounded` (for
+precipitation `rounded_for_display`) and `counted`, then in the temperature file
+`hourly_resolution_value_state` and `hourly_final_at`, and last the day so far before rounding and
+rounded (`high_so_far_unrounded`, `high_so_far_rounded`, `low_so_far_unrounded` and
+`low_so_far_rounded`, or `mean_so_far_`, `peak_so_far_` or `total_so_far_` with `unrounded` and
+`rounded`). Every value and time is the place file's own string. The page assembles the file and
+saves it through a Blob link. The day's two files at every place, raw and processed, stay in the
+top bar.
+
+**Publication times.** The page never estimates one. An hour comes in, for the replay and the table,
+at its file's first publication on either server (`pub`, `pcpPub`), or failing that at the earliest
+Last-Modified time in its file record (`anlFile`, `pcpFile`), which the lane fills for old days from
+NOAA's records, and a time not on record is said to be. The replay runs from the day's local
+midnight to the clock on a live day. On a day past its cut-off it runs to a quarter hour past the
+latest of the cut-off, the last hour's hourly cut-off (`hourly.cut`) and any file the old rule
+counted late, so the 11 PM hour shows final. A day whose counted files have no time on record is
+shown as it stands, with no replay and a line saying why. A counted hour enters the day's values once
+every counted hour before it has arrived, since its running values cover them. A file published
+after the cut-off is shown dimmed once the cut-off has passed and never counted.
+
+**Live days.** While the day is live and the tab is visible, the display follows the clock, and each
+minute from :44 to :54 and from :14 to :20 past the hour, about when the analysis and the
+precipitation land, it fetches the place file and the day file again with `?b=` and a stamp that
+changes once a minute (`WXD.get`'s `bust`), so the day fills in without a reload. It does the same
+each minute while a countdown reads late, for up to half an hour past the file's usual time
+(`CHASE`), and for as long while an hour the file holds provisional is past its hourly cut-off, so
+the lane's next pass settles it on the page. The site's CloudFront snapshot policy keeps query
+strings out of its cache key (`ops/aws/template.yaml`), so the stamp reaches past the browser's cache
+but not the CDN's, and a refetch can still be up to the CDN's 60-second lifetime old. Since
+2026-11-03 it is no older than that, because the live files carry no `stale-while-revalidate`
+(section 4); with it the first fetch after the minute could be about six minutes old.
 
 A link such as `analysis-resolution.html?var=precip&day=2026-09-28&loc=boston-ma` opens that
-place-day and, since it names a variable and a place, scrolls to that variable's chart
-(temperature for the high and low, wind for the gust and mean wind). A file without `rowShape`
-is drawn as it stands: the summary's values, the hours as stored, no running total, no replay,
-and a line saying so.
+place-day and, since it names a variable and a place, scrolls to that variable's chart (temperature
+for the high and low, wind for the gust and mean wind).
 
-**Method note.** The conventions block of `index.json` rendered as a definition list, the
-sources with their measured lags, the subsample statement, and the statement that station
-report conventions have no analogue here.
+**Older files.** A place file in `rowShape` 2 has no stored or converted values, file records or
+hourly contract. The hover leaves them out and says no file time is on record, the CSV leaves them
+blank, and the day replays only if its rows carry `pub` times. A file without `rowShape` is drawn as
+it stands, with the summary's values, the hours as stored, no running total, no replay and a line
+saying so. The lane rewrote the listed days in `rowShape` 3 within about two hours of its deploy.
+
+Version 3 removed the day and place buttons and their popovers, the map below the day with its
+hourly frames, hour stepper, cell mode and Zoom to the cell, the hypothetical ladder, the Show exact
+values toggle, and every estimated publication time with its ≈ mark.
+
+**Method note.** The conventions block of `index.json` rendered as a definition list, the sources
+with their measured lags, what the map shows, and the statement that station report conventions have
+no analogue here.
 
 ## 7. Verification
 
@@ -1053,6 +1197,29 @@ report conventions have no analogue here.
   day's summary; place files without the new fields stay readable and are rewritten newest
   first, a few a pass, inside the deadline; and Boston's 2026-09-28 resolves on 0.84 while its
   rounded hours add to 0.83.
+- `tests/test_analysis.py`, for `rowShape` 3 and the hourly contract (2026-11-04): the contract
+  final at NOMADS's Last-Modified once its copy is in, before its cut settles; final at the cut
+  from the first ten-minute pass on NOAA Open Data's copy alone, and provisional until then; under
+  review with neither copy, the row with no value carrying the contract and its files alone; a
+  NOMADS copy read after the hourly cut settled flagged and never used, though published before the
+  cut, while the day takes it by its own rules; a file between New York's cut-off and the hourly cut
+  counting for the hourly contract and for Chicago's day and not New York's, and one after the
+  hourly cut counting for the day and not the contract; the hourly cut settling apart from the
+  days', on no copy for a carried-over file, never on a windowed pass with one copy and never for a
+  precipitation file, the record waiting for it at Los Angeles alone and not with the three zones,
+  and the file leaving the open list as before; the exact strings from the stored values, the three
+  half ties and a precipitation figure whose cut differs from its rounding among them, finer stored
+  values written exactly, and `runX` on the hours `run` counts, a late hour adding nothing; files read
+  before the copies with and without the table's times (NOAA Open Data's shown, NOMADS's by the cut
+  making the contract final there, NOAA Open Data's after the cut a review, the record's own
+  Last-Modified standing over the table's), the day the same either way; a table time after the
+  cut-off, counted under the earlier rule, changing only the times shown and `afterCut`; a full day
+  of three zones run against `tests/fixtures/analysis_v2_day.json.gz`, which the lane wrote from the
+  same scenario before the change, its day file, CSV files and place files byte-identical once the
+  new fields are taken away, and its place files in `rowShape` 3; every `rowShape` 3 field of every
+  fixture and sample place-day agreeing with the row's figures of before; the file names against
+  the URLs; the table builder and the Lambda package; and a rebuilt location list keeping each
+  place's ForecastEx code, none missing or shared.
 - `tests/test_analysis.py`, for the windowed passes (2026-11-03): an hour's precipitation is read
   as soon as it lands, before its analysis is due, and is in the place file and the day at once,
   and the analysis read later does not fetch it again; New York's last accumulation of a day is
@@ -1075,34 +1242,40 @@ report conventions have no analogue here.
   over one expired lease with one winning, a create whose answer was lost, an unreadable lease,
   the headers on each request with no hook outliving its call, a 409 counted as a lost race,
   and the local guard (never listed, a live one makes a write give up, a dead one is broken).
-- `scripts/verify.py`: the page in the `pages` sweep; checks that the map's variable switch changes
-  the legend and the frame, the page offers no product choice and never says URMA (an old
-  `product=urma` address opens on RTMA), the day calendar and hour stepper change the caption,
-  a dot click opens the panel with the hour rows, five cards and one hourly line, the
-  hypothetical rungs are hatched and carry no `data-contract-url`, the status line says
-  provisional with the count when `rtma` is incomplete, the chart rule says resolved on a final
-  day and running on a provisional one, the exact figures are cut to a thousandth, `?loc=`
-  opens the panel on load, and the 503 degradation shows "No data", and the day's CSV links
-  fetch the raw and processed files. For the settlement display, with the clock fixed where time
-  matters: the five cards carry the summary's values on a final day; the three charts share one
-  axis and one now line, with the hours to come shaded; the countdowns pass through counting
-  down, due now, late and missed; the hour table has a row per hour, its running total ends on
-  the day's and the toggle shows exact figures; the replay moves the cards to the lane's running
-  values for that minute and Latest brings the final day back; Play the day runs; `var=` opens
-  its chart; a refetch inside an arrival window carries `?b=` and fills the day in; a late
-  accumulation's note gives NOAA's usual time and the cut-off and nothing of the next analysis;
-  outside the windows a late countdown keeps the place file fetched each minute and the day
-  fills in, and past half an hour late nothing is fetched; and a place
-  file without the new fields still draws, with no running figures and no replay.
-  Fixtures under `samples/snapshots/analysis2/` come from a real local run of the job, rebuilt
-  on 2026-11-03 by the lane's own code (their README says how).
-- Cell mode: at the national extent no cell outline is drawn; after Zoom to the cell on a
-  fixture place the resolving cell's outline exists with the `--ink` stroke, the label carries the
-  dot's value and a leader line, the raster image is hidden and the caption says so, the window
-  draws 441 cells for the picked place, hover on a window cell reports its `i, j` and value, and
-  the URL carries `z`, `cx`, `cy`; a fixture without `windows` still draws the outline and the
-  label with no window cells; while zoomed a click on a window cell and on the label opens the
-  panel and a drag ending over a window cell opens nothing; a dry precipitation window draws its
-  cells clear and hover on one reads 0.00 in; a place stripped of its cell keys keeps its plain
-  dot; on the wind map a dot clicked while zoomed still scrolls to its section.
+- `scripts/verify.py`: the page in the `pages` sweep, and, with every read that depends on drawing
+  polled for first, that the page opens on the newest fully resolved day with the later days marked
+  provisional, or on the newest day when the index lacks the field; the day's CSV links fetch the
+  raw and processed files; the calendar and the map are on the page with no day or place button,
+  popover, second map, ladder or exact box, side by side at 1280 px and stacked at 375 px with a
+  16 px gutter, above the place's header and its day, with no sideways scroll; the map labels every
+  place with the day file's value for the chosen variable in the scheme's own colours, and a day with
+  no file draws every place hollow; the calendar marks each listed day's state, greys the rest, steps
+  only through months with listed days, walks by keyboard and opens a date for the same place; a
+  place chosen on the map or in the box opens on the same date, and the box's list narrows, steps
+  and closes on Escape or when the focus leaves; the switch, a value card and a link's `var=` set the
+  map's variable and the card; the header gives both grid points, the centre and the zone; the page
+  offers no product choice, never says URMA (an old `product=urma` address opens on RTMA) and shows
+  no price; a short day reads provisional with its count, a place under review says so on every card,
+  an unreadable file is reported as unreadable, and the 503 degradation shows "No data". For the
+  settlement display, on the samples' final New York day: the five cards carry the summary's values;
+  the hour table gives each hour's publication time and hourly contract and ends its running total on
+  the day's; each chart's hover gives the lane's stored, converted and rounded values, the day so far
+  and both servers' times or "not on record"; each of the four CSV files has its header, 24 rows and
+  every value and time the place file's own string; the replay ends a quarter hour past the last
+  hour's hourly cut-off with the 11 PM hour final, moves the cards to the lane's running values for a
+  minute at the files' own times, shows each hourly contract as it stood, and Latest and Play the day
+  work; `var=` opens its chart; and a `rowShape` 2 file with no times and a file without `rowShape`
+  still draw, with no replay. On a `rowShape` 3 file made by hand from the samples
+  (`ana_row_shape3`): each basis's wording of the hourly contract, both servers' found and published
+  times, a file counted under the rule before 14 October, an hour under review before and after its
+  cut-off, and an hour NOAA Open Data published after its hourly cut-off with no NOMADS copy on
+  record, in the table, the hover and the CSV. With the clock fixed on the samples' live day:
+  the three charts share one axis and one now line, with the hours to come shaded; the countdowns pass
+  through counting down, due now, late and missed; a refetch inside an arrival window carries `?b=`
+  and fills the day in; a late accumulation's note gives NOAA's usual time and the cut-off and
+  nothing of the next analysis; outside the windows a late countdown keeps the place file fetched
+  each minute and the day fills in, and past half an hour late nothing is fetched. No ≈ or estimated
+  time appears anywhere and the page raises no script error. Fixtures under
+  `samples/snapshots/analysis2/` come from a real local run of the job, rebuilt in `rowShape` 3 on
+  2026-11-04 by the lane's own code (their README says how).
 - `scripts/scrub.py` before push; the page's `<meta name="description">` under 200 characters.

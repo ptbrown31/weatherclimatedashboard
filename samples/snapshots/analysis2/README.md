@@ -61,3 +61,28 @@ the current conventions and `review` counts. The files predate the publication t
 replays these days at the usual lags, marked ≈, and its live features run on them only under a fixed
 clock, which is how `scripts/verify.py` drives them (2026-09-29 is the live day, its hours read to 19
 UTC).
+
+On 2026-11-04 the place files moved to `rowShape` 3 for version 3 of the settlement display (the owner's
+approval of display v3): each row with a value gained its stored values as strings (`raw`), its values
+converted before rounding and the day so far before rounding as exact strings (`x`, `runX`), both files
+with each server's times (`anlFile`, `pcpFile`) and the hourly temperature contract of its hour
+(`hourly`). The tree was rebuilt the way it was on 2026-11-03. The six days' raw CSV files were written
+back as archive hours and precipitation keys of the earlier shape in a scratch local store, and the
+lane's own `rebuild_days` rebuilt the six days there at the run's time of 2026-09-29 20:20 UTC, with the
+table `config/analysis_file_times.json`. The day files and the processed CSV files are byte for byte as
+they were, and the raw CSV files keep every column and value they had. Every place file is the same once
+the new fields are taken away, apart from two the lane has written on every row since 2026-11-03, which
+these files predated: `pubSrc` and `pcpPubSrc`, each the one server its file was read from (`nodd`).
+The raw CSV files gained the lane's columns for each server's copy in the same way, empty for files read
+from one server. The new fields were checked against the prototype's own integer arithmetic, from the raw
+CSV files and the engine's table, at all 9,046 rows, and a second rebuild from the rewritten CSV files
+changes no file. `index.json` changed only in its conventions, where `hourlyContract` is new and `provisional`
+and `missing` take the lane's current text.
+
+The files' times are NOAA Open Data's own Last-Modified times from the engine's table, for every file of
+the six days; `seen` is null throughout, since the engine kept no first sighting before 14 October, and
+`pub` and `pcpPub` stay absent, as the lane counted these files without them. No file here was published
+after a cut-off of its day. Every hour's hourly contract is final at its cut, three hours after the
+hour, on the copy read (basis `norecord`, since no NOMADS copy is on record for these files), except the
+hours of 18 and 19 UTC on 2026-09-29, whose cut came after the run's time and which are provisional. The
+precipitation file of 2026-09-29's 19 UTC row was not read by the run and has no times.

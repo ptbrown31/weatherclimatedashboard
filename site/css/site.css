@@ -14,12 +14,15 @@
   --viewer:#404040; --viewer-line:#2E2E2E;
   /* the working paper's five groups on the accuracy page, the palette of the brief at its top */
   --g-mos:#1B7D3A; --g-blend:#12A4B6; --g-human:#E8850C; --g-ai:#7B3294; --g-raw:#B79E70;
-  --ana-rtma:#B8722C; --cell-line:#111111; --ana-rain-soft:#D6E4F3;
+  --ana-rtma:#B8722C; --ana-rain-soft:#D6E4F3;
+  /* the analysis page's map: nine steps for temperature and wind, nine for precipitation, and the ink on the dark steps */
+  --ana-r0:#c9dcec; --ana-r1:#d4e6ea; --ana-r2:#dcecd9; --ana-r3:#e9eecb; --ana-r4:#f4ecc1; --ana-r5:#f5ddb3; --ana-r6:#eec9a5; --ana-r7:#e3b49c; --ana-r8:#d8a098;
+  --ana-b0:#eef4fb; --ana-b1:#d6e6f5; --ana-b2:#bcd7ee; --ana-b3:#9fc5e5; --ana-b4:#7fb0da; --ana-b5:#5f98cb; --ana-b6:#437fb8; --ana-b7:#2b66a1; --ana-b8:#184d86; --ana-ink-dk:#FFFFFF;
   --t-extra:#9AA3AD;
   /* a live storm's cards, shaded by what each column of the vendor's is: LiveCyc looks forward from
      its cycle, Metryc counts the highest gust over the whole storm (owner, 2026-10-12) */
   --ph-fwd:rgba(30,90,160,.075); --ph-cum:rgba(214,140,30,.13); --ph-cum-ink:#9A5B0C;
-  /* the shadow under a popover, such as the analysis page's calendar and place map */
+  /* the shadow under a floating panel, such as the analysis page's list of places and its replay */
   --shadow:rgba(16,24,40,.16);
 }
 @media (prefers-color-scheme: dark){
@@ -32,7 +35,9 @@
     --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
     --tip-bg:#E4E9F0; --tip-ink:#0F141A;
     --g-mos:#5FBF7A; --g-blend:#3FC4D4; --g-human:#F0A04A; --g-ai:#B98AE0; --g-raw:#A8957A;
-    --ana-rtma:#E8A85C; --cell-line:#0B0F14; --ana-rain-soft:#1E3550;
+    --ana-rtma:#E8A85C; --ana-rain-soft:#1E3550;
+    --ana-r0:#35506b; --ana-r1:#3d5f66; --ana-r2:#456650; --ana-r3:#5d6a3e; --ana-r4:#76693a; --ana-r5:#80603a; --ana-r6:#82533a; --ana-r7:#7e4740; --ana-r8:#7a3c44;
+    --ana-b0:#1d2a38; --ana-b1:#1f3550; --ana-b2:#234466; --ana-b3:#28547d; --ana-b4:#2d6595; --ana-b5:#3577ad; --ana-b6:#4a8cc2; --ana-b7:#68a3d3; --ana-b8:#8cbbe2; --ana-ink-dk:#0F141A;
     --t-extra:#8C97A3;
     --ph-fwd:rgba(127,176,234,.13); --ph-cum:rgba(232,170,80,.15); --ph-cum-ink:#E8AA50;
     --shadow:rgba(0,0,0,.55);
@@ -47,7 +52,9 @@
   --chip:#1F2833; --warn:#F0C36A; --warn-soft:#2B2210; --bad:#E8876A; --bad-soft:#2B1A14; --ok:#7CC28F; --ok-soft:#14261A;
   --tip-bg:#E4E9F0; --tip-ink:#0F141A;
   --g-mos:#5FBF7A; --g-blend:#3FC4D4; --g-human:#F0A04A; --g-ai:#B98AE0; --g-raw:#A8957A;
-  --ana-rtma:#E8A85C; --cell-line:#0B0F14; --ana-rain-soft:#1E3550;
+  --ana-rtma:#E8A85C; --ana-rain-soft:#1E3550;
+  --ana-r0:#35506b; --ana-r1:#3d5f66; --ana-r2:#456650; --ana-r3:#5d6a3e; --ana-r4:#76693a; --ana-r5:#80603a; --ana-r6:#82533a; --ana-r7:#7e4740; --ana-r8:#7a3c44;
+  --ana-b0:#1d2a38; --ana-b1:#1f3550; --ana-b2:#234466; --ana-b3:#28547d; --ana-b4:#2d6595; --ana-b5:#3577ad; --ana-b6:#4a8cc2; --ana-b7:#68a3d3; --ana-b8:#8cbbe2; --ana-ink-dk:#0F141A;
   --t-extra:#8C97A3;
   --ph-fwd:rgba(127,176,234,.13); --ph-cum:rgba(232,170,80,.15); --ph-cum-ink:#E8AA50;
   --shadow:rgba(0,0,0,.55);
@@ -829,171 +836,138 @@ table.lad th{font-weight:600;border-bottom:1px solid var(--line)}
    point, and the cursor says the plot is readable. */
 .ctr svg.ts rect.hband,svg.ts rect.hband{cursor:crosshair}
 
-/* The analysis resolution page. RTMA owns a token above for its line on the
-   hourly chart. The rest is the furniture the page adds: the day and place
-   popovers, the map's variable switch, the ramp swatch in the legend, the
-   hour stepper, the panel's five cards and its hour table. */
-/* The controls since 2026-11-03 (owner's request). The day button opens a
-   month calendar of the listed days and the place button a small map of the
-   places with a box to type a name. Both panels open under their buttons,
-   and analysis.js keeps them inside the page, so a phone never scrolls
-   sideways. The shadow is the one token added for them, --shadow. */
-.anapop{position:relative;display:inline-block;min-width:0;max-width:100%}
-.anapopbtn{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
-.anapopbtn .k{font-size:11.5px;color:var(--muted)}
-.anapopbtn::after{content:"";display:inline-block;vertical-align:middle;width:0;height:0;margin:0 0 2px 7px;border:4.5px solid transparent;border-top-color:currentColor;border-bottom:0}
-.anapopbtn[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.anapanel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:var(--panel);color:var(--ink);border:1px solid var(--line);
-  border-radius:10px;box-shadow:0 10px 28px var(--shadow);padding:10px 12px}
-.anapanel[hidden]{display:none}
-.anapanel:focus{outline:none}
-.anacal{width:304px}
+/* The analysis resolution page, version 3 of its settlement display (owner's
+   approval of 2026-11-04). RTMA owns a token above for its line on the
+   temperature chart, the rain bars take --ana-rain-soft, and the map's nine
+   colours for each theme are --ana-r0 to --ana-r8 and, for precipitation,
+   --ana-b0 to --ana-b8, the approved design's ramps. The rest is the furniture
+   the page adds, in its order: the calendar and the map side by side
+   (stacked on a phone), the open place's header, and the place-day. */
+@media (max-width:560px){.anawrap{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}}
+#anaBar #anaNewest{margin:0;min-width:0}   /* wraps at phone width; nowrap pushed the page to 469 px at 390 */
+#anaBar .anacsv{font-size:.85rem;color:var(--muted);min-width:0}
+.anahead{margin:4px 0 12px}
+.anaheadrow{display:flex;gap:4px 12px;align-items:baseline;flex-wrap:wrap}
+.anaheadrow h2{margin:0;font-size:18px}
+.anaheadrow h2 .code{color:var(--muted);font-weight:600}
+.anaheadrow .anaday{color:var(--muted);font-size:13.5px}
+.anaheadrow .ananav{margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap}
+.anaheadrow .ananav button{padding:4px 9px;font-size:12.5px}
+.anafacts{margin:5px 2px 0;font-size:13px;max-width:none}
+.anastmt{margin:6px 2px 0;font-weight:600;color:var(--ink)}
+.anapick{margin:2px 2px 12px}
+/* the calendar and the map, always on the page */
+.anapickers{display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:14px;align-items:start;margin:0 0 14px}
+@media (max-width:760px){.anapickers{grid-template-columns:minmax(0,1fr)}}
+.anapick1{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 14px;min-width:0}
 .anacalhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 6px}
-.anacalttl{font-weight:650;color:var(--navy)}
+.anacalttl{margin:0;font-size:15px;color:var(--navy)}
+.anacalnavs{display:inline-flex;gap:6px}
 .anacalnav{padding:2px 10px;font-size:12px}
 .anacalnav:disabled{opacity:.4;cursor:default}
-table.anacalgrid{width:100%;table-layout:fixed;border:0;background:none;font-size:13px}
-table.anacalgrid th{padding:2px 0 4px;border:0;text-align:center;font-size:10.5px;letter-spacing:.04em}
-table.anacalgrid td{height:38px;padding:0;border:0;text-align:center;vertical-align:middle;border-radius:8px}
+table.anacalgrid{width:100%;table-layout:fixed;border:0;background:none;border-collapse:separate;border-spacing:3px;font-size:13px}
+table.anacalgrid th{padding:2px 0;border:0;text-align:center;font-size:10.5px;letter-spacing:.04em;color:var(--muted);font-weight:600;text-transform:none}
+table.anacalgrid td{height:36px;padding:0;border:1px solid transparent;text-align:center;vertical-align:middle;border-radius:7px}
 table.anacalgrid td .n{display:block;line-height:1.15}
 table.anacalgrid td.off{color:var(--muted);opacity:.45;cursor:not-allowed}
-table.anacalgrid td.on{cursor:pointer;font-weight:600;color:var(--ink)}
-table.anacalgrid td.on:hover{background:var(--chip)}
-table.anacalgrid td[aria-selected="true"]{box-shadow:inset 0 0 0 2px var(--accent);color:var(--navy)}
+table.anacalgrid td.on{cursor:pointer;font-weight:600;color:var(--ink);background:var(--ground);border-color:var(--line)}
+table.anacalgrid td.on:hover{border-color:var(--accent)}
+table.anacalgrid td.open{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 table.anacalgrid td:focus{outline:none}
-table.anacalgrid td:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;background:var(--chip)}
-/* a listed day's mark is solid once final and a ring while provisional, as
-   the map draws its dots, and a diamond or a square for event review and
-   closed, so the marks differ in shape as well as colour */
+table.anacalgrid td:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* a listed day's mark is solid once final and a ring while provisional, and
+   a diamond or a square under review or closed, so the marks differ in shape
+   as well as colour */
 .anacal i.mk{display:block;width:7px;height:7px;margin:3px auto 0;border-radius:50%}
 .anacal i.mk.final{background:var(--ok)}
 .anacal i.mk.provisional{border:1.5px solid var(--warn)}
 .anacal i.mk.review{background:var(--bad);border-radius:1px;transform:rotate(45deg)}
 .anacal i.mk.closed{border:1.5px solid var(--bad);border-radius:1px}
+table.anacalgrid td.open i.mk{box-shadow:0 0 0 1.5px var(--accent-ink)}
 .anacalkey{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:11.5px;color:var(--muted)}
 .anacalkey span{display:inline-flex;align-items:center;gap:5px}
 .anacalkey span.off{flex-basis:100%}
 .anacalkey i.mk{margin:0}
-.anaplaces{width:620px}
-.anaplrow{display:flex;gap:10px;align-items:center}
-.anaplrow label{font-size:12.5px;color:var(--muted);white-space:nowrap}
-.anaplrow input{flex:1 1 auto;min-width:0;font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--ground);color:var(--ink)}
-.anaplrow input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.anaplcount{margin:6px 0 8px}
-.anaplbody{display:flex;gap:10px;align-items:flex-start}
-svg.anamini{flex:1 1 auto;min-width:0;width:100%;height:auto;display:block;background:var(--map-sea);border-radius:6px}
-svg.anamini.hot{cursor:pointer}
-svg.anamini circle.pt{fill:var(--accent);stroke:var(--panel);stroke-width:1.2px;vector-effect:non-scaling-stroke}
-svg.anamini circle.ring{fill:none;stroke:none;stroke-width:2px;vector-effect:non-scaling-stroke}
-svg.anamini g.pd.dim circle.pt{fill:var(--muted);opacity:.35}
-svg.anamini g.pd.cur circle.pt{fill:var(--ink)}
-svg.anamini g.pd.cur circle.ring{stroke:var(--ink)}
-svg.anamini g.pd.hl circle.ring{stroke:var(--accent)}
-svg.anamini g.pd.hl circle.pt{fill:var(--accent);opacity:1}
-ul.anapllist{position:relative;flex:0 0 190px;list-style:none;margin:0;padding:3px;max-height:240px;overflow-y:auto;
-  border:1px solid var(--line);border-radius:6px;background:var(--panel)}
-ul.anapllist li{padding:4px 8px;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-ul.anapllist li:hover{background:var(--chip)}
-ul.anapllist li.act{background:var(--chip);box-shadow:inset 0 0 0 1px var(--accent)}
-ul.anapllist li.cur{font-weight:700}
-ul.anapllist li span.cur{font-weight:400;color:var(--muted)}
-@media (max-width:600px){.anaplbody{flex-direction:column;align-items:stretch}ul.anapllist{flex:none;max-height:168px}}
-/* the map's variable switch, one radio group in the zoom bar */
+.anamaphead{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.anamaphead h2{margin:0;font-size:15px}
+.anamapbox{margin-top:8px}
+svg.anamap{display:block;width:100%;height:auto;background:var(--map-sea);border-radius:6px}
+svg.anamap.hot{cursor:pointer}
+svg.anamap .pv{stroke:var(--muted);stroke-width:.9px;vector-effect:non-scaling-stroke}
+svg.anamap .pv.prov{stroke-dasharray:3 2;stroke-width:1.2px}
+svg.anamap .pv.none{fill:var(--panel)}
+svg.anamap text.pvt{fill:var(--ink);font-weight:650;pointer-events:none}
+svg.anamap text.pvt.dk{fill:var(--ana-ink-dk)}
+svg.anamap circle.ring{fill:none;stroke:var(--ink);stroke-width:2.2px;vector-effect:non-scaling-stroke}
+svg.anamap text.pname{fill:var(--ink);font-weight:700;paint-order:stroke;stroke:var(--map-sea);stroke-width:4px;stroke-linejoin:round;pointer-events:none}
+.anamapfoot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 16px;align-items:flex-start;margin-top:8px}
+.analegend{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;font-size:12px;color:var(--muted);min-width:0;flex:1 1 260px}
+.analegend .what{color:var(--ink);font-weight:600}
+.analegend .scale{white-space:nowrap}
+.analegend .ramp{display:inline-flex;border:1px solid var(--line);border-radius:3px;overflow:hidden;vertical-align:middle}
+.analegend .ramp i{display:inline-block;width:13px;height:10px}
+.analegend .kn{flex-basis:100%}
+/* the map's variable switch, one radio group above the map */
 .anaseg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--panel)}
 .anaseg button{border:0;border-radius:0;padding:4px 10px;font-size:12.5px;background:none;color:var(--ink)}
 .anaseg button + button{border-left:1px solid var(--line)}
 .anaseg button[aria-checked="true"]{background:var(--ink);color:var(--ground)}
 .anaseg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-#anaMap #vmap{touch-action:none}
-/* the dots are buttons to the keyboard; the focused one shows its ring */
-#vdots g.dot{cursor:pointer;outline:none}
-#vdots g.dot:focus-visible circle:last-of-type{stroke:var(--accent);stroke-width:2.2px;stroke-dasharray:none}
-#anaBar #anaNewest{margin:0;min-width:0}   /* wraps at phone width; nowrap pushed the page to 469 px at 390 */
-#anaBar .anacsv{font-size:.85rem;color:var(--muted);min-width:0}
-/* cell mode: the window cells and the resolving cell open the panel like a
-   dot; the value text on a dot is in the ink, the muted grey was faint on
-   the dark theme */
-#vcells path.wcell{cursor:pointer}
-#vdots text.anaval{fill:var(--ink)}
-#vdots g.cellmark text{fill:var(--ink);font-weight:600;pointer-events:none}
-/* the site's dot hover thickens the last circle in viewBox units, which at
-   sixty times in is a ring the size of the window; the Census dot keeps no
-   stroke and the hover goes to the outline, whose stroke does not scale */
-#vdots g.cellmark circle.posdot,#vdots g.cellmark:hover circle.posdot,#vdots g.dot.cellmark:focus-visible circle.posdot{stroke:none}
-#vdots g.cellmark:hover path.rcell{stroke-width:3}
-/* the focus ring of a cell mark is the outline itself in the accent, at a
-   width that does not scale; the generic dot focus rule above would have
-   stroked the Census dot in viewBox units, a ring wider than the window */
-#vdots g.dot.cellmark:focus-visible path.rcell{stroke:var(--accent);stroke-width:1.5px;vector-effect:non-scaling-stroke}
-.key .anaramp{display:inline-flex;gap:1px;vertical-align:middle;margin-right:4px}
-.key .anaramp i{display:inline-block;width:12px;height:12px;border:0;border-radius:1px}
-.key .kn{flex-basis:100%;color:var(--muted);font-style:italic;white-space:normal}
-.bar.anastep{margin:8px 2px 4px}
-.bar.anastep button{padding:4px 9px}
-.anahead{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-top:22px}
-.anahead h2{margin:0}
-.anahead .ananav{margin-left:auto;display:inline-flex;gap:6px}
-.anahead .ananav button{padding:4px 9px;font-size:12.5px}
-.anastmt{margin:6px 2px 10px;font-weight:600;color:var(--ink)}
-.anacards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin:6px 0 14px}
-.anacard{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px;cursor:pointer}
-.anacard:hover{border-color:var(--accent)}
-.anacard.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
-.anacard .al{font-size:12px;color:var(--muted)}
-.anacard .av{font-size:24px;font-weight:700;color:var(--navy);line-height:1.1;margin:2px 0}
-.anacard .av.dim{font-size:15px;color:var(--muted);font-weight:600}
-.anacard .ae{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.4}
-.anacard .anapill{margin-top:4px}
-.anatab{overflow-x:auto;margin:0 0 6px}
-table.anahours{font-size:12px}
-table.anahours th,table.anahours td{padding:3px 7px;white-space:nowrap}
-table.anahours td.dim{color:var(--muted)}
-table.anahours tr:nth-child(odd) td{box-shadow:inset 0 0 0 9999px rgba(127,127,127,.035)}
-.anarung{font-size:9px;font-weight:700;fill:var(--ink);pointer-events:none}
+/* the box that finds a place, with its list of matches under it */
+.anafind{display:grid;grid-template-columns:auto minmax(0,1fr);gap:3px 8px;align-items:center;flex:1 1 240px;max-width:340px;min-width:0}
+.anafind label{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.anafindbox{position:relative;min-width:0}
+.anafind input{width:100%;font:inherit;font-size:13px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:var(--ground);color:var(--ink)}
+.anafind input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.anaplcount{grid-column:1/-1;margin:0}
+ul.anapllist{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;list-style:none;margin:0;padding:3px;max-height:240px;overflow-y:auto;
+  border:1px solid var(--line);border-radius:8px;background:var(--panel);box-shadow:0 10px 28px var(--shadow)}
+ul.anapllist[hidden]{display:none}
+ul.anapllist li{padding:4px 8px;border-radius:4px;cursor:pointer;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ul.anapllist li:hover{background:var(--chip)}
+ul.anapllist li.act{background:var(--chip);box-shadow:inset 0 0 0 1px var(--accent)}
+ul.anapllist li span.val,ul.anapllist li span.cur{color:var(--muted)}
+ul.anapllist li.cur{font-weight:700}
+ul.anapllist li.cur span{font-weight:400}
 .anadl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:13.5px;margin:8px 0 14px}
 .anadl dt{font-weight:600;color:var(--navy)}
 .anadl dd{margin:0;line-height:1.55;color:var(--ink)}
 @media (max-width:640px){.anadl{grid-template-columns:1fr}.anadl dd{margin-bottom:6px}}
-/* The settlement display (owner's approved design of 2026-11-03): the picked
-   place-day above the map, its state, the clock and countdowns, the five
-   values, three charts on one time axis and every hour. Colours are the
-   site's tokens, so it reads in both themes; the rain bars take the one token
-   added for it, --ana-rain-soft. */
-.anapick{margin:2px 2px 12px}
-#anaSettle{display:grid;gap:12px;margin:8px 0 6px}
+/* the place-day: its state, the countdowns, the five values, three charts on
+   one time axis with their CSV files, every hour, and the replay */
+#anaSettle{display:grid;gap:12px;margin:0 0 6px}
 #anaSettle [hidden]{display:none !important}
 .anastatus{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13.5px}
 .anastatus .anapill{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:999px;padding:2px 9px;margin:0}
 .anapill.prov{background:var(--warn-soft);color:var(--warn)}
 .anapill.final{background:var(--ok-soft);color:var(--ok)}
 .anapill.review,.anapill.closed{background:var(--bad-soft);color:var(--bad)}
-.anaclock{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 14px;display:grid;gap:10px}
-.anaclkrow{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:center}
-.anawhen{white-space:nowrap;font-variant-numeric:tabular-nums}
-.anawhen b{font-size:17px}
-.anawhen span{color:var(--muted);margin-left:6px;font-size:12.5px}
-#anaT{width:100%;accent-color:var(--accent)}
-.anabtns{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center}
-.anabtns button{padding:5px 11px;font-weight:600}
-.anabtns button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-.anatoggle{display:inline-flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
-.anaest{font-size:12px;color:var(--warn);max-width:60ch}
 .ananext{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px}
+.ananext:empty{display:none}
 .anadue{border:1px solid var(--line);border-radius:8px;padding:8px 12px;display:grid;gap:2px;background:var(--ground)}
 .anadue .what{font-size:12.5px;color:var(--muted)}
 .anadue .main{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
 .anadue .cd{font:700 20px/1.1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
 .anadue .cd.late{color:var(--warn)}
 .anadue .ananote{font-size:12px;color:var(--muted)}
+.anacards{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.anacard{display:grid;align-content:start;gap:1px;text-align:left;font:inherit;color:var(--ink);border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px;cursor:pointer}
+.anacard:hover{border-color:var(--accent)}
+/* the card the map shows; the site's pressed button turns ink, which a card does not */
+.anacard.on{background:var(--panel);color:var(--ink);border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.anacard .al{font-size:12px;color:var(--muted)}
+.anacard .av{font-size:24px;font-weight:700;color:var(--navy);line-height:1.1;margin:2px 0}
+.anacard .av.dim{font-size:15px;color:var(--muted);font-weight:600}
+.anacard .ae{font-size:11.5px;color:var(--muted);margin-top:3px;line-height:1.4}
 .anaold{margin:0}
-#anaSettle .anacards{margin:0}
-.anacard .ae.anaexact{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.anachart{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px 8px;min-width:0}
+.anachart{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px 10px;min-width:0}
 .anachart h3{margin:0;font-size:14px;color:var(--navy);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline}
 .analeg{display:inline-flex;gap:12px;flex-wrap:wrap;font-size:12px;font-weight:400;color:var(--muted)}
 .analeg i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
 .anachart .cap{margin:2px 0 6px;max-width:80ch}
 .anaplot svg{display:block;width:100%;height:auto;overflow:visible}
+svg.anasvg:focus{outline:none}
+svg.anasvg:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
 svg.anasvg text{font-size:11px;fill:var(--muted)}
 svg.anasvg text.lab{fill:var(--ink);font-weight:600}
 svg.anasvg text.duelab{fill:var(--accent)}
@@ -1002,16 +976,52 @@ svg.anasvg .axis{stroke:var(--rule);stroke-width:1}
 svg.anasvg .future{fill:var(--shade)}
 svg.anasvg .now{stroke:var(--ink);stroke-width:1.5}
 svg.anasvg .duemark{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 3}
+svg.anasvg .kband{fill:var(--chip)}
+.anacsvrow{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin-top:8px;font-size:12.5px;color:var(--muted)}
+.anacsvrow button{padding:4px 10px;font-size:12.5px}
 .anahrs{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px 8px;min-width:0}
 .anahrs h3{margin:0 0 8px;font-size:14px;color:var(--navy)}
-.anahrs .anatab{margin:0}
+.anatab{overflow-x:auto;margin:0}
+table.anahours{font-size:12px}
+table.anahours th,table.anahours td{padding:3px 7px;white-space:nowrap}
+table.anahours td.dim{color:var(--muted)}
+table.anahours tr:nth-child(odd) td{box-shadow:inset 0 0 0 9999px rgba(127,127,127,.035)}
 table.anahours tr.pending td{color:var(--muted)}
 table.anahours td.hi{color:var(--warm);font-weight:700}
 table.anahours td.lo{color:var(--cool);font-weight:700}
 table.anahours td.pk{color:var(--vbar);font-weight:700}
 table.anahours td.arr{color:var(--muted)}
+table.anahours td.hst{font-size:11.5px;color:var(--muted)}
+table.anahours td.hst[data-state="final"]{color:var(--ok)}
+table.anahours td.hst[data-state="review"]{color:var(--bad)}
 table.anahours th.num,table.anahours td.num{text-align:right}
-@media (max-width:560px){.anaclkrow{grid-template-columns:1fr}.anawhen{white-space:normal}.anawhen span{display:block;margin:2px 0 0}}
+/* the replay comes last, as the specification orders it, and is held at the
+   foot of the screen while the day is on it, so the charts it moves stay in
+   view; a day that cannot be replayed has only its note there */
+.anareplay{position:sticky;bottom:0;z-index:20;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px;box-shadow:0 -4px 16px var(--shadow)}
+.anareplay.still{position:static;box-shadow:none}
+.anaclkrow{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:8px 14px;align-items:center}
+.anabtns{display:flex;gap:8px}
+.anabtns button{padding:5px 11px;font-weight:600}
+.anabtns button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.anawhen{white-space:nowrap;font-variant-numeric:tabular-nums}
+.anawhen b{font-size:16px}
+.anawhen span{color:var(--muted);margin-left:6px;font-size:12.5px}
+#anaT{width:100%;min-width:0;accent-color:var(--accent)}
+/* on a phone the replay is two rows, the time and then the buttons beside the slider, so the bar
+   held at the foot of the screen stays short */
+@media (max-width:640px){.anareplay{padding:8px 12px}.anaclkrow{grid-template-columns:auto minmax(0,1fr);gap:6px 10px}
+  .anawhen{grid-column:1/-1;grid-row:1;white-space:normal;line-height:1.3}.anawhen b{font-size:14px}.anawhen span{font-size:12px}
+  .anabtns{gap:6px}.anabtns button{padding:4px 9px;font-size:13px}}
+/* the hover box of the three charts: the value as stored, converted and
+   rounded, the day so far and the file, each a section of its own */
+.tip .tsub{display:block;opacity:.75;font-size:11px;margin:-1px 0 2px;overflow-wrap:anywhere}
+.tip .anatg{grid-template-columns:8.4em minmax(0,1fr);margin-top:5px;padding-top:4px;border-top:1px solid color-mix(in srgb, currentColor 22%, transparent)}
+.tip .anatg .tv{text-align:left}
+.tip .anatg b{display:inline;margin:0}
+.tip .anatg .tv.num{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+.tip .tm{opacity:.7;font-weight:400}
+.tip:has(.anatg){max-width:min(380px,calc(100vw - 16px))}
 
 /* the landing map's legend: what a dot's number, color and size mean, and the NWS color scale under them */
 .maplegend{display:flex;flex-direction:column;gap:8px;margin:10px 2px 12px;font-size:12px;color:var(--muted)}

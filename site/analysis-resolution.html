@@ -11,7 +11,7 @@
 <script src="js/theme.js"></script>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap anawrap">
 <h1>Analysis resolution</h1>
 <p class="sub" id="anaStatement">A proposed settlement framework. No contract settles on it. Daily high, low, peak gust,
 mean wind and precipitation at sixty-seven settlement locations, each the 2.5 km grid cell that holds a main
@@ -20,9 +20,10 @@ instead of a station&rsquo;s reports. Values are rounded once, half up, away fro
 strike resolves Yes. The exchange&rsquo;s current daily contracts still resolve strictly above or below a strike.
 Each value is shown the way its contract rounds it, and a day fills in as NOAA publishes each hour.</p>
 <div class="bar" id="anaBar"><span id="pageStatus"></span></div>
+<section class="anapickers" id="anaPickers" aria-label="Choose a day and a place"></section>
+<section class="anahead" id="anaHead" aria-label="The open place" hidden></section>
+<p class="cap anapick" id="anaPick">Choose a place on the map, or find one by name under it, to follow its day as it resolves, hour by hour.</p>
 <div id="locPanel" hidden></div>
-<p class="cap anapick" id="anaPick">Pick a place on the map, or find one with the Place button above, to follow its day as it resolves, hour by hour.</p>
-<div id="anaMap" class="card"></div>
 <div class="prose" id="anaMethod"></div>
 <p class="cap" id="foot"></p>
 </div>

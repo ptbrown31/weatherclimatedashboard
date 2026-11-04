@@ -141,6 +141,103 @@ def ndfd_route(days: dict):
     return handler
 
 
+def ana_row_shape3(doc: dict, raw: list, review_row=None, review_late_row=None) -> dict:
+    """The analysis page's place file in rowShape 3 (docs/analysis.md section 4),
+    made by hand from a rowShape 2 sample and the day's raw CSV rows, until the
+    lane's own samples carry it. Each row gains its stored values (`raw`, the CSV's
+    own strings), its values converted before rounding (`x`), the day so far before
+    rounding (`runX`), each file's times on both servers (`anlFile`, `pcpFile`) and
+    the hourly contract (`hourly`), worked out here in decimal arithmetic as the
+    lane works them. The times are invented, a NOMADS copy for most analysis files
+    and none for the rest, so every wording the page has for a file and for each
+    basis of an hourly state is reached: hours 0 to 5 final from NOMADS, hour 6 from
+    NOMADS with NOAA Open Data's value shown, hours 7 to 9 and the last at the
+    hourly cut-off, hours 10 to 12 with NOMADS not on record, hour 14 with NOAA Open
+    Data not on record, and the day's last accumulation published after the cut-off
+    and counted under the rule before 14 October. `review_row` turns that row into
+    one with an hourly state under review and no daily value, and `review_late_row`
+    into one NOAA Open Data published after its hourly cut-off and in time for the
+    day, with no NOMADS copy on record, as a file read before both servers were."""
+    from decimal import Decimal, ROUND_DOWN
+    doc = json.loads(json.dumps(doc))
+    doc["rowShape"] = 3
+    by_t = {r["valid_utc"]: r for r in raw}
+    iso = lambda t: t.strftime("%Y-%m-%dT%H:%M:%SZ")
+    at = lambda s: dt.datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+    def cut10(x):
+        q = (x * 10 ** 10).to_integral_value(rounding=ROUND_DOWN) / Decimal(10 ** 10)
+        return format(q.normalize(), "f") if q == x else format(q.quantize(Decimal("1e-10")), "f")
+
+    hi = lo = gu = None
+    wsum, wn, psum = Decimal(0), 0, Decimal(0)
+    rows = doc["hours"]
+    last = len(rows) - 1
+    cutoff = at(rows[-1]["t"]) + dt.timedelta(hours=1, minutes=45)
+    for i, row in enumerate(rows):
+        v = row.get("rtma")
+        if not v:
+            continue
+        c = by_t[row["t"]]
+        t = at(row["t"])
+        k, ms, gs, mm = (Decimal(c[f]) for f in ("temp_k", "wind_ms", "gust_ms", "precip_mm"))
+        tx = (k - Decimal("273.15")) * 9 / 5 + 32
+        wx, gx = ms * Decimal("2.2369362921"), gs * Decimal("2.2369362921")
+        px = mm / Decimal("25.4")
+        v["raw"] = {"temp": c["temp_k"], "wind": c["wind_ms"], "gust": c["gust_ms"], "precip": c["precip_mm"]}
+        v["x"] = {"temp": format(tx.quantize(Decimal("0.001")), "f"), "wind": format(wx.quantize(Decimal("1e-12")), "f"),
+                  "gust": format(gx.quantize(Decimal("1e-12")), "f"), "precip": cut10(px)}
+        hi = tx if hi is None or tx > hi else hi
+        lo = tx if lo is None or tx < lo else lo
+        gu = gx if gu is None or gx > gu else gu
+        wsum += wx; wn += 1; psum += px
+        v["runX"] = {"high": format(hi.quantize(Decimal("0.001")), "f"), "low": format(lo.quantize(Decimal("0.001")), "f"),
+                     "gust": format(gu.quantize(Decimal("1e-12")), "f"), "wind": cut10(wsum / wn), "precip": cut10(psum)}
+        nodd = {"lm": iso(t + dt.timedelta(minutes=48, seconds=10 + i)), "seen": iso(t + dt.timedelta(minutes=49, seconds=2 + i))}
+        nomads = {"lm": iso(t + dt.timedelta(minutes=46, seconds=31)), "seen": iso(t + dt.timedelta(minutes=47, seconds=5))}
+        if 7 <= i <= 13 or i == last:
+            nomads = None
+        if i == 14:
+            nodd = None
+        src = "nomads" if nomads and i != 6 else "nodd"
+        stamp = row["t"][:10].replace("-", "")
+        v["anlFile"] = {"name": f"rtma2p5.{stamp}/rtma2p5.t{row['t'][11:13]}z.2dvaranl_ndfd.grb2_wexp",
+                        "nodd": nodd, "nomads": nomads, "src": src, "counts": True, "afterCut": False}
+        v["pub"] = (nomads or nodd)["lm"]
+        v["pubSrc"] = "nomads" if nomads else "nodd"
+        v["src"] = src
+        end = t + dt.timedelta(hours=1)
+        plm = end + dt.timedelta(minutes=16, seconds=40)
+        late_ok = i == last
+        if late_ok:
+            plm = cutoff + dt.timedelta(minutes=5)
+        v["pcpFile"] = {"name": f"rtma2p5.{end.strftime('%Y%m%d')}/rtma2p5.{end.strftime('%Y%m%d%H')}.pcp.184.grb2",
+                        "nodd": {"lm": iso(plm), "seen": iso(plm + dt.timedelta(seconds=50))}, "nomads": None,
+                        "src": "nodd", "counts": True, "afterCut": late_ok}
+        v["pcpPub"] = iso(plm)
+        v["pcpPubSrc"] = "nodd"
+        cut = t + dt.timedelta(hours=3)
+        basis = "nomads" if nomads else "cutoff" if (7 <= i <= 9 or i == last) else "norecord"
+        v["hourly"] = {"cut": iso(cut), "state": "final", "at": nomads["lm"] if basis == "nomads" else iso(cut) if basis == "cutoff" else None,
+                       "basis": basis, "src": src, "value": v["show"]["temp"], "x": v["x"]["temp"], "late": False}
+    if review_row is not None:
+        row = rows[review_row]
+        t = at(row["t"])
+        row["rtma"] = {"hourly": {"cut": iso(t + dt.timedelta(hours=3)), "state": "review", "at": iso(t + dt.timedelta(hours=3)),
+                                  "basis": "cutoff", "src": None, "value": None, "x": None, "late": False},
+                       "anlFile": {"name": row["rtma"]["anlFile"]["name"], "nodd": None, "nomads": None, "src": None,
+                                   "counts": False, "afterCut": False},
+                       "pcpFile": row["rtma"]["pcpFile"]}
+    if review_late_row is not None:
+        v = rows[review_late_row]["rtma"]
+        cut = at(v["hourly"]["cut"])
+        v["anlFile"].update({"nodd": {"lm": iso(cut + dt.timedelta(minutes=20)), "seen": iso(cut + dt.timedelta(minutes=21))},
+                             "nomads": None, "src": "nodd"})
+        v.update({"pub": v["anlFile"]["nodd"]["lm"], "pubSrc": "nodd", "src": "nodd"})
+        v["hourly"].update({"state": "review", "at": iso(cut), "basis": "norecord", "src": None, "value": None, "x": None, "late": True})
+    return doc
+
+
 def tiny_png(rgb) -> bytes:
     """A 4x4 PNG of one colour, standing in for a satellite frame in the loop checks."""
     import struct
@@ -179,7 +276,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                          ("daily-temperature-markets.html", ".prose h2", "the article sections"),
                          ("hourly-temperature-markets.html", "#board section.prod", "the listed hourly cities"),
                          ("wind-markets.html", "#board section.prod", "the wind cities"),
-                         ("analysis-resolution.html", "#vmap, #anaMap", "analysis resolution page"),
+                         ("analysis-resolution.html", "#anaPlaceMap, #anaPickers", "analysis resolution page"),
                          ("tropical-cyclone-markets.html", ".basincard svg.minimap", "a map per basin"),
                          ("allocator.html", "#allocSvg", "the allocation chart"),
                          ("climate-gdp.html", "#gdpMain rect", "the world GDP contract and its ladder")]
@@ -1019,18 +1116,20 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 #
                 # The page computes nothing, so the checks are that each control
                 # moves what it says it moves, that a place opens with its day in
-                # full, and that the hypothetical ladder can never be read as a
-                # market: hatched, Yes or No and nothing else, no cents, no link.
+                # full, and that every figure it shows or saves is the place
+                # file's own. Version 3 of its settlement display (owner's
+                # approval of 2026-11-04): the calendar and the map always on the
+                # page, the hover and the CSV files from the lane's strings, real
+                # publication times only, and each hour's hourly contract. Every
+                # read that depends on drawing polls for what it reads first.
                 ANA = "analysis-resolution.html"
                 ANA_SNAP = os.path.join(ROOT, "samples", "snapshots", "analysis2")
-                # The fixtures are a real local run of the job, so the day and
-                # the hours the checks drive come from the fixture index files
-                # rather than from dates written into this script: the newest
-                # day whose New York RTMA day is complete (final pills; RTMA
-                # resolves, owner's decision 2026-09-29), the oldest day (routed
-                # away for the hollow-dot check), and the last two RTMA
-                # temperature frames listed on a day the page can select (the
-                # stepper).
+                # The fixtures are a real local run of the job, so the day the
+                # checks drive comes from the fixture index rather than from a
+                # date written into this script: the newest day whose New York
+                # RTMA day is complete (final pills; RTMA resolves, owner's
+                # decision 2026-09-29), and the oldest day, routed away for the
+                # hollow-label check.
                 with open(os.path.join(ANA_SNAP, "index.json")) as fh:
                     ana_index = json.load(fh)
                 ana_days = list(ana_index["days"])
@@ -1044,24 +1143,42 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         ana_day = d_
                 chk.add(f"{scheme} analysis fixtures: a day with a complete New York RTMA entry", ana_day is not None, str(ana_days))
                 ana_day = ana_day or ana_days[-1]
-                with open(os.path.join(ANA_SNAP, "grid", "index.json")) as fh:
-                    ana_ut = (json.load(fh).get("frames") or {}).get("rtma", {}).get("temp", {})
-                ana_fday = next((d_ for d_ in sorted(ana_ut, reverse=True) if d_ in ana_days and len(ana_ut[d_]) >= 2), None)
-                chk.add(f"{scheme} analysis fixtures: two RTMA temperature frames on a selectable day", ana_fday is not None, str(ana_ut))
                 ana_n = len(ana_index["locations"])
-                ana_hours = sorted(ana_ut.get(ana_fday) or ["15", "16"])[-2:]
+                with open(os.path.join(ANA_SNAP, "days", ana_day + ".json")) as fh:
+                    ana_dayfile = json.load(fh)
                 # the page opens on the newest day every place has resolved, marks
                 # the days after it as provisional, and falls back to the newest
                 # day when the index does not name one
                 ana_rday = ana_index.get("lastResolvedDay")
                 chk.add(f"{scheme} analysis fixtures: the index names a fully resolved day before the newest",
                         bool(ana_rday) and ana_rday in ana_days and ana_rday != ana_days[-1], str(ana_rday))
+                # another listed day, to open from the calendar
+                ana_pick = next((d_ for d_ in reversed(ana_days) if d_ < ana_day), ana_days[0])
                 # every console error the analysis page raises from here lands in
                 # errs, so the section can say it raised none
                 ana_e0 = len(errs)
-                # The day is a button that opens a month calendar (owner's request
-                # of 2026-11-03). The marks are read off every month the calendar
-                # can show, so a day in another month is not missed
+
+                def ana_until(pg, js, ms=8000, arg=None):
+                    """Poll `js` in the page until it is truthy, up to `ms`, and return its last
+                    value. Polled from here rather than in the page, so it also works under
+                    Playwright's fixed clock."""
+                    end_ = time.time() + ms / 1000.0
+                    while True:
+                        v_ = pg.evaluate(js) if arg is None else pg.evaluate(js, arg)
+                        if v_ or time.time() > end_:
+                            return v_
+                        pg.wait_for_timeout(100)
+
+                # the map is drawn once every place has its label; a place-day is
+                # drawn once its hour table has its rows
+                ANA_MAP = "() => document.querySelectorAll('#anaDots g.pd').length === %d" % ana_n
+                ANA_DAY = """() => !document.querySelector('#locPanel').hidden && !!document.querySelector('#anaStatus .anapill')
+                  && (document.querySelectorAll('#anaHours tbody tr').length > 0 || !!document.querySelector('#anaNone:not([hidden])'))"""
+
+                def ana_goto(pg, q, ready=None):
+                    pg.goto(f"{srv.url}/{ANA}{q}")
+                    return ana_until(pg, ready or ANA_MAP)
+
                 ana_cal_all = """() => { const out = [], P = document.querySelector('#anaCalPrev'), N = document.querySelector('#anaCalNext');
                   for (let k = 0; k < 40 && !P.disabled; k++) P.click();
                   for (let k = 0; k < 40; k++) {
@@ -1069,22 +1186,22 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                       t.getAttribute('aria-label') || '', !!t.querySelector('i.mk.' + t.dataset.status)]));
                     if (N.disabled) break; N.click(); }
                   return out; }"""
-                page.goto(f"{srv.url}/{ANA}"); page.wait_for_timeout(2200)
-                page.click("#anaDayBtn"); page.wait_for_timeout(300)
-                dflt = page.evaluate("""(js) => ({ day: document.querySelector('#anaDayBtn').dataset.day, btn: document.querySelector('#anaDayBtn').textContent,
-                  url: location.search, opts: eval(js)() })""", ana_cal_all)
-                page.keyboard.press("Escape"); page.wait_for_timeout(200)
+                ana_goto(page, "")
+                dflt = page.evaluate("""(js) => ({ open: [...document.querySelectorAll('#anaCalGrid td.open')].map(t => t.dataset.day),
+                  url: location.search, legend: document.querySelector('#anaLegend').textContent, opts: eval(js)() })""", ana_cal_all)
                 newer = [o_ for o_ in dflt["opts"] if o_[0] > (ana_rday or "")]
+                ana_rd = dt.date.fromisoformat(ana_rday or ana_days[-1])
                 chk.add(f"{scheme} analysis: the page opens on the newest fully resolved day",
-                        dflt["day"] == ana_rday and ana_rday in dflt["btn"] and f"day={ana_rday}" in dflt["url"], str([dflt["day"], dflt["btn"], ana_rday]))
+                        dflt["open"] == [ana_rday] and f"day={ana_rday}" in dflt["url"] and f"{ana_rd:%A}, {ana_rd:%B} {ana_rd.day}" in dflt["legend"],
+                        str([dflt["open"], dflt["url"], dflt["legend"][:60]]))
                 chk.add(f"{scheme} analysis: the days after it are marked provisional and it is not",
                         bool(newer) and all(o_[1] == "provisional" and o_[2].endswith(", provisional") and o_[3] for o_ in newer)
                         and [o_[0] for o_ in dflt["opts"]] == ana_days
                         and any(o_[0] == ana_rday and o_[1] == "final" and o_[3] for o_ in dflt["opts"])
-                        and not any("provisional" in o_[2] for o_ in dflt["opts"] if o_[0] == ana_rday) and "provisional" not in dflt["btn"],
+                        and not any("provisional" in o_[2] for o_ in dflt["opts"] if o_[0] == ana_rday),
                         str(dflt["opts"][-3:]))
-                # the day's values as CSV (owner's decision 2026-09-29): the two
-                # links follow the day and fetch the job's own files
+                # the day's values as CSV at every place (owner's decision
+                # 2026-09-29): the two links follow the day and fetch the job's files
                 ana_csv = page.evaluate("""async () => { const out = [];
                   for (const a of document.querySelectorAll('#anaCsv a')) {
                     const r = await fetch(a.href); out.push([a.getAttribute('href'), r.status, (await r.text()).split('\\n')[0]]); }
@@ -1101,152 +1218,141 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     return route.fulfill(response=resp, body=json.dumps(d))
 
                 page.route("**/analysis2/index.json", ana_no_resolved)
-                page.goto(f"{srv.url}/{ANA}"); page.wait_for_timeout(2200)
+                ana_goto(page, "")
+                ana_nr = page.evaluate("() => [[...document.querySelectorAll('#anaCalGrid td.open')].map(t => t.dataset.day), location.search]")
                 chk.add(f"{scheme} analysis: an index without the field opens on the newest day",
-                        page.evaluate("document.querySelector('#anaDayBtn').dataset.day") == ana_days[-1]
-                        and f"day={ana_days[-1]}" in page.evaluate("location.search"),
-                        page.evaluate("document.querySelector('#anaDayBtn').dataset.day"))
+                        ana_nr[0] == [ana_days[-1]] and f"day={ana_days[-1]}" in ana_nr[1], str(ana_nr))
                 page.unroute("**/analysis2/index.json")
-                page.goto(f"{srv.url}/{ANA}?day={ana_fday}"); page.wait_for_timeout(2200)
-                ana_state = """() => ({
-                  legend: document.querySelector('#anaLegend').textContent,
-                  href: document.querySelector('#anaFrame').getAttribute('href') || '',
-                  cap: document.querySelector('#anaCap').textContent,
-                  dots: document.querySelectorAll('#vdots g.dot').length,
-                  stmt: document.querySelector('.sub').textContent,
+                ana_goto(page, f"?day={ana_day}")
+                a0 = page.evaluate("""() => ({
+                  labels: Object.fromEntries([...document.querySelectorAll('#anaDots g.pd')].map(g => [g.dataset.loc, (g.querySelector('text.pvt') || {}).textContent || ''])),
+                  legend: document.querySelector('#anaLegend').textContent, stmt: document.querySelector('.sub').textContent,
                   robots: (document.querySelector('meta[name=robots]') || {}).content || '',
                   header: !!document.querySelector('header.site'), footer: !!document.querySelector('footer.site'),
-                  url: location.search })"""
-                a0 = page.evaluate(ana_state)
+                  top: { dayBtn: !!document.querySelector('#anaDayBtn'), locBtn: !!document.querySelector('#anaLocBtn'), zoom: !!document.querySelector('#anaZoomCell'),
+                         stepper: !!document.querySelector('#anaStep'), frame: !!document.querySelector('#anaFrame, #vmap, #anaMap'),
+                         ladder: document.querySelectorAll('rect.hatched, text.anarung').length, exact: !!document.querySelector('#anaExact'),
+                         dialogs: document.querySelectorAll('[role=dialog]').length, maps: document.querySelectorAll('svg').length - document.querySelectorAll('header.site svg, footer.site svg, #anaSettle svg').length,
+                         cal: !!document.querySelector('#anaPickers > #anaCal table#anaCalGrid[role=grid]'),
+                         sw: [...document.querySelectorAll('#anaPickers > #anaMapCard .anamaphead #anaVar[role=radiogroup] button[role=radio]')].map(b => b.dataset.var) },
+                  url: location.search })""")
                 chk.add(f"{scheme} analysis: the statement is on the page and the page is not offered to search",
                         "No contract settles on it" in a0["stmt"] and "noindex" in a0["robots"], a0["robots"])
                 chk.add(f"{scheme} analysis: the chrome draws for a page outside the navigation",
                         a0["header"] and a0["footer"], str([a0["header"], a0["footer"]]))
-                chk.add(f"{scheme} analysis: every place and a frame under them",
-                        a0["dots"] == ana_n and ana_n == 67 and a0["href"].startswith("data:image/png"), str([a0["dots"], a0["href"][:22]]))
-                # the variable is switched on the map since 2026-11-03, and the
-                # top bar holds the day and place buttons and no variable buttons
-                ana_top = page.evaluate("""() => ({ vars: document.querySelectorAll('#anaBar [data-var]').length,
-                  selects: document.querySelectorAll('#anaBar select').length,
-                  day: !!document.querySelector('#anaBar #anaDayBtn'), place: !!document.querySelector('#anaBar #anaLocBtn'),
-                  zoom: !!document.querySelector('#anaBar #anaZoomCell'),
-                  sw: [...document.querySelectorAll('#anaMap #anaZoom #anaVar[role=radiogroup] button[role=radio]')].map(b => b.dataset.var) })""")
-                chk.add(f"{scheme} analysis: the top bar holds the day and place buttons and Zoom to the cell, and the variable switch is on the map",
-                        ana_top["vars"] == 0 and ana_top["selects"] == 0 and ana_top["day"] and ana_top["place"] and ana_top["zoom"]
-                        and ana_top["sw"] == ["high", "low", "gust", "wind", "precip"], str(ana_top))
-                page.click('#anaVar button[data-var="gust"]'); page.wait_for_timeout(900)
-                a1 = page.evaluate(ana_state)
-                chk.add(f"{scheme} analysis: the map's variable switch changes the legend and the frame",
-                        "Peak gust" in a1["legend"] and a1["legend"] != a0["legend"]
-                        and a1["href"].startswith("data:image/png") and a1["href"] != a0["href"]
-                        and "var=gust" in a1["url"], a1["legend"][:60])
+                # every place is labelled with its value on the open date, as the
+                # day file has it, and a place with no value has no label
+                ana_hi = {k_: (((v_ or {}).get("rtma") or {}).get("high") or {}).get("value") for k_, v_ in (ana_dayfile.get("locations") or {}).items()}
+                ana_lbl_want = {L_["id"]: ("" if ana_hi.get(L_["id"]) is None else str(ana_hi[L_["id"]])) for L_ in ana_index["locations"]}
+                chk.add(f"{scheme} analysis: the map labels every place with its high on the open date, as the day file has it",
+                        len(a0["labels"]) == ana_n == 67 and a0["labels"] == ana_lbl_want and sum(1 for v_ in ana_lbl_want.values() if v_) >= 60,
+                        str([len(a0["labels"]), [k_ for k_ in ana_lbl_want if a0["labels"].get(k_) != ana_lbl_want[k_]][:4]]))
+                # the calendar and the map replace the day and place buttons and
+                # their popovers, the map below the day with its frames, stepper,
+                # cell mode and zoom, the hypothetical ladder and Show exact values
+                chk.add(f"{scheme} analysis: the calendar and the map are on the page with no day or place button, popover, second map, ladder or exact box, and the switch sits above the map",
+                        a0["top"]["cal"] and a0["top"]["sw"] == ["high", "low", "gust", "wind", "precip"] and a0["top"]["maps"] == 1
+                        and not any(a0["top"][k_] for k_ in ("dayBtn", "locBtn", "zoom", "stepper", "frame", "ladder", "exact", "dialogs")),
+                        str(a0["top"]))
+                page.click('#anaVar button[data-var="gust"]')
+                a1 = ana_until(page, """() => document.querySelector('#anaLegend').textContent.startsWith('Peak gust') && ({
+                  legend: document.querySelector('#anaLegend').textContent, url: location.search,
+                  labels: Object.fromEntries([...document.querySelectorAll('#anaDots g.pd')].map(g => [g.dataset.loc, (g.querySelector('text.pvt') || {}).textContent || ''])) })""") or {}
+                ana_gu = {k_: (((v_ or {}).get("rtma") or {}).get("gust") or {}).get("value") for k_, v_ in (ana_dayfile.get("locations") or {}).items()}
+                chk.add(f"{scheme} analysis: the map's variable switch changes the legend and labels the map with the peak gust",
+                        "Peak gust" in a1.get("legend", "") and a1.get("legend") != a0["legend"] and "var=gust" in a1.get("url", "")
+                        and a1.get("labels") == {k_: ("" if ana_gu.get(k_) is None else str(ana_gu[k_])) for k_ in ana_lbl_want},
+                        str(a1.get("legend", ""))[:60])
+                # the map's colours are the scheme's own: each label's fill is the
+                # token of its step in this scheme, and its ink differs from it
+                ana_col = page.evaluate("""() => { const cs = getComputedStyle(document.documentElement), out = [];
+                  document.querySelectorAll('#anaDots g.pd rect.pv').forEach(r => { const f = r.getAttribute('fill') || '';
+                    const m = /var\\((--ana-[rb]\\d)\\)/.exec(f); if (!m) return;
+                    const want = cs.getPropertyValue(m[1]).trim(), got = getComputedStyle(r).fill;
+                    const ink = getComputedStyle(r.parentNode.querySelector('text.pvt')).fill;
+                    const probe = document.createElement('i'); probe.style.color = want; document.body.appendChild(probe);
+                    const wantRgb = getComputedStyle(probe).color; probe.remove();
+                    out.push([m[1], got === wantRgb, ink !== got]); });
+                  return { n: out.length, ok: out.every(x => x[1] && x[2]), steps: [...new Set(out.map(x => x[0]))].length,
+                           r4: cs.getPropertyValue('--ana-r4').trim() }; }""")
+                chk.add(f"{scheme} analysis: the map's labels take this scheme's colours, with ink that differs from each fill",
+                        ana_col["n"] >= 60 and ana_col["ok"] and ana_col["steps"] >= 3
+                        and ana_col["r4"].lower() == ("#f4ecc1" if scheme == "light" else "#76693a"), str(ana_col))
                 # RTMA is the one analysis the page reads (owner's decision
                 # 2026-09-30): no product choice, no URMA anywhere in the page
                 # or its description, and an address from before that still
                 # opens, on RTMA, without the parameter
-                page.click('#anaVar button[data-var="high"]'); page.wait_for_timeout(900)
+                page.click('#anaVar button[data-var="high"]')
+                ana_until(page, "() => document.querySelector('#anaLegend').textContent.startsWith('High')")
                 a2 = page.evaluate("""() => ({ product: document.querySelectorAll('button[data-product]').length,
                   text: document.body.innerText + ' ' + [...document.querySelectorAll('meta')].map(m => m.content || '').join(' ') })""")
                 chk.add(f"{scheme} analysis: one analysis, no product choice and no URMA on the page",
                         a2["product"] == 0 and "urma" not in a2["text"].lower(), str(a2["product"]))
-                page.goto(f"{srv.url}/{ANA}?var=high&product=urma&day={ana_fday}"); page.wait_for_timeout(2200)
-                a3 = page.evaluate(ana_state)
+                ana_goto(page, f"?var=high&product=urma&day={ana_day}")
+                a3 = page.evaluate("() => [document.querySelector('#anaNewest').textContent, location.search, document.querySelectorAll('#anaDots text.pvt').length]")
                 chk.add(f"{scheme} analysis: an address with product=urma opens on RTMA and drops the parameter",
-                        "RTMA" in a3["legend"] and a3["href"].startswith("data:image/png") and "product=" not in a3["url"],
-                        str([a3["legend"][:40], a3["url"]]))
-                # the stepper walks the last two RTMA temperature frames the
-                # fixtures list; the oldest day's file is routed away so the
-                # day calendar lands on a day with no file
-                ana_gone = ana_days[0] if ana_days[0] != ana_fday else ana_days[-1]
-
-                def ana_pick_day(pg, d_):
-                    """Open the day calendar, step to d_'s month and click d_, as a reader would."""
-                    pg.click("#anaDayBtn"); pg.wait_for_timeout(200)
-                    for _ in range(40):
-                        if pg.locator(f'#anaCalGrid td.on[data-day="{d_}"]').count():
-                            break
-                        on_ = pg.evaluate("() => document.querySelector('#anaCalGrid td[data-day]').dataset.day.slice(0, 7)")
-                        pg.click("#anaCalPrev" if d_[:7] < on_ else "#anaCalNext"); pg.wait_for_timeout(80)
-                    pg.click(f'#anaCalGrid td.on[data-day="{d_}"]'); pg.wait_for_timeout(900)
+                        "RTMA" in a3[0] and "product=" not in a3[1] and a3[2] >= 60, str(a3))
+                # an address from before version 3 carries hour= and the map's
+                # view, which went with the frames; it still opens, without them
+                ana_goto(page, f"?var=high&day={ana_day}&hour=16&z=4.00&cx=850.00&cy=208.00")
+                a4 = page.evaluate("() => location.search")
+                chk.add(f"{scheme} analysis: an address with hour= and a map view still opens, and drops them",
+                        f"day={ana_day}" in a4 and "hour=" not in a4 and "z=" not in a4 and "cx=" not in a4, a4)
+                # a day whose file is gone draws every place hollow
+                ana_gone = ana_days[0] if ana_days[0] != ana_day else ana_days[-1]
 
                 def ana_routes(route):
-                    u = route.request.url
-                    if u.endswith(f"/analysis2/days/{ana_gone}.json"):
+                    if route.request.url.split("?")[0].endswith(f"/analysis2/days/{ana_gone}.json"):
                         return route.fulfill(status=404, body="not there")
                     return route.continue_()
 
                 page.route("**/data/snapshots/**", ana_routes)
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_fday}&hour={ana_hours[1]}"); page.wait_for_timeout(2200)
-                c0 = page.locator("#anaCap").inner_text()
-                page.locator("#anaStep button[title='previous hour']").click(); page.wait_for_timeout(900)
-                c1 = page.locator("#anaCap").inner_text()
-                chk.add(f"{scheme} analysis: the hour stepper changes the caption",
-                        f"{ana_hours[1]}:00 UTC" in c0 and f"{ana_hours[0]}:00 UTC" in c1 and c1 != c0
-                        and f"hour={ana_hours[0]}" in page.evaluate("location.search"), c1[:80])
-                ana_pick_day(page, ana_gone)
-                c2 = page.locator("#anaCap").inner_text()
-                chk.add(f"{scheme} analysis: the day calendar changes the caption and the address",
-                        ana_gone in c2 and c2 != c1 and f"day={ana_gone}" in page.evaluate("location.search")
-                        and ana_gone in page.locator("#anaDayBtn").inner_text(), c2[:80])
-                chk.add(f"{scheme} analysis: a day with no file draws every place hollow",
-                        page.locator("#vdots circle.absent").count() == ana_n, str(page.locator("#vdots circle.absent").count()))
+                ana_goto(page, f"?var=high&day={ana_gone}")
+                ana_hol = page.evaluate("() => [document.querySelectorAll('#anaDots .pv.none').length, document.querySelectorAll('#anaDots text.pvt').length]")
+                chk.add(f"{scheme} analysis: a day with no file draws every place hollow", ana_hol == [ana_n, 0], str(ana_hol))
                 page.unroute("**/data/snapshots/**")
-                # a dot opens the place, with its day in full
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_day}"); page.wait_for_timeout(2200)
-                page.click('#vmap g.dot[data-loc="new-york-ny"]'); page.wait_for_timeout(1400)
-                pn = page.evaluate("""() => {
-                  const p = document.querySelector('#locPanel');
-                  const hatched = [...p.querySelectorAll('rect.hatched')];
-                  return { hidden: p.hidden, h2: (p.querySelector('h2') || {}).textContent || '',
-                           rows: p.querySelectorAll('tbody tr').length, cards: p.querySelectorAll('.anacard').length,
-                           hatched: hatched.length, fills: [...new Set(hatched.map(r => r.getAttribute('fill')))],
-                           links: p.querySelectorAll('[data-contract-url], a').length,
-                           rungs: [...new Set([...p.querySelectorAll('text.anarung')].map(t => t.textContent))].sort(),
-                           series: p.querySelectorAll('svg.ts path.anaseries').length,
-                           resolved: p.querySelectorAll('svg.ts line.anares').length,
-                           text: p.textContent, url: location.search };
-                }""")
-                chk.add(f"{scheme} analysis: a dot opens the place with 24 hour rows and five cards",
-                        not pn["hidden"] and pn["h2"].startswith("New York") and pn["rows"] == 24 and pn["cards"] == 5
-                        and "loc=new-york-ny" in pn["url"], str([pn["h2"], pn["rows"], pn["cards"]]))
-                chk.add(f"{scheme} analysis: the RTMA line and the resolved value are drawn, and the panel never says URMA",
-                        pn["series"] == 1 and pn["resolved"] == 1 and "urma" not in pn["text"].lower(),
-                        str([pn["series"], pn["resolved"]]))
-                chk.add(f"{scheme} analysis: the hypothetical rungs are hatched and say Yes or No only",
-                        pn["hatched"] >= 5 and pn["fills"] == ["url(#wxHatch)"] and pn["rungs"] == ["No", "Yes"],
-                        str([pn["hatched"], pn["fills"], pn["rungs"]]))
-                # owner's decision 2026-09-28: a value equal to the strike resolves Yes,
-                # at or above for the high and at or below for the low
-                ana_rungs = """() => {
-                  const p = document.querySelector('#locPanel');
-                  const yn = [...p.querySelectorAll('text.anarung')].map(t => t.textContent);
-                  const st = [...p.querySelectorAll('text.anastrike')].map(t => t.textContent);
-                  return st.map((k, i) => [k, yn[i]]);
-                }"""
-                ny_u = (ana_entries.get(ana_day) or {}).get("rtma") or {}
-                hv = (ny_u.get("high") or {}).get("value"); lv = (ny_u.get("low") or {}).get("value")
-                rh = dict(page.evaluate(ana_rungs))
-                chk.add(f"{scheme} analysis: a high equal to the strike resolves Yes, a strike one above it No, and the rungs read at least",
-                        hv is not None and rh.get(f"\u2265{hv}°F") == "Yes" and rh.get(f"\u2265{hv + 1}°F") == "No"
-                        and all(k.startswith("\u2265") for k in rh), str([hv, rh]))
-                page.click('#anaVar button[data-var="low"]'); page.wait_for_timeout(900)
-                rl = dict(page.evaluate(ana_rungs))
-                chk.add(f"{scheme} analysis: a low equal to the strike resolves Yes, a strike one below it No, and the rungs read at most",
-                        lv is not None and rl.get(f"\u2264{lv}°F") == "Yes" and rl.get(f"\u2264{lv - 1}°F") == "No"
-                        and all(k.startswith("\u2264") for k in rl), str([lv, rl]))
-                page.click('#anaVar button[data-var="high"]'); page.wait_for_timeout(700)
-                chk.add(f"{scheme} analysis: no rung carries a link or a price, and the panel keeps the exchange's language",
-                        pn["links"] == 0 and "¢" not in pn["text"]
-                        and not re.search(r"\b(ask|sell|offer|bid)\b", pn["text"], re.I)
+                # choosing a place on the map opens it on the same date, with its
+                # day in full. The label is clicked where elementFromPoint proves
+                # the pointer reaches it
+                ana_hit = """(id) => { const g = document.querySelector('#anaDots g.pd[data-loc="' + id + '"]'); if (!g) return null;
+                  const e = g.querySelector('rect.pv, circle.pv'), r = e.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+                  const t = document.elementFromPoint(x, y), hit = t && t.closest && t.closest('g.pd');
+                  return { x, y, on: hit ? hit.dataset.loc : null }; }"""
+                ana_goto(page, f"?var=high&day={ana_day}")
+                page.evaluate("() => document.querySelector('#anaPlaceMap').scrollIntoView({ block: 'center' })")
+                ht = page.evaluate(ana_hit, "new-york-ny")
+                if ht:
+                    page.mouse.click(ht["x"], ht["y"])
+                ana_until(page, ANA_DAY)
+                pn = page.evaluate("""() => { const p = document.querySelector('#locPanel'), hd = document.querySelector('#anaHead');
+                  return { hidden: p.hidden, head: hd.hidden ? '' : hd.textContent, h2: (document.querySelector('#anaPlaceName') || {}).textContent || '',
+                           rows: p.querySelectorAll('#anaHours tbody tr').length, cards: p.querySelectorAll('.anacard').length,
+                           charts: [...p.querySelectorAll('svg.anasvg')].map(s => s.closest('section').id), series: p.querySelectorAll('#anaTemp path.series').length,
+                           cur: [...document.querySelectorAll('#anaDots g.pd.cur')].map(g => g.dataset.loc), open: [...document.querySelectorAll('#anaCalGrid td.open')].map(t => t.dataset.day),
+                           links: p.querySelectorAll('[data-contract-url]').length, text: hd.textContent + ' ' + p.textContent, url: location.search }; }""")
+                ana_c = next((L_ for L_ in ana_index["locations"] if L_["id"] == "new-york-ny"), {}).get("cell") or {}
+                chk.add(f"{scheme} analysis: choosing a place on the map opens it on the same date, with 24 hour rows and five cards",
+                        bool(ht) and ht["on"] == "new-york-ny" and not pn["hidden"] and pn["h2"].startswith("New York") and pn["rows"] == 24 and pn["cards"] == 5
+                        and "loc=new-york-ny" in pn["url"] and f"day={ana_day}" in pn["url"] and pn["cur"] == ["new-york-ny"] and pn["open"] == [ana_day],
+                        str([ht, pn["h2"], pn["rows"], pn["cards"], pn["cur"]]))
+                # the header (spec section 8): the name, the code when the index
+                # carries one, both grid points, the centre of the grid square and the zone
+                ana_ny = next((L_ for L_ in ana_index["locations"] if L_["id"] == "new-york-ny"), {})
+                chk.add(f"{scheme} analysis: the place's header gives its name, its two grid points, the centre of its grid square and its zone",
+                        f"Analysis grid point ({ana_c['wexp'][0]}, {ana_c['wexp'][1]})" in pn["head"] and f"Grid 184 point ({ana_c['g184'][0]}, {ana_c['g184'][1]})" in pn["head"]
+                        and f"{ana_c['centre'][0]:.4f}° N, {abs(ana_c['centre'][1]):.4f}° W" in pn["head"] and "America/New_York" in pn["head"]
+                        and (not ana_ny.get("code") or f"({ana_ny['code']})" in pn["h2"]), pn["head"][:200])
+                chk.add(f"{scheme} analysis: the three charts draw, and the place never says URMA",
+                        pn["charts"] == ["anaTemp", "anaWind", "anaPcp"] and pn["series"] >= 1 and "urma" not in pn["text"].lower(), str(pn["charts"]))
+                chk.add(f"{scheme} analysis: the place shows no price and keeps the exchange's language",
+                        pn["links"] == 0 and "¢" not in pn["text"] and not re.search(r"\b(ask|sell|offer|bid)\b", pn["text"], re.I)
                         and "No contract settles on it" in pn["text"], str(pn["links"]))
                 # a day whose RTMA is short of 24 hours: the day file says so, and
                 # the place file has no hour past the 17th, so the running values
-                # the settlement display shows stop at 17 (the lane's running
-                # values of an hour cover only the hours up to it, so the first
-                # 17 rows keep theirs). The status is one line since 2026-11-03,
-                # where five card pills carried it before
+                # stop at 17 (the lane's running values of an hour cover only the
+                # hours up to it, so the first 17 rows keep theirs)
                 def ana_partial(route):
-                    u = route.request.url
+                    u = route.request.url.split("?")[0]
                     if u.endswith(f"/analysis2/days/{ana_day}.json"):
                         resp = route.fetch(); d = json.loads(resp.text())
                         e = d["locations"]["new-york-ny"]["rtma"]
@@ -1256,7 +1362,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         if e.get("precip"):
                             e["precip"].update({"resolved": False, "resolvedAt": None, "hours": 17})
                         return route.fulfill(response=resp, body=json.dumps(d))
-                    if u.split("?")[0].endswith(f"/analysis2/loc/new-york-ny/{ana_day}.json"):
+                    if u.endswith(f"/analysis2/loc/new-york-ny/{ana_day}.json"):
                         resp = route.fetch(); d = json.loads(resp.text())
                         for r_ in d["hours"][17:]:
                             r_["rtma"] = None
@@ -1264,67 +1370,28 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     return route.continue_()
 
                 page.route("**/data/snapshots/**", ana_partial)
-                page.goto(f"{srv.url}/{ANA}?day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
                 st_p = page.evaluate("""() => ({ open: !document.querySelector('#locPanel').hidden,
                   pills: [...document.querySelectorAll('#locPanel .anapill')].map(x => x.textContent),
                   line: (document.querySelector('#anaStatus') || {}).textContent || '',
-                  cards: document.querySelectorAll('#locPanel .anacard').length })""")
+                  cards: document.querySelectorAll('#locPanel .anacard').length,
+                  prov: document.querySelectorAll('#anaDots g.pd[data-loc="new-york-ny"] .pv.prov').length })""")
+                page.unroute("**/data/snapshots/**")
                 chk.add(f"{scheme} analysis: ?loc= opens the panel on load",
                         st_p["open"] and len(st_p["pills"]) == 1 and st_p["cards"] == 5, str(st_p)[:160])
-                chk.add(f"{scheme} analysis: the status line says provisional when RTMA is incomplete, with the count",
-                        st_p["pills"] == ["Provisional"] and "17 of 24 hours" in st_p["line"]
-                        and page.locator('#vdots g.dot[data-loc="new-york-ny"] circle.prov').count() == 1, st_p["line"][:120])
-                page.unroute("**/data/snapshots/**")
-                # the wording follows the state: a value that can still move is
-                # running, one that cannot is resolved, a closed day's is closed.
-                # The partial route above is still on for the first read
-                ana_rule = "() => (document.querySelector('#locPanel text.anareslbl') || {}).textContent || ''"
-                page.route("**/data/snapshots/**", ana_partial)
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
-                r_part = page.evaluate(ana_rule)
-                page.unroute("**/data/snapshots/**")
-                page.goto(f"{srv.url}/{ANA}?var=precip&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
-                r_final = page.evaluate(ana_rule)
-                # the running precipitation curve ends on the file's own total
-                # once every hourly file is read: the last point of the RTMA
-                # line sits on the resolved rule
-                ana_end = page.evaluate("""() => {
-                  const p = document.querySelector('#locPanel');
-                  const d = p.querySelector('svg.ts path.anaseries').getAttribute('d').trim();
-                  const last = d.split(/[ML]/).filter(Boolean).pop().trim().split(' ');
-                  const tip = p.querySelectorAll('rect.hband');
-                  return { y: +last[1], rule: +p.querySelector('line.anares').getAttribute('y1'), bands: tip.length };
-                }""")
-                page.locator("#locPanel rect.hband").last.hover(); page.wait_for_timeout(300)
-                ana_tip = page.evaluate("() => [...document.querySelectorAll('.tip')].map(t => t.textContent).join(' ')")
-                # the exact figures are behind Show exact values since 2026-11-03
-                page.click("#anaExact"); page.wait_for_timeout(300)
-                ana_cards = page.evaluate("() => [...document.querySelectorAll('#locPanel .anacard')].map(c => [c.dataset.var, (c.querySelector('.anaexact') || {}).textContent || ''])")
-                chk.add(f"{scheme} analysis: the chart rule says resolved only when final and running while provisional",
-                        r_final.startswith("resolved ") and r_final.endswith("(final)")
-                        and r_part.startswith("running ") and r_part.endswith("(provisional, 17 of 24 hours)"),
-                        str([r_final, r_part]))
-                chk.add(f"{scheme} analysis: the complete RTMA precipitation curve ends on the resolved rule and the tooltip names the running sum",
-                        abs(ana_end["y"] - ana_end["rule"]) < 0.6 and "Running sum of the hourly analyses" in ana_tip,
-                        str([ana_end, ana_tip[:120]]))
-                ana_dec = {k: (re.search(r"exact -?\d+\.(\d+)", v) or [None, ""])[1] for k, v in ana_cards}
-                chk.add(f"{scheme} analysis: the exact figure is cut to a thousandth, precipitation a ten-thousandth",
-                        [len(ana_dec.get(k, "")) for k in ("high", "low", "gust", "wind", "precip")] == [3, 3, 3, 3, 4], str(ana_cards))
-                # a closed day in the fixtures, if one is there: the RTMA day is
-                # closed too, not provisional
+                chk.add(f"{scheme} analysis: the status line says provisional when RTMA is incomplete, with the count, and the map dashes the label",
+                        st_p["pills"] == ["Provisional"] and "17 of 24 hours" in st_p["line"] and st_p["prov"] == 1, st_p["line"][:120])
+                # a closed day in the fixtures, if one is there: closed, with its count
                 ana_closed = next((d_ for d_ in ana_days if ((ana_entries.get(d_) or {}).get("rtma") or {}).get("closed")), None)
                 if ana_closed:
-                    page.goto(f"{srv.url}/{ANA}?var=high&day={ana_closed}&loc=new-york-ny"); page.wait_for_timeout(2200)
-                    r_closed = page.evaluate(ana_rule)
+                    ana_goto(page, f"?var=high&day={ana_closed}&loc=new-york-ny", ANA_DAY)
                     st_c = page.evaluate("() => (document.querySelector('#anaStatus') || {}).textContent || ''")
-                    chk.add(f"{scheme} analysis: a closed RTMA day says closed, with its count",
-                            r_closed.startswith("closed ") and st_c.startswith("Closed") and " of " in st_c, str([r_closed, st_c[:80]]))
-                # a place with no hour published by its 12:45 AM cut-off goes to
-                # event review (owner's ruling 2026-10-14): every card says so,
-                # no value is drawn, and the dot is hollow
+                    chk.add(f"{scheme} analysis: a closed RTMA day says closed, with its count", st_c.startswith("Closed") and " of " in st_c, st_c[:80])
+                # a place with no hour published by its 12:45 AM cut-off is under
+                # review (owner's ruling 2026-10-14): every card says so, no value
+                # is drawn, and the map draws the place hollow
                 def ana_review(route):
-                    u = route.request.url
-                    if u.endswith(f"/analysis2/days/{ana_day}.json"):
+                    if route.request.url.split("?")[0].endswith(f"/analysis2/days/{ana_day}.json"):
                         resp = route.fetch(); d = json.loads(resp.text())
                         d["locations"]["new-york-ny"]["rtma"] = {
                             "hours": 0, "of": 24, "complete": False, "high": None, "low": None, "gust": None,
@@ -1335,17 +1402,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     return route.continue_()
 
                 page.route("**/data/snapshots/**", ana_review)
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                ana_goto(page, f"?var=high&day={ana_day}&loc=new-york-ny", ANA_DAY)
                 pills_r = page.eval_on_selector_all("#locPanel .anapill", "e => e.map(x => x.textContent)")
                 cards_r = page.eval_on_selector_all("#locPanel .anacard .ae", "e => e.map(x => x.textContent)")
                 novalue_r = page.locator("#locPanel .anacard .av.dim").count()
-                chk.add(f"{scheme} analysis: a place with no hour by the cut-off says event review on every card, with no value",
-                        pills_r == ["Event review"] and "event review" in page.evaluate("() => document.querySelector('#anaStatus').textContent")
-                        and len(cards_r) == 5 and novalue_r == 5 and all("12:45 AM cut-off" in c_ for c_ in cards_r)
-                        and page.locator("#locPanel line.anares").count() == 0
-                        and page.locator('#vdots g.dot[data-loc="new-york-ny"] circle.prov, #vdots g.dot[data-loc="new-york-ny"] circle.final').count() == 0,
-                        str([pills_r, cards_r[:2]]))
+                hollow_r = page.locator('#anaDots g.pd[data-loc="new-york-ny"] .pv.none').count()
                 page.unroute("**/data/snapshots/**")
+                chk.add(f"{scheme} analysis: a place with no hour by the cut-off says under review on every card, with no value, and is hollow on the map",
+                        pills_r == ["Under review"] and "under review" in page.evaluate("() => document.querySelector('#anaStatus').textContent")
+                        and len(cards_r) == 5 and novalue_r == 5 and all("12:45 AM cut-off" in c_ for c_ in cards_r) and hollow_r == 1,
+                        str([pills_r, cards_r[:2], hollow_r]))
                 # the freshness pill judges the job by the index's written time,
                 # not by the analysis valid hour NOAA's lag keeps behind the clock;
                 # the valid hours stand beside it
@@ -1356,7 +1422,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     return route.fulfill(response=resp, body=json.dumps(d))
 
                 page.route("**/analysis2/index.json", ana_fresh)
-                page.goto(f"{srv.url}/{ANA}"); page.wait_for_timeout(2200)
+                ana_goto(page, "")
                 fr = page.evaluate("""() => ({ cls: document.querySelector('.status').className, text: document.querySelector('.status').textContent,
                                               newest: (document.querySelector('#anaNewest') || {}).textContent || '' })""")
                 page.unroute("**/analysis2/index.json")
@@ -1365,60 +1431,18 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         "live" in fr["cls"] and "behind" not in fr["text"] and "every 10 minutes" in fr["text"], str(fr)[:160])
                 chk.add(f"{scheme} analysis: the newest RTMA analysis valid hour stays visible",
                         fr["newest"] == "newest RTMA analysis " + ana_latest.get("rtma", "x"), fr["newest"])
-                # the place map and the keyboard both open the panel; the picked
-                # dot is drawn last so it is on top where dots overlap. The place
-                # map's dot is clicked where elementFromPoint proves the pointer
-                # reaches the small map
-                ana_mini_hit = """(id) => { const c = document.querySelector('#anaPlaceMap g.pd[data-loc="' + id + '"] circle.pt'); if (!c) return null;
-                  const r = c.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, t = document.elementFromPoint(x, y);
-                  return { x, y, onMap: !!(t && t.closest && t.closest('#anaPlaceMap')) }; }"""
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_fday}&hour={ana_hours[0]}"); page.wait_for_timeout(2200)
-                page.click("#anaLocBtn"); page.wait_for_timeout(300)
-                ana_pl_n = page.evaluate("() => [document.querySelectorAll('#anaPlaceList li[role=option]').length, document.querySelectorAll('#anaPlaceMap g.pd').length]")
-                ht = page.evaluate(ana_mini_hit, "chicago-il")
-                if ht: page.mouse.click(ht["x"], ht["y"]); page.wait_for_timeout(1400)
-                sel = page.evaluate("""() => [document.querySelector('#locPanel').hidden, (document.querySelector('#locPanel h2') || {}).textContent || '',
-                                            location.search, document.querySelector('#vdots g.dot:last-child').dataset.loc,
-                                            document.querySelector('#anaPlaces').hidden, document.activeElement.id,
-                                            document.querySelector('#anaLocBtn').textContent]""")
-                chk.add(f"{scheme} analysis: a dot on the place map opens the panel, raises the dot and closes the place map with focus on its button",
-                        bool(ht and ht["onMap"]) and sel[0] is False and sel[1].startswith("Chicago") and "loc=chicago-il" in sel[2] and sel[3] == "chicago-il"
-                        and ana_pl_n == [ana_n, ana_n] and sel[4] is True and sel[5] == "anaLocBtn" and "Chicago, IL" in sel[6], str([ht, sel, ana_pl_n]))
-                page.focus('#vmap g.dot[data-loc="denver-co"]'); page.keyboard.press("Enter"); page.wait_for_timeout(1400)
-                kb = page.evaluate("""() => { const g = document.querySelector('#vmap g.dot[data-loc="denver-co"]');
-                  return [(document.querySelector('#locPanel h2') || {}).textContent || '', location.search, g.getAttribute('role'), g.getAttribute('tabindex'),
-                          (g.querySelector('title') || {}).textContent || '', document.querySelector('#anaLocBtn').dataset.loc,
-                          document.querySelector('#anaLocBtn').textContent] }""")
-                chk.add(f"{scheme} analysis: Enter on a focused dot opens its place, and the dot is a named button",
-                        kb[0].startswith("Denver") and "loc=denver-co" in kb[1] and kb[2] == "button" and kb[3] == "0"
-                        and kb[4].startswith("Denver") and kb[5] == "denver-co" and "Denver, CO" in kb[6], str(kb))
-                page.focus("#anaStep button[title='next hour']"); page.keyboard.press("ArrowRight"); page.wait_for_timeout(700)
-                chk.add(f"{scheme} analysis: ArrowRight on the focused stepper steps the hour",
-                        f"hour={ana_hours[1]}" in page.evaluate("location.search"), page.evaluate("location.search"))
-                # frames are never written to this browser's storage
-                for _ in range(4):
-                    page.locator("#anaStep button[title='next hour']").click(); page.wait_for_timeout(300)
-                ls_keys = page.evaluate("() => Object.keys(localStorage).filter(k => /^wx:analysis2?\\/grid\\/[a-z]+\\//.test(k))")
-                chk.add(f"{scheme} analysis: no grid frame is written to localStorage after stepping", ls_keys == [], str(ls_keys)[:120])
-                # a day with no frames listed carries no hour in the address
-                ana_noframes = next((d_ for d_ in ana_days if not ana_ut.get(d_)), None)
-                if ana_noframes:
-                    ana_pick_day(page, ana_noframes)
-                    nf = page.evaluate("() => [location.search, document.querySelector('#anaCap').textContent]")
-                    chk.add(f"{scheme} analysis: a day with no frames clears hour= and names the variable in words",
-                            "hour=" not in nf[0] and "no RTMA temperature frames" in nf[1] and f"day={ana_noframes}" in nf[0], str(nf))
-                # ---- the day calendar (owner's request of 2026-11-03). The index
-                #      is routed to list two days in the month before the
-                #      fixtures' first and one two months after their last, with
-                #      the month between left empty, and to put one fixture day
-                #      in event review and one closed, so the marks and the month
-                #      steps have something to show. The added days are never
-                #      picked, so their missing files are never requested.
+                # ---- the calendar, always on the page. The index is routed to
+                #      list two days in the month before the fixtures' first and one
+                #      two months after their last, with the month between left
+                #      empty, and to put one fixture day under review and one closed,
+                #      so the marks and the month steps have something to show. The
+                #      added days are never opened, so their missing files are never
+                #      requested.
                 ana_m0 = dt.date.fromisoformat(ana_days[0][:7] + "-01")
                 ana_before = ana_m0 - dt.timedelta(days=1)
                 ana_after = (dt.date.fromisoformat(ana_days[-1][:7] + "-01") + dt.timedelta(days=62)).replace(day=2)
                 ana_skip = (dt.date.fromisoformat(ana_days[-1][:7] + "-01") + dt.timedelta(days=31)).strftime("%B %Y")
-                ana_mid = [d_ for d_ in ana_days if d_ not in (ana_rday, ana_days[-1])]
+                ana_mid = [d_ for d_ in ana_days if d_ not in (ana_rday, ana_days[-1], ana_pick)]
                 ana_rv, ana_cl = (ana_mid[-1], ana_mid[-2]) if len(ana_mid) >= 2 else (None, None)
                 ana_st = dict(ana_index.get("dayStatus") or {})
                 ana_st.update({(ana_before - dt.timedelta(days=1)).isoformat(): {"places": 67, "final": 67, "resolved": 67, "closed": 0, "review": 0},
@@ -1440,7 +1464,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         return "review"
                     return "closed" if s_["resolved"] + s_.get("closed", 0) + s_.get("review", 0) >= s_["places"] else "provisional"
 
-                ana_word = {"final": "final", "provisional": "provisional", "review": "event review", "closed": "closed"}
+                ana_word = {"final": "final", "provisional": "provisional", "review": "under review", "closed": "closed"}
 
                 def ana_cal_index(route):
                     resp = route.fetch(); d = json.loads(resp.text())
@@ -1449,236 +1473,236 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     return route.fulfill(response=resp, body=json.dumps(d))
 
                 ana_month = lambda d_: dt.date.fromisoformat(d_[:7] + "-15").strftime("%B %Y")
-                ana_cal_state = """() => { const c = document.querySelector('#anaCal'), a = document.activeElement;
-                  return { open: !c.hidden && c.getBoundingClientRect().height > 0, exp: document.querySelector('#anaDayBtn').getAttribute('aria-expanded'),
-                    role: c.getAttribute('role'), label: c.getAttribute('aria-label') || '', grid: document.querySelector('#anaCalGrid').getAttribute('role'),
+                ana_cal_state = """() => { const c = document.querySelector('#anaCal'), a = document.activeElement, r = c.getBoundingClientRect();
+                  return { shown: r.height > 0 && getComputedStyle(c).visibility !== 'hidden', grid: document.querySelector('#anaCalGrid').getAttribute('role'),
                     focus: a ? a.id || (a.dataset && a.dataset.day) || a.tagName : '', title: document.querySelector('#anaCalTitle').textContent,
                     sel: [...document.querySelectorAll('#anaCalGrid td[aria-selected="true"]')].map(t => t.dataset.day),
+                    open: [...document.querySelectorAll('#anaCalGrid td.open')].map(t => t.dataset.day),
                     stops: [...document.querySelectorAll('#anaCalGrid td[tabindex="0"]')].map(t => t.dataset.day),
                     prev: document.querySelector('#anaCalPrev').disabled, next: document.querySelector('#anaCalNext').disabled,
                     cells: [...document.querySelectorAll('#anaCalGrid td[data-day]')].map(t => [t.dataset.day, t.className, t.dataset.status || '',
                       t.getAttribute('aria-disabled') || '', t.getAttribute('aria-label') || '', t.hasAttribute('tabindex'), !!t.querySelector('i.mk')]),
-                    key: document.querySelector('#anaCalKey').textContent, day: document.querySelector('#anaDayBtn').dataset.day,
-                    btn: document.querySelector('#anaDayBtn').textContent, url: location.search }; }"""
+                    key: document.querySelector('#anaCalKey').textContent,
+                    head: (document.querySelector('#anaHeadDay') || {}).textContent || '', place: (document.querySelector('#anaPlaceName') || {}).textContent || '',
+                    rows: document.querySelectorAll('#anaHours tbody tr').length, url: location.search }; }"""
                 page.route("**/analysis2/index.json", ana_cal_index)
-                page.goto(f"{srv.url}/{ANA}?day={ana_rday}"); page.wait_for_timeout(2200)
-                page.click("#anaDayBtn"); page.wait_for_timeout(300)
+                ana_goto(page, f"?day={ana_rday}")
                 k0 = page.evaluate(ana_cal_state)
-                chk.add(f"{scheme} analysis calendar: the day button opens a dialog on the picked day's month, with the focus and the one tab stop on that day",
-                        k0["open"] and k0["exp"] == "true" and k0["role"] == "dialog" and k0["label"] and k0["grid"] == "grid"
-                        and k0["focus"] == ana_rday and k0["sel"] == [ana_rday] and k0["stops"] == [ana_rday] and k0["title"] == ana_month(ana_rday),
-                        str({k_: k0[k_] for k_ in ("open", "exp", "focus", "sel", "stops", "title")}))
+                chk.add(f"{scheme} analysis calendar: it is on the page at the open day's month, with the open day marked and the one tab stop on it",
+                        k0["shown"] and k0["grid"] == "grid" and k0["sel"] == [ana_rday] and k0["open"] == [ana_rday] and k0["stops"] == [ana_rday]
+                        and k0["title"] == ana_month(ana_rday), str({k_: k0[k_] for k_ in ("shown", "sel", "open", "stops", "title")}))
                 k0_on = [c_ for c_ in k0["cells"] if c_[0] in ana_cal_days]
                 k0_want = [d_ for d_ in ana_cal_days if d_[:7] == ana_rday[:7]]
-                chk.add(f"{scheme} analysis calendar: each listed day is marked final, provisional, event review or closed as the index's day status has it",
+                chk.add(f"{scheme} analysis calendar: each listed day is marked final, provisional, under review or closed as the index's day status has it",
                         bool(ana_rv) and [c_[0] for c_ in k0_on] == k0_want
-                        and all(c_[1] == "on" and c_[2] == ana_kind(c_[0]) and c_[4].endswith(", " + ana_word[ana_kind(c_[0])]) and c_[6] for c_ in k0_on)
+                        and all(c_[1].split()[0] == "on" and c_[2] == ana_kind(c_[0]) and (", " + ana_word[ana_kind(c_[0])]) in c_[4] and c_[6] for c_ in k0_on)
                         and {ana_kind(d_) for d_ in k0_want} >= {"final", "provisional", "review", "closed"}
-                        and all(w_ in k0["key"] for w_ in ("final", "provisional", "event review", "closed")),
-                        str([(c_[0], c_[2], c_[4][-14:]) for c_ in k0_on]))
+                        and all(w_ in k0["key"] for w_ in ("final", "provisional", "under review", "closed")),
+                        str([(c_[0], c_[2], c_[4][-24:]) for c_ in k0_on]))
                 k0_off = [c_ for c_ in k0["cells"] if c_[0] not in ana_cal_days]
                 ana_grey = k0_off[0][0] if k0_off else None
                 if ana_grey:
-                    page.click(f'#anaCalGrid td[data-day="{ana_grey}"]', force=True); page.wait_for_timeout(400)
+                    page.click(f'#anaCalGrid td[data-day="{ana_grey}"]', force=True)
+                    page.wait_for_timeout(300)        # nothing is meant to change, so there is nothing to wait for
                 k1 = page.evaluate(ana_cal_state)
-                chk.add(f"{scheme} analysis calendar: every day not listed is greyed, out of the tab order and unmarked, and a click on one picks nothing",
+                chk.add(f"{scheme} analysis calendar: every day not listed is greyed, out of the tab order and unmarked, and a click on one opens nothing",
                         len(k0_off) + len(k0_on) == len(k0["cells"]) and len(k0_off) > 0
                         and all(c_[1] == "off" and c_[3] == "true" and not c_[5] and not c_[6] and c_[4].endswith(", not on file") for c_ in k0_off)
-                        and k1["open"] and k1["day"] == ana_rday and f"day={ana_rday}" in k1["url"], str([ana_grey, k1["open"], k1["day"]]))
+                        and k1["open"] == [ana_rday] and f"day={ana_rday}" in k1["url"], str([ana_grey, k1["open"]]))
                 # the month steps go to the month before, the fixtures' month and
                 # the one two months on, never to the empty month between
                 ana_titles = [page.evaluate(ana_cal_state)]
-                page.click("#anaCalNext"); page.wait_for_timeout(150); ana_titles.append(page.evaluate(ana_cal_state))
-                page.click("#anaCalPrev"); page.wait_for_timeout(150); ana_titles.append(page.evaluate(ana_cal_state))
-                page.click("#anaCalPrev"); page.wait_for_timeout(150); ana_titles.append(page.evaluate(ana_cal_state))
+                for b_ in ("#anaCalNext", "#anaCalPrev", "#anaCalPrev"):
+                    t0_ = ana_titles[-1]["title"]
+                    page.click(b_)
+                    ana_titles.append(ana_until(page, "(t) => document.querySelector('#anaCalTitle').textContent !== t && (" + ana_cal_state + ")()", arg=t0_)
+                                      or page.evaluate(ana_cal_state))
                 chk.add(f"{scheme} analysis calendar: month steps cover only the months that hold listed days",
                         [t_["title"] for t_ in ana_titles] == [ana_month(ana_rday), ana_month(ana_after.isoformat()), ana_month(ana_rday), ana_month(ana_before.isoformat())]
                         and [(t_["prev"], t_["next"]) for t_ in ana_titles] == [(False, False), (False, True), (False, False), (True, False)]
                         and all(ana_skip != t_["title"] for t_ in ana_titles) and ana_titles[1]["stops"] == [ana_after.isoformat()],
                         str([(t_["title"], t_["prev"], t_["next"]) for t_ in ana_titles]))
-                page.keyboard.press("Escape"); page.wait_for_timeout(200)
-                k2 = page.evaluate(ana_cal_state)
-                chk.add(f"{scheme} analysis calendar: Escape closes it and puts the focus back on the day button, with the day unchanged",
-                        not k2["open"] and k2["exp"] == "false" and k2["focus"] == "anaDayBtn" and k2["day"] == ana_rday and f"day={ana_rday}" in k2["url"],
-                        str({k_: k2[k_] for k_ in ("open", "exp", "focus", "day")}))
-                # by keyboard: Enter on the button opens it, ArrowRight walks the
-                # listed days into the month two on, ArrowLeft walks back to the
-                # day before the one picked, and Enter picks that day
+                # by keyboard, from a fresh load: the grid's tab stop is the open
+                # day, ArrowRight walks the listed days into the month two on,
+                # ArrowLeft walks back to the day before the open one, and Enter
+                # opens that day, with the focus kept on it
+                ana_goto(page, f"?day={ana_rday}")
                 ana_i, ana_ia = ana_cal_days.index(ana_rday), ana_cal_days.index(ana_after.isoformat())
                 ana_keys = ["ArrowRight"] * (ana_ia - ana_i) + ["ArrowLeft"] * (ana_ia - ana_i + 1)
                 ana_walk_want = [ana_rday] + [[ana_cal_days[j_], ana_month(ana_cal_days[j_])]
                                               for j_ in list(range(ana_i + 1, ana_ia + 1)) + list(range(ana_ia - 1, ana_i - 2, -1))]
-                page.keyboard.press("Enter"); page.wait_for_timeout(300)
+                page.focus('#anaCalGrid td[tabindex="0"]')
                 ana_walk = [page.evaluate(ana_cal_state)["focus"]]
                 for key_ in ana_keys:
-                    page.keyboard.press(key_); page.wait_for_timeout(120)
+                    page.keyboard.press(key_)
                     s_ = page.evaluate(ana_cal_state); ana_walk.append([s_["focus"], s_["title"]])
-                page.keyboard.press("Enter"); page.wait_for_timeout(1000)
-                k3 = page.evaluate(ana_cal_state)
                 ana_kpick = ana_cal_days[ana_i - 1]
-                chk.add(f"{scheme} analysis calendar: the arrows move between listed days across months and Enter picks one, closing on the day button",
+                page.keyboard.press("Enter")
+                k3 = ana_until(page, "(d) => location.search.includes('day=' + d) && (" + ana_cal_state + ")()", arg=ana_kpick) or page.evaluate(ana_cal_state)
+                chk.add(f"{scheme} analysis calendar: the arrows move between listed days across months and Enter opens one, with the focus kept on it",
                         ana_walk == ana_walk_want and ana_kpick != ana_rday and ana_month(ana_after.isoformat()) != ana_month(ana_rday)
-                        and not k3["open"] and k3["focus"] == "anaDayBtn" and k3["day"] == ana_kpick and f"day={ana_kpick}" in k3["url"]
-                        and k3["btn"].endswith(ana_kpick + ("" if ana_kind(ana_kpick) == "final" else " · " + ana_word[ana_kind(ana_kpick)])),
-                        str([ana_walk, k3["day"], k3["btn"]]))
-                # by click, and a click outside closes it
-                page.click("#anaDayBtn"); page.wait_for_timeout(300)
-                page.click(f'#anaCalGrid td[data-day="{ana_rday}"]'); page.wait_for_timeout(1000)
-                k4 = page.evaluate(ana_cal_state)
-                k4_cap = page.locator("#anaCap").inner_text()
-                chk.add(f"{scheme} analysis calendar: a click on a listed day picks it, moves the caption and the address, and closes on the day button",
-                        not k4["open"] and k4["focus"] == "anaDayBtn" and k4["day"] == ana_rday and f"day={ana_rday}" in k4["url"] and ana_rday in k4_cap,
-                        str([k4["day"], k4["focus"], k4_cap[:40]]))
-                page.click("#anaDayBtn"); page.wait_for_timeout(300)
-                k5a = page.evaluate(ana_cal_state)["open"]
-                page.click("h1"); page.wait_for_timeout(300)
-                k5 = page.evaluate(ana_cal_state)
-                chk.add(f"{scheme} analysis calendar: a click outside closes it and picks nothing",
-                        k5a and not k5["open"] and k5["exp"] == "false" and k5["day"] == ana_rday, str([k5a, k5["open"], k5["day"]]))
+                        and k3["focus"] == ana_kpick and k3["open"] == [ana_kpick] and f"day={ana_kpick}" in k3["url"],
+                        str([ana_walk, k3["open"], k3["focus"]]))
+                # by click, with a place open: the date opens for the same place
+                ana_goto(page, f"?day={ana_rday}&loc=new-york-ny", ANA_DAY)
+                page.click(f'#anaCalGrid td[data-day="{ana_pick}"]')
+                k4 = ana_until(page, "(d) => location.search.includes('day=' + d) && document.querySelectorAll('#anaHours tbody tr').length > 0 && (" + ana_cal_state + ")()",
+                               arg=ana_pick) or page.evaluate(ana_cal_state)
+                ana_pk = dt.date.fromisoformat(ana_pick)
+                chk.add(f"{scheme} analysis calendar: choosing a date opens it for the same place and writes the address",
+                        k4["open"] == [ana_pick] and f"day={ana_pick}" in k4["url"] and "loc=new-york-ny" in k4["url"] and k4["place"].startswith("New York")
+                        and k4["head"] == f"{ana_pk:%A}, {ana_pk:%B} {ana_pk.day}, {ana_pk.year}" and k4["rows"] == 24,
+                        str([k4["open"], k4["url"], k4["head"], k4["rows"]]))
                 page.unroute("**/analysis2/index.json")
-                # ---- the place map (owner's request of 2026-11-03), a small map of
-                #      the places on the page's own projection with a box that
-                #      finds a place by name for the keyboard, a screen reader and
-                #      a phone. A dot click is checked above, and here the dialog,
-                #      the typed name, the arrows through the matches, Escape and
-                #      a click or the focus moving outside
-                ana_pl_state = """() => { const p = document.querySelector('#anaPlaces'), q = document.querySelector('#anaPlaceQ'), a = document.activeElement;
-                  return { open: !p.hidden && p.getBoundingClientRect().height > 0, exp: document.querySelector('#anaLocBtn').getAttribute('aria-expanded'),
-                    role: p.getAttribute('role'), label: p.getAttribute('aria-label') || '', focus: a ? a.id || a.tagName : '',
-                    combo: [q.getAttribute('role'), q.getAttribute('aria-controls'), q.getAttribute('aria-autocomplete'),
-                            (document.querySelector('label[for="anaPlaceQ"]') || {}).textContent || ''],
-                    listbox: document.querySelector('#anaPlaceList').getAttribute('role'), maphidden: document.querySelector('#anaPlaceMap').getAttribute('aria-hidden'),
-                    opts: [...document.querySelectorAll('#anaPlaceList li[role="option"]')].map(l => l.dataset.loc),
-                    dots: [...document.querySelectorAll('#anaPlaceMap g.pd')].map(g => g.dataset.loc),
-                    dim: document.querySelectorAll('#anaPlaceMap g.pd.dim').length,
-                    active: q.getAttribute('aria-activedescendant') || '',
-                    chosen: [...document.querySelectorAll('#anaPlaceList li[aria-selected="true"]')].map(l => l.dataset.loc),
+                # ---- the map's box finds a place by name for the keyboard, a
+                #      screen reader and a phone: every place is in its list, a
+                #      typed name narrows it, the arrows move through it, Enter
+                #      opens a place on the same date, and Escape or the focus
+                #      leaving the box closes the list
+                ana_pl_state = """() => { const q = document.querySelector('#anaPlaceQ'), l = document.querySelector('#anaPlaceList'), a = document.activeElement;
+                  return { list: !l.hidden && l.getBoundingClientRect().height > 0, exp: q.getAttribute('aria-expanded'), focus: a ? a.id || a.tagName : '',
+                    combo: [q.getAttribute('role'), q.getAttribute('aria-controls'), q.getAttribute('aria-autocomplete'), (document.querySelector('label[for="anaPlaceQ"]') || {}).textContent || ''],
+                    listbox: l.getAttribute('role'), maphidden: document.querySelector('#anaPlaceMap').getAttribute('aria-hidden'),
+                    opts: [...l.querySelectorAll('li[role="option"]')].map(x => x.dataset.loc), texts: [...l.querySelectorAll('li[role="option"]')].map(x => x.textContent),
+                    dots: [...document.querySelectorAll('#anaDots g.pd')].map(g => g.dataset.loc),
+                    active: q.getAttribute('aria-activedescendant') || '', chosen: [...l.querySelectorAll('li[aria-selected="true"]')].map(x => x.dataset.loc),
                     count: document.querySelector('#anaPlaceCount').textContent, aria: document.querySelector('#anaPlaceCount').getAttribute('aria-live'),
-                    h2: (document.querySelector('#locPanel h2') || {}).textContent || '', url: location.search,
-                    btn: document.querySelector('#anaLocBtn').textContent, loc: document.querySelector('#anaLocBtn').dataset.loc }; }"""
+                    h2: (document.querySelector('#anaPlaceName') || {}).textContent || '', url: location.search }; }"""
                 ana_ids = sorted(L_["id"] for L_ in ana_index["locations"])
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_day}"); page.wait_for_timeout(2200)
-                page.click("#anaLocBtn"); page.wait_for_timeout(300)
-                p0 = page.evaluate(ana_pl_state)
-                chk.add(f"{scheme} analysis place map: the place button opens a dialog with every place on its map and in its list, and the focus in the box",
-                        p0["open"] and p0["exp"] == "true" and p0["role"] == "dialog" and p0["label"] and p0["focus"] == "anaPlaceQ"
-                        and p0["combo"][:3] == ["combobox", "anaPlaceList", "list"] and p0["combo"][3] != "" and p0["listbox"] == "listbox"
-                        and p0["maphidden"] == "true" and sorted(p0["opts"]) == ana_ids and sorted(p0["dots"]) == ana_ids and len(ana_ids) == ana_n
-                        and p0["aria"] == "polite" and p0["count"].startswith(f"{ana_n} places") and "none picked" in p0["btn"],
-                        str({k_: p0[k_] for k_ in ("open", "exp", "focus", "combo", "count", "btn")})[:240])
-                # a typed name narrows the list and the map, and Enter opens the first match
-                page.keyboard.type("denv"); page.wait_for_timeout(200)
-                p1 = page.evaluate(ana_pl_state)
-                page.keyboard.press("Enter"); page.wait_for_timeout(1400)
-                p2 = page.evaluate(ana_pl_state)
-                chk.add(f"{scheme} analysis place map: a typed name narrows the list and the map, and Enter opens the first match, closing on the place button",
-                        p1["opts"] == ["denver-co"] and p1["active"] == "anaPlace-denver-co" and p1["chosen"] == ["denver-co"] and p1["dim"] == ana_n - 1
-                        and not p2["open"] and p2["focus"] == "anaLocBtn" and p2["h2"].startswith("Denver") and "loc=denver-co" in p2["url"]
-                        and "Denver, CO" in p2["btn"] and p2["loc"] == "denver-co", str([p1["opts"], p1["active"], p1["dim"], p2["h2"], p2["focus"]]))
-                # the arrows reach every match, with Enter on the button opening it
-                # and Enter taking the match the arrows moved to
+                ana_goto(page, f"?var=high&day={ana_day}")
+                page.click("#anaPlaceQ")
+                page.keyboard.press("ArrowDown")
+                p0 = ana_until(page, "() => !document.querySelector('#anaPlaceList').hidden && (" + ana_pl_state + ")()") or page.evaluate(ana_pl_state)
+                ana_nyv = f"New York, NY · {ana_hi.get('new-york-ny')}°F"
+                chk.add(f"{scheme} analysis place box: every place is on the map and in the box's list, with its value, and the map is left to the pointer",
+                        p0["list"] and p0["exp"] == "true" and p0["combo"][:3] == ["combobox", "anaPlaceList", "list"] and p0["combo"][3] != ""
+                        and p0["listbox"] == "listbox" and p0["maphidden"] == "true" and sorted(p0["opts"]) == ana_ids and sorted(p0["dots"]) == ana_ids
+                        and len(ana_ids) == ana_n and p0["aria"] == "polite" and ana_nyv in p0["texts"],
+                        str({k_: p0[k_] for k_ in ("list", "exp", "combo", "count")})[:240])
+                page.keyboard.press("Escape")
+                page.fill("#anaPlaceQ", "")
+                page.keyboard.type("denv")
+                p1 = ana_until(page, "() => document.querySelectorAll('#anaPlaceList li').length === 1 && (" + ana_pl_state + ")()") or page.evaluate(ana_pl_state)
+                page.keyboard.press("Enter")
+                p2 = ana_until(page, "() => location.search.includes('loc=denver-co') && document.querySelectorAll('#anaHours tbody tr').length > 0 && ("
+                               + ana_pl_state + ")()") or page.evaluate(ana_pl_state)
+                chk.add(f"{scheme} analysis place box: a typed name narrows the list, and Enter opens the first match on the same date, with the focus kept in the box",
+                        p1["opts"] == ["denver-co"] and p1["active"] == "anaPlace-denver-co" and p1["chosen"] == ["denver-co"]
+                        and not p2["list"] and p2["focus"] == "anaPlaceQ" and p2["h2"].startswith("Denver") and "loc=denver-co" in p2["url"]
+                        and f"day={ana_day}" in p2["url"], str([p1["opts"], p1["active"], p2["h2"], p2["focus"], p2["url"]]))
                 ana_san = [L_["id"] for L_ in sorted(ana_index["locations"], key=lambda L_: (L_["name"], L_["state"])) if L_["name"].lower().startswith("san")]
-                page.keyboard.press("Enter"); page.wait_for_timeout(300)
-                p3 = page.evaluate(ana_pl_state)
-                page.keyboard.type("san"); page.wait_for_timeout(200)
-                ana_steps = [page.evaluate(ana_pl_state)]
+                page.keyboard.type("san")
+                ana_steps = [ana_until(page, "() => document.querySelectorAll('#anaPlaceList li').length >= 3 && (" + ana_pl_state + ")()") or page.evaluate(ana_pl_state)]
                 for key_ in ("ArrowDown", "ArrowDown", "ArrowUp", "ArrowDown"):
-                    page.keyboard.press(key_); page.wait_for_timeout(100)
+                    page.keyboard.press(key_)
                     ana_steps.append(page.evaluate(ana_pl_state))
-                page.keyboard.press("Enter"); page.wait_for_timeout(1400)
-                p4 = page.evaluate(ana_pl_state)
-                chk.add(f"{scheme} analysis place map: the arrows move through the matches and Enter opens the one they reach",
-                        len(ana_san) >= 3 and p3["open"] and p3["focus"] == "anaPlaceQ" and ana_steps[0]["opts"][:len(ana_san)] == ana_san
+                page.keyboard.press("Enter")
+                p4 = ana_until(page, "(id) => location.search.includes('loc=' + id) && (" + ana_pl_state + ")()", arg=ana_san[2] if len(ana_san) > 2 else "x") \
+                    or page.evaluate(ana_pl_state)
+                chk.add(f"{scheme} analysis place box: the arrows move through the matches and Enter opens the one they reach",
+                        len(ana_san) >= 3 and ana_steps[0]["opts"][:len(ana_san)] == ana_san
                         and [s_["active"] for s_ in ana_steps] == ["anaPlace-" + ana_san[i_] for i_ in (0, 1, 2, 1, 2)]
                         and all(s_["chosen"] == [s_["active"][len("anaPlace-"):]] for s_ in ana_steps)
-                        and not p4["open"] and p4["focus"] == "anaLocBtn" and f"loc={ana_san[2]}" in p4["url"] and p4["loc"] == ana_san[2],
-                        str([[s_["active"] for s_ in ana_steps], p4["url"]]))
-                page.click("#anaLocBtn"); page.wait_for_timeout(300)
-                p5a = page.evaluate(ana_pl_state)
-                page.keyboard.press("Escape"); page.wait_for_timeout(200)
+                        and not p4["list"] and f"loc={ana_san[2]}" in p4["url"], str([[s_["active"] for s_ in ana_steps], p4["url"]]))
+                page.keyboard.type("bo")
+                p5a = ana_until(page, "() => !document.querySelector('#anaPlaceList').hidden && (" + ana_pl_state + ")()") or page.evaluate(ana_pl_state)
+                page.keyboard.press("Escape")
                 p5 = page.evaluate(ana_pl_state)
-                chk.add(f"{scheme} analysis place map: Escape closes it and puts the focus back on the place button, with the place unchanged",
-                        p5a["open"] and not p5["open"] and p5["exp"] == "false" and p5["focus"] == "anaLocBtn" and f"loc={ana_san[2]}" in p5["url"]
-                        and p5["loc"] == ana_san[2] and not page.locator("#locPanel").is_hidden(), str({k_: p5[k_] for k_ in ("open", "focus", "loc")}))
-                page.click("#anaLocBtn"); page.wait_for_timeout(300)
-                p6a = page.evaluate(ana_pl_state)["open"]
-                page.click("h1"); page.wait_for_timeout(300)
-                p6 = page.evaluate(ana_pl_state)
-                page.click("#anaLocBtn"); page.wait_for_timeout(300)
-                p7a = page.evaluate(ana_pl_state)["open"]
-                page.keyboard.press("Tab"); page.wait_for_timeout(300)
-                p7 = page.evaluate(ana_pl_state)
-                chk.add(f"{scheme} analysis place map: a click outside it or the focus moving out of it closes it and opens nothing",
-                        p6a and not p6["open"] and p7a and not p7["open"] and p7["focus"] == "anaZoomCell"
-                        and p7["loc"] == ana_san[2] and f"loc={ana_san[2]}" in p7["url"], str([p6a, p6["open"], p7a, p7["open"], p7["focus"]]))
-                # ---- the map's variable switch (owner's request of 2026-11-03)
-                #      moves the map and the ladder, and the cards and var= follow
-                #      it; a card click, a link's var= and the arrow keys move it
+                chk.add(f"{scheme} analysis place box: Escape closes the list and keeps the place, with the focus in the box",
+                        p5a["list"] and not p5["list"] and p5["exp"] == "false" and p5["focus"] == "anaPlaceQ" and f"loc={ana_san[2]}" in p5["url"],
+                        str({k_: p5[k_] for k_ in ("list", "focus", "url")}))
+                page.fill("#anaPlaceQ", "")
+                page.keyboard.type("chi")
+                p6a = ana_until(page, "() => !document.querySelector('#anaPlaceList').hidden") is True
+                page.keyboard.press("Tab")
+                p6 = ana_until(page, "() => document.querySelector('#anaPlaceList').hidden && (" + ana_pl_state + ")()") or page.evaluate(ana_pl_state)
+                chk.add(f"{scheme} analysis place box: the list closes when the focus leaves the box, and opens nothing",
+                        p6a and not p6["list"] and p6["focus"] != "anaPlaceQ" and f"loc={ana_san[2]}" in p6["url"], str([p6a, p6["list"], p6["focus"], p6["url"]]))
+                # ---- the map's variable switch: it labels the map, lights the
+                #      card and writes var=, and a card click, a link's var= and the
+                #      arrow keys move it
                 ana_sw_state = """() => ({ checked: [...document.querySelectorAll('#anaVar button[aria-checked="true"]')].map(b => b.dataset.var),
                   stops: [...document.querySelectorAll('#anaVar button')].filter(b => b.tabIndex === 0).map(b => b.dataset.var),
                   card: [...document.querySelectorAll('#anaCards .anacard.on')].map(c => c.dataset.var),
-                  ladder: (document.querySelector('#locPanel .secttl') || {}).textContent || '',
-                  strikes: [...document.querySelectorAll('#locPanel text.anastrike')].map(t => t.textContent),
-                  legend: document.querySelector('#anaLegend').textContent, href: document.querySelector('#anaFrame').getAttribute('href') || '',
-                  dots: [...document.querySelectorAll('#vdots g.dot text.anaval')].map(t => t.textContent).join(','),
+                  pressed: [...document.querySelectorAll('#anaCards .anacard[aria-pressed="true"]')].map(c => c.dataset.var),
+                  legend: document.querySelector('#anaLegend').textContent,
+                  labels: Object.fromEntries([...document.querySelectorAll('#anaDots g.pd')].map(g => [g.dataset.loc, (g.querySelector('text.pvt') || {}).textContent || ''])),
                   url: location.search, focus: (document.activeElement && document.activeElement.dataset && document.activeElement.dataset.var) || '' })"""
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_fday}&hour={ana_hours[1]}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                ana_goto(page, f"?var=high&day={ana_day}&loc=new-york-ny", ANA_DAY)
                 s0 = page.evaluate(ana_sw_state)
-                page.click('#anaVar button[data-var="gust"]'); page.wait_for_timeout(900)
-                s1 = page.evaluate(ana_sw_state)
-                chk.add(f"{scheme} analysis switch: Peak gust on the map's switch shades the map, redraws the ladder, lights its card and writes var=",
-                        s0["checked"] == ["high"] and s0["card"] == ["high"] and s0["ladder"].startswith("HIGH ")
-                        and s1["checked"] == ["gust"] and s1["stops"] == ["gust"] and s1["card"] == ["gust"] and s1["ladder"].startswith("PEAK GUST ")
-                        and "Peak gust" in s1["legend"] and s1["href"].startswith("data:image/png") and s1["href"] != s0["href"] and s1["dots"] != s0["dots"]
-                        and bool(s1["strikes"]) and s1["strikes"] != s0["strikes"] and not any(t_.endswith("°F") for t_ in s1["strikes"])
-                        and "var=gust" in s1["url"], str([s1["checked"], s1["card"], s1["ladder"], s1["url"]]))
-                page.click('#anaCards .anacard[data-var="precip"]'); page.wait_for_timeout(900)
-                s2 = page.evaluate(ana_sw_state)
-                chk.add(f"{scheme} analysis switch: a card click moves the switch, the map, the ladder and var= with it",
-                        s2["checked"] == ["precip"] and s2["stops"] == ["precip"] and s2["card"] == ["precip"] and s2["ladder"].startswith("PRECIPITATION ")
-                        and "Precipitation" in s2["legend"] and "var=precip" in s2["url"], str([s2["checked"], s2["card"], s2["ladder"], s2["url"]]))
+                page.click('#anaVar button[data-var="gust"]')
+                s1 = ana_until(page, "() => location.search.includes('var=gust') && (" + ana_sw_state + ")()") or page.evaluate(ana_sw_state)
+                chk.add(f"{scheme} analysis switch: Peak gust on the switch labels the map with the peak gust, lights its card and writes var=",
+                        s0["checked"] == ["high"] and s0["card"] == ["high"] and s1["checked"] == ["gust"] and s1["stops"] == ["gust"]
+                        and s1["card"] == ["gust"] and s1["pressed"] == ["gust"] and "Peak gust" in s1["legend"] and "var=gust" in s1["url"]
+                        and s1["labels"] == {k_: ("" if ana_gu.get(k_) is None else str(ana_gu[k_])) for k_ in ana_lbl_want},
+                        str([s1["checked"], s1["card"], s1["url"]]))
+                ana_pr = {k_: (((v_ or {}).get("rtma") or {}).get("precip") or {}).get("value") for k_, v_ in (ana_dayfile.get("locations") or {}).items()}
+                page.click('#anaCards .anacard[data-var="precip"]')
+                s2 = ana_until(page, "() => location.search.includes('var=precip') && (" + ana_sw_state + ")()") or page.evaluate(ana_sw_state)
+                chk.add(f"{scheme} analysis switch: a value card sets the map's variable, its labels, the switch and var=",
+                        s2["checked"] == ["precip"] and s2["stops"] == ["precip"] and s2["card"] == ["precip"] and "Precipitation" in s2["legend"]
+                        and "var=precip" in s2["url"] and s2["labels"] == {k_: ("" if ana_pr.get(k_) is None else f"{ana_pr[k_]:.2f}") for k_ in ana_lbl_want},
+                        str([s2["checked"], s2["card"], s2["url"], list(s2["labels"].items())[:3]]))
                 page.focus('#anaVar button[aria-checked="true"]')
                 ana_sw_keys = []
-                for key_ in ("ArrowLeft", "ArrowRight", "Home"):
-                    page.keyboard.press(key_); page.wait_for_timeout(700)
-                    ana_sw_keys.append(page.evaluate(ana_sw_state))
+                for key_, want_ in (("ArrowLeft", "wind"), ("ArrowRight", "precip"), ("Home", "high")):
+                    page.keyboard.press(key_)
+                    ana_sw_keys.append(ana_until(page, "(w) => location.search.includes('var=' + w) && (" + ana_sw_state + ")()", arg=want_)
+                                       or page.evaluate(ana_sw_state))
                 chk.add(f"{scheme} analysis switch: one tab stop, and the arrows and Home move the choice with the focus, the cards and var= following",
                         [(s_["checked"], s_["stops"], s_["focus"], s_["card"]) for s_ in ana_sw_keys]
                         == [(["wind"], ["wind"], "wind", ["wind"]), (["precip"], ["precip"], "precip", ["precip"]), (["high"], ["high"], "high", ["high"])]
-                        and "var=high" in ana_sw_keys[-1]["url"] and ana_sw_keys[-1]["ladder"].startswith("HIGH "),
-                        str([(s_["checked"], s_["focus"], s_["card"]) for s_ in ana_sw_keys]))
-                page.goto(f"{srv.url}/{ANA}?var=low&day={ana_fday}&hour={ana_hours[1]}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                        and "var=high" in ana_sw_keys[-1]["url"], str([(s_["checked"], s_["focus"], s_["card"]) for s_ in ana_sw_keys]))
+                ana_goto(page, f"?var=low&day={ana_day}&loc=new-york-ny", ANA_DAY)
                 s3 = page.evaluate(ana_sw_state)
-                chk.add(f"{scheme} analysis switch: a link's var= sets the switch, the card and the ladder on load",
-                        s3["checked"] == ["low"] and s3["stops"] == ["low"] and s3["card"] == ["low"] and s3["ladder"].startswith("LOW ")
-                        and "Low from" in s3["legend"] and "var=low" in s3["url"], str([s3["checked"], s3["card"], s3["ladder"]]))
-                # ---- on a phone 390 px wide the page never scrolls sideways, with
-                #      nothing open, the calendar open or the place map open, each
-                #      panel stays on screen, a name typed on the phone opens its
-                #      place, and nothing raises a console error
-                ana_ph_ctx = browser.new_context(color_scheme=scheme, viewport={"width": 390, "height": 844})
+                chk.add(f"{scheme} analysis switch: a link's var= sets the switch, the card and the map on load",
+                        s3["checked"] == ["low"] and s3["stops"] == ["low"] and s3["card"] == ["low"] and s3["legend"].startswith("Low, ")
+                        and "var=low" in s3["url"], str([s3["checked"], s3["card"], s3["legend"][:30]]))
+                # ---- the layout: the calendar and the map at the top, side by
+                #      side at 1280 px and stacked at 375 px, above the place's
+                #      header and its day, with no sideways scroll; at 375 px the
+                #      gutter is 16 px and the box's list stays on screen
+                ana_lay = """() => { const R = s => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.top + scrollY, r.right, r.bottom + scrollY, r.width, r.height]; };
+                  return { cal: R('#anaCal'), map: R('#anaMapCard'), head: R('#anaHead'), status: R('#anaStatus'), replay: R('#anaClock'),
+                           sw: [document.scrollingElement.scrollWidth, document.scrollingElement.clientWidth], vw: document.documentElement.clientWidth,
+                           order: [...document.querySelectorAll('.wrap > *')].map(e => e.id).filter(Boolean) }; }"""
+                ana_w_ctx = browser.new_context(color_scheme=scheme, viewport={"width": 1280, "height": 900})
+                ana_w = ana_w_ctx.new_page()
+                errors_of(ana_w, into=errs)
+                ana_goto(ana_w, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                lw = ana_w.evaluate(ana_lay)
+                ana_w_ctx.close()
+                chk.add(f"{scheme} analysis: at 1280 px the calendar and the map sit side by side at the top, above the place's header and its day",
+                        abs(lw["cal"][1] - lw["map"][1]) <= 2 and lw["cal"][2] < lw["map"][0] and lw["cal"][5] > 200 and lw["map"][5] > 300
+                        and max(lw["cal"][3], lw["map"][3]) <= lw["head"][1] <= lw["status"][1] and lw["cal"][1] < 600
+                        and lw["order"].index("anaPickers") < lw["order"].index("anaHead") < lw["order"].index("locPanel")
+                        and lw["sw"][0] <= lw["sw"][1], str([[round(x) for x in lw["cal"][:4]], [round(x) for x in lw["map"][:4]], round(lw["head"][1]), lw["sw"]]))
+                ana_ph_ctx = browser.new_context(color_scheme=scheme, viewport={"width": 375, "height": 812})
                 ana_ph = ana_ph_ctx.new_page()
                 ana_ph_errs = errors_of(ana_ph)
-                ana_ph.goto(f"{srv.url}/{ANA}?day={ana_day}&loc=new-york-ny"); ana_ph.wait_for_timeout(2400)
+                ana_goto(ana_ph, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                lp = ana_ph.evaluate(ana_lay)
                 ana_wide = "() => [document.scrollingElement.scrollWidth, document.scrollingElement.clientWidth]"
-                ana_edge = "(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [r.left, r.right, document.documentElement.clientWidth, r.height]; }"
-                w0 = ana_ph.evaluate(ana_wide)
-                ana_ph.click("#anaDayBtn"); ana_ph.wait_for_timeout(300)
-                w1, e1 = ana_ph.evaluate(ana_wide), ana_ph.evaluate(ana_edge, "#anaCal")
-                ana_ph.keyboard.press("Escape"); ana_ph.wait_for_timeout(200)
-                ana_ph.click("#anaLocBtn"); ana_ph.wait_for_timeout(300)
-                w2, e2 = ana_ph.evaluate(ana_wide), ana_ph.evaluate(ana_edge, "#anaPlaces")
-                ana_ph.keyboard.type("bost"); ana_ph.keyboard.press("Enter"); ana_ph.wait_for_timeout(1600)
+                ana_ph.click("#anaPlaceQ")
+                ana_ph.keyboard.type("san")
+                ana_until(ana_ph, "() => !document.querySelector('#anaPlaceList').hidden")
+                w1 = ana_ph.evaluate(ana_wide)
+                e1 = ana_ph.evaluate("() => { const r = document.querySelector('#anaPlaceList').getBoundingClientRect(); return [r.left, r.right, document.documentElement.clientWidth, r.height]; }")
+                ana_ph.fill("#anaPlaceQ", "")
+                ana_ph.keyboard.type("bost"); ana_ph.keyboard.press("Enter")
+                ph_open = ana_until(ana_ph, "() => location.search.includes('loc=boston-ma') && document.querySelectorAll('#anaHours tbody tr').length > 0 && [(document.querySelector('#anaPlaceName') || {}).textContent, location.search]") or ["", ""]
+                w2 = ana_ph.evaluate(ana_wide)
+                ana_ph.click('#anaVar button[data-var="wind"]')
+                ana_until(ana_ph, "() => location.search.includes('var=wind')")
                 w3 = ana_ph.evaluate(ana_wide)
-                ph_open = ana_ph.evaluate("() => [(document.querySelector('#locPanel h2') || {}).textContent || '', location.search]")
-                ana_ph.evaluate("() => document.querySelector('#anaMap').scrollIntoView()"); ana_ph.wait_for_timeout(200)
-                ana_ph.click('#anaVar button[data-var="wind"]'); ana_ph.wait_for_timeout(900)
-                w4 = ana_ph.evaluate(ana_wide)
                 ana_ph_ctx.close()
-                chk.add(f"{scheme} analysis: at phone width the page never scrolls sideways, with the calendar or the place map open, and each panel stays on screen",
-                        all(a_ <= b_ + 1 for a_, b_ in (w0, w1, w2, w3, w4)) and e1[3] > 0 and e2[3] > 0
-                        and e1[0] >= 0 and e1[1] <= e1[2] and e2[0] >= 0 and e2[1] <= e2[2]
-                        and ph_open[0].startswith("Boston") and "loc=boston-ma" in ph_open[1], str([w0, w1, w2, w3, w4, e1, e2, ph_open]))
+                chk.add(f"{scheme} analysis: at 375 px the calendar and the map are stacked at the top with a 16 px gutter, and the page never scrolls sideways",
+                        lp["cal"][3] <= lp["map"][1] and abs(lp["cal"][0] - 16) <= 1 and abs(lp["map"][0] - 16) <= 1 and abs(lp["cal"][2] - (lp["vw"] - 16)) <= 1
+                        and abs(lp["map"][2] - (lp["vw"] - 16)) <= 1 and lp["map"][3] <= lp["head"][1] <= lp["status"][1]
+                        and all(a_ <= b_ for a_, b_ in (lp["sw"], w1, w2, w3)) and e1[3] > 0 and e1[0] >= 0 and e1[1] <= e1[2]
+                        and str(ph_open[0]).startswith("Boston") and "loc=boston-ma" in ph_open[1],
+                        str([[round(x) for x in lp["cal"][:4]], [round(x) for x in lp["map"][:4]], lp["sw"], w1, w2, w3, e1, ph_open]))
                 chk.add(f"{scheme} analysis: at phone width the page raises no console error", not ana_ph_errs, "; ".join(ana_ph_errs)[:300])
                 # a day or place file that could not be read is said to be
                 # unreadable, not a day with no hours; a fresh context so no
@@ -1687,48 +1711,81 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 ana_p2 = ana_ctx2.new_page()
                 ana_p2.route("**/analysis2/days/**", lambda route: route.fulfill(status=404, body="gone"))
                 ana_p2.route("**/analysis2/loc/**", lambda route: route.fulfill(status=404, body="gone"))
-                ana_p2.goto(f"{srv.url}/{ANA}?var=high&day={ana_day}&loc=new-york-ny"); ana_p2.wait_for_timeout(2200)
+                ana_goto(ana_p2, f"?var=high&day={ana_day}&loc=new-york-ny", ANA_DAY)
                 ur = ana_p2.evaluate("""() => [[...document.querySelectorAll('#locPanel .anacard .ae')].map(x => x.textContent),
-                                              [...document.querySelectorAll('#locPanel p.cap')].map(x => x.textContent).join(' ')]""")
+                                              [...document.querySelectorAll('#locPanel p.cap')].filter(x => !x.hidden).map(x => x.textContent).join(' ')]""")
                 chk.add(f"{scheme} analysis: an unreadable day file is reported as unreadable, not as no hours",
                         len(ur[0]) == 5 and all("could not be read" in t for t in ur[0]) and "could not be read" in ur[1]
                         and "No hours read yet" not in ur[1], str(ur)[:160])
                 ana_ctx2.close()
-                # ---- the settlement display (owner's approval of 2026-11-03):
-                #      the picked place-day above the map, drawn only from the
-                #      lane's figures (`show`, the rows' exact values and `run`).
+                # ---- the settlement display, drawn only from the lane's figures.
                 #      Every expected figure below is read from the fixtures, which
-                #      the lane's own code wrote, never worked out here. On the
-                #      fixtures' final New York day: the five cards carry the
-                #      summary, the hour table ends its running total on the day's
-                #      and shows exact figures under the toggle, the replay moves
-                #      the cards to the lane's running values for that minute, and
-                #      var= opens its chart. With the clock fixed on the fixtures'
-                #      live day: the three charts share one axis and one now line,
-                #      the countdowns pass through their four states, and a refetch
-                #      inside an arrival window carries ?b= and fills the day in. A
-                #      place file written before the running values still draws.
+                #      the lane's own code wrote, or from the rowShape 3 file made by
+                #      hand from them (ana_row_shape3), never worked out by the page.
+                #      On the samples' final New York day: the five cards carry the
+                #      summary, the hour table ends its running total on the day's,
+                #      and with no publication time on record the day is shown as it
+                #      stands. On the rowShape 3 file: the hover on each chart, the
+                #      four CSV files, every wording of the hourly contract, the
+                #      replay and its end. With the clock fixed on the samples' live
+                #      day: the three charts share one axis and one now line, the
+                #      countdowns pass through their four states, and a refetch
+                #      inside an arrival window carries ?b= and fills the day in.
                 with open(os.path.join(ANA_SNAP, "loc", "new-york-ny", ana_day + ".json")) as fh:
                     sd_doc = json.load(fh)
                 sd_sum = sd_doc["summary"]["rtma"]
                 sd_tz = _Z(sd_doc["tz"])
+                sd_n2 = lambda s_: str(s_).replace(" ", " ")
+                sd_rows = sd_doc["hours"]
 
                 def sd_hour(iso_):
                     t_ = dt.datetime.fromisoformat(iso_.replace("Z", "+00:00")).astimezone(sd_tz)
                     return f"{t_.hour % 12 or 12} {'AM' if t_.hour < 12 else 'PM'} {t_.tzname()}"
 
-                def sd_clock(t_):
+                def sd_clock(t_, secs=False):
                     t_ = t_.astimezone(sd_tz)
-                    return f"{t_.hour % 12 or 12}:{t_.minute:02d} {'AM' if t_.hour < 12 else 'PM'}"
+                    return f"{t_.hour % 12 or 12}:{t_.minute:02d}" + (f":{t_.second:02d}" if secs else "") + f" {'AM' if t_.hour < 12 else 'PM'}"
 
+                sd_at = lambda s_: dt.datetime.fromisoformat(s_.replace("Z", "+00:00"))
+
+                # the hourly contract in words, as the owner set them on 2026-11-04,
+                # worked out here from the lane's state, basis, moment and cut-off
+                def sd_htext(hr, F_=None):
+                    cut_ = sd_clock(sd_at(hr["cut"]), True)
+                    if hr["state"] == "final" and hr["basis"] == "nomads":
+                        return ("final at " + sd_clock(sd_at(hr["at"]), True) + ", when NOMADS published the file"
+                                + (". The value shown is NOAA Open Data’s copy." if hr.get("src") == "nodd" else ""))
+                    if hr["state"] == "final" and hr["basis"] == "cutoff":
+                        return "final at the hourly cut-off, " + sd_clock(sd_at(hr["at"] or hr["cut"]), True) + ", from NOAA Open Data’s copy"
+                    if hr["state"] == "final" and hr["basis"] == "norecord":
+                        return "final by the hourly cut-off, " + cut_ + " (NOMADS’s copy is not on record before 3 Nov 15:13 UTC)"
+                    if hr["state"] == "review" and hr.get("basis") == "norecord":
+                        od_ = ((F_ or {}).get("nodd") or {}).get("lm")
+                        return ("no value: " + ("NOAA Open Data published it after the hourly cut-off, " if od_ else "not published by the hourly cut-off, ")
+                                + cut_ + ", and NOMADS’s copy is not on record. Under review.")
+                    if hr["state"] == "review":
+                        return "no value: not published by the hourly cut-off, " + cut_ + ", under review"
+                    return "provisional, until NOMADS publishes the file or the hourly cut-off, " + cut_
+
+                SD_WORD = {"nomads": "final", "cutoff": "final at the cut-off", "norecord": "final by the cut-off"}
+                SD_SRV = {"nodd": "NOAA Open Data", "nomads": "NOMADS"}
+                # the file's first publication on either server, as the replay and the table take it
+                sd_pub = lambda F_: min(sd_at(F_[s_]["lm"]) for s_ in ("nodd", "nomads") if F_.get(s_) and F_[s_].get("lm"))
                 sd_cards_js = """() => [...document.querySelectorAll('#anaCards .anacard')].map(c => [c.dataset.var,
                   (c.querySelector('.av') || {}).textContent || '', (c.querySelector('.ae') || {}).textContent || ''])"""
-                page.goto(f"{srv.url}/{ANA}?day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                sd_tab_js = """() => { const rows = [...document.querySelectorAll('#anaHours tbody tr')];
+                  return { n: rows.length, last: rows.length ? rows[rows.length - 1].querySelector('td.ptotal').textContent : '',
+                           hi: (document.querySelector('#anaHours td.hi') || {}).textContent || '',
+                           hst: rows.map(r => [r.querySelector('td.hst').textContent, r.querySelector('td.hst').title]),
+                           arr: rows.map(r => r.querySelector('td.arr').textContent),
+                           foot: (document.querySelector('#anaFoot') || {}).textContent || '' }; }"""
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
                 sd = page.evaluate("""(js) => ({ cards: eval(js)(),
                   status: (document.querySelector('#anaStatus') || {}).textContent || '',
                   pill: (document.querySelector('#anaStatus .anapill') || {}).textContent || '',
-                  y: window.scrollY, est: !document.querySelector('#anaEst').hidden,
+                  y: window.scrollY, html: document.documentElement.outerHTML,
                   order: [...document.querySelectorAll('.wrap > *')].map(e => e.id).filter(Boolean) })""", sd_cards_js)
+                sd_html = [sd["html"]]
                 sd_want = [["high", f"{sd_sum['high']['value']}°F", "at " + sd_hour(sd_sum["high"]["at"])],
                            ["low", f"{sd_sum['low']['value']}°F", "at " + sd_hour(sd_sum["low"]["at"])],
                            ["gust", f"{sd_sum['gust']['value']} mph", "at " + sd_hour(sd_sum["gust"]["at"])],
@@ -1738,82 +1795,247 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         sd["cards"] == sd_want, str([sd["cards"], sd_want])[:240])
                 chk.add(f"{scheme} settlement display: the status line says final, with the hours the day resolved on",
                         sd["pill"] == "Final" and f"on {sd_sum['hours']} of {sd_sum['of']} hours" in sd["status"], sd["status"][:120])
-                chk.add(f"{scheme} settlement display: it sits above the map, and a link with no var stays at the top",
-                        "locPanel" in sd["order"] and "anaMap" in sd["order"] and sd["order"].index("locPanel") < sd["order"].index("anaMap")
-                        and sd["y"] < 40, str([sd["order"], sd["y"]]))
-                # the hour table, then the same with Show exact values
-                sd_tab_js = """() => { const rows = [...document.querySelectorAll('#anaHours tbody tr')];
-                  return { n: rows.length, last: rows.length ? rows[rows.length - 1].querySelector('td.ptotal').textContent : '',
-                           hi: (document.querySelector('#anaHours td.hi') || {}).textContent || '',
-                           temps: rows.map(r => r.querySelectorAll('td')[2].textContent),
-                           arr: rows.map(r => r.querySelector('td.arr').textContent),
-                           exacts: [...document.querySelectorAll('#anaCards .anaexact')].map(e => e.textContent),
-                           foot: (document.querySelector('#anaFoot') || {}).textContent || '' }; }"""
+                chk.add(f"{scheme} settlement display: the calendar and the map sit above the place's header and the day, and a link with no var stays at the top",
+                        sd["order"].index("anaPickers") < sd["order"].index("anaHead") < sd["order"].index("locPanel") and sd["y"] < 40,
+                        str([sd["order"], sd["y"]]))
+                # the hour table: a row per hour, the running total ending on the
+                # day's, each analysis's publication time on record, and each hour's
+                # hourly contract in the lane's words
                 tb = page.evaluate(sd_tab_js)
-                sd_est = ["≈" if not (r_["rtma"] or {}).get("pub") else "" for r_ in sd_doc["hours"]]
-                chk.add(f"{scheme} settlement display: the hour table has a row per hour, its running total ends on the day's, and estimated arrivals carry ≈",
-                        tb["n"] == sd_sum["of"] and tb["last"] == f"{sd_sum['precip']['value']:.2f}" and tb["hi"] == str(sd_sum["high"]["value"])
-                        and [a_[:1] if a_.startswith("≈") else "" for a_ in tb["arr"]] == sd_est and sd["est"] == any(sd_est)
-                        and "resolves on" in tb["foot"] and tb["exacts"] == [], str({k_: tb[k_] for k_ in ("n", "last", "hi")})[:160])
-                page.click("#anaExact"); page.wait_for_timeout(300)
-                tx = page.evaluate(sd_tab_js)
-                chk.add(f"{scheme} settlement display: Show exact values gives the exact figures in the table and on the cards",
-                        tx["last"] == f"{sd_sum['precip']['exact']:.4f}" and all(re.fullmatch(r"-?\d+\.\d{3}", t_) for t_ in tx["temps"])
-                        and len(tx["exacts"]) == 5 and tx["exacts"][0] == f"exact {sd_sum['high']['exact']:.3f}°F"
-                        and tx["exacts"][4] == f"exact {sd_sum['precip']['exact']:.4f} in", str([tx["last"], tx["temps"][:2], tx["exacts"][:2]]))
+                tb_arr = [sd_clock(sd_pub(r_["rtma"]["anlFile"])) + " on " + SD_SRV[min(("nodd", "nomads"), key=lambda s_: (
+                          sd_at(r_["rtma"]["anlFile"][s_]["lm"]) if (r_["rtma"]["anlFile"].get(s_) or {}).get("lm") else dt.datetime.max.replace(tzinfo=dt.timezone.utc)))]
+                          for r_ in sd_rows]
+                chk.add(f"{scheme} settlement display: the hour table has a row per hour, its running total ends on the day's, and it gives each analysis's publication time and hourly contract",
+                        tb["n"] == sd_sum["of"] == len(sd_rows) and tb["last"] == f"{sd_sum['precip']['value']:.2f}" and tb["hi"] == str(sd_sum["high"]["value"])
+                        and [sd_n2(a_) for a_ in tb["arr"]] == tb_arr and "resolves on" in tb["foot"]
+                        and [[w_, sd_n2(t_)] for w_, t_ in tb["hst"]] == [[SD_WORD[r_["rtma"]["hourly"]["basis"]], sd_htext(r_["rtma"]["hourly"], r_["rtma"].get("anlFile"))] for r_ in sd_rows],
+                        str([tb["n"], tb["last"], tb["arr"][:2], tb["hst"][:1]])[:300])
+                # a final day's replay runs to a quarter hour past the last hour's
+                # hourly cut-off, so the 11 PM hour shows final; at the old end, a
+                # quarter hour past the daily cut-off, it was still provisional
+                sd_cut = sd_at(sd_rows[-1]["t"]) + dt.timedelta(hours=1, minutes=45)
+                sd_lastcut = sd_at(sd_rows[-1]["rtma"]["hourly"]["cut"])
+                sd_end = page.evaluate("""() => ({ max: +document.querySelector('#anaT').max, slider: document.querySelector('#anaT').hidden,
+                  when: document.querySelector('#anaWhen b').textContent, last: (r => [r.textContent, r.dataset.state])([...document.querySelectorAll('#anaHours td.hst')].pop()) })""")
+                page.evaluate("(ms) => { const r = document.querySelector('#anaT'); r.value = String(ms); r.dispatchEvent(new Event('input')); }",
+                              int((sd_cut + dt.timedelta(minutes=15)).timestamp() * 1000))
+                sd_mid = ana_until(page, "() => { const t = [...document.querySelectorAll('#anaHours td.hst')].pop(); return t.dataset.state === 'provisional' && [t.textContent, document.querySelector('#anaStatus .anapill').textContent]; }") or ["", ""]
+                sd_e15 = sd_lastcut + dt.timedelta(minutes=15)
+                chk.add(f"{scheme} settlement display: a final day's replay runs to a quarter hour past the last hour's hourly cut-off, where the 11 PM hour is final",
+                        not sd_end["slider"] and sd_end["max"] == int(sd_e15.timestamp() * 1000) and sd_lastcut > sd_cut
+                        and sd_n2(sd_end["when"]) == sd_clock(sd_e15) + " " + sd_e15.astimezone(sd_tz).tzname()
+                        and sd_end["last"] == [SD_WORD[sd_rows[-1]["rtma"]["hourly"]["basis"]], "final"] and sd_mid == ["provisional", "Final"],
+                        str([sd_end["max"], sd_end["when"], sd_end["last"], sd_mid]))
                 # the replay: half past the hour after the 11 AM analysis, when the
-                # hours from midnight to 11 AM are in (each analysis about 49
-                # minutes after its hour, the 11 AM hour's rain at about 12:17);
-                # the cards carry the lane's running values of the 11 AM row
+                # hours from midnight to 11 AM are in at their files' own times; the
+                # cards carry the lane's running values of the 11 AM row
                 sd_k = 11
-                sd_run = sd_doc["hours"][sd_k]["rtma"]["run"]
-                sd_t = dt.datetime.fromisoformat(sd_doc["hours"][sd_k + 1]["t"].replace("Z", "+00:00")) + dt.timedelta(minutes=30)
+                sd_run = sd_rows[sd_k]["rtma"]["run"]
+                sd_t = sd_at(sd_rows[sd_k + 1]["t"]) + dt.timedelta(minutes=30)
                 page.evaluate("(ms) => { const r = document.querySelector('#anaT'); r.value = String(ms); r.dispatchEvent(new Event('input')); }",
                               int(sd_t.timestamp() * 1000))
-                page.wait_for_timeout(300)
-                rp = page.evaluate("""(js) => ({ cards: eval(js)(),
+                rp = ana_until(page, """(js) => document.querySelector('#anaStatus .anapill').textContent === 'Provisional' && ({ cards: eval(js)(),
                   status: document.querySelector('#anaStatus').textContent,
                   pill: document.querySelector('#anaStatus .anapill').textContent,
                   future: document.querySelectorAll('#anaSettle svg.anasvg rect.future').length,
                   now: document.querySelectorAll('#anaSettle svg.anasvg line.now').length,
-                  when: document.querySelector('#anaWhen b').textContent })""", sd_cards_js)
+                  when: document.querySelector('#anaWhen b').textContent,
+                  hst: [...document.querySelectorAll('#anaHours td.hst')].map(t => [t.textContent, t.title]) })""", arg=sd_cards_js) \
+                    or {"cards": [], "status": "", "pill": "", "future": 0, "now": 0, "when": "", "hst": []}
                 rp_want = [f"{sd_run['high']['value']}°F", f"{sd_run['low']['value']}°F", f"{sd_run['gust']['value']} mph",
                            f"{sd_run['wind']['value']} mph", f"{sd_run['precip']['value']:.2f} in"]
-                chk.add(f"{scheme} settlement display: the replay shows the day as of that minute, from the lane's running values",
+                chk.add(f"{scheme} settlement display: the replay shows the day as of that minute, at the files' own publication times, from the lane's running values",
                         [c_[1] for c_ in rp["cards"]] == rp_want and all(c_[2].endswith("so far") for c_ in rp["cards"])
                         and rp["pill"] == "Provisional" and f"{sd_run['hours']} of {sd_sum['of']} hours" in rp["status"]
-                        and rp["future"] == 3 and rp["now"] == 3 and rp["when"].startswith(sd_clock(sd_t)),
+                        and rp["future"] == 3 and rp["now"] == 3 and sd_n2(rp["when"]).startswith(sd_clock(sd_t)),
                         str([rp["cards"], rp_want, rp["status"][:60], rp["future"], rp["now"], rp["when"]])[:260])
-                page.click("#anaLatest"); page.wait_for_timeout(300)
-                sd_l = page.evaluate("() => [document.querySelector('#anaStatus .anapill').textContent, +document.querySelector('#anaT').value]")
-                page.click("#anaPlayDay"); page.wait_for_timeout(700)
-                sd_p = page.evaluate("() => [document.querySelector('#anaPlayDay').textContent, +document.querySelector('#anaT').value, +document.querySelector('#anaT').min]")
-                page.click("#anaPlayDay"); page.wait_for_timeout(200)
-                sd_b = page.evaluate("() => document.querySelector('#anaPlayDay').textContent")
+                # the hourly contract as it stood then: final from the moment it
+                # became final, provisional before, nothing for an hour to come
+                sd_h0, sd_p0 = sd_rows[0]["rtma"]["hourly"], sd_rows[sd_k + 1]["rtma"]["hourly"]
+                chk.add(f"{scheme} settlement display: in a replay each hour's hourly contract shows as it stood, provisional until it became final",
+                        len(rp["hst"]) == len(sd_rows) and rp["hst"][0][0] == SD_WORD[sd_h0["basis"]] and rp["hst"][sd_k + 1][0] == "provisional"
+                        and sd_n2(rp["hst"][sd_k + 1][1]) == sd_htext(dict(sd_p0, state="provisional"))
+                        and all(h_[0] == "" for h_ in rp["hst"][sd_k + 2:]), str(rp["hst"][sd_k:sd_k + 3]))
+                page.click("#anaLatest")
+                sd_l = ana_until(page, "() => document.querySelector('#anaStatus .anapill').textContent === 'Final' && [document.querySelector('#anaStatus .anapill').textContent, +document.querySelector('#anaT').value]") or ["", 0]
+                page.click("#anaPlayDay")
+                sd_p = ana_until(page, "() => { const r = document.querySelector('#anaT'); return +r.value > +r.min && +r.value < +r.max && [document.querySelector('#anaPlayDay').textContent, +r.value, +r.min]; }") or ["", 0, 0]
+                page.click("#anaPlayDay")
+                sd_b = ana_until(page, "() => document.querySelector('#anaPlayDay').textContent === 'Play the day' && 'Play the day'") or ""
                 chk.add(f"{scheme} settlement display: Latest brings the final day back, and Play the day runs from the day's start and pauses",
                         sd_l[0] == "Final" and sd_p[0] == "Pause" and sd_p[2] < sd_p[1] < sd_l[1] and sd_b == "Play the day", str([sd_l, sd_p, sd_b]))
+                page.click("#anaLatest")
+                ana_until(page, "() => document.querySelector('#anaStatus .anapill').textContent === 'Final'")
+
+                # the hover on each chart (spec section 8), at an hour's point
+                def sd_tip(sec_, i_, n_, half=False):
+                    page.evaluate("(s) => document.getElementById(s).scrollIntoView({ block: 'center' })", sec_)
+                    g_ = page.evaluate("(s) => { const v = document.querySelector('#' + s + ' svg'); return [+v.dataset.x0, +v.dataset.x1, +v.getAttribute('width')]; }", sec_)
+                    box_ = page.locator(f"#{sec_} svg").bounding_box()
+                    x_ = g_[0] + (g_[1] - g_[0]) * ((i_ + (0.5 if half else 0)) / n_)
+                    page.mouse.move(box_["x"] + x_ * box_["width"] / g_[2], box_["y"] + box_["height"] * 0.45)
+                    return sd_n2(ana_until(page, "() => getComputedStyle(document.querySelector('#tip')).opacity === '1' && document.querySelector('#tip').innerText.includes(' UTC') && document.querySelector('#tip').innerText") or "")
+
+                def sd_srv_txt(F_, s_, valid_):
+                    v_ = F_.get(s_)
+                    if not v_ or not (v_.get("lm") or v_.get("seen")):
+                        return "not on record before 3 Nov 15:13 UTC" if s_ == "nomads" and valid_ < dt.datetime(2026, 11, 3, 15, 13, tzinfo=dt.timezone.utc) else "not on record"
+                    return ", ".join(x_ for x_ in ("published " + sd_clock(sd_at(v_["lm"]), True) if v_.get("lm") else "",
+                                                   "found " + sd_clock(sd_at(v_["seen"]), True) if v_.get("seen") else "") if x_)
+
+                def sd_counted(F_):
+                    if F_.get("counts") and F_.get("afterCut"):
+                        return "published after the cut-off, counted under the rule before 14 October 2026"
+                    return "counted" if F_.get("counts") else "published after the cut-off, not counted" if F_.get("afterCut") else "not counted"
+
+                def sd_tip_want(kind, r_, valid_):
+                    v_ = r_["rtma"]
+                    F_ = v_["pcpFile" if kind == "pcp" else "anlFile"]
+                    files = [f"NOAA Open Data\n{sd_srv_txt(F_, 'nodd', valid_)}", f"NOMADS\n{sd_srv_txt(F_, 'nomads', valid_)}",
+                             f"Copy used\n{SD_SRV[F_['src']]}, {sd_counted(F_)}", F_["name"]]
+                    if kind == "temp":
+                        return [f"As stored\n{v_['raw']['temp']} K", f"Converted\n{v_['x']['temp']} °F", f"Rounded\n{v_['show']['temp']} °F",
+                                f"Hourly contract\n{v_['hourly']['value']} °F, " + sd_htext(v_["hourly"], v_.get("anlFile")),
+                                f"High so far\n{v_['run']['high']['value']} °F {v_['runX']['high']}", f"Low so far\n{v_['run']['low']['value']} °F {v_['runX']['low']}"] + files
+                    if kind == "wind":
+                        return [f"Wind as stored\n{v_['raw']['wind']} m/s", f"Converted\n{v_['x']['wind']} mph", f"Rounded\n{v_['show']['wind']} mph",
+                                f"Gust as stored\n{v_['raw']['gust']} m/s", f"Converted\n{v_['x']['gust']} mph", f"Rounded\n{v_['show']['gust']} mph",
+                                f"Mean so far\n{v_['run']['wind']['value']} mph {v_['runX']['wind']}", f"Peak so far\n{v_['run']['gust']['value']} mph {v_['runX']['gust']}"] + files
+                    return [f"As stored\n{v_['raw']['precip']} mm", f"Converted\n{v_['x']['precip']} in", f"Rounded\n{v_['show']['precip']:.2f} in for display only",
+                            f"Total so far\n{v_['run']['precip']['value']:.2f} in {v_['runX']['precip']}", f"Hours in it\n{v_['run']['precip']['hours']}"] + files
+
+                SD_CSV_NAME = {"temp": "temperature", "wind": "wind", "pcp": "precipitation"}
+                for kind_, sec_, i_, what_ in (("temp", "anaTemp", 15, "the value as stored, converted and rounded, the hourly contract, the day so far and the file's times on each server"),
+                                               ("wind", "anaWind", 9, "the wind and the gust as stored, converted and rounded, the mean and the peak so far, and the file's times on each server"),
+                                               ("pcp", "anaPcp", 14, "the hour as stored, converted and rounded, the total so far, and the file's times on each server")):
+                    r_ = sd_rows[i_]
+                    valid_ = sd_at(r_["t"]) + (dt.timedelta(hours=1) if kind_ == "pcp" else dt.timedelta(0))
+                    tip_ = sd_tip(sec_, i_, len(sd_rows), half=kind_ == "pcp")
+                    want_ = sd_tip_want(kind_, r_, valid_)
+                    chk.add(f"{scheme} settlement display: the {SD_CSV_NAME[kind_]} hover gives {what_}",
+                            all(w_ in tip_ for w_ in want_), str([w_ for w_ in want_ if w_ not in tip_][:3]) + " in " + tip_[:200])
+                page.mouse.move(2, 2)
+                # one CSV file per value, for the whole place-day: its header, one
+                # row per hour, and every value and time the place file's own string
+                SD_CSV = {"temp": ("temperature", "K", "F", ["rounded", "counted", "hourly_resolution_value_state", "hourly_final_at",
+                                                            "high_so_far_unrounded", "high_so_far_rounded", "low_so_far_unrounded", "low_so_far_rounded"]),
+                          "wind": ("wind speed", "m/s", "mph", ["rounded", "counted", "mean_so_far_unrounded", "mean_so_far_rounded"]),
+                          "gust": ("wind gust", "m/s", "mph", ["rounded", "counted", "peak_so_far_unrounded", "peak_so_far_rounded"]),
+                          "precip": ("precipitation", "mm", "in", ["rounded_for_display", "counted", "total_so_far_unrounded", "total_so_far_rounded"])}
+                SD_HEAD = ["location_code", "location", "contract_date", "time_zone", "local_time", "valid_utc", "file", "copy_used",
+                           "nodd_first_found", "nodd_last_modified", "nomads_first_found", "nomads_last_modified",
+                           "stored_value", "stored_unit", "converted_unrounded", "unit"]
+                SD_SO = {"temp": [("high", "high"), ("low", "low")], "wind": [("wind", "wind")], "gust": [("gust", "gust")], "precip": [("precip", "precip")]}
+                SD_COUNT = {"counted": "yes", "published after the cut-off, not counted": "no, after the cut-off", "not counted": "no"}
+                import csv as _csv
+
+                def sd_csv(kind, doc_):
+                    page.evaluate("(k) => document.getElementById('anaCsv-' + k).scrollIntoView({ block: 'center' })", kind)
+                    with page.expect_download(timeout=10000) as dl_:
+                        page.click(f"#anaCsv-{kind}")
+                    with open(dl_.value.path(), encoding="utf-8") as fh_:
+                        rows_ = list(_csv.reader(fh_))
+                    name_, unit0, unit1, tail_ = SD_CSV[kind]
+                    pc_ = kind == "precip"
+                    bad_ = []
+                    code_ = ana_ny.get("code") or ""
+                    for i_, (r_, h_) in enumerate(zip(rows_[1:], doc_["hours"])):
+                        v_ = h_["rtma"] or {}
+                        F_ = v_.get("pcpFile" if pc_ else "anlFile") or {}
+                        has_ = v_.get(kind) is not None
+                        s_ = lambda srv_, f_: ((F_.get(srv_) or {}).get(f_) or "")
+                        valid_ = (sd_at(h_["t"]) + dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ") if pc_ else h_["t"]
+                        dec_ = 2 if pc_ else 0
+                        cnt_ = sd_counted(F_) if F_ else ("counted" if has_ else "")
+                        want_ = [code_, "New York, NY", doc_["day"], doc_["tz"], None, valid_, F_.get("name") or "", SD_SRV.get(F_.get("src"), "") if has_ else "",
+                                 s_("nodd", "seen"), s_("nodd", "lm"), s_("nomads", "seen"), s_("nomads", "lm"),
+                                 v_["raw"][kind] if has_ else "", unit0, v_["x"][kind] if has_ else "", unit1, f"{v_['show'][kind]:.{dec_}f}" if has_ else "",
+                                 SD_COUNT.get(cnt_, cnt_) if cnt_ else "not published"]
+                        if kind == "temp":
+                            hr_ = v_.get("hourly")
+                            want_ += [sd_htext(hr_, v_.get("anlFile")).replace("’", "'") if hr_ else "",
+                                      (hr_["at"] or (hr_["cut"] if hr_["basis"] == "norecord" else "")) if hr_ and hr_["state"] == "final" else ""]
+                        for a_, b_ in SD_SO[kind]:
+                            want_ += [v_["runX"][a_], f"{v_['run'][b_]['value']:.{dec_}f}"] if has_ else ["", ""]
+                        got_ = [sd_n2(c_) for c_ in r_]
+                        diff_ = [(j_, got_[j_] if j_ < len(got_) else None, w_) for j_, w_ in enumerate(want_) if w_ is not None and (j_ >= len(got_) or got_[j_] != w_)]
+                        # the local time with its UTC offset and zone, as the prototype writes it
+                        lt_ = sd_at(valid_).astimezone(sd_tz)
+                        if len(got_) <= 4 or got_[4] != lt_.strftime("%Y-%m-%d %H:%M ") + lt_.strftime("%z")[:3] + ":" + lt_.strftime("%z")[3:] + f" ({lt_.tzname()})":
+                            diff_.append((4, got_[4] if len(got_) > 4 else None, "local"))
+                        if len(got_) != len(SD_HEAD) + len(tail_):
+                            diff_.append(("width", len(got_), len(SD_HEAD) + len(tail_)))
+                        if diff_:
+                            bad_.append((i_, diff_[:2]))
+                    return {"name": dl_.value.suggested_filename, "head": rows_[0] if rows_ else [], "n": len(rows_) - 1, "bad": bad_,
+                            "want_name": f"{doc_['day']} {code_ or 'new-york-ny'} {name_}.csv", "want_head": SD_HEAD + tail_}
+
+                for kind_ in ("temp", "wind", "gust", "precip"):
+                    c_ = sd_csv(kind_, sd_doc)
+                    chk.add(f"{scheme} settlement display: the {SD_CSV[kind_][0]} CSV has its header, 24 rows and the place file's own strings in every row",
+                            c_["name"] == c_["want_name"] and c_["head"] == c_["want_head"] and c_["n"] == 24 == len(sd_rows) and not c_["bad"],
+                            str([c_["name"], c_["n"], c_["head"][-3:], c_["bad"][:2]])[:300])
                 # var= opens the place-day on that variable's chart
                 sd_vs = []
                 for var_, sec_ in (("precip", "anaPcp"), ("gust", "anaWind"), ("low", "anaTemp")):
-                    page.goto(f"{srv.url}/{ANA}?var={var_}&day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
-                    sd_vs.append(page.evaluate("""(id) => ({ id, top: Math.round(document.getElementById(id).getBoundingClientRect().top),
-                      y: Math.round(window.scrollY), url: location.search, on: (document.querySelector('#anaCards .anacard.on') || {}).dataset })""", sec_))
+                    ana_goto(page, f"?var={var_}&day={ana_day}&loc=new-york-ny", ANA_DAY)
+                    sd_vs.append(ana_until(page, """(id) => window.scrollY > 100 && ({ id, top: Math.round(document.getElementById(id).getBoundingClientRect().top),
+                      y: Math.round(window.scrollY), url: location.search })""", arg=sec_) or {"id": sec_, "top": -999, "y": 0, "url": ""})
                 chk.add(f"{scheme} settlement display: a link's var, day and loc open that place-day on that variable's chart",
                         all(-4 <= v_["top"] <= 40 and v_["y"] > 100 and f"var={w_}" in v_["url"] and f"day={ana_day}" in v_["url"]
                             and "loc=new-york-ny" in v_["url"] for v_, w_ in zip(sd_vs, ("precip", "gust", "low"))),
                         str([(v_["id"], v_["top"], v_["y"]) for v_ in sd_vs]))
+
+                # a place file in rowShape 2, as the lane wrote one before 14
+                # October, with no publication time: the day as it stands, every
+                # time not on record, the stored values left out, and no replay
+                def sd_shape2(d):
+                    d = json.loads(json.dumps(d))
+                    d["rowShape"] = 2
+                    for r_ in d.get("hours") or []:
+                        v_ = r_.get("rtma")
+                        if not v_:
+                            continue
+                        if v_.get("temp") is None and v_.get("precip") is None:
+                            r_["rtma"] = None
+                            continue
+                        for k_ in ("raw", "x", "runX", "anlFile", "pcpFile", "hourly", "settled", "pcpSettled", "lateCopy", "pcpLateCopy",
+                                   "pub", "pcpPub", "pubSrc", "pcpPubSrc"):
+                            v_.pop(k_, None)
+                    return d
+
+                sd_v2 = sd_shape2(sd_doc)
+                page.route(f"**/analysis2/loc/new-york-ny/{ana_day}.json*",
+                           lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(sd_v2)))
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                t2 = page.evaluate(sd_tab_js)
+                t2x = page.evaluate("""(js) => ({ cards: eval(js)(), slider: document.querySelector('#anaT').hidden,
+                  old: !document.querySelector('#anaOld').hidden && document.querySelector('#anaOld').textContent, html: document.documentElement.outerHTML })""", sd_cards_js)
+                page.evaluate("() => document.querySelector('#anaTemp').scrollIntoView({ block: 'center' })")
+                page.hover("#anaTemp svg", position={"x": 60, "y": 120})
+                sd_tip2 = sd_n2(ana_until(page, "() => getComputedStyle(document.querySelector('#tip')).opacity === '1' && document.querySelector('#tip').innerText") or "")
+                page.mouse.move(2, 2)
+                page.unroute(f"**/analysis2/loc/new-york-ny/{ana_day}.json*")
+                sd_html.append(t2x["html"])
+                chk.add(f"{scheme} settlement display: a rowShape 2 file with no publication times still draws the day as it stands, every time not on record and no replay",
+                        t2x["cards"] == sd_want and t2["n"] == sd_sum["of"] and all(a_ == "not on record" for a_ in t2["arr"])
+                        and all(h_[0] == "" for h_ in t2["hst"]) and t2x["slider"] and bool(t2x["old"]) and "no publication time on record" in t2x["old"],
+                        str([t2x["cards"][:1], t2["arr"][:2], t2x["slider"], t2x["old"]])[:240])
+                chk.add(f"{scheme} settlement display: the hover on a rowShape 2 file gives the rounded value, leaves the stored value out and says no file time is on record",
+                        "Rounded" in sd_tip2 and "As stored" not in sd_tip2 and sd_tip2.count("not on record") == 2 and "High so far" in sd_tip2
+                        and "Copy used" in sd_tip2, sd_tip2[:200])
                 # a place file written before the running values: the day as the
                 # file stands, the summary's values, no running total, no replay
                 def sd_strip(route):
-                    resp = route.fetch(); d = json.loads(resp.text())
+                    d = sd_shape2(sd_doc)
                     d.pop("rowShape", None)
                     for r_ in d.get("hours") or []:
-                        for k_ in ("show", "run", "pub", "pcpPub", "src", "pcpSrc"):
+                        for k_ in ("show", "run", "src", "pcpSrc"):
                             (r_.get("rtma") or {}).pop(k_, None)
-                    return route.fulfill(response=resp, body=json.dumps(d))
+                    return route.fulfill(status=200, content_type="application/json", body=json.dumps(d))
 
                 page.route(f"**/analysis2/loc/new-york-ny/{ana_day}.json*", sd_strip)
-                page.goto(f"{srv.url}/{ANA}?day={ana_day}&loc=new-york-ny"); page.wait_for_timeout(2200)
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
                 od = page.evaluate("""(js) => ({ cards: eval(js)(),
                   slider: document.querySelector('#anaT').hidden, note: !document.querySelector('#anaOld').hidden,
                   totals: [...new Set([...document.querySelectorAll('#anaHours td.ptotal')].map(e => e.textContent))],
@@ -1824,17 +2046,85 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} settlement display: a place file written before the running values still draws the day, with no running figures and no replay",
                         od["cards"] == sd_want and od["slider"] and od["note"] and od["rows"] == sd_sum["of"]
                         and od["totals"] == ["·"] and od["line"] == 0 and od["pill"] == "Final", str(od)[:240])
+                # ---- a rowShape 3 file made by hand from the samples
+                #      (ana_row_shape3), for what the samples do not hold: a NOMADS
+                #      copy, each basis of the hourly contract, a file counted under
+                #      the rule before 14 October, and an hour under review
+                with open(os.path.join(ANA_SNAP, "csv", ana_day + "-raw.csv")) as fh:
+                    sd_raw = [r_ for r_ in _csv.DictReader(fh) if r_["location"] == "new-york-ny" and r_["date"] == ana_day]
+                sd_v3 = ana_row_shape3(sd_v2, sd_raw)
+                sd_v3r = ana_row_shape3(sd_v2, sd_raw, review_row=13, review_late_row=16)
+                sd_serve = {"doc": sd_v3}
+                page.route(f"**/analysis2/loc/new-york-ny/{ana_day}.json*",
+                           lambda route: route.fulfill(status=200, content_type="application/json", body=json.dumps(sd_serve["doc"])))
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                sd_html.append(page.evaluate("() => document.documentElement.outerHTML"))
+                fx_rows = sd_v3["hours"]
+                fx_hw = [[w_, sd_n2(t_)] for w_, t_ in page.evaluate("() => [...document.querySelectorAll('#anaHours td.hst')].map(t => [t.textContent, t.title])")]
+                fx_want = [[SD_WORD[r_["rtma"]["hourly"]["basis"]], sd_htext(r_["rtma"]["hourly"], r_["rtma"]["anlFile"])] for r_ in fx_rows]
+                fx_b = {i_: fx_rows[i_]["rtma"]["hourly"] for i_ in (0, 6, 7, 10)}
+                chk.add(f"{scheme} settlement display: the hourly contract reads as each basis words it, NOMADS, NOMADS with Open Data's value, the hourly cut-off and NOMADS not on record",
+                        fx_hw == fx_want and [(h_["basis"], h_["src"]) for h_ in fx_b.values()] == [("nomads", "nomads"), ("nomads", "nodd"), ("cutoff", "nodd"), ("norecord", "nodd")]
+                        and fx_hw[6][1].endswith(". The value shown is NOAA Open Data’s copy.") and "identical" not in " ".join(t_ for _, t_ in fx_hw),
+                        str([(i_, fx_hw[i_][1][:70]) for i_ in fx_b]))
+                fx_t = sd_tip("anaTemp", 0, len(fx_rows))
+                fx_t_want = sd_tip_want("temp", fx_rows[0], sd_at(fx_rows[0]["t"]))
+                fx_p = sd_tip("anaPcp", len(fx_rows) - 1, len(fx_rows), half=True)
+                fx_p_want = sd_tip_want("pcp", fx_rows[-1], sd_at(fx_rows[-1]["t"]) + dt.timedelta(hours=1))
+                page.mouse.move(2, 2)
+                chk.add(f"{scheme} settlement display: the hover gives both servers' publication and first-found times and the copy used, when NOMADS has one",
+                        all(w_ in fx_t for w_ in fx_t_want) and "found " in fx_t and "NOMADS\npublished " in fx_t,
+                        str([w_ for w_ in fx_t_want if w_ not in fx_t][:3]) + " in " + fx_t[:160])
+                fx_c = [sd_csv("temp", sd_v3), sd_csv("precip", sd_v3)]
+                chk.add(f"{scheme} settlement display: a file published after the cut-off and counted under the rule before 14 October says so in the hover and the CSV, never as not counted",
+                        all(w_ in fx_p for w_ in fx_p_want) and "Copy used\nNOAA Open Data, published after the cut-off, counted under the rule before 14 October 2026" in fx_p
+                        and "not counted" not in fx_p and fx_rows[-1]["rtma"]["pcpFile"]["afterCut"] and not fx_c[1]["bad"] and not fx_c[0]["bad"]
+                        and fx_c[0]["n"] == fx_c[1]["n"] == 24, str([[w_ for w_ in fx_p_want if w_ not in fx_p][:2], fx_c[0]["bad"][:1], fx_c[1]["bad"][:1]])[:300])
+                # an hour with no file by its hourly cut-off: provisional before
+                # the cut, under review from it, in the table, the hover and the CSV
+                sd_serve["doc"] = sd_v3r
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                fx_h13 = sd_v3r["hours"][13]["rtma"]["hourly"]
+                fx_rv_txt = sd_htext(fx_h13)
+                fx_rv = page.evaluate("() => { const t = [...document.querySelectorAll('#anaHours tbody tr')][13]; return [t.querySelector('td.hst').textContent, t.querySelector('td.hst').title, t.querySelectorAll('td')[2].textContent]; }")
+                tip_r = sd_tip("anaTemp", 13, len(fx_rows))
+                page.mouse.move(2, 2)
+                c_r = sd_csv("temp", sd_v3r)
+                # an hour NOAA Open Data published after its hourly cut-off, in time
+                # for the day, with NOMADS's copy not on record (a file read before
+                # both servers were, as for 2026-09-23 at 23Z)
+                fx_h16 = sd_v3r["hours"][16]["rtma"]
+                fx_l_txt = sd_htext(fx_h16["hourly"], fx_h16["anlFile"])
+                fx_l = page.evaluate("() => { const t = [...document.querySelectorAll('#anaHours tbody tr')][16]; return [t.querySelector('td.hst').textContent, t.querySelector('td.hst').title, t.querySelectorAll('td')[2].textContent]; }")
+                tip_l = sd_tip("anaTemp", 16, len(fx_rows))
+                page.mouse.move(2, 2)
+                page.evaluate("(ms) => { const r = document.querySelector('#anaT'); r.value = String(ms); r.dispatchEvent(new Event('input')); }",
+                              int((sd_at(fx_h13["cut"]) - dt.timedelta(minutes=30)).timestamp() * 1000))
+                fx_rv0 = ana_until(page, "() => { const t = [...document.querySelectorAll('#anaHours tbody tr')][13].querySelector('td.hst'); return t.dataset.state === 'provisional' && [t.textContent, t.title]; }") or ["", ""]
+                sd_html.append(page.evaluate("() => document.documentElement.outerHTML"))
+                page.unroute(f"**/analysis2/loc/new-york-ny/{ana_day}.json*")
+                chk.add(f"{scheme} settlement display: an hour with no file by its hourly cut-off is under review from the cut, provisional before it, in the table, the hover and the CSV",
+                        fx_rv[0] == "under review" and sd_n2(fx_rv[1]) == fx_rv_txt and fx_rv[2] == "·" and ("Hourly contract\n" + fx_rv_txt) in tip_r
+                        and "Not published by the cut-off." in tip_r and "For the day\nnot counted" in tip_r
+                        and fx_rv0[0] == "provisional" and sd_n2(fx_rv0[1]) == sd_htext(dict(fx_h13, state="provisional"))
+                        and not c_r["bad"] and c_r["n"] == 24, str([fx_rv, fx_rv0, tip_r[-160:], c_r["bad"][:1]])[:300])
+                chk.add(f"{scheme} settlement display: an hour NOAA Open Data published after its hourly cut-off, with NOMADS's copy not on record, says so under review in the table, the hover and the CSV",
+                        fx_h16["hourly"]["basis"] == "norecord" and fx_h16["hourly"]["state"] == "review"
+                        and fx_l_txt.startswith("no value: NOAA Open Data published it after the hourly cut-off, ") and fx_l_txt.endswith(", and NOMADS’s copy is not on record. Under review.")
+                        and fx_l[0] == "under review" and sd_n2(fx_l[1]) == fx_l_txt and fx_l[2] == str(fx_h16["show"]["temp"])
+                        and ("Hourly contract\n" + fx_l_txt) in tip_l and not c_r["bad"],
+                        str([fx_l, tip_l[-200:], fx_l_txt])[:300])
                 # the fixtures' live day, under a fixed clock: the next analysis is
                 # the first hour with nothing read, and the next accumulation the
-                # hour before it, whose rain the lane reads with that analysis
+                # hour before it
                 ana_live = next((d_ for d_ in reversed(ana_days)
                                  if not ((ana_entries.get(d_) or {}).get("rtma") or {}).get("final")), None)
                 lv_rows = []
                 if ana_live:
                     with open(os.path.join(ANA_SNAP, "loc", "new-york-ny", ana_live + ".json")) as fh:
                         lv_rows = json.load(fh)["hours"]
-                lv_ka = next((i_ for i_, r_ in enumerate(lv_rows) if r_["rtma"] is None), None)
-                lv_kp = next((i_ for i_, r_ in enumerate(lv_rows) if not r_["rtma"] or r_["rtma"]["precip"] is None), None)
+                lv_ka = next((i_ for i_, r_ in enumerate(lv_rows) if not r_["rtma"] or r_["rtma"].get("temp") is None), None)
+                lv_kp = next((i_ for i_, r_ in enumerate(lv_rows) if not r_["rtma"] or r_["rtma"].get("precip") is None), None)
                 chk.add(f"{scheme} settlement display fixtures: a live New York day whose next accumulation is the hour before its next analysis",
                         lv_ka is not None and lv_kp == lv_ka - 1, str([ana_live, lv_ka, lv_kp]))
                 if lv_ka is not None and lv_kp == lv_ka - 1:
@@ -1850,17 +2140,22 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                (t_a + dt.timedelta(minutes=50), ("due", "due now"), ("late", "late")),
                                (t_a + dt.timedelta(minutes=55), ("late", "late"), ("late", "late")),
                                (lv_cut + dt.timedelta(minutes=15), ("missed", "missed"), ("missed", "missed"))]
+                    lv_due = """() => Object.fromEntries([...document.querySelectorAll('#anaNext .anadue')].map(d =>
+                      [d.dataset.kind, [d.dataset.state, (d.querySelector('.cd') || {}).textContent || '']]))"""
                     lv = fixture_page(moments[0][0])
-                    lv.goto(lv_url); lv.wait_for_timeout(2200)
+                    lv.goto(lv_url)
+                    ana_until(lv, "() => document.querySelectorAll('#anaNext .anadue').length === 2")
                     seen_states, ax = [], None
                     for at_, want_a, want_p in moments:
                         if at_ != moments[0][0]:
-                            lv.context.clock.set_fixed_time(at_); lv.wait_for_timeout(2000)
-                        got_ = lv.evaluate("""() => Object.fromEntries([...document.querySelectorAll('#anaNext .anadue')].map(d =>
-                          [d.dataset.kind, [d.dataset.state, (d.querySelector('.cd') || {}).textContent || '']]))""")
+                            lv.context.clock.set_fixed_time(at_)
+                        # the countdowns tick once a second, so the read waits for both to show the moment
+                        ana_until(lv, "(w) => { const g = (" + lv_due + ")(); return JSON.stringify([g.anl, g.pcp]) === JSON.stringify(w); }", ms=4000,
+                                  arg=[list(want_a), list(want_p)])
+                        got_ = lv.evaluate(lv_due)
                         seen_states.append((at_.strftime("%H:%M:%S"), got_.get("anl"), got_.get("pcp"), list(want_a), list(want_p)))
                         if at_ == moments[2][0]:
-                            # the three charts at 4:30 PM: one axis, one now line, the hours to come shaded
+                            # the three charts at half past: one axis, one now line, the hours to come shaded
                             ax = lv.evaluate("""() => [...document.querySelectorAll('#anaSettle svg.anasvg')].map(s => ({
                               id: s.closest('section').id, x0: s.dataset.x0, x1: s.dataset.x1,
                               now: [...s.querySelectorAll('line.now')].map(l => l.getAttribute('x1')),
@@ -1869,12 +2164,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                               lab: (s.querySelector('text.nowlab') || {}).textContent || '',
                               marks: ['circle.mkhi', 'circle.mklo', 'line.meanline', 'circle.mkpk', 'path.runline'].filter(q => s.querySelector(q)) }))""")
                             lv_cards = lv.evaluate(sd_cards_js)
+                    sd_html.append(lv.evaluate("() => document.documentElement.outerHTML"))
                     chk.add(f"{scheme} settlement display: the countdowns pass through counting down, due now, late and missed",
                             all(a_ == wa_ and p_ == wp_ for _, a_, p_, wa_, wp_ in seen_states), str(seen_states)[:300])
                     ax_ok = bool(ax) and [a_["id"] for a_ in ax] == ["anaTemp", "anaWind", "anaPcp"] \
                         and len({a_["x0"] for a_ in ax}) == 1 and len({a_["x1"] for a_ in ax}) == 1 \
                         and all(len(a_["now"]) == 1 and a_["now"] == ax[0]["now"] and a_["fut"] == a_["now"] and a_["due"] == 1
-                                and a_["lab"] == sd_clock(moments[2][0]) for a_ in ax) \
+                                and sd_n2(a_["lab"]) == sd_clock(moments[2][0]) for a_ in ax) \
                         and ax[0]["marks"] == ["circle.mkhi", "circle.mklo"] and ax[1]["marks"] == ["line.meanline", "circle.mkpk"] \
                         and ax[2]["marks"] == ["path.runline"]
                     chk.add(f"{scheme} settlement display: the three charts share one time axis and one now line, with the hours to come shaded",
@@ -1900,10 +2196,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         return route.fulfill(response=resp, body=json.dumps(d))
 
                     rf.route(f"**/analysis2/loc/new-york-ny/{ana_live}.json*", rf_route)
-                    rf.goto(lv_url); rf.wait_for_timeout(2200)
-                    rf0 = rf.evaluate("() => document.querySelector('#anaStatus').textContent")
-                    rf.clock.run_for(61000); rf.wait_for_timeout(1500); rf.clock.run_for(2000); rf.wait_for_timeout(500)
-                    rf1 = rf.evaluate("() => document.querySelector('#anaStatus').textContent")
+                    rf.goto(lv_url)
+                    rf0 = ana_until(rf, "() => { const s = document.querySelector('#anaStatus'); return s && / of \\d+ hours/.test(s.textContent) && s.textContent; }") or ""
+                    rf.clock.run_for(61000)
+                    rf1 = ana_until(rf, "(w) => { const s = document.querySelector('#anaStatus').textContent; return s.includes(w) && s; }", ms=5000, arg=f"{lv_ka} of ") or ""
                     chk.add(f"{scheme} settlement display: inside an arrival window the place file is fetched again with ?b= and the day fills in without a reload",
                             f"{lv_ka - 1} of " in rf0 and f"{lv_ka} of " in rf1 and any("?b=" in u_ for u_ in rf_seen),
                             str([rf0[:50], rf1[:50], rf_seen]))
@@ -1911,10 +2207,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
 
                     # late means not in yet. The accumulation's late note gives NOAA's
                     # usual time and the cut-off and says nothing of the next analysis,
-                    # which the lane no longer waits for, and outside the arrival
-                    # windows a countdown that reads late keeps the place file fetched
-                    # each minute for half an hour past its usual time and no longer
-                    # (CHASE in js/analysis-settle.js)
+                    # and outside the arrival windows a countdown that reads late keeps
+                    # the place file fetched each minute for half an hour past its
+                    # usual time and no longer (CHASE in js/analysis-settle.js)
                     def late_page(at_, strip):
                         c_ = browser.new_context(color_scheme=scheme, viewport={"width": 1200, "height": 900})
                         c_.clock.install(time=at_)
@@ -1932,7 +2227,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             return route.fulfill(response=resp, body=json.dumps(d))
 
                         p_.route(f"**/analysis2/loc/new-york-ny/{ana_live}.json*", route_)
-                        p_.goto(lv_url); p_.wait_for_timeout(2200)
+                        p_.goto(lv_url)
+                        ana_until(p_, "() => document.querySelectorAll('#anaNext .anadue').length === 2")
                         return c_, p_, seen_
 
                     # half past the hour, outside both windows, the accumulation of the
@@ -1941,8 +2237,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     lt0 = lt.evaluate("""() => { const p = document.querySelector('#anaNext .anadue[data-kind="pcp"]');
                       return { status: document.querySelector('#anaStatus').textContent, state: p ? p.dataset.state : '',
                                note: p ? p.querySelector('.ananote').textContent : '' }; }""")
-                    lt.clock.run_for(61000); lt.wait_for_timeout(1500); lt.clock.run_for(2000); lt.wait_for_timeout(500)
-                    lt1 = lt.evaluate("() => document.querySelector('#anaStatus').textContent")
+                    lt.clock.run_for(61000)
+                    lt1 = ana_until(lt, "(w) => { const s = document.querySelector('#anaStatus').textContent; return s.includes(w) && s; }", ms=5000, arg=f"{lv_ka} of ") or ""
                     lt_ctx.close()
                     chk.add(f"{scheme} settlement display: a late accumulation's note gives NOAA's usual time and the cut-off, and nothing of the next analysis",
                             lt0["state"] == "late" and lt0["note"].startswith("Usually published by ")
@@ -1952,225 +2248,20 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             f"{lv_ka - 1} of " in lt0["status"] and f"{lv_ka} of " in lt1 and any("?b=" in u_ for u_ in lt_seen),
                             str([lt0["status"][:50], lt1[:50], lt_seen]))
                     # half past the next hour both countdowns have read late for more
-                    # than half an hour, so outside the windows nothing is fetched
+                    # than half an hour, so outside the windows nothing is fetched;
+                    # two minutes pass, and the wait is for nothing to happen
                     lq_ctx, lq, lq_seen = late_page(t_a + dt.timedelta(minutes=90), False)
                     lq.clock.run_for(61000); lq.wait_for_timeout(1500); lq.clock.run_for(61000); lq.wait_for_timeout(500)
                     lq_states = lq.evaluate("() => [...document.querySelectorAll('#anaNext .anadue')].map(d => d.dataset.state)")
                     lq_ctx.close()
                     chk.add(f"{scheme} settlement display: past half an hour late, outside the windows, the place file is not fetched again",
                             lq_states == ["late", "late"] and not any("?b=" in u_ for u_ in lq_seen), str([lq_states, lq_seen]))
-                # ---- cell mode (docs/analysis.md section 6): at the national
-                #      extent no cell is outlined; Zoom to the cell on New York
-                #      outlines its resolving cell in the ink, floats the dot's
-                #      value in a label with a leader, hides the raster and says
-                #      so, draws the 441 window cells of the one fixture frame
-                #      that carries windows, answers hover with i, j and the
-                #      value, and writes the view into the address; a frame
-                #      routed without windows keeps the outline and the label.
-                #      The frame with windows is found in the fixtures, not named.
-                ana_wf = None
-                for fn_ in sorted(os.listdir(os.path.join(ANA_SNAP, "grid", "rtma", "temp"))):
-                    with open(os.path.join(ANA_SNAP, "grid", "rtma", "temp", fn_)) as fh:
-                        if "new-york-ny" in (json.load(fh).get("windows") or {}):
-                            ana_wf = fn_
-                chk.add(f"{scheme} analysis fixtures: an RTMA temperature frame with windows", ana_wf is not None, str(ana_wf))
-                ana_wday = f"{ana_wf[:4]}-{ana_wf[4:6]}-{ana_wf[6:8]}" if ana_wf else ana_fday
-                ana_whh = ana_wf[9:11] if ana_wf else ana_hours[1]
-                ana_ny = next((L_ for L_ in ana_index["locations"] if L_["id"] == "new-york-ny"), {})
-                ana_ij = (ana_ny.get("cell") or {}).get("wexp") or [None, None]
-                ana_cell_state = """() => {
-                  const ny = document.querySelector('#vdots g.dot[data-loc="new-york-ny"]');
-                  const img = document.querySelector('#anaFrame');
-                  const out = ny && ny.querySelector('path.rcell');
-                  const lbl = ny && ny.querySelector('g.anacl text');
-                  return { outlines: document.querySelectorAll('#vdots path.rcell').length,
-                           stroke: out ? out.getAttribute('stroke') : '', sw: out ? out.getAttribute('stroke-width') : '',
-                           ve: out ? out.getAttribute('vector-effect') : '',
-                           label: lbl ? lbl.textContent : '', leaders: ny ? ny.querySelectorAll('line.analead').length : 0,
-                           posdot: ny ? ny.querySelectorAll('circle.posdot').length : 0,
-                           hidden: img.style.display === 'none', href: (img.getAttribute('href') || '').slice(0, 14),
-                           cap: document.querySelector('#anaCap').textContent,
-                           wcells: document.querySelectorAll('#vcells g.wwin[data-loc="new-york-ny"] path.wcell').length,
-                           dotval: (ny && ny.querySelector('text.anaval')) ? ny.querySelector('text.anaval').textContent : '',
-                           dotfill: (ny && ny.querySelector('text.anaval')) ? getComputedStyle(ny.querySelector('text.anaval')).fill : '',
-                           ink: getComputedStyle(document.documentElement).getPropertyValue('--ink').trim(),
-                           vb: document.querySelector('#vmap').getAttribute('viewBox'),
-                           readout: document.querySelector('#anaZoomLevel').textContent,
-                           zbtn: document.querySelector('#anaZoomCell').disabled, url: location.search };
-                }"""
-                page.goto(f"{srv.url}/{ANA}?var=high&day={ana_wday}&hour={ana_whh}&loc=new-york-ny"); page.wait_for_timeout(2200)
-                z0 = page.evaluate(ana_cell_state)
-                hex_ = lambda c: "rgb(%d, %d, %d)" % tuple(int(c.lstrip("#")[k:k + 2], 16) for k in (0, 2, 4)) if c.startswith("#") else c
-                chk.add(f"{scheme} analysis cell mode: at the national extent no cell is outlined and the dot value is in the ink",
-                        z0["outlines"] == 0 and not z0["hidden"] and z0["href"] == "data:image/png" and z0["dotval"] != ""
-                        and z0["dotfill"] == hex_(z0["ink"]) and z0["zbtn"] is False, str([z0["outlines"], z0["dotval"], z0["dotfill"], z0["ink"]]))
-                page.click("#anaZoomCell"); page.wait_for_timeout(600)
-                z1 = page.evaluate(ana_cell_state)
-                chk.add(f"{scheme} analysis cell mode: Zoom to the cell outlines the resolving cell with the dark cell line at a fixed 2 px",
-                        z1["outlines"] >= 1 and z1["stroke"] == "var(--cell-line)" and z1["sw"] == "2" and z1["ve"] == "non-scaling-stroke",
-                        str([z1["outlines"], z1["stroke"], z1["sw"], z1["ve"]]))
-                chk.add(f"{scheme} analysis cell mode: the label carries the dot's value with a leader and the position dot",
-                        z1["label"] == z0["dotval"] and z1["leaders"] == 1 and z1["posdot"] == 1, str([z1["label"], z0["dotval"], z1["leaders"]]))
-                chk.add(f"{scheme} analysis cell mode: the raster is hidden and the caption says so",
-                        z1["hidden"] and "hidden at this zoom" in z1["cap"], z1["cap"][-90:])
-                chk.add(f"{scheme} analysis cell mode: the picked place's window draws 441 cells",
-                        z1["wcells"] == 441, str(z1["wcells"]))
-                ana_zm = re.search(r"z=([\d.]+)&cx=([\d.]+)&cy=([\d.]+)", z1["url"])
-                ana_vbw = float(z1["vb"].split()[2]) if z1["vb"] else 0
-                chk.add(f"{scheme} analysis cell mode: the address carries z, cx and cy that match the view",
-                        ana_zm is not None and abs(960 / float(ana_zm.group(1)) - ana_vbw) < 0.6 and "loc=new-york-ny" in z1["url"],
-                        str([z1["url"], z1["vb"]]))
-                # the cell is about 30 screen px wide after the button
-                ana_cw = page.evaluate("""() => { const p = document.querySelector('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="0"][data-b="0"]');
-                  return p ? p.getBoundingClientRect().width : 0; }""")
-                chk.add(f"{scheme} analysis cell mode: the picked cell is about 30 px wide", 24 <= ana_cw <= 40, str(round(ana_cw, 1)))
-                page.hover('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="3"][data-b="-2"]'); page.wait_for_timeout(300)
-                ana_wtip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
-                chk.add(f"{scheme} analysis cell mode: hover on a window cell reports its i, j and the value with its unit",
-                        ana_ij[0] is not None and f"i {ana_ij[0] + 3}, j {ana_ij[1] - 2}" in ana_wtip and "New York" in ana_wtip
-                        and re.search(r"-?\d+\.\d+°F", ana_wtip) is not None, ana_wtip[:120])
-                # hover on the mark reads the resolving cell, with no row about
-                # the hidden field (the cell is what is under the pointer)
-                page.hover('#vdots g.dot[data-loc="new-york-ny"] circle.posdot'); page.wait_for_timeout(300)
-                ana_mtip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
-                chk.add(f"{scheme} analysis cell mode: hover on the mark reports the resolving cell and drops the hidden-field row",
-                        ana_ij[0] is not None and f"i {ana_ij[0]}, j {ana_ij[1]}" in ana_mtip and "Lattice field" not in ana_mtip, ana_mtip[:120])
-                # A CLICK WHILE ZOOMED. The pan used to take pointer capture on
-                # pointerdown, and Chromium then delivered every click to the
-                # svg, so nothing under the pointer opened once the map was
-                # zoomed. The panel is closed, the pointer is put on a window
-                # cell (elementFromPoint proves the cell is what it reaches)
-                # and a plain click has to open the place. Then the label.
-                ana_hit = """(sel) => {
-                  const e = document.querySelector(sel); if (!e) return null;
-                  const r = e.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2;
-                  const t = document.elementFromPoint(x, y);
-                  return { x, y, hit: !!(t && (t === e || e.contains(t))), under: t ? t.tagName + '.' + (t.getAttribute('class') || '') : null };
-                }"""
-                ana_open = "() => ({ hidden: document.querySelector('#locPanel').hidden, url: location.search, vb: document.querySelector('#vmap').getAttribute('viewBox') })"
-                for what, sel in (("a window cell", '#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="4"][data-b="3"]'),
-                                  ("the label", '#vdots g.dot[data-loc="new-york-ny"] g.anacl rect')):
-                    page.click("#locPanel button[title='close the panel']"); page.wait_for_timeout(200)
-                    page.evaluate("() => window.scrollTo(0, 0)"); page.wait_for_timeout(200)
-                    c0 = page.evaluate(ana_open)
-                    ht = page.evaluate(ana_hit, sel)
-                    if ht: page.mouse.click(ht["x"], ht["y"]); page.wait_for_timeout(500)
-                    c1 = page.evaluate(ana_open)
-                    chk.add(f"{scheme} analysis cell mode: while zoomed, a click on {what} opens the panel and puts loc= in the address",
-                            bool(ht and ht["hit"]) and c0["hidden"] and "loc=" not in c0["url"] and not c1["hidden"] and "loc=new-york-ny" in c1["url"],
-                            str([ht, c0["url"], c1["url"]]))
-                # and a drag that ends over a window cell pans and opens nothing
-                page.click("#locPanel button[title='close the panel']"); page.wait_for_timeout(200)
-                page.evaluate("() => window.scrollTo(0, 0)"); page.wait_for_timeout(200)
-                ht = page.evaluate(ana_hit, '#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="4"][data-b="3"]')
-                d0 = page.evaluate(ana_open)
-                if ht:
-                    page.mouse.move(ht["x"], ht["y"]); page.mouse.down()
-                    for k_ in range(1, 6): page.mouse.move(ht["x"] + 8 * k_, ht["y"] + 4 * k_)
-                    page.mouse.up(); page.wait_for_timeout(500)
-                d1 = page.evaluate(ana_open)
-                chk.add(f"{scheme} analysis cell mode: a drag that ends over a window cell pans the view and opens nothing",
-                        bool(ht) and d1["hidden"] and "loc=" not in d1["url"] and d1["vb"] != d0["vb"], str([d0["vb"], d1["vb"], d1["url"]]))
-                # the view comes back from the address on load
-                page.goto(f"{srv.url}/{ANA}{z1['url']}"); page.wait_for_timeout(2200)
-                z2 = page.evaluate(ana_cell_state)
-                # the address carries a tenth of a unit, so the restored view
-                # is the same to a tenth, not to the viewBox's third decimal
-                ana_vbs = [[float(t) for t in (v_ or "0 0 0 0").split()] for v_ in (z1["vb"], z2["vb"])]
-                chk.add(f"{scheme} analysis cell mode: a zoomed address restores the view and cell mode on load",
-                        all(abs(a_ - b_) <= 0.15 for a_, b_ in zip(*ana_vbs)) and z2["outlines"] >= 1 and z2["wcells"] == 441 and z2["hidden"],
-                        str([z2["vb"], z1["vb"], z2["wcells"]]))
-                chk.add(f"{scheme} analysis cell mode: the zoom readout names the restored zoom, not the whole country",
-                        z2["readout"].endswith("×") and z2["readout"] != "whole country" and z2["readout"] == z1["readout"], str([z2["readout"], z1["readout"]]))
-                # an index entry without the geometry keys keeps its plain dot
-                # in cell mode, with Zoom to the cell disabled for it
-                def ana_nokeys(route):
-                    resp = route.fetch(); d = json.loads(resp.text())
-                    for L_ in d.get("locations") or []:
-                        if L_["id"] == "new-york-ny":
-                            for k_ in list((L_.get("cell") or {}).keys()):
-                                if k_.endswith("Px") or k_.endswith("Box") or k_.endswith("Basis"): L_["cell"].pop(k_)
-                    return route.fulfill(response=resp, body=json.dumps(d))
-
-                page.route("**/analysis2/index.json", ana_nokeys)
-                page.goto(f"{srv.url}/{ANA}{z1['url']}"); page.wait_for_timeout(2200)
-                zk = page.evaluate(ana_cell_state)
-                page.unroute("**/analysis2/index.json")
-                chk.add(f"{scheme} analysis cell mode: a place without the geometry keys keeps its plain dot and value in cell mode",
-                        zk["hidden"] and zk["posdot"] == 0 and zk["label"] == "" and zk["dotval"] == z0["dotval"] and zk["wcells"] == 0
-                        and zk["outlines"] >= 1 and zk["zbtn"] is True, str([zk["dotval"], zk["posdot"], zk["outlines"], zk["zbtn"]]))
-                # a dry precipitation window: every zero cell is drawn clear
-                # and still answers hover with 0.00 in, a null cell inside the
-                # grid says it is missing, and the caption says dry cells are
-                # left clear. The fixture frame is routed to all zeros with
-                # one null at (3, -2).
-                ana_pf = None
-                ana_pdir = os.path.join(ANA_SNAP, "grid", "rtma", "precip")
-                for fn_ in sorted(os.listdir(ana_pdir)) if os.path.isdir(ana_pdir) else []:
-                    with open(os.path.join(ana_pdir, fn_)) as fh:
-                        if "new-york-ny" in (json.load(fh).get("windows") or {}):
-                            ana_pf = fn_
-                chk.add(f"{scheme} analysis fixtures: an RTMA precipitation frame with a New York window", ana_pf is not None, str(ana_pf))
-                if ana_pf:
-                    def ana_dry(route):
-                        resp = route.fetch(); d = json.loads(resp.text())
-                        w_ = d["windows"]["new-york-ny"]; half_ = w_.get("half", 10); n_ = 2 * half_ + 1
-                        w_["values"] = [0] * (n_ * n_)
-                        w_["values"][(-2 + half_) * n_ + (3 + half_)] = None
-                        return route.fulfill(response=resp, body=json.dumps(d))
-
-                    page.route(f"**/analysis2/grid/rtma/precip/{ana_pf}", ana_dry)
-                    page.goto(f"{srv.url}/{ANA}?var=precip&day={ana_pf[:4]}-{ana_pf[4:6]}-{ana_pf[6:8]}&hour={ana_pf[9:11]}&loc=new-york-ny")
-                    page.wait_for_timeout(2200)
-                    page.click("#anaZoomCell"); page.wait_for_timeout(600)
-                    page.unroute(f"**/analysis2/grid/rtma/precip/{ana_pf}")
-                    zd = page.evaluate("""() => ({ cells: document.querySelectorAll('#vcells g.wwin[data-loc="new-york-ny"] path.wcell').length,
-                      clear: document.querySelectorAll('#vcells g.wwin[data-loc="new-york-ny"] path.wcell.clear').length,
-                      fill: (document.querySelector('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="0"][data-b="5"]') || {}).getAttribute('fill'),
-                      cap: document.querySelector('#anaCap').textContent })""")
-                    page.hover('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="0"][data-b="5"]'); page.wait_for_timeout(300)
-                    ana_dtip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
-                    page.hover('#vcells g.wwin[data-loc="new-york-ny"] path.wcell[data-a="3"][data-b="-2"]'); page.wait_for_timeout(300)
-                    ana_ntip = page.evaluate("() => (document.querySelector('#tip') || {}).textContent || ''")
-                    chk.add(f"{scheme} analysis cell mode: a dry window draws its 441 cells clear and the caption says dry cells are left clear",
-                            zd["cells"] == 441 and zd["clear"] == 441 and zd["fill"] == "transparent" and "dry cells left clear" in zd["cap"], str(zd)[:160])
-                    chk.add(f"{scheme} analysis cell mode: hover on a dry cell says 0.00 in and on a null cell inside the grid says missing in this hour",
-                            "0.00 in" in ana_dtip and "missing in this hour" in ana_ntip and "off the grid" not in ana_ntip, str([ana_dtip[:80], ana_ntip[:80]]))
-                # the frame routed without windows: the outline and the label
-                # stay, no window cells
-                def ana_nowin(route):
-                    resp = route.fetch(); d = json.loads(resp.text())
-                    d.pop("windows", None)
-                    return route.fulfill(response=resp, body=json.dumps(d))
-
-                page.route(f"**/analysis2/grid/rtma/temp/{ana_wf}", ana_nowin)
-                page.goto(f"{srv.url}/{ANA}{z1['url']}"); page.wait_for_timeout(2200)
-                z3 = page.evaluate(ana_cell_state)
-                page.unroute(f"**/analysis2/grid/rtma/temp/{ana_wf}")
-                chk.add(f"{scheme} analysis cell mode: a frame without windows still draws the outline and the label, with no window cells",
-                        z3["outlines"] >= 1 and z3["label"] == z0["dotval"] and z3["wcells"] == 0 and z3["hidden"], str([z3["outlines"], z3["label"], z3["wcells"]]))
-                # Reset brings the raster and the dots back
-                page.click("#anaZoom button[title='back to the whole country']"); page.wait_for_timeout(600)
-                z4 = page.evaluate(ana_cell_state)
-                chk.add(f"{scheme} analysis cell mode: Reset returns the raster and the dots and clears the view from the address",
-                        z4["outlines"] == 0 and not z4["hidden"] and z4["dotval"] == z0["dotval"] and "z=" not in z4["url"], str([z4["outlines"], z4["url"]]))
-                # the tooltip is hidden when the wheel carries the map into cell
-                # mode, rather than keeping the lattice value from before the flip.
-                # The open place's settlement display sits above the map, so the
-                # map is brought into view rather than the top of the page
-                page.evaluate("() => document.querySelector('#vmap').scrollIntoView({ block: 'center' })"); page.wait_for_timeout(200)
-                ht = page.evaluate(ana_hit, '#vdots g.dot[data-loc="new-york-ny"] circle:last-of-type')
-                if ht:
-                    page.mouse.move(ht["x"], ht["y"]); page.wait_for_timeout(200)
-                    t_on = page.evaluate("() => getComputedStyle(document.querySelector('#tip')).opacity")
-                    for k_ in range(30):
-                        page.mouse.wheel(0, -100); page.wait_for_timeout(30)
-                        if page.evaluate("() => document.querySelector('#anaFrame').style.display === 'none'"): break
-                    page.wait_for_timeout(400)
-                    t_off = page.evaluate("() => [getComputedStyle(document.querySelector('#tip')).opacity, document.querySelector('#anaFrame').style.display === 'none']")
-                    chk.add(f"{scheme} analysis cell mode: the tooltip is hidden when the wheel flips the map into cell mode",
-                            t_on == "1" and t_off[0] == "0" and t_off[1], str([t_on, t_off]))
-                # every check above, the calendar, the place map and the switch
+                # no time is estimated anywhere: no ≈ on the samples' final day, on
+                # the rowShape 3 file, on its review hour or on the live day
+                chk.add(f"{scheme} settlement display: no estimated time, and no ≈, anywhere on the page",
+                        len(sd_html) >= 3 and not any("≈" in h_ for h_ in sd_html) and not any("estimated" in h_.lower() for h_ in sd_html),
+                        str([("≈" in h_, "estimated" in h_.lower()) for h_ in sd_html]))
+                # every check above, the calendar, the map, the box and the switch
                 # included, ran without a console error on the page
                 chk.add(f"{scheme} analysis: no console error on the page through the checks above", errs[ana_e0:] == [], "; ".join(errs[ana_e0:])[:300])
                 # the built head of an unlisted page: no canonical link and no
@@ -2187,10 +2278,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 ana_page = ana_ctx.new_page()
                 ana_errs = errors_of(ana_page)
                 ana_page.route("**/data/**", lambda route: route.fulfill(status=503, body="outage"))
-                ana_page.goto(f"{srv.url}/{ANA}"); ana_page.wait_for_timeout(1200)
+                ana_page.goto(f"{srv.url}/{ANA}")
+                ana_until(ana_page, "() => /No data/.test((document.querySelector('.status') || {}).textContent || '') && document.querySelector('#anaPickers').textContent.length > 0")
                 ana_status = ana_page.locator(".status").first.inner_text() if ana_page.locator(".status").count() else ""
                 chk.add(f"{scheme} analysis: the 503 degradation shows no data and keeps the statement",
-                        "No data" in ana_status and "No contract settles on it" in ana_page.locator("#anaMap").inner_text()
+                        "No data" in ana_status and "No contract settles on it" in ana_page.locator("#anaPickers").inner_text()
                         and not ana_errs, ana_status[:60] + " " + "; ".join(ana_errs)[:100])
                 ana_ctx.close()
 

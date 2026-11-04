@@ -139,3 +139,15 @@ tests/test_advisories.py reads it through pipeline/advisories.py, and edits its 
 to stand in for other advisories.
 
 SHA-256 `380c6a4138226e4697c5245b6aa14d2c48180acc1ee8a3593564efd524cd3674`.
+
+## analysis_v2_day.json.gz (13,971 bytes)
+
+The analysis lane's files of 2026-09-26 at three places (New York, Chicago, Los Angeles) as the
+lane wrote them at commit 9893f97, before rowShape 3: the day file, the raw and processed CSV
+files and the three place files, as text keyed by store key. `golden_scenario` in
+`tests/test_analysis.py` made them, on the fake servers through thirty hourly ten-minute
+passes, and the full-day test runs the same function on the lane as it stands and requires the
+same bytes once the rowShape 3 fields are taken away from the place files. A change to that
+function or to the fakes it uses means writing this file again from the lane at 9893f97.
+
+SHA-256 `8880bc6f0c24810e50cde6e2855a68b42c8da5efca53bc78a405f8399cb79906`.

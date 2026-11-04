@@ -290,6 +290,28 @@ def values_of(cell):
     return None if cell is None else {k: cell.get(k) for k in ("temp", "wind", "gust", "precip")}
 
 
+# what rowShape 3 added to a row with a value (2026-11-04); a row with no value
+# for the day whose hourly contract has a state carries only HOURLY_ONLY
+ROW_SHAPE_3 = ("runX", "raw", "x", "anlFile", "pcpFile", "hourly")
+HOURLY_ONLY = ["anlFile", "hourly", "pcpFile"]
+
+
+def as_row_shape_2(text):
+    """A rowShape 3 place file as the lane wrote it before 2026-11-04: the new
+    fields taken away, a row left with nothing null, rowShape 2, the bytes
+    analysis._dump makes."""
+    doc = json.loads(text)
+    doc["rowShape"] = 2
+    for r in doc["hours"]:
+        c = r.get("rtma")
+        if c is not None:
+            for k in ROW_SHAPE_3:
+                c.pop(k, None)
+            if not c:
+                r["rtma"] = None
+    return analysis._dump(doc).decode("utf-8")
+
+
 def blank_status():
     """The status a pass starts with, for a lane called on its own."""
     return {"read": [], "pcpRead": [], "copies": [], "absent": [], "waiting": [], "errors": [], "failed": 0,
@@ -312,22 +334,67 @@ def raw_product_hours(raw_rows):
     return out
 
 
+def check_row_shape_3(case, cell, raw_row, where):
+    """One row's rowShape 3 fields against its own figures of before: the
+    stored strings are the raw CSV's numbers, the exact strings cut and round
+    to the row's exact and shown values, the day so far before rounding cuts
+    and rounds to `run`, and the hourly contract's value is its exact string
+    rounded once."""
+    D = Decimal
+    for var, col in (("temp", "temp_k"), ("wind", "wind_ms"), ("gust", "gust_ms"), ("precip", "precip_mm")):
+        stored, x = cell["raw"][var], cell["x"][var]
+        case.assertEqual(stored is None, raw_row[col] == "", where + (var,))
+        if stored is None:
+            case.assertIsNone(x, where + (var,))
+            continue
+        case.assertEqual(D(stored), D(raw_row[col]), where + (var,))
+        case.assertEqual(len(x.split(".")[1]), analysis.TEXT_PLACES[var], where + (var,))
+        case.assertEqual(analysis.cut(D(x), analysis.HOUR_SHOW[var]), cell[var], where + (var,))
+        case.assertEqual(analysis.half_up(D(x), analysis.HOUR_UNIT[var]), cell["show"][var], where + (var,))
+    run, run_x = cell["run"], cell["runX"]
+    for k in ("high", "low", "gust", "wind"):
+        case.assertEqual(run_x[k] is None, run[k] is None, where + (k,))
+        if run[k] is not None:
+            case.assertEqual((analysis.cut(D(run_x[k]), 0.001), analysis.half_up(D(run_x[k]), 1)),
+                             (run[k]["exact"], run[k]["value"]), where + (k,))
+    case.assertEqual(run_x["precip"] is None, run["precip"] is None, where)
+    if run["precip"] is not None:
+        case.assertEqual((analysis.cut(D(run_x["precip"]), 0.0001), analysis.half_up(D(run_x["precip"]), 0.01)),
+                         (run["precip"]["exact"], run["precip"]["value"]), where)
+    h = cell["hourly"]
+    case.assertEqual(list(h), ["cut", "state", "at", "basis", "src", "value", "x", "late"], where)
+    case.assertEqual(h["value"] is None, h["x"] is None, where)
+    if h["value"] is not None:
+        case.assertEqual(analysis.half_up(D(h["x"]), 1), h["value"], where)
+    for f in ("anlFile", "pcpFile"):
+        if cell[f] is not None:
+            case.assertEqual(list(cell[f]), ["name", "nodd", "nomads", "src", "counts", "afterCut"], where + (f,))
+    case.assertEqual(cell["anlFile"]["counts"], raw_row["analysis_source"] != "" and not cell.get("late"), where)
+
+
 def check_running(case, loc_doc, raw_rows):
     """Every hour of one place file against a fresh resolution of the hours
     so far: its running values equal day_summary over the raw rows up to it,
-    its shown values are its own exact values rounded once, and the day's last
-    counted hour (the last analysis and the last accumulation that count)
-    carries the day's own summary. Returns how many rows were checked."""
+    its shown values are its own exact values rounded once, its rowShape 3
+    fields agree with them (check_row_shape_3), and the day's last counted
+    hour (the last analysis and the last accumulation that count) carries the
+    day's own summary. Returns how many rows were checked."""
     tz, day, now = loc_doc["tz"], loc_doc["day"], analysis._parse_iso(loc_doc["written"])
     ph = raw_product_hours(raw_rows)
+    by_t = {r["valid_utc"]: r for r in raw_rows}
     summary = loc_doc["summary"]["rtma"]
     case.assertEqual(loc_doc.get("rowShape"), analysis.ROW_SHAPE, (loc_doc["id"], day))
     last_anl = last_pcp = None
     checked = 0
     for row in loc_doc["hours"]:
         cell, where = row["rtma"], (loc_doc["id"], day, row["t"])
-        if cell is None:
-            case.assertNotIn(row["t"], ph, where)
+        if cell is None or "show" not in cell:
+            # no value for the day, and at most a raw CSV row of a copy that
+            # gave none; the hourly contract and its files where it has a state
+            rec = ph.get(row["t"])
+            case.assertTrue(rec is None or all(rec[v] is None for v in analysis.HOURLY_VARS), where)
+            if cell is not None:
+                case.assertEqual(sorted(cell), HOURLY_ONLY, where)
             continue
         rec = ph[row["t"]]
         fresh = analysis.day_summary({k: v for k, v in ph.items() if k <= row["t"]}, tz, day, now)
@@ -340,6 +407,7 @@ def check_running(case, loc_doc, raw_rows):
                          else {"value": p["value"], "exact": p["exact"], "hours": p["hours"]}, where + ("precip",))
         for var in analysis.HOURLY_VARS:
             case.assertEqual(cell["show"][var], analysis.half_up(rec[var], analysis.HOUR_UNIT[var]), where + (var,))
+        check_row_shape_3(case, cell, by_t[row["t"]], where)
         if rec["anl"] and not cell.get("late"):
             last_anl = run
         if rec["precip"] is not None and not cell.get("pcpLate"):
@@ -369,6 +437,55 @@ def hours_of(temps, wind=5.0, gust=8.0, precip=0.0, day="2026-09-26", tz="Americ
     for h, t in zip(hs, temps):
         out[iso(h)] = {"temp": t, "wind": wind, "gust": gust, "precip": precip}
     return out
+
+
+GOLDEN = os.path.join(ROOT, "tests", "fixtures", "analysis_v2_day.json.gz")
+GOLDEN_DAY = "2026-09-26"
+
+
+def golden_scenario(case):
+    """Three places through 2026-09-26 and into the next morning on hourly
+    ten-minute passes (a Job case), with an analysis on NOAA Open Data only
+    (09Z), one on neither server whose precipitation landed (12Z), one whose
+    NOMADS copy, other bytes, lands after every cut-off of its day (15Z), and
+    New York's 23:00 (03Z on the 27th), whose NOMADS copy, other bytes, lands
+    after New York's cut-off and before Chicago's and the hourly cut. Returns
+    the day's files as text by store key. GOLDEN holds these files as the lane
+    at 9893f97 wrote them, before rowShape 3, from this same function."""
+    fx = case.fx
+    keep = analysis.load_lattice
+    analysis.load_lattice = lambda path=None: {"wexp": [], "g184": []}
+    case.addCleanup(lambda: setattr(analysis, "load_lattice", keep))
+    state = case.caught_up(hour(2026, 9, 26, 3))
+    state["precipSwept"] = "2026-10-30T00:00:00Z"            # no daily sweep in the way
+    analysis.save_state(case.st, state, hour(2026, 9, 26, 3))
+    nodd_only, neither, late, between = (hour(2026, 9, 26, 9), hour(2026, 9, 26, 12), hour(2026, 9, 26, 15),
+                                         hour(2026, 9, 27, 3))
+    for i, t in enumerate(hour(2026, 9, 26, 4) + dt.timedelta(hours=n) for n in range(28)):
+        if t == neither:
+            fx.add_precip("rtma", t)
+        else:
+            fx.add_hour("rtma", t, servers=("nodd",) if t in (nodd_only, late, between) else analysis.SERVERS)
+        fx.values[("rtma", "temp", iso(t))] = lambda c, i=i: 280.0 + ((i * 37 + c % 101) % 2500) / 100.0
+        fx.values[("rtma", "wind", iso(t))] = lambda c, i=i: ((i * 7 + c) % 900) / 100.0
+        fx.values[("rtma", "gust", iso(t))] = lambda c, i=i: ((i * 7 + c) % 900) / 100.0 + ((i * 3 + c) % 500) / 100.0
+        fx.values[("rtma", "precip", iso(t))] = lambda c, i=i: ((i * 5 + c) % 7) * 0.015625
+
+    def nomads_copy(t, published):
+        fx.published[analysis.anl_url("rtma", t, nomads=True)] = published
+        fx.add_hour("rtma", t, servers=("nomads",), precip=False, variant="b")
+        fx.values[("rtma", "temp", iso(t), "b")] = 300.0
+    for n in range(30):
+        at = hour(2026, 9, 26, 4) + dt.timedelta(hours=n, minutes=50)
+        if at == hour(2026, 9, 27, 5) + dt.timedelta(minutes=50):
+            nomads_copy(between, "2026-09-27T05:10:00Z")
+        if at == hour(2026, 9, 27, 8) + dt.timedelta(minutes=50):
+            nomads_copy(late, "2026-09-27T08:30:00Z")
+        case.assertEqual(case.run_pass(at), 0)
+    keys = [analysis.DAY_KEY.format(day=GOLDEN_DAY), analysis.CSV_RAW_KEY.format(day=GOLDEN_DAY),
+            analysis.CSV_DAY_KEY.format(day=GOLDEN_DAY)]
+    keys += [analysis.LOC_KEY.format(loc=loc["id"], day=GOLDEN_DAY) for loc in LOCS]
+    return {k: case.st.get(k).decode("utf-8") for k in keys}
 
 
 # ------------------------------------------------------------------ rules, no storage
@@ -654,6 +771,64 @@ class Rules(unittest.TestCase):
         self.assertEqual((s["hours"], s["high"]["value"], s["precip"]["value"]), (22, 66, 0.22))
         self.assertIsNone(analysis.running({}, tz, day, later, hs[3]))
 
+    def test_the_exact_strings_are_the_stored_values_converted_in_rational_arithmetic(self):
+        # rowShape 3 (owner's approval of display v3, 2026-11-04): the stored
+        # value as the file holds it, and the value converted before
+        # rounding, exact where its decimal ends (a thousandth of a degree,
+        # twelve places of a mile an hour) and otherwise cut toward zero at
+        # ten places, never rounded and never a Decimal division
+        cases = [("temp", 288.54, "288.54", "59.702", 60), ("wind", 3.96, "3.96", "8.858267716716", 9),
+                 ("gust", 7.3, "7.30", "16.329634932330", 16), ("precip", 0.0123, "0.0123", "0.0004842519", 0.0),
+                 # the three half ties: 45.5 shows 46, -8.5 shows -9, 0.625 shows 0.63
+                 ("temp", 280.65, "280.65", "45.500", 46), ("temp", 250.65, "250.65", "-8.500", -9),
+                 ("precip", 15.875, "15.875", "0.6250000000", 0.63),
+                 ("precip", 0.0, "0", "0.0000000000", 0.0), ("precip", 25.4, "25.4", "1.0000000000", 1.0)]
+        for var, stored, raw, x, shown in cases:
+            self.assertEqual((analysis.raw_text(var, stored), analysis.x_text(var, stored)), (raw, x), (var, stored))
+            self.assertEqual(analysis.half_up(Decimal(x), analysis.HOUR_UNIT[var]), shown, (var, stored))
+            self.assertEqual(analysis.half_up(analysis.exact(var, stored), analysis.HOUR_UNIT[var]), shown, (var, stored))
+        # 0.0123 mm is 0.00048425196850... in, which rounds to 0.0004842520 at
+        # ten places, and the string is cut and never rounded
+        self.assertEqual(str(analysis.exact("precip", 0.0123).quantize(Decimal("1E-10"))), "0.0004842520")
+        # a stored value finer than the file's precision is written exactly,
+        # and a converted value that ends past ten places too
+        self.assertEqual((analysis.raw_text("temp", 288.5401), analysis.x_text("temp", 288.5401)), ("288.5401", "59.70218"))
+        self.assertEqual(analysis.x_text("wind", 3.961), "8.8605046530081")
+        self.assertEqual((analysis.raw_text("precip", 0.0000127), analysis.x_text("precip", 0.0000127)),
+                         ("0.0000127", "0.0000005000"))
+        self.assertEqual(analysis.fixed_text(analysis.Fraction(5, 10 ** 11), 10), "0.00000000005")
+        self.assertEqual(analysis.cut_text(analysis.Fraction(-1, 3), 3), "-0.333")
+        self.assertIsNone(analysis.x_text("temp", None))
+
+    def test_the_day_so_far_before_rounding_runs_on_the_hours_run_counts(self):
+        # runX: the high and low to a thousandth and the peak gust to twelve
+        # places, exact; the mean wind cut at ten places even where it ends
+        # (2.244392746407 is written 2.2443927464); the total from the summed
+        # millimetres, 15.875 mm in three hours being exactly 0.625 in. An
+        # hour published after the cut-off adds nothing, as in `run`
+        tz, day = "America/New_York", "2026-09-26"
+        hs = analysis.local_day_hours(day, tz)
+        cut = analysis.day_cutoff(day, tz)
+        ph = {}
+        for h, (k, w, mm) in zip(hs, ((280.65, 1.0, 0.015625), (250.65, 1.0, 2.546875), (290.09, 1.01, 13.3125),
+                                      (310.0, 9.0, 5.0))):
+            ph[iso(h)] = {"temp": analysis.exact("temp", k), "wind": analysis.exact("wind", w),
+                          "gust": analysis.exact("gust", w + 2), "precip": analysis.exact("precip", mm), "mm": mm}
+        ph[iso(hs[3])].update({"pub": iso(cut + dt.timedelta(hours=1)), "pcpPub": iso(cut + dt.timedelta(hours=1))})
+        texts = analysis.running_texts(ph, tz, day)
+        self.assertEqual(texts[iso(hs[0])], {"high": "45.500", "low": "45.500", "gust": "6.710808876300",
+                                             "wind": "2.2369362921", "precip": "0.0006151574"})
+        last = {"high": "62.492", "low": "-8.500", "gust": "6.733178239221", "wind": "2.2443927464", "precip": "0.6250000000"}
+        self.assertEqual((texts[iso(hs[2])], texts[iso(hs[3])]), (last, last))
+        later = cut + dt.timedelta(hours=2)
+        for h in hs[:4]:
+            run, run_x = analysis.running(ph, tz, day, later, h), texts[iso(h)]
+            for k in ("high", "low", "gust", "wind"):
+                self.assertEqual((analysis.cut(Decimal(run_x[k]), 0.001), analysis.half_up(Decimal(run_x[k]), 1)),
+                                 (run[k]["exact"], run[k]["value"]), (h, k))
+            self.assertEqual(analysis.half_up(Decimal(run_x["precip"]), 0.01), run["precip"]["value"], h)
+        self.assertEqual(sorted(texts), sorted(ph))
+
 
 class LocalDay(unittest.TestCase):
     def test_a_chicago_day_spans_two_utc_directories(self):
@@ -670,6 +845,21 @@ class LocalDay(unittest.TestCase):
         self.assertIn(("new-york-ny", "2026-09-27"), touched)
         self.assertIn(("los-angeles-ca", "2026-09-26"), touched)
         self.assertEqual(analysis.local_day_of(hour(2026, 9, 27, 4), "America/Chicago"), "2026-09-26")
+
+    def test_a_files_name_is_ncep_s_and_ends_both_servers_urls(self):
+        # the names the prototype's CSV files give, under the day directory
+        # of the analysis's hour or of the hour the accumulation ends
+        self.assertEqual(analysis.file_name("rtma", "anl", hour(2026, 11, 4, 11)),
+                         "rtma2p5.20261104/rtma2p5.t11z.2dvaranl_ndfd.grb2_wexp")
+        self.assertEqual(analysis.file_name("rtma", "pcp", hour(2026, 11, 4, 12)),
+                         "rtma2p5.20261104/rtma2p5.2026110412.pcp.184.grb2")
+        self.assertEqual(analysis.file_name("rtma", "pcp", hour(2026, 11, 5, 0)),
+                         "rtma2p5.20261105/rtma2p5.2026110500.pcp.184.grb2")
+        for n in range(48):
+            t = hour(2026, 11, 3, 0) + dt.timedelta(hours=n)
+            for nomads in (False, True):
+                self.assertTrue(analysis.anl_url("rtma", t, nomads=nomads).endswith("/" + analysis.file_name("rtma", "anl", t)))
+                self.assertTrue(analysis.pcp_url("rtma", t, nomads=nomads).endswith("/" + analysis.file_name("rtma", "pcp", t)))
 
     def test_the_spring_forward_day_has_23_distinct_hours(self):
         spring = analysis.local_day_hours("2026-03-08", "America/New_York")
@@ -940,8 +1130,8 @@ class Job(unittest.TestCase):
         self.assertEqual(w["values"][220], 320 + 10 * (NY_K % 997))
         # the archive hour, now the settled record, holds the value at the resolving cell
         arc = self.read(analysis.hour_key("rtma", t_r))
-        self.assertEqual(sorted(arc), ["cutoffs", "hashMatch", "kind", "picks", "product", "published", "schema",
-                                       "servers", "settled", "source", "valid", "values", "written"])
+        self.assertEqual(sorted(arc), ["cutoffs", "hashMatch", "hourly", "kind", "picks", "product", "published",
+                                       "schema", "servers", "settled", "source", "valid", "values", "written"])
         self.assertLess(abs(float(analysis.exact("temp", arc["values"]["new-york-ny"]["temp"])) - (32 + NY_K % 997)), 0.001)
         # a cell the bitmap leaves out is null in the window
         gust = self.read(analysis.FRAME_KEY.format(product="rtma", var="gust", stamp="20260926T19Z"))["windows"]["new-york-ny"]
@@ -986,7 +1176,9 @@ class Job(unittest.TestCase):
         loc_before = self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))
         # rewrite every frame in the shape the lane wrote before windows
         # existed, and one of them as it would be after a page-side tool
-        # touched it, then rebuild the day from scratch
+        # touched it, then rebuild the day from scratch, inside the same hour,
+        # since at 20Z the 19Z row's precipitation file is due and its row
+        # gains the file (pcpFile) with no times
         frames = [k for k, _, _ in self.st.puts if k.startswith("snapshots/analysis2/grid/") and not k.endswith("index.json")]
         self.assertEqual(len(frames), 4)
         for key in frames:
@@ -995,7 +1187,7 @@ class Job(unittest.TestCase):
             del doc["windows"]
             self.st.put(key, analysis._dump(doc), "application/json", analysis.CACHE_FINAL)
         self.st.gets = []
-        later = NOW + dt.timedelta(minutes=10)
+        later = NOW + dt.timedelta(minutes=4)
         cache = {}
         day_doc, loc_docs = analysis.build_day(self.st, "2026-09-26", LOCS, cache, later, analysis.load_state(self.st))
         self.assertEqual(day_doc["locations"], day_before["locations"])
@@ -2527,7 +2719,7 @@ class Job(unittest.TestCase):
             doc = self.read(key)
             doc.pop("rowShape")
             for r in doc["hours"]:
-                for k in ("show", "run", "pub", "pcpPub", "src", "pcpSrc", "pubSrc", "pcpPubSrc"):
+                for k in ("show", "run", "pub", "pcpPub", "src", "pcpSrc", "pubSrc", "pcpPubSrc") + ROW_SHAPE_3:
                     (r["rtma"] or {}).pop(k, None)
             self.st.put(key, analysis._dump(doc), "application/json")
         old = {d: self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=d)) for d in days}
@@ -2556,6 +2748,323 @@ class Job(unittest.TestCase):
         analysis.refresh_days(self.st, state, LOCS, {}, now, archive.Deadline(1), status)
         self.assertEqual(status["refreshed"]["days"], 0)
         self.assertEqual(sorted(state["relayout"]), list(days))
+
+    # ---- rowShape 3 and the hourly contract (owner's approval of display v3
+    #      and Patrick's ruling of 4 November): each hour's temperature is the
+    #      hourly contract's value, with its own cut three hours after the hour
+    def row_of(self, lid, day, t):
+        """One place file's rtma cell for the hour t."""
+        return next(r for r in self.read(analysis.LOC_KEY.format(loc=lid, day=day))["hours"] if r["t"] == iso(t))["rtma"]
+
+    def test_the_hourly_contract_is_final_at_nomadss_last_modified_once_its_copy_is_in(self):
+        # final as soon as NOMADS's copy is in, published by the hourly cut,
+        # stamped with that copy's Last-Modified and not when the lane read it,
+        # and before the hourly cut has settled
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.published[analysis.anl_url("rtma", t, nomads=True)] = "2026-09-26T19:46:10Z"
+        self.fx.add_hour("rtma", t, servers=("nomads",))
+        self.fx.values[("rtma", "temp", iso(t))] = lambda c: 280.65 if c == NY_K else 293.15
+        self.assertEqual(self.run_pass(), 0)
+        want = {"cut": "2026-09-26T22:00:00Z", "state": "final", "at": "2026-09-26T19:46:10Z", "basis": "nomads",
+                "src": "nomads", "value": 46, "x": "45.500", "late": False}
+        self.assertEqual(self.row_of("new-york-ny", "2026-09-26", t)["hourly"], want)
+        self.assertEqual(self.row_of("chicago-il", "2026-09-26", t)["hourly"], dict(want, value=68, x="68.000"))
+        self.assertNotIn("hourly", self.state()["products"]["rtma"]["open"][iso(t)]["anl"])
+        # NOAA Open Data's copy comes ten minutes on, every cut settles at
+        # once, and the hourly contract stays as it was
+        self.fx.add_hour("rtma", t, servers=("nodd",))
+        at = NOW + dt.timedelta(minutes=10)
+        self.assertEqual(self.run_pass(at), 0)
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual(arc["hourly"], {"at": iso(at), "with": ["nodd", "nomads"], "src": "nomads",
+                                         "published": "2026-09-26T19:46:10Z", "pubSrc": "nomads"})
+        cell = self.row_of("new-york-ny", "2026-09-26", t)
+        self.assertEqual(cell["hourly"], want)
+        self.assertEqual(cell["anlFile"], {"name": "rtma2p5.20260926/rtma2p5.t19z.2dvaranl_ndfd.grb2_wexp",
+                                           "nodd": {"lm": "2026-09-26T19:48:00Z", "seen": iso(at)},
+                                           "nomads": {"lm": "2026-09-26T19:46:10Z", "seen": iso(NOW)},
+                                           "src": "nomads", "counts": True, "afterCut": False})
+
+    def test_the_hourly_contract_on_noaa_open_data_alone_is_final_at_its_cut_from_the_first_ten_minute_pass(self):
+        t = hour(2026, 9, 26, 19)
+        cut = hour(2026, 9, 26, 22)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, servers=("nodd",))
+        self.assertEqual(self.run_pass(), 0)
+        h = self.row_of("new-york-ny", "2026-09-26", t)["hourly"]
+        self.assertEqual((h["state"], h["at"], h["basis"], h["src"], h["value"], h["x"]),
+                         ("provisional", None, None, "nodd", 68, "68.000"))
+        # the first ten-minute pass after the cut settles it on the copy in
+        # hand, and it is final at the cut itself, as a day's finalAt is its cut-off
+        froze = cut + dt.timedelta(minutes=8)
+        self.assertEqual(self.run_pass(froze), 0)
+        cell = self.row_of("new-york-ny", "2026-09-26", t)
+        self.assertEqual(cell["hourly"], {"cut": iso(cut), "state": "final", "at": iso(cut), "basis": "cutoff",
+                                          "src": "nodd", "value": 68, "x": "68.000", "late": False})
+        self.assertEqual(self.state()["products"]["rtma"]["open"][iso(t)]["anl"]["hourly"],
+                         {"at": iso(froze), "with": ["nodd"], "src": "nodd", "published": iso(t + dt.timedelta(minutes=48)),
+                          "pubSrc": "nodd"})
+        # the day's own rules are untouched: the row still waits for its cut-off
+        self.assertNotIn("settled", cell)
+        self.assertFalse(self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]["final"])
+
+    def test_the_hourly_contract_with_neither_copy_by_its_cut_is_under_review(self):
+        # 19Z on neither server, nor its precipitation. The row has no value
+        # for the day, and once the hourly cut settles it carries the review
+        # and its files and nothing else
+        t = hour(2026, 9, 26, 19)
+        cut = hour(2026, 9, 26, 22)
+        self.caught_up(t - dt.timedelta(hours=2))
+        self.fx.add_hour("rtma", t - dt.timedelta(hours=1))             # 18Z, so New York's day has a value
+        self.assertEqual(self.run_pass(t + dt.timedelta(minutes=55)), 0)
+        self.assertIsNone(self.row_of("new-york-ny", "2026-09-26", t))     # nothing known yet
+        froze = cut + dt.timedelta(minutes=8)
+        self.assertEqual(self.run_pass(froze), 0)
+        cell = self.row_of("new-york-ny", "2026-09-26", t)
+        self.assertEqual(sorted(cell), HOURLY_ONLY)
+        self.assertEqual(cell["hourly"], {"cut": iso(cut), "state": "review", "at": iso(cut), "basis": "cutoff",
+                                          "src": None, "value": None, "x": None, "late": False})
+        self.assertEqual(cell["anlFile"], {"name": "rtma2p5.20260926/rtma2p5.t19z.2dvaranl_ndfd.grb2_wexp",
+                                           "nodd": None, "nomads": None, "src": None, "counts": False, "afterCut": False})
+        self.assertEqual((cell["pcpFile"]["name"], cell["pcpFile"]["nodd"]),
+                         ("rtma2p5.20260926/rtma2p5.2026092620.pcp.184.grb2", None))
+        self.assertEqual(self.state()["products"]["rtma"]["open"][iso(t)]["anl"]["hourly"],
+                         {"at": iso(froze), "with": [], "src": None, "published": None, "pubSrc": None})
+        self.assertEqual(self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]["hours"], 1)
+        # the next hour, not yet past its cut, stays a row with nothing
+        self.assertIsNone(self.row_of("new-york-ny", "2026-09-26", t + dt.timedelta(hours=1)))
+
+    def test_a_nomads_copy_read_after_the_hourly_cut_settled_is_flagged_and_changes_nothing(self):
+        # NOMADS's copy, other bytes, published before the hourly cut but read
+        # only after it settled on NOAA Open Data's, is recorded, flagged late
+        # and never used for the hourly contract. The day, still before its
+        # cut-offs, takes it by its own rules, so the two can differ
+        t = hour(2026, 9, 26, 19)
+        cut = hour(2026, 9, 26, 22)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, servers=("nodd",))
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(self.run_pass(cut + dt.timedelta(minutes=8)), 0)
+        before = self.row_of("new-york-ny", "2026-09-26", t)["hourly"]
+        self.assertEqual((before["state"], before["basis"], before["src"], before["late"]), ("final", "cutoff", "nodd", False))
+        self.fx.published[analysis.anl_url("rtma", t, nomads=True)] = "2026-09-26T21:30:00Z"
+        self.fx.add_hour("rtma", t, servers=("nomads",), precip=False, variant="b")
+        self.fx.values[("rtma", "temp", iso(t), "b")] = 300.0
+        seen = cut + dt.timedelta(minutes=68)
+        self.assertEqual(self.run_pass(seen), 0)
+        cell = self.row_of("new-york-ny", "2026-09-26", t)
+        self.assertEqual(cell["hourly"], dict(before, late=True))
+        self.assertEqual(self.read(analysis.hour_key("rtma", t))["hourly"]["with"], ["nodd"])
+        self.assertEqual(cell["anlFile"]["nomads"], {"lm": "2026-09-26T21:30:00Z", "seen": iso(seen)})
+        self.assertEqual((cell["src"], cell["show"]["temp"], cell["hourly"]["value"]), ("nomads", 80, 68))
+
+    def test_a_file_between_the_days_cut_off_and_the_hourly_cut_counts_for_the_hourly_contract_and_not_the_day(self):
+        # New York's 23:00 (03Z) has its day's cut-off at 04:45Z and the
+        # hourly cut at 06:00Z. The analysis lands on both servers at 05:10,
+        # after New York's rows settled on no copy and before Chicago's
+        # cut-off, so the hourly contract counts it at every place, Chicago's
+        # day counts it, and New York's day does not, its row carrying the
+        # hourly contract alone
+        t = hour(2026, 9, 27, 3)
+        self.caught_up(t - dt.timedelta(hours=2))
+        self.fx.add_hour("rtma", t - dt.timedelta(hours=1))             # New York's 22:00, so its day has a value
+        self.assertEqual(self.run_pass(t + dt.timedelta(minutes=55)), 0)
+        cut = analysis.day_cutoff("2026-09-26", "America/New_York")
+        self.assertEqual(self.run_pass(cut + dt.timedelta(minutes=3)), 0)
+        day_key = analysis.DAY_KEY.format(day="2026-09-26")
+        ny_day = self.read(day_key)["locations"]["new-york-ny"]
+        self.assertTrue(ny_day["rtma"]["final"])
+        for nomads in (False, True):
+            self.fx.published[analysis.anl_url("rtma", t, nomads=nomads)] = "2026-09-27T05:10:00Z"
+        self.fx.add_hour("rtma", t, precip=False)
+        self.fx.values[("rtma", "temp", iso(t))] = 280.65
+        read_at = hour(2026, 9, 27, 5) + dt.timedelta(minutes=18)
+        self.assertEqual(self.run_pass(read_at), 0)
+        hourly = {"cut": "2026-09-27T06:00:00Z", "state": "final", "at": "2026-09-27T05:10:00Z", "basis": "nomads",
+                  "src": "nomads", "value": 46, "x": "45.500", "late": False}
+        ny = self.row_of("new-york-ny", "2026-09-26", t)
+        self.assertEqual(sorted(ny), HOURLY_ONLY)
+        self.assertEqual(ny["hourly"], hourly)
+        self.assertEqual((ny["anlFile"]["src"], ny["anlFile"]["counts"], ny["anlFile"]["afterCut"]), (None, False, True))
+        self.assertEqual(self.read(day_key)["locations"]["new-york-ny"], ny_day)
+        chi = self.row_of("chicago-il", "2026-09-26", t)
+        self.assertEqual((chi["temp"], chi["src"], chi["hourly"]), (45.5, "nomads", hourly))
+        self.assertEqual((chi["anlFile"]["counts"], chi["anlFile"]["afterCut"]), (True, False))
+
+    def test_a_file_after_the_hourly_cut_and_before_the_days_cut_off_counts_for_the_day_and_not_the_hourly_contract(self):
+        # New York's 06:00 (10Z) has its hourly cut at 13Z and its day's
+        # cut-off at 04:45Z the next day. The analysis lands at 14:00 on both
+        # servers, after the hourly cut settled on no copy, so the day counts
+        # it and the hourly contract stays under review, the copies flagged late
+        t = hour(2026, 9, 26, 10)
+        hc = hour(2026, 9, 26, 13)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.assertEqual(self.run_pass(t + dt.timedelta(minutes=55)), 0)
+        self.assertEqual(self.run_pass(hc + dt.timedelta(minutes=8)), 0)
+        for nomads in (False, True):
+            self.fx.published[analysis.anl_url("rtma", t, nomads=nomads)] = "2026-09-26T14:00:00Z"
+        self.fx.add_hour("rtma", t, precip=False)
+        self.assertEqual(self.run_pass(hour(2026, 9, 26, 14) + dt.timedelta(minutes=8)), 0)
+        cell = self.row_of("new-york-ny", "2026-09-26", t)
+        self.assertEqual((cell["temp"], cell["show"]["temp"], cell.get("late")), (68.0, 68, None))
+        self.assertEqual((cell["anlFile"]["counts"], cell["anlFile"]["afterCut"]), (True, False))
+        self.assertEqual(cell["hourly"], {"cut": iso(hc), "state": "review", "at": iso(hc), "basis": "cutoff", "src": None,
+                                          "value": None, "x": None, "late": True})
+        self.assertEqual(self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]["hours"], 1)
+
+    def test_the_hourly_cut_settles_apart_from_the_days_and_the_record_waits_for_it(self):
+        # Los Angeles alone, at its 23:00 (06Z), has the day's cut-off at
+        # 07:45Z and the hourly cut at 09:00Z, so the record waits past the day's
+        t = hour(2026, 9, 27, 6)
+        cut, hc = "2026-09-27T07:45:00Z", "2026-09-27T09:00:00Z"
+        values = {LA["id"]: {"temp": 290.0, "wind": 5.0, "gust": 8.0}}
+        analysis.write_copy(self.st, "rtma", "anl", "nodd", t,
+                            {"server": "nodd", "seen": "2026-09-27T06:50:00Z", "published": "2026-09-27T06:48:00Z",
+                             "sha256": {"temp": "a"}, "values": values}, {})
+        slots: dict = {}
+        p1 = analysis._parse_iso(cut) + dt.timedelta(minutes=3)
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, [LA], p1, {}, True))
+        self.assertEqual(list(slots), ["cutoffs"])
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
+        entry, state = {"anl": slots}, analysis.new_state()
+        analysis.settle_file(self.st, "rtma", "anl", t, entry, [LA], p1, {}, state, True)
+        self.assertIn("anl", entry)
+        # a windowed pass after the hourly cut settles nothing on one copy
+        self.assertFalse(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, [LA],
+                                              analysis._parse_iso(hc) + dt.timedelta(minutes=14), {}, False))
+        p3 = analysis._parse_iso(hc) + dt.timedelta(minutes=18)
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, [LA], p3, {}, True))
+        self.assertEqual(slots["hourly"], {"at": iso(p3), "with": ["nodd"], "src": "nodd",
+                                           "published": "2026-09-27T06:48:00Z", "pubSrc": "nodd"})
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((arc["hourly"], arc["cutoffs"], arc["settled"]), (slots["hourly"], slots["cutoffs"], iso(p3)))
+        # it stays open for NOMADS's copy until a day after its hour
+        analysis.settle_file(self.st, "rtma", "anl", t, entry, [LA], p3, {}, state, True)
+        self.assertIn("anl", entry)
+        later = t + dt.timedelta(hours=analysis.RECHECK_AFTER_HOURS)
+        analysis.settle_file(self.st, "rtma", "anl", t, entry, [LA], later, {}, state, True)
+        self.assertNotIn("anl", entry)
+        # with the three zones the later cut-offs are past the hourly cut, so
+        # the record is written when the days' last cut settles, as before
+        t2 = hour(2026, 9, 27, 3)
+        analysis.write_copy(self.st, "rtma", "anl", "nodd", t2, {"server": "nodd", "seen": "2026-09-27T03:50:00Z",
+                                                                 "published": "2026-09-27T03:48:00Z", "sha256": {"temp": "a"},
+                                                                 "values": {l["id"]: values[LA["id"]] for l in LOCS}}, {})
+        last = max(analysis._cutoffs("anl", t2, LOCS)) + dt.timedelta(minutes=3)
+        self.assertGreater(last, analysis.hourly_cut(t2))
+        slots2: dict = {}
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t2, slots2, LOCS, last, {}, True))
+        self.assertEqual(self.read(analysis.hour_key("rtma", t2))["settled"], iso(last))
+        # a file carried over from before the copies settles its hourly cut
+        # on no copy when the cut had passed by then; a precipitation file has none
+        t3 = hour(2026, 9, 25, 19)
+        carried = {"migrated": "2026-09-26T06:00:00Z"}
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t3, carried, LOCS, NOW, {}, False))
+        self.assertEqual(carried["hourly"], {"at": "2026-09-26T06:00:00Z", "with": [], "src": None, "published": None,
+                                             "pubSrc": None})
+        pslots: dict = {}
+        analysis.settle_cuts(self.st, "rtma", "pcp", t, pslots, [LA], p3, {}, True)
+        self.assertNotIn("hourly", pslots)
+
+    def put_read_before_the_copies(self, t, temp=293.15, mm=0.254, published=None):
+        """Hour t's analysis and the precipitation file that ends an hour on,
+        as the lane archived them before it kept each server's copy: read
+        from NOAA Open Data, no copies, and no Last-Modified before 2026-10-14."""
+        vals = {loc["id"]: {"temp": temp, "wind": 5.0, "gust": 8.0} for loc in LOCS}
+        self.st.put(analysis.hour_key("rtma", t), analysis._gz(
+            {"schema": analysis.SCHEMA, "product": "rtma", "valid": iso(t), "written": iso(t + dt.timedelta(hours=1)),
+             "source": "nodd", "published": published, "values": vals}), "application/gzip")
+        end = t + dt.timedelta(hours=1)
+        doc = analysis.precip_doc("rtma", end, {loc["id"]: mm for loc in LOCS}, end, read=True)
+        doc.update({"source": "nodd", "published": None})
+        self.st.put(analysis.precip_key("rtma", end), analysis._gz(doc), "application/gzip")
+
+    def test_files_read_before_the_copies_take_the_tables_times_and_their_hourly_contract_follows_them(self):
+        day, tz = "2026-09-26", "America/New_York"
+        hs = analysis.local_day_hours(day, tz)
+        for h in hs:
+            self.put_read_before_the_copies(h, published=iso(h + dt.timedelta(minutes=50)) if h == hs[4] else None)
+        m = lambda h, n: iso(h + dt.timedelta(minutes=n))                   # noqa: E731
+        table = {"anl": {iso(hs[1]): {"nodd": {"lm": m(hs[1], 48), "seen": None}},
+                         iso(hs[2]): {"nodd": {"lm": m(hs[2], 49), "seen": None},
+                                      "nomads": {"lm": m(hs[2], 46), "seen": m(hs[2], 47)}},
+                         iso(hs[3]): {"nodd": {"lm": m(hs[3], 186), "seen": None}},
+                         iso(hs[4]): {"nodd": {"lm": m(hs[4], 40), "seen": None}}},
+                 "pcp": {iso(hs[1] + dt.timedelta(hours=1)): {"nodd": {"lm": m(hs[1], 77), "seen": None}}}}
+        now = hour(2026, 9, 28, 12)
+        day0, docs0 = analysis.build_day(self.st, day, LOCS, {}, now, analysis.new_state(), times={})
+        day1, docs1 = analysis.build_day(self.st, day, LOCS, {}, now, analysis.new_state(), times=table)
+        rows = {r["t"]: r["rtma"] for r in docs1["new-york-ny"]["hours"]}
+        hc = lambda h: iso(h + dt.timedelta(hours=3))                       # noqa: E731
+        final = {"state": "final", "basis": "norecord", "src": "nodd", "value": 68, "x": "68.000", "late": False}
+        # with no time on record none is shown, and it is final at the cut on the copy read
+        r0 = rows[iso(hs[0])]
+        self.assertEqual((r0["anlFile"]["nodd"], r0["anlFile"]["nomads"], r0["anlFile"]["src"], r0["anlFile"]["counts"],
+                          r0["anlFile"]["afterCut"]), (None, None, "nodd", True, False))
+        self.assertEqual(r0["hourly"], dict(final, cut=hc(hs[0]), at=hc(hs[0])))
+        # NOAA Open Data's time from the table, shown, and nothing else moves
+        r1 = rows[iso(hs[1])]
+        self.assertEqual((r1["anlFile"]["nodd"], r1["pcpFile"]["nodd"]),
+                         ({"lm": m(hs[1], 48), "seen": None}, {"lm": m(hs[1], 77), "seen": None}))
+        self.assertEqual(r1["hourly"], dict(final, cut=hc(hs[1]), at=hc(hs[1])))
+        # NOMADS's time by the cut, from the engine's probe, makes it final
+        # there, the copy read still the one used
+        r2 = rows[iso(hs[2])]
+        self.assertEqual(r2["anlFile"]["nomads"], {"lm": m(hs[2], 46), "seen": m(hs[2], 47)})
+        self.assertEqual(r2["hourly"], dict(final, cut=hc(hs[2]), at=m(hs[2], 46), basis="nomads"))
+        # NOAA Open Data's time after the hourly cut puts it under review,
+        # while the day, which never reads the table, still counts the hour
+        r3 = rows[iso(hs[3])]
+        self.assertEqual(r3["hourly"], {"cut": hc(hs[3]), "state": "review", "at": hc(hs[3]), "basis": "norecord",
+                                        "src": None, "value": None, "x": None, "late": False})
+        self.assertEqual((r3["anlFile"]["counts"], r3["show"]["temp"]), (True, 68))
+        # the record's own Last-Modified stands over the table's
+        self.assertEqual(rows[iso(hs[4])]["anlFile"]["nodd"], {"lm": m(hs[4], 50), "seen": None})
+        # before its cut an hour is provisional on the copy read
+        _, docs2 = analysis.build_day(self.st, day, LOCS, {}, hs[-1] + dt.timedelta(minutes=30), analysis.new_state(),
+                                      times=table)
+        h = docs2["new-york-ny"]["hours"][-1]["rtma"]["hourly"]
+        self.assertEqual((h["state"], h["at"], h["basis"], h["src"], h["value"]), ("provisional", None, None, "nodd", 68))
+        # and the day is the same with the table and without it
+        self.assertEqual(day1, day0)
+        self.assertEqual([values_of(r["rtma"]) for r in docs1["new-york-ny"]["hours"]],
+                         [values_of(r["rtma"]) for r in docs0["new-york-ny"]["hours"]])
+
+    def test_a_table_time_after_the_cut_off_changes_nothing_but_the_times_shown(self):
+        # the precipitation of the hour ending 2026-09-30T07Z reached NOAA Open
+        # Data at 08:01:44Z, after the 07:45Z cut-off of Los Angeles's 29
+        # September, and the lane counted it under the rule before 14 October.
+        # So here it stays counted, and only its time and afterCut say so. An
+        # analysis whose time falls between the day's cut-off and its hourly
+        # cut moves its times alone too
+        day, tz = "2026-09-26", "America/Los_Angeles"
+        hs = analysis.local_day_hours(day, tz)
+        for h in hs:
+            self.put_read_before_the_copies(h)
+        last, cut = hs[-1], analysis.day_cutoff(day, tz)
+        late_pcp, late_anl = iso(cut + dt.timedelta(minutes=16, seconds=44)), iso(cut + dt.timedelta(minutes=30))
+        table = {"pcp": {iso(last + dt.timedelta(hours=1)): {"nodd": {"lm": late_pcp, "seen": None}}},
+                 "anl": {iso(last): {"nodd": {"lm": late_anl, "seen": None}}}}
+        self.assertLess(late_anl, iso(analysis.hourly_cut(last)))
+        now = hour(2026, 9, 28, 12)
+        runs = []
+        for times in ({}, table):
+            raw: list = []
+            d, docs = analysis.build_day(self.st, day, [LA], {}, now, analysis.new_state(), raw=raw, times=times)
+            runs.append((d, docs["los-angeles-ca"], analysis.raw_csv(raw), analysis.processed_csv(day, d, [LA])))
+        (d0, l0, raw0, pro0), (d1, l1, raw1, pro1) = runs
+        self.assertEqual((analysis._dump(d1), raw1, pro1), (analysis._dump(d0), raw0, pro0))
+        self.assertTrue(d1["locations"]["los-angeles-ca"]["rtma"]["final"])
+        r0, r1 = l0["hours"][-1]["rtma"], l1["hours"][-1]["rtma"]
+        self.assertEqual(r1["pcpFile"], dict(r0["pcpFile"], nodd={"lm": late_pcp, "seen": None}, afterCut=True))
+        self.assertEqual(r1["anlFile"], dict(r0["anlFile"], nodd={"lm": late_anl, "seen": None}, afterCut=True))
+        self.assertEqual((r1["pcpFile"]["counts"], r1["anlFile"]["counts"]), (True, True))
+        rest = lambda r: {k: v for k, v in r.items() if k not in ("anlFile", "pcpFile")}     # noqa: E731
+        self.assertEqual(rest(r1), rest(r0))
+        self.assertEqual(r1["hourly"]["basis"], "norecord")
+        self.assertEqual(l1["hours"][:-1], l0["hours"][:-1])
+        self.assertEqual({k: v for k, v in l1.items() if k != "hours"}, {k: v for k, v in l0.items() if k != "hours"})
 
     # ---- the windowed passes and the lease (owner's ruling 2026-11-03): every
     #      two minutes about when NOAA publishes each file, an hour's
@@ -2882,6 +3391,73 @@ class Samples(unittest.TestCase):
                          (0.84, 0.84))
 
 
+class FullDay(unittest.TestCase):
+    """golden_scenario run once on the lane as it stands: the day's files
+    byte-identical to GOLDEN once rowShape 3's fields are taken away, and the
+    place files of the full day in rowShape 3."""
+    @classmethod
+    def setUpClass(cls):
+        cls.job = Job("run_pass")
+        cls.job.setUp()
+        try:
+            cls.files = golden_scenario(cls.job)
+        except Exception:
+            cls.job.doCleanups()
+            raise
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.job.doCleanups()
+
+    def test_the_days_figures_states_and_csv_files_are_byte_identical_to_before(self):
+        # the hourly cut settles beside the daily cut-offs in this day (an
+        # analysis on one server, one on neither, a late NOMADS copy, and
+        # New York's 23:00 counting for the hourly contract and not the day),
+        # and the day file, both CSV files and every place file's figures and
+        # states are the bytes the lane wrote before rowShape 3
+        with gzip.open(GOLDEN, "rt", encoding="utf-8") as fh:
+            golden = json.load(fh)
+        self.assertEqual(sorted(golden), sorted(self.files))
+        for key, text in sorted(golden.items()):
+            got = as_row_shape_2(self.files[key]) if "/loc/" in key else self.files[key]
+            self.assertEqual(got, text, key)
+
+    def test_the_place_file_of_a_full_day_in_row_shape_3(self):
+        raw = self.files[analysis.CSV_RAW_KEY.format(day=GOLDEN_DAY)]
+        docs = {loc["id"]: json.loads(self.files[analysis.LOC_KEY.format(loc=loc["id"], day=GOLDEN_DAY)]) for loc in LOCS}
+        for lid, doc in docs.items():
+            self.assertEqual(check_running(self, doc, raw_rows_of(raw, lid)), 24, lid)
+            for r in doc["hours"]:
+                t = analysis._parse_iso(r["t"])
+                self.assertEqual(sorted(k for k in r["rtma"] if k in ROW_SHAPE_3), sorted(ROW_SHAPE_3), (lid, r["t"]))
+                self.assertEqual(r["rtma"]["anlFile"]["name"], analysis.file_name("rtma", "anl", t))
+                self.assertEqual(r["rtma"]["pcpFile"]["name"], analysis.file_name("rtma", "pcp", t + dt.timedelta(hours=1)))
+        rows = {r["t"]: r["rtma"] for r in docs["new-york-ny"]["hours"]}
+        summary = docs["new-york-ny"]["summary"]["rtma"]
+        # the day so far after its last hour is the day's own figure before rounding
+        end = rows[iso(hour(2026, 9, 27, 3))]["runX"]
+        self.assertEqual((analysis.cut(Decimal(end["high"]), 0.001), analysis.cut(Decimal(end["precip"]), 0.0001)),
+                         (summary["high"]["exact"], summary["precip"]["exact"]))
+
+        def states(t):
+            h = rows[iso(t)]["hourly"]
+            return h["state"], h["at"], h["basis"], h["src"], h["late"]
+        self.assertEqual(states(hour(2026, 9, 26, 4)), ("final", "2026-09-26T04:48:00Z", "nomads", "nomads", False))
+        self.assertEqual(states(hour(2026, 9, 26, 9)), ("final", "2026-09-26T12:00:00Z", "cutoff", "nodd", False))
+        self.assertEqual(states(hour(2026, 9, 26, 12)), ("review", "2026-09-26T15:00:00Z", "cutoff", None, False))
+        self.assertEqual(states(hour(2026, 9, 26, 15)), ("final", "2026-09-26T18:00:00Z", "cutoff", "nodd", True))
+        # at New York's 23:00 the day keeps NOAA Open Data's copy, read by its
+        # cut-off, and the hourly contract takes NOMADS's, in by the hourly cut
+        between = rows[iso(hour(2026, 9, 27, 3))]
+        self.assertEqual(states(hour(2026, 9, 27, 3)), ("final", "2026-09-27T05:10:00Z", "nomads", "nomads", False))
+        self.assertEqual((between["src"], between["raw"]["temp"], between["hourly"]["value"], between["hourly"]["x"]),
+                         ("nodd", "289.09", 80, "80.330"))
+        self.assertEqual((between["anlFile"]["counts"], between["anlFile"]["afterCut"], between["anlFile"]["nomads"]),
+                         (True, False, {"lm": "2026-09-27T05:10:00Z", "seen": "2026-09-27T05:50:00Z"}))
+        chi = next(r["rtma"] for r in docs["chicago-il"]["hours"] if r["t"] == iso(hour(2026, 9, 27, 3)))
+        self.assertEqual((chi["src"], chi["show"]["temp"], chi["hourly"]["value"]), ("nomads", 80, 80))
+
+
 class RangeFetch(unittest.TestCase):
     """gov_weather.fetch_range against a stand-in for urlopen: the exact
     body, a whole object sliced, and the clamped 206 S3 answers for a range
@@ -3005,7 +3581,8 @@ class Config(unittest.TestCase):
         self.assertIs(run.JOBS["analysis-window"], analysis.window_pass)
         with open(os.path.join(ROOT, "scripts", "package_lambda.py")) as fh:
             src = fh.read()
-        for item in ("config/analysis_locations.json", "config/analysis_lattice.json", "geo/settlement_locations.csv"):
+        for item in ("config/analysis_locations.json", "config/analysis_lattice.json", "config/analysis_file_times.json",
+                     "geo/settlement_locations.csv"):
             self.assertIn(item, src)
         with open(os.path.join(ROOT, "ops", "aws", "template.yaml")) as fh:
             tpl = fh.read()
@@ -3013,6 +3590,43 @@ class Config(unittest.TestCase):
         self.assertIn('{"job": "analysis"}', tpl)
         self.assertIn('{"job": "analysis-window"}', tpl)
         self.assertIn("eight EventBridge schedules", tpl)
+
+    def test_the_file_times_table_is_built_from_the_engines_csv(self):
+        # one file to a line, {kind: {file_utc: {server: {lm, seen}}}}, and a
+        # row that is not one file on one server at the top of an hour, or a
+        # file given twice, refused with nothing written
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import build_analysis_file_times as b   # noqa: E402
+        head = "kind,file_utc,server,last_modified,first_seen"
+        good = ["anl,2026-11-03T16:00:00Z,nomads,2026-11-03T16:46:12Z,2026-11-03T16:47:00Z",
+                "anl,2026-11-03T16:00:00Z,nodd,2026-11-03T16:48:00Z,", "pcp,2026-11-03T17:00:00Z,nodd,2026-11-03T17:16:40Z,"]
+        with tempfile.TemporaryDirectory() as tmp:
+            src, out = os.path.join(tmp, "times.csv"), os.path.join(tmp, "times.json")
+
+            def run(lines):
+                with open(src, "w") as fh:
+                    fh.write("\n".join(lines) + "\n")
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    return b.main([src, out])
+            self.assertEqual(run([head] + good), 0)
+            self.assertEqual(analysis.load_file_times(out), {
+                "anl": {"2026-11-03T16:00:00Z": {"nodd": {"lm": "2026-11-03T16:48:00Z", "seen": None},
+                                                 "nomads": {"lm": "2026-11-03T16:46:12Z", "seen": "2026-11-03T16:47:00Z"}}},
+                "pcp": {"2026-11-03T17:00:00Z": {"nodd": {"lm": "2026-11-03T17:16:40Z", "seen": None}}}})
+            with open(out) as fh:
+                self.assertEqual(len(fh.read().splitlines()), 8)
+            os.remove(out)
+            for bad in ([head] + good + good[1:2], [head, "anl,2026-11-03T16:30:00Z,nodd,2026-11-03T16:48:00Z,"],
+                        [head, "anl,2026-11-03T16:00:00Z,aws,2026-11-03T16:48:00Z,"],
+                        [head, "anl,2026-11-03T16:00:00Z,nodd,3 Nov 16:48,"], [head.replace("first_seen", "seen")] + good):
+                self.assertEqual(run(bad), 1, bad)
+                self.assertFalse(os.path.exists(out), bad)
+        # the checked-in table is the engine's of 2026-11-04: the analysis
+        # that never reached NOAA Open Data, and the precipitation file that
+        # reached it after Los Angeles's cut-off and counted under the earlier rule
+        t = analysis.load_file_times()
+        self.assertEqual(t["anl"]["2026-09-23T19:00:00Z"], {"nomads": {"lm": "2026-09-23T19:46:54Z", "seen": None}})
+        self.assertEqual(t["pcp"]["2026-09-30T07:00:00Z"]["nodd"]["lm"], "2026-09-30T08:01:44Z")
 
     def test_the_two_schedules_take_each_minute_in_a_window_once(self):
         """The ten-minute pass keeps cron(8/10) and the windowed pass takes the
@@ -3084,6 +3698,25 @@ class CellGeometry(unittest.TestCase):
         # j runs north on this grid, so dj points up the screen; i runs east
         self.assertLess(dj[1], 0)
         self.assertGreater(di[0], 0)
+
+    def test_a_rebuilt_config_keeps_each_places_code_and_no_two_share_one(self):
+        # ForecastEx's location codes (2026-11-04) are a column of the
+        # settlement list, so a rerun of the generator writes the checked-in
+        # file byte for byte, codes included, and refuses a list with a place
+        # missing its code or two places sharing one
+        centres = self.bag.read_centres()
+        rebuilt = self.bag.build_locations(centres, self.tr)
+        with open(analysis.LOCATIONS_PATH) as fh:
+            self.assertEqual(json.dumps(rebuilt, indent=1) + "\n", fh.read())
+        codes = [l.get("code") for l in rebuilt]
+        self.assertTrue(all(codes))
+        self.assertEqual(len(set(codes)), len(rebuilt))
+        self.assertEqual(next(l["code"] for l in rebuilt if l["id"] == "new-york-ny"), "NYC")
+        self.bag.check_codes(centres)
+        for broken in ([dict(c, code="") if c["id"] == "boise-id" else c for c in centres],
+                       [dict(c, code="NYC") if c["id"] == "los-angeles-ca" else c for c in centres]):
+            with self.assertRaises(SystemExit):
+                self.bag.check_codes(broken)
 
     def test_the_checked_in_geometry_is_what_the_script_computes(self):
         for l in ALL_LOCS:
