@@ -3428,6 +3428,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         page.locator("#map image.ndfd").count() == 0
                         and "No NWS forecast shading" in page.locator("#legendField").inner_text(), "")
                 page.unroute("**/data/snapshots/ndfd/**", _nd2)
+                # data.js keeps each view it fetched and draws that copy when a fetch fails, so the
+                # fixture's views go with the route. Kept, they shaded the plain-land check below
+                # whenever 5 pm Eastern fell between the two and the map opened on the other board
+                page.evaluate("() => Object.keys(localStorage).filter(k => k.startsWith('wx:ndfd/')).forEach(k => localStorage.removeItem(k))")
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(900)
                 page.locator("#m1").click(); page.wait_for_timeout(400)
                 wl = page.eval_on_selector_all("#mapW text.lbl", "e=>e.map(x=>x.textContent)")
@@ -3480,6 +3484,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                            bg: getComputedStyle(c.querySelector('img.loopimg')).backgroundColor };
                 }""")
                 page.route("**/data/snapshots/wpcsfc/**", _wpc)
+                # the loop leaves its newest frame 400 ms after it comes on screen, and a read about 1.8 s
+                # after load found it on its oldest. So the first frame is read with reduced motion, which
+                # keeps the loop still, and the loop is watched playing on a second load
+                page.emulate_media(reduced_motion="reduce")
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1500)
                 page.locator("#conusLoop").scroll_into_view_if_needed(); page.wait_for_timeout(300)
                 cn0 = cn_read()
@@ -3488,6 +3496,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                              and cn0["src"].endswith("/" + _cn["frames"][-1]["key"]) and "latest" in cn0["time"]
                              and re.search(r"\w{3} \d{1,2}\)", cn0["time"]) and "last 8 analyses" in cn0["sub"]
                              and "Weather Prediction Center" in cn0["credit"] and not cn0["cropped"]), str(cn0)[:300])
+                page.emulate_media(reduced_motion="null")
+                page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(1500)
+                page.locator("#conusLoop").scroll_into_view_if_needed()
                 cn_seen = set()
                 for _ in range(18):                                   # the loop holds the newest frame 1.4 s a turn
                     cn_seen.add(page.evaluate("() => (document.querySelector('#conusLoop .looptime') || {}).textContent || ''").split(" ")[0])
@@ -5687,6 +5698,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     return route.fulfill(status=200, content_type="image/png", body=_png((40, 90, 160)))
                 page.route("**/data/snapshots/hurricane.json", _storm_here)
                 page.route("**/data/snapshots/floater/**", _floater)
+                # the first frame is read with reduced motion and the loop watched playing on a second
+                # load, as for the surface analysis loop
+                page.emulate_media(reduced_motion="reduce")
                 page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1200)
                 page.locator("#stormLoops").scroll_into_view_if_needed(); page.wait_for_timeout(300)
                 fl0 = page.evaluate("""() => {
@@ -5696,6 +5710,9 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                            src: c.querySelector('img.loopimg').getAttribute('src'), time: c.querySelector('.looptime').textContent,
                            credit: c.querySelector('.lsrc').textContent };
                 }""")
+                page.emulate_media(reduced_motion="null")
+                page.goto(f"{srv.url}/hurricane.html"); page.wait_for_timeout(1200)
+                page.locator("#stormLoops").scroll_into_view_if_needed()
                 lt = lambda: page.evaluate("() => (document.querySelector('#stormLoops .looptime') || {}).textContent || ''")
                 seen = set()
                 for _ in range(18):                                   # the loop holds the newest frame 1.4 s a turn
