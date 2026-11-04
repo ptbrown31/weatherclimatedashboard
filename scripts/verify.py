@@ -6414,7 +6414,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # a station's own page: the thing a search result and a shared
                 # link point at, which has to say which station it is before any
                 # script has run and still draw that station's chart
-                page.goto(f"{srv.url}/san-francisco-ksfo.html"); page.wait_for_timeout(1600)
+                page.goto(f"{srv.url}/san-francisco-ksfo.html"); page.wait_for_timeout(400)
+                # the chart draws once its files are in, which a loaded machine took longer than
+                # 1.6 s to do on 4 November, so the read waits for it, up to 8 s
+                for _ in range(40):
+                    if page.locator("#chart path").count() >= 2:
+                        break
+                    page.wait_for_timeout(200)
                 sp = page.evaluate("""() => {
                   const g = (sel, a) => { const e = document.querySelector(sel); return e ? e.getAttribute(a) : null; };
                   return { title: document.title,
