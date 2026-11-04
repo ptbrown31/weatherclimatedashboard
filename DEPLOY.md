@@ -79,7 +79,12 @@ creates the `market` schedule (every 10 minutes, offset from the observation job
 the exchange's listed contracts; no credential is involved. The stack also creates the `analysis`
 schedule (`cron(8/10 * * * ? *)`, every ten minutes at :08, no retry) for the gridded-analysis
 lane, which runs on its own rather than in a chain because a pass may spend its whole budget on
-the thirty-day backfill (`docs/analysis.md`). It reads RTMA from NOAA Open Data
+the thirty-day backfill (`docs/analysis.md`), and the `analysis-windows` schedule
+(`cron(14,16,20,44,46,50,52,54 * * * ? *)`, no retry), the same lane's windowed pass (job
+`analysis-window`), every two minutes about when NOAA publishes each file. A lease under
+`data/archive/analysis2/` keeps the two from overlapping. A stack update that adds a schedule
+for a job the deployed code does not know, as `analysis-window` did on 2026-11-03, needs the
+code uploaded first (section 4), or each of its invocations fails as an unknown job. It reads RTMA from NOAA Open Data
 (`noaa-rtma-pds`; public, no credential), and from NCEP's NOMADS server a file NOAA Open Data
 lacks, and writes `data/snapshots/analysis2/` and `data/archive/analysis2/`. The page it feeds, `analysis-resolution.html`, is unlisted and
 `noindex`. It also creates the `hrrr` schedule (`cron(12/15 * * * ? *)`, every fifteen minutes at

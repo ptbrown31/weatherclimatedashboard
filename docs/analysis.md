@@ -21,7 +21,12 @@ Open Data or NOMADS by then (a file's Last-Modified time on the server it was re
 published later never counts, the first published version of a file counts, and a place-day with
 no hour by the cut-off goes to event review. It replaced the rule of 2026-10-13 (a file on
 neither server six hours after its hour was not published, and a day was final once every file
-was in or not published), which had replaced half an hour after the product usually lands. 2026-09-30: **URMA is dropped from the lane and the page**, since
+was in or not published), which had replaced half an hour after the product usually lands. 2026-11-03 (owner's ruling):
+**the job checks every two minutes around the expected arrivals** (section 5), and reads each
+hour's precipitation file as soon as NOAA publishes it rather than with the next analysis. The
+same ruling has the job read NOMADS for every hour, since an hour is final once NOMADS has it;
+that part is not built yet, and until it is the job reads NOMADS only for a file NOAA Open Data
+lacks (section 1). 2026-09-30: **URMA is dropped from the lane and the page**, since
 it does not resolve. The lane read it for comparison until then; it reads RTMA only now, the
 published days, place files and CSV files were rewritten without it (`LAYOUT`, section 5),
 and its archive and frames under `archive/analysis2/{hours,precip}/urma/` and
@@ -45,7 +50,10 @@ write times (S3 LastModified on NOAA Open Data; NOMADS directory times for the f
 NOMADS keeps), as lag after the valid hour, median (90th percentile): the analysis 48 min (53)
 on Open Data and 46 min (47) on NOMADS; the precipitation 17 min (21) after the end of its
 hour. The Open Data copy trails NOMADS by a median of under two minutes and occasionally by
-hours (up to 2 h 37 min on the evening of 2026-09-23, when NOMADS was on time). A live poll of
+hours (up to 2 h 37 min on the evening of 2026-09-23, when NOMADS was on time). NOAA's own
+publication times over the two weeks to 2026-11-03 put the analysis 46 to 52 minutes after its
+hour (median 49) and an hour's precipitation 16 to 18 minutes after the hour ends; the windowed
+passes of section 5 are set on them. A live poll of
 the bucket on 2026-09-28 found each object listed within one 20-second poll of its
 LastModified. NOAA writes each RTMA file once; neither the analysis nor the precipitation file
 is rewritten. Over the thirty days to 2026-09-27 one file of the 720 analysis hours and none of
@@ -289,7 +297,15 @@ All files carry `schema: "analysis/2"`, `asof` (the newest analysis valid time t
 contain, or for `index.json` the newest hour actually read) and `written` (the pass time).
 Cache-Control: frames and location-day files that are final with resolved precipitation
 `public, max-age=300, stale-while-revalidate=1800, stale-if-error=86400`; everything
-else `public, max-age=60, stale-while-revalidate=300, stale-if-error=86400`.
+else `public, max-age=60, stale-if-error=86400` (`CACHE_LIVE`). The live files carried
+`stale-while-revalidate=300` until 2026-11-03 and no longer do. The settlement display fetches
+a live day's place file and day file again each minute with a stamp in the query string, and
+the CDN's snapshot policy keeps the query string out of its cache key, so with it the first
+fetch after the minute was answered from the stale copy while the edge refreshed behind it, up
+to about six minutes old (a CloudFront hit of age 179 s on Boston's place file, seen on the live
+page). Without it a fetch is at most the minute old, and `stale-if-error` still serves the last
+copy when the origin errs. The same header goes on the other live files, `index.json`, the grid
+index and the CSV files. The stack's cache policy is unchanged.
 
 **`snapshots/analysis2/index.json`**
 
@@ -455,11 +471,16 @@ re-reading NOAA. `archive/analysis2/_meta/state.json` holds the cursors: per pro
 hours whose analysis or precipitation file is known not published, pruned past 33 days), `newest` (the
 newest hour read), `scanned` (how far the live walk has looked), `since` (when the lane first
 looked), `gaps` (hours passed without a read, retried for 48 hours), `precipPending`
-(archived hours whose precipitation file is still being refetched) and `reads`; per product
+(archived hours whose precipitation file is still being refetched), `reads` and `lastRead`
+(when a pass last read an hour); per product
 the backfill `cursor`, `oldest`, `done` and queued catch-up spans; `layout`, the `LAYOUT` the
 listed days were last all written in, and `relayout`, the listed days still to be rewritten
-after it changed; the day statuses; the prune stamp; and `precipSwept`, the time of the last
-precipitation sweep (step 4). A state written before 2026-09-30 loses its `urma` lanes and its
+after it changed; the day statuses; the prune stamp; `precipSwept`, the time of the last
+precipitation sweep (step 4); and `healthAt`, when a ten-minute pass last advanced the failure
+streak (section 5). `archive/analysis2/_meta/lease.json` is the lease of section 5, the token
+of the pass that holds it with the pass's kind (`baseline` or `window`), when it was taken,
+when it expires and when it was released; it is under `data/archive/`, which the Lambda's role
+can write and the CDN never serves. A state written before 2026-09-30 loses its `urma` lanes and its
 re-read and revision records when it is loaded, and has no `layout`, which queues every listed
 day for rewriting.
 A precipitation key without an archive hour is the precipitation of an hour whose analysis
@@ -469,33 +490,86 @@ this lane's streaks never collide with another lane's. Pages never read `archive
 
 ## 5. The job
 
-`analysis_pass(cfg, store) -> int`, registered as `JOBS["analysis"]` and run on its own
-EventBridge schedule `cron(8/10 * * * ? *)` (between the observation and quote lanes). Each
-pass runs under `arch.Deadline(min(arch.remaining_budget(cfg), PASS_CAP_SECONDS))` with
-`PASS_CAP_SECONDS = 330`, which with `FETCH_TRIES = 2` and `FETCH_TIMEOUT = 20` (about 212 s
-for the worst hour) keeps a pass inside the ten-minute cadence, so two passes never overlap on
-the state file, keeps
-`RESERVE_SECONDS = 45` back from the lanes for the rebuild and the indexes, and sets
-`arch.LAST_STATUS`. Every NOAA call is `fetch_range` or `fetch_bytes` in
-`pipeline/gov_weather.py` with the site's User-Agent, two tries of twenty seconds each, so
-one hour's five fetches cannot hold a pass for more than a few minutes and the 900 s Lambda
-timeout is never what stops it.
+The job has two passes (owner's ruling 2026-11-03). `analysis_pass(cfg, store) -> int` is the
+ten-minute pass, registered as `JOBS["analysis"]` and run on its own EventBridge schedule
+`cron(8/10 * * * ? *)` (between the observation and quote lanes). `window_pass(cfg, store) ->
+int` is the windowed pass, registered as `JOBS["analysis-window"]` and run by a second schedule,
+`cron(14,16,20,44,46,50,52,54 * * * ? *)`, which is every two minutes inside :44 to :54 and :14
+to :20 (`WINDOWS`), about when NOAA publishes the analysis and an hour's precipitation (section
+1), at the minutes the ten-minute pass does not take. :48 and :18 are the ten-minute pass's own,
+and there it does the windowed pass's work first. A test reads both schedules from
+`ops/aws/template.yaml` and checks that no minute starts two passes. Minutes past the hour are
+the same in UTC and in every zone the lane covers.
 
-1. **Pending precipitation.** For each product, refetch the precipitation file of every
-   archived hour in `precipPending`: an hour whose file was absent, refused, or short of a
-   place's cell at the last read. A read that adds values rewrites the precipitation key
-   and (within the frame window) the precipitation frame; an hour whose file is complete
-   leaves the list; an hour past `precip_due`, six hours after its hour ends, is dropped
+Each pass runs under `arch.Deadline(pass_seconds(now, budget))`, which is `PASS_CAP_SECONDS =
+330` (or the invocation's budget when that is less), never later than `WINDOW_YIELD_SECONDS = 10`
+before the next minute in a window, and never under `PASS_FLOOR_SECONDS = 75`. The ten-minute
+pass outside the windows keeps its 330 s. At :48 and :18 it has until ten seconds before the
+windowed pass two minutes on, room for the windowed work and a little backfill, so the sweep and
+the refresh, which want 165 s, wait for the next ten-minute pass outside the windows. With
+`FETCH_TRIES = 2` and `FETCH_TIMEOUT = 20` (about 212 s for the worst hour) a pass ends inside
+the ten minutes. Each pass keeps `RESERVE_SECONDS = 45` back from the lanes for the rebuild and
+the indexes, and sets `arch.LAST_STATUS` with its `mode` (`baseline` or `window`). Every NOAA
+call is `fetch_range` or `fetch_bytes` in `pipeline/gov_weather.py` with the site's User-Agent,
+two tries of twenty seconds each, so one hour's five fetches cannot hold a pass for more than a
+few minutes and the 900 s Lambda timeout is never what stops it.
+
+**The lease.** No two passes ever overlap. Before it reads the state, a pass takes the lease,
+`archive/analysis2/_meta/lease.json` (section 4), with conditional writes on the store
+(`storage.Lease`). It creates the lease with `If-None-Match: *`, takes over one that has expired
+or been released with `If-Match` on the ETag it read, and releases its own by the same rule, so
+of two passes racing for it exactly one holds it. On S3 the headers are added to PutObject
+through the boto3 client's `before-call` event hook rather than as parameters, since the Lambda
+runtime's botocore is not pinned and one older than the parameters would refuse them; S3
+enforces them on the server. The local backend does the same with an exclusive create (a hard
+link of the written file) and an atomic rename, under a guard file held for the few milliseconds
+of each conditional write. A pass that finds the lease held writes nothing, prints the status
+`"lease": "held"` with the holder's kind and times, and returns 0, so it is not a failure and
+raises no alarm. The lease lasts past the longest its holder can run, the pass's budget (Lambda's
+remaining time less the 30 s `handler.py` holds back) plus `LEASE_SPARE_SECONDS = 90`, or 900 s
+plus that for a run with no budget, and the holder never renews it. A pass killed before it lets
+go (out of memory, say) holds the lane until the lease expires, on Lambda up to about sixteen
+minutes after the pass began (a budget of about 870 s, plus the 90 s).
+A pass releases the lease after its last write. A release that finds the lease taken over is
+recorded as a failure, since it would mean a pass outran its lease.
+
+**The windowed pass** does only light work. It reads the newest precipitation files (step 1),
+then the analysis hours after the walk's cursor and the gap of the hour now due (step 2),
+rebuilds the days they touch (step 3), and writes the state when it moved and `index.json` when
+a file came in. It leaves the pending precipitation, the older gaps, the days past their cut-off,
+the sweep, the refresh, the backfill, the prune and the health file to the ten-minute pass. When
+nothing is new it writes nothing but the lease and exits within seconds, its requests being the
+lease, the state, the grid index, the newest hours' precipitation keys and a fetch or two of NOAA
+files not yet published.
+
+1. **Precipitation.** First the newest files, on both passes (`precip_lane`). An hour's
+   precipitation file is read as soon as NOAA publishes it, without waiting for the next
+   analysis, which it was read with until 2026-11-03, about half an hour after it landed. A
+   file is looked for from 14 minutes after its hour ends (`LOOK_MINUTES`, its window's
+   opening), through the `PCP_LIVE_HOURS = 3` newest files now due, oldest first. A file already
+   stored is left alone, and one NOAA Open Data lacks 27 minutes after its hour ends is looked
+   for on NOMADS as before. A read writes the precipitation key, its frame and `grid/index.json`.
+   What counts is unchanged, and the day takes the file by its publication time as before; the
+   day's last accumulation, on the bucket about 17 minutes after local midnight, is now in the
+   day's total before the 12:45 AM cut-off. Then, on the ten-minute pass only, refetch the
+   precipitation file of every archived hour in `precipPending`, an hour whose file was absent,
+   refused, or short of a place's cell at the last read. A read that adds values rewrites the
+   precipitation key and (within the frame window) the precipitation frame; an hour whose file
+   is complete leaves the list, without a fetch when the newest files' read has stored it
+   whole since; an hour past `precip_due`, six hours after its hour ends, is dropped
    with whatever coverage it has, a place still without a value being not published. The lane never waits on a precipitation file before
    archiving an analysis hour.
 2. **Live hours.** For each product, the hours to try are the `gaps` first, then the hours
-   after the walk's cursor (the later of `newest` and `scanned`) up to what should have
-   landed (`now` less the product's lag, floored to the hour). A first pass starts at the
-   present. A cursor more than 24 hours behind jumps to the present and queues the skipped
-   span for the backfill (once, and no older than the backfill reaches). For each hour, up
-   to three reads per product per pass: fetch the `.idx`, range-fetch TMP, WIND and GUST,
-   sample each field at the places' cells and onto the lattice, then fetch the precipitation
-   file and do the same. Write the archive hour (once), the precipitation key, the four
+   after the walk's cursor (the later of `newest` and `scanned`) up to the hour now due
+   (`due_latest`). An analysis is looked for from 44 minutes after its hour, its window's
+   opening, two minutes before NOAA's earliest publication; at the ten-minute pass's own
+   minutes that is the hour the product's 47-minute lag gives, as before. The windowed pass
+   retries only the gap of the hour now due and leaves the older gaps to the ten-minute pass. A
+   first pass starts at the present. A cursor more than 24 hours behind jumps to the present and
+   queues the skipped span for the backfill (once, and no older than the backfill reaches). For
+   each hour, up to three reads per product per pass: fetch the `.idx`, range-fetch TMP, WIND
+   and GUST, sample each field at the places' cells and onto the lattice, then fetch the
+   precipitation file, unless step 1 has stored it whole already, and do the same. Write the archive hour (once), the precipitation key, the four
    frames and `grid/index.json`; queue the hour in `precipPending` when its precipitation
    is short and its wait has not run out. A file NOAA Open Data does not have is looked for
    on NOMADS from `settled_after` (the product's lag plus `NOMADS_AFTER_MINUTES = 30`) until
@@ -520,8 +594,11 @@ timeout is never what stops it.
    lane first looked while the newest hours were half an hour late, and a cursor
    seeded only by a read would have left the backfill idle until one landed).
 3. **Days.** Rebuild every `days/` and `loc/` file that a new hour or a filled
-   precipitation key touches (a UTC hour lands in one local day per zone), and any day past
-   its close time, from the archive hours, applying section 1's rules. The state is saved.
+   precipitation key touches (a UTC hour lands in one local day per zone), and on the
+   ten-minute pass any day past its cut-off, from the archive hours, applying section 1's
+   rules. A row reads the files of any hour that has begun (its analysis) or ended (its
+   accumulation). Until 2026-11-03 it read only the hours the product's lag said had landed,
+   which hid an hour's precipitation until the next analysis was due. The state is saved.
 4. **Sweep.** Once a day (`PRECIP_SWEEP_HOURS = 24`), over the hours both walks have passed
    (from the backfill's `oldest`, at most 30 days back, to 48 hours before the live cursor,
    outside queued catch-up spans): read the analysis of every hour that has no archive hour
@@ -546,13 +623,16 @@ timeout is never what stops it.
    state is saved every twenty hours read.
 7. **Prune**, once a day: frames older than 30 days and their index entries, and the state's
    lists of hours not published older than 33 days.
-8. **Always**, in a `finally`: `grid/index.json`, the state, the health file and
-   `index.json` last, so a reader sees a consistent set whatever happened above.
+8. **Always**, in a `finally`. On the ten-minute pass `grid/index.json`, the health file, the
+   state and `index.json` last, so a reader sees a consistent set whatever happened above (the
+   health file before the state, which keeps when it was written). On the windowed pass the
+   state when it moved and `index.json` when a file came in; every frame it wrote was followed
+   by its grid index. Steps 4 to 7 are the ten-minute pass's.
 
 Nothing a NOAA object does fails the pass. Every fetch and decode of an hour is guarded
 inside `read_hour` and `read_precip`; every lane call is guarded in the pass; the pass-level
 `except` is the last resort and still reaches the `finally`. A pass returns 1 only when a
-read failed and nothing at all was read. The health file keeps a failure streak per product
+read failed and nothing at all was read, a precipitation file included. The health file keeps a failure streak per product
 through `archive.update_health`: a pass with a read of that product resets it; a pass counts
 against it when a read of that product failed or when the product is *overdue*, which is the
 newest hour read (or, before any read, the hour the lane first looked for) being
@@ -560,15 +640,26 @@ newest hour read (or, before any read, the hour the lane first looked for) being
 the normal wait between landings and counts neither way. Six such passes in a row
 (`FAIL_STREAK_ALARM`) raise the lane's alarm the same way the other lanes do, so an outage on
 NOAA's side is an alarm after about three hours and a corrupt file among readable hours is
-not. The health file keeps URMA's last streak from before 2026-09-30; a product the lane no
-longer reads raises no alarm. `LAST_STATUS` carries the counts and the lists (reads, absences,
-waiting precipitation, errors), and `newest` per product.
+not. Only the ten-minute pass advances the streak, so it still counts passes at the cadence
+the alarm was set for. The windowed passes now read most hours between two ten-minute passes
+and never touch it, so an hour any pass read since the last ten-minute pass (`lastRead` after
+`healthAt` in the state) is a read there, and a read that fails in a windowed pass counts once
+the ten-minute pass meets the same file with nothing read since. The health file keeps URMA's last streak from before 2026-09-30; a product the lane no
+longer reads raises no alarm. `LAST_STATUS` carries the pass's `mode` and `lease` (`released`,
+`held`, or `unknown` when the store could not be read), the counts and the lists (reads,
+precipitation reads, absences, waiting precipitation, errors), and `newest` per product.
 
 Write budget per pass (measured with fifty places, when the lane read two products): a pass
 where one hour of each product landed wrote about 70 objects; an empty pass five; a
 precipitation refetch that adds coverage one key, one frame, one day file and one place file
 per place. That was about 110k PUTs a month with both products, and the 30-day backfill a
-one-time 15k (about a third more with sixty-seven places); RTMA alone is a little over half. Schema 2's first 30 days were filled on 2026-09-29 by a local run of
+one-time 15k (about a third more with sixty-seven places); RTMA alone is a little over half.
+From 2026-11-03, counted from the code rather than measured, an hour's precipitation is read
+and its days rebuilt on their own, one more rebuild an hour (a day file, two CSV files and
+sixty-seven place files, twice that across a local midnight), and each of the fourteen passes an
+hour writes the lease about three times (a create the store refuses, a takeover, a release) and
+reads it once, about 30k lease writes and 10k reads a month. A windowed pass with nothing new
+writes only the lease. Schema 2's first 30 days were filled on 2026-09-29 by a local run of
 the lane's own `read_hour`, `write_hour` and `rebuild_days` with the reads in parallel, then
 uploaded, so the live lane started with its backfill done.
 
@@ -687,9 +778,13 @@ averages or rounds a value, and its only sums are of times and pixels. In order:
   four states: counting down, due now, late, and missed once the cut-off has passed. They run
   to NOAA's own publication times over the two weeks to 2026-11-03, the analysis a median 49
   minutes after its hour and usually by 52, the precipitation a median 17 minutes after the hour
-  ends and usually by 18 (`LAG` in the script). The lane reads an hour's precipitation file
-  with the next analysis, so on a live day that countdown reads late for about half an hour
-  each hour and its note says so;
+  ends and usually by 18 (`LAG` in the script). Late means the file is not in yet past the time
+  it is usually out by, and its note gives that time and says the file counts if published by
+  the cut-off. Until 2026-11-03 the lane read an hour's precipitation file with the next
+  analysis, so that countdown read late for about half an hour each hour and its note said so;
+  the lane now reads each file within about two minutes of its publication inside the arrival
+  windows, the precipitation as soon as it lands (section 5), and the note says nothing of the
+  next analysis;
 - five value cards, High, Low, Peak gust, Mean wind and Precipitation, each the lane's running
   value at the last counted hour in (`run`), with the hour of the extreme or the hours counted,
   "so far" until the day is final, and the exact figure under the toggle; a place in event
@@ -714,9 +809,15 @@ never counted. While the day is live and the tab is visible, the display follows
 and each minute from :44 to :54 and from :14 to :20 past the hour, about when the analysis and
 the precipitation land, it fetches the place file and the day file again with `?b=` and a
 stamp that changes once a minute (`WXD.get`'s `bust`), so the day fills in without a reload.
-The site's CloudFront snapshot policy keeps query strings out of its cache key
-(`ops/aws/template.yaml`), so the stamp reaches past the browser's cache but not the CDN's,
-and a refetch can still be up to the CDN's 60-second lifetime old.
+It does the same each minute while a countdown reads late, for up to half an hour past the
+file's usual time (`CHASE`), so a file the lane reads late, on its ten-minute pass outside the
+windows, reaches the page a minute or two after the read and late ends when the file is in;
+past that half hour the windows fetch the day twice an hour. The site's CloudFront snapshot
+policy keeps query strings out of its cache key (`ops/aws/template.yaml`), so the stamp
+reaches past the browser's cache but not the CDN's, and a refetch can still be up to the CDN's
+60-second lifetime old. Since 2026-11-03 it is no older than that, because the live files
+carry no `stale-while-revalidate` (section 4); with it the first fetch after the minute could
+be about six minutes old.
 
 A link such as `analysis-resolution.html?var=precip&day=2026-09-28&loc=boston-ma` opens that
 place-day and, since it names a variable and a place, scrolls to that variable's chart
@@ -772,6 +873,28 @@ report conventions have no analogue here.
   day's summary; place files without the new fields stay readable and are rewritten newest
   first, a few a pass, inside the deadline; and Boston's 2026-09-28 resolves on 0.84 while its
   rounded hours add to 0.83.
+- `tests/test_analysis.py`, for the windowed passes (2026-11-03): an hour's precipitation is read
+  as soon as it lands, before its analysis is due, and is in the place file and the day at once,
+  and the analysis read later does not fetch it again; New York's last accumulation of a day is
+  in before the 12:45 AM cut-off and the day resolves on it by the same rules; a windowed pass
+  with nothing new writes nothing and fetches only the files newly due; the analysis is
+  looked for from :44; a windowed pass leaves the older gaps, the pending precipitation, the
+  backfill, the sweep, the refresh and the prune to the ten-minute pass, which does them; a pass
+  that finds the lease held writes and fetches nothing and is not a failure, a pass holds the
+  lease while it reads the state and for its budget plus 90 s, and one left by a pass that died
+  is taken over once it expires; a windowed pass's read counts for the next ten-minute pass's
+  streak and its failed read does not; a precipitation read is a read for the exit code; the
+  live files carry no `stale-while-revalidate` and keep `stale-if-error`, while a final place-day
+  keeps `CACHE_FINAL`; every pass ends ten seconds before the next minute in a window; and the
+  two schedules in the template take each minute in a window once, the ten-minute pass keeping
+  :48 and :18.
+- `tests/test_lease.py`: the conditional writes and the lease on the local backend, on a stand-in
+  for boto3's client that answers the conditional headers as S3 does, and, where botocore is
+  installed, on a real boto3 client whose requests are answered in the process: create, held,
+  an expired lease taken over and its old holder's release refused, release, two passes taking
+  over one expired lease with one winning, a create whose answer was lost, an unreadable lease,
+  the headers on each request with no hook outliving its call, a 409 counted as a lost race,
+  and the local guard (never listed, a live one makes a write give up, a dead one is broken).
 - `scripts/verify.py`: the page in the `pages` sweep; checks that the map's variable switch changes
   the legend and the frame, the page offers no product choice and never says URMA (an old
   `product=urma` address opens on RTMA), the day calendar and hour stepper change the caption,
@@ -786,7 +909,10 @@ report conventions have no analogue here.
   down, due now, late and missed; the hour table has a row per hour, its running total ends on
   the day's and the toggle shows exact figures; the replay moves the cards to the lane's running
   values for that minute and Latest brings the final day back; Play the day runs; `var=` opens
-  its chart; a refetch inside an arrival window carries `?b=` and fills the day in; and a place
+  its chart; a refetch inside an arrival window carries `?b=` and fills the day in; a late
+  accumulation's note gives NOAA's usual time and the cut-off and nothing of the next analysis;
+  outside the windows a late countdown keeps the place file fetched each minute and the day
+  fills in, and past half an hour late nothing is fetched; and a place
   file without the new fields still draws, with no running figures and no replay.
   Fixtures under `samples/snapshots/analysis2/` come from a real local run of the job, rebuilt
   on 2026-11-03 by the lane's own code (their README says how).

@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import types
 import unittest
 
@@ -737,14 +738,19 @@ class Job(unittest.TestCase):
         self.addCleanup(lambda: setattr(analysis, "load_locations", keep))
         self.cfg = {}
 
-    def run_pass(self, now=NOW):
-        """One pass, its printed status kept in self.errors for the assertions."""
+    def run_pass(self, now=NOW, window=False):
+        """One pass (the windowed one with `window`), its printed status kept
+        in self.status and its errors in self.errors for the assertions."""
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            rc = analysis.analysis_pass(self.cfg, self.st, now)
+            rc = (analysis.window_pass if window else analysis.analysis_pass)(self.cfg, self.st, now)
         line = buf.getvalue().strip().splitlines()[-1]
-        self.errors = json.loads(line).get("errors", [])
+        self.status = json.loads(line)
+        self.errors = self.status.get("errors", [])
         return rc
+
+    def run_window(self, now):
+        return self.run_pass(now, window=True)
 
     def read(self, key):
         raw = self.st.get(key)
@@ -1330,7 +1336,9 @@ class Job(unittest.TestCase):
 
     def test_a_message_on_another_grid_is_refused_and_reported(self):
         t = hour(2026, 9, 26, 19)
-        self.fx.add_hour("rtma", t)
+        # no precipitation file, which is read on its own as it lands and
+        # would be a read of its own (test_a_precipitation_read_is_a_read)
+        self.fx.add_hour("rtma", t, precip=False)
         self.fx.grids[("rtma", "TMP", iso(t))] = "other"
         self.assertEqual(self.run_pass(), 1)                   # the only read this pass failed
         self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
@@ -1354,10 +1362,12 @@ class Job(unittest.TestCase):
         self.assertIsNotNone(self.read(analysis.GRID_INDEX_KEY))
         self.assertIsNotNone(self.read(analysis.INDEX_KEY))
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
-        # the hour's read, and the precipitation of the first absent hour the
-        # backfill reaches; the absent hours after it are walked past
-        # without their precipitation, so an outage costs one of each
-        self.assertEqual(archive.LAST_STATUS["failed"], 2)
+        # the newest precipitation file, the hour's read, and the
+        # precipitation of the first absent hour the backfill reaches; each
+        # lane stops at its first refused file and the absent hours after it
+        # are walked past without their precipitation, so an outage costs
+        # one of each
+        self.assertEqual(archive.LAST_STATUS["failed"], 3)
         self.assertEqual(self.health()["rtma"]["fail_streak"], 1)
         self.assertEqual(self.state()["products"]["rtma"]["gaps"], [iso(t)])
         # persistently failing, the product reaches the alarm streak
@@ -1387,7 +1397,7 @@ class Job(unittest.TestCase):
 
     def test_a_raising_decode_is_the_hours_error_not_the_pass(self):
         t = hour(2026, 9, 26, 19)
-        self.fx.add_hour("rtma", t)
+        self.fx.add_hour("rtma", t, precip=False)             # the analysis is the pass's only read
         keep = self.fx.decode_cells
 
         def refuse(msg, ks):
@@ -1888,6 +1898,285 @@ class Job(unittest.TestCase):
         self.assertEqual(status["refreshed"]["days"], 0)
         self.assertEqual(sorted(state["relayout"]), list(days))
 
+    # ---- the windowed passes and the lease (owner's ruling 2026-11-03): every
+    #      two minutes about when NOAA publishes each file, an hour's
+    #      precipitation read as soon as it lands, and never two passes at once
+    def caught_up(self, newest, since=None):
+        """A saved state whose live walk has read `newest` and whose backfill is done."""
+        state = analysis.new_state()
+        state["products"]["rtma"].update({"newest": iso(newest), "scanned": iso(newest), "since": iso(since or newest)})
+        back = iso(newest - dt.timedelta(days=31))
+        state["backfill"]["rtma"].update({"cursor": back, "oldest": back, "done": True})
+        state["precipSwept"] = state["pruned"] = iso(newest)
+        analysis.save_state(self.st, state, newest)
+        return state
+
+    def test_precipitation_is_read_as_soon_as_it_lands_not_with_the_next_analysis(self):
+        t = hour(2026, 9, 26, 19)                    # the file of the hour 18Z to 19Z, on the bucket at 19:17
+        self.fx.add_precip("rtma", t)
+        self.fx.values[("rtma", "precip", iso(t))] = lambda k: 2.54 if k == NY_K184 else 0.0
+        self.fx.published[analysis.pcp_url("rtma", t)] = "2026-09-26T19:17:02Z"
+        at = t + dt.timedelta(minutes=18)
+        self.assertLess(analysis.expected_latest("rtma", at), t)     # the analysis it came with is not due till 19:47
+        self.assertEqual(self.run_window(at), 0)
+        self.assertEqual(self.status["pcpReadCount"], 1)
+        pre = self.read(analysis.precip_key("rtma", t))
+        self.assertEqual((pre["complete"], pre["published"], pre["values"]["new-york-ny"]), (True, "2026-09-26T19:17:02Z", 2.54))
+        self.assertIsNotNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z")))
+        # in the place file and the day at once, in the row of the hour it starts
+        row = next(r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]
+                   if r["t"] == iso(t - dt.timedelta(hours=1)))
+        self.assertEqual((row["rtma"]["precip"], row["rtma"]["show"]["precip"], row["rtma"]["pcpPub"]),
+                         (0.1, 0.1, "2026-09-26T19:17:02Z"))
+        self.assertEqual(row["rtma"]["run"]["precip"], {"value": 0.1, "exact": 0.1, "hours": 1})
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual(ny["precip"], {"value": 0.1, "exact": 0.1, "hours": 1, "resolved": False, "resolvedAt": None})
+        # the analysis lands at 19:49 and is read on its own, without the
+        # precipitation file being fetched again, and nothing waits on it
+        self.fx.add_hour("rtma", t, precip=False)
+        k = len(self.fx.fetched)
+        self.assertEqual(self.run_window(t + dt.timedelta(minutes=50)), 0)
+        self.assertNotIn(analysis.pcp_url("rtma", t), self.fx.fetched[k:])
+        self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[k:])
+        ps = self.state()["products"]["rtma"]
+        self.assertEqual((ps["newest"], ps["precipPending"]), (iso(t), []))
+        merged = analysis.get_hour(self.st, "rtma", t, {})
+        self.assertEqual((merged["values"]["new-york-ny"]["temp"], merged["values"]["new-york-ny"]["precip"], merged["precipRead"]),
+                         (293.15, 2.54, True))
+
+    def test_the_days_last_accumulation_is_in_before_its_cut_off_and_resolves_by_the_same_rules(self):
+        # New York's 2026-09-26: its last hour's accumulation, 23:00 to
+        # midnight EDT, is NOAA's file for 04Z on the 27th, on the bucket at
+        # about 04:17Z, and the cut-off is 04:45Z. The windowed pass at 04:18
+        # has it in the day's total before the cut-off, and the ten-minute pass
+        # after the cut-off resolves the day on it, by its publication time
+        day, tz = "2026-09-26", "America/New_York"
+        hs = analysis.local_day_hours(day, tz)
+        for h in hs:
+            self.fx.add_hour("rtma", h)
+            self.fx.published[analysis.pcp_url("rtma", h)] = iso(h + dt.timedelta(minutes=17))
+        self.archive(hs, hs[-1] + dt.timedelta(minutes=50))
+        last = hs[-1] + dt.timedelta(hours=1)
+        self.caught_up(hs[-1], hs[0])
+        self.fx.add_precip("rtma", last)
+        self.fx.values[("rtma", "precip", iso(last))] = lambda k: 2.54 if k == NY_K184 else 0.0
+        self.fx.published[analysis.pcp_url("rtma", last)] = iso(last + dt.timedelta(minutes=17))
+        cut = analysis.day_cutoff(day, tz)
+        self.assertEqual(cut, last + dt.timedelta(minutes=45))
+        self.assertEqual(self.run_window(last + dt.timedelta(minutes=18)), 0)
+        ny = self.read(analysis.DAY_KEY.format(day=day))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["final"], ny["precip"]["hours"], ny["precip"]["value"]), (False, 24, 0.1))
+        rows = self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=day))["hours"]
+        self.assertEqual((rows[-1]["local"], rows[-1]["rtma"]["precip"], rows[-1]["rtma"]["pcpPub"]),
+                         ("23", 0.1, iso(last + dt.timedelta(minutes=17))))
+        self.assertEqual(self.run_pass(cut + dt.timedelta(minutes=3)), 0)
+        ny = self.read(analysis.DAY_KEY.format(day=day))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["final"], ny["hours"], ny["precip"]["resolved"], ny["precip"]["hours"], ny["precip"]["value"]),
+                         (True, 24, True, 24, 0.1))
+
+    def test_a_windowed_pass_with_nothing_new_writes_nothing_and_exits_at_once(self):
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        self.assertEqual(self.run_pass(), 0)
+        health = self.health()
+        n, k = len(self.st.puts), len(self.fx.fetched)
+        t0 = time.time()
+        self.assertEqual(self.run_window(hour(2026, 9, 26, 20) + dt.timedelta(minutes=14)), 0)
+        self.assertLess(time.time() - t0, 5)
+        self.assertEqual(self.st.puts[n:], [])                 # no state, no index, no day, no health file
+        self.assertEqual(self.health(), health)
+        self.assertEqual((self.status["mode"], self.status["lease"], self.status["readCount"], self.status["pcpReadCount"]),
+                         ("window", "released", 0, 0))
+        self.assertEqual((archive.LAST_STATUS["mode"], archive.LAST_STATUS["errors"], archive.LAST_STATUS["alarms"]),
+                         ("window", 0, []))
+        # it fetches only what is newly due, never the analysis it has read,
+        # and of the precipitation only the newest files not yet stored
+        got = self.fx.fetched[k:]
+        self.assertFalse([u for u in got if "2dvaranl" in u])
+        self.assertIn(analysis.pcp_url("rtma", hour(2026, 9, 26, 20)), got)
+        self.assertTrue(all(any(f"{h:%Y%m%d%H}.pcp" in u for h in (hour(2026, 9, 26, 18), hour(2026, 9, 26, 20))) for u in got), got)
+
+    def test_a_windowed_pass_looks_for_the_analysis_from_its_windows_opening(self):
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        k = len(self.fx.fetched)
+        self.run_window(t + dt.timedelta(minutes=44))
+        self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[k:])
+        self.assertEqual(self.state()["products"]["rtma"]["gaps"], [iso(t)])
+        k = len(self.fx.fetched)
+        self.run_window(t + dt.timedelta(minutes=46))              # still not there, fetched again
+        self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[k:])
+        self.fx.add_hour("rtma", t)                                # NOAA publishes it at 19:47
+        self.assertEqual(self.run_window(t + dt.timedelta(minutes=50)), 0)
+        ps = self.state()["products"]["rtma"]
+        self.assertEqual((ps["newest"], ps["gaps"]), (iso(t), []))
+        self.assertIsNotNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="temp", stamp="20260926T19Z")))
+
+    def test_a_windowed_pass_leaves_the_older_gaps_the_retries_and_the_heavy_work_to_the_ten_minute_pass(self):
+        h15, h16, h19, h20 = (hour(2026, 9, 26, k) for k in (15, 16, 19, 20))
+        self.fx.add_hour("rtma", h15)                    # an old gap whose file has landed since
+        self.fx.add_precip("rtma", h16)                  # an archived hour's precipitation, still pending
+        state = analysis.new_state()
+        state["products"]["rtma"].update({"newest": iso(h19), "scanned": iso(h19), "since": iso(h15),
+                                          "gaps": [iso(h15)], "precipPending": [iso(h16)]})
+        state["backfill"]["rtma"].update({"cursor": iso(h19), "oldest": iso(h19)})
+        state["layout"] = "cutoff-2026-10-14"
+        analysis.save_state(self.st, state, h19)
+        k = len(self.fx.fetched)
+        self.assertEqual(self.run_window(h20 + dt.timedelta(minutes=46)), 0)
+        got = self.fx.fetched[k:]
+        self.assertNotIn(analysis.anl_url("rtma", h15) + ".idx", got)
+        self.assertNotIn(analysis.pcp_url("rtma", h16), got)
+        self.assertIn(analysis.anl_url("rtma", h20) + ".idx", got)       # the hour now due, not there yet
+        s = self.state()
+        self.assertEqual((s["products"]["rtma"]["gaps"], s["products"]["rtma"]["precipPending"]), ([iso(h15), iso(h20)], [iso(h16)]))
+        self.assertEqual((s["backfill"]["rtma"]["cursor"], s["precipSwept"], s["pruned"], s["layout"]),
+                         (iso(h19), None, None, "cutoff-2026-10-14"))
+        self.assertIsNone(self.read(analysis.hour_key("rtma", h15)))
+        k = len(self.fx.fetched)
+        self.run_window(h20 + dt.timedelta(minutes=50))
+        self.assertIn(analysis.anl_url("rtma", h20) + ".idx", self.fx.fetched[k:])
+        self.assertNotIn(analysis.anl_url("rtma", h15) + ".idx", self.fx.fetched[k:])
+        # the ten-minute pass does all of it
+        at = h20 + dt.timedelta(minutes=58)
+        self.assertEqual(self.run_pass(at), 0)
+        s = self.state()
+        self.assertIsNotNone(self.read(analysis.hour_key("rtma", h15)))
+        self.assertTrue(self.read(analysis.precip_key("rtma", h16))["complete"])
+        self.assertEqual((s["products"]["rtma"]["gaps"], s["products"]["rtma"]["precipPending"]), ([iso(h20)], []))
+        self.assertEqual((s["precipSwept"], s["pruned"], s["layout"]), (iso(at), iso(at), analysis.LAYOUT))
+        self.assertNotEqual(s["backfill"]["rtma"]["cursor"], iso(h19))
+
+    def test_a_pass_that_finds_the_lease_held_writes_nothing_and_is_not_a_failure(self):
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        other = storage.Lease(self.st, analysis.LEASE_KEY)
+        self.assertTrue(other.acquire(NOW - dt.timedelta(minutes=1), 900, "baseline"))
+        for window in (False, True):
+            n, k = len(self.st.puts), len(self.fx.fetched)
+            self.assertEqual(self.run_pass(NOW, window=window), 0)
+            self.assertEqual((self.st.puts[n:], self.fx.fetched[k:]), ([], []))
+            self.assertEqual((self.status["lease"], self.status["holder"]["mode"]), ("held", "baseline"))
+            self.assertEqual((archive.LAST_STATUS["lease"], archive.LAST_STATUS["errors"], archive.LAST_STATUS["alarms"]),
+                             ("held", 0, []))
+        self.assertIsNone(self.state())
+        self.assertIsNone(self.health())
+        # the holder lets go and the next pass runs. It holds the lease while it
+        # reads the state, until past the longest it can run, its budget plus 90 s
+        self.assertTrue(other.release(NOW))
+        seen = {}
+        keep = analysis.load_state
+
+        def peek(store):
+            seen.update(json.loads(store.get(analysis.LEASE_KEY)))
+            return keep(store)
+        analysis.load_state = peek
+        self.addCleanup(lambda: setattr(analysis, "load_state", keep))
+        self.cfg = {"pass_budget_seconds": 840}
+        at = NOW + dt.timedelta(minutes=1)
+        self.assertEqual(self.run_pass(at), 0)
+        self.assertEqual((seen["mode"], seen["released"], seen["acquired"], seen["expires"]),
+                         ("baseline", None, iso(at), iso(at + dt.timedelta(seconds=840 + 90))))
+        self.assertEqual(self.state()["products"]["rtma"]["newest"], iso(t))
+        self.assertTrue(json.loads(self.st.get(analysis.LEASE_KEY))["released"])
+        # a pass that died holding the lease holds the lane only until it expires
+        dead = storage.Lease(self.st, analysis.LEASE_KEY)
+        self.assertTrue(dead.acquire(NOW + dt.timedelta(minutes=5), 60, "window"))
+        self.run_window(NOW + dt.timedelta(minutes=5, seconds=30))
+        self.assertEqual(self.status["lease"], "held")
+        self.run_window(NOW + dt.timedelta(minutes=6))
+        self.assertEqual(self.status["lease"], "released")
+
+    def test_a_read_by_a_windowed_pass_counts_for_the_next_ten_minute_pass(self):
+        # the windowed passes never touch the failure streak, so the alarm still
+        # counts passes at the ten-minute cadence; an hour they read since the
+        # last ten-minute pass is a read there
+        t19, t20, t21 = (hour(2026, 9, 26, k) for k in (19, 20, 21))
+        self.fx.add_hour("rtma", t19)
+        self.assertEqual(self.run_pass(), 0)
+        self.st.put(analysis.HEALTH_KEY, json.dumps({"rtma": {"fail_streak": 3, "last_ok": None,
+                                                              "last_error": "read failed"}}).encode(), "application/json")
+        self.fx.add_hour("rtma", t20)
+        self.assertEqual(self.run_window(t20 + dt.timedelta(minutes=50)), 0)
+        self.assertEqual(self.status["readCount"], 1)
+        self.assertEqual(self.health()["rtma"]["fail_streak"], 3)             # untouched
+        self.assertEqual(self.run_pass(t20 + dt.timedelta(minutes=58)), 0)
+        self.assertEqual(archive.LAST_STATUS["read"], 0)                     # nothing new to read itself
+        self.assertEqual(self.health()["rtma"]["fail_streak"], 0)
+        # a windowed pass whose read fails adds nothing to the streak; the
+        # ten-minute pass that fails on the same file, with nothing read since, does
+        self.fx.add_hour("rtma", t21, precip=False)
+        self.fx.grids[("rtma", "TMP", iso(t21))] = "other"
+        self.assertEqual(self.run_window(t21 + dt.timedelta(minutes=50)), 1)
+        self.assertEqual(self.health()["rtma"]["fail_streak"], 0)
+        self.run_pass(t21 + dt.timedelta(minutes=58))
+        self.assertEqual(self.health()["rtma"]["fail_streak"], 1)
+
+    def test_a_precipitation_read_is_a_read(self):
+        # the analysis refused and the hour's precipitation file read on its
+        # own. The pass read something, so it is no outage, and the refusal is
+        # still a failure on the record and on the streak
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        self.fx.grids[("rtma", "TMP", iso(t))] = "other"
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual((archive.LAST_STATUS["failed"], archive.LAST_STATUS["pcpRead"], archive.LAST_STATUS["read"]), (1, 1, 0))
+        self.assertTrue(self.read(analysis.precip_key("rtma", t))["complete"])
+        self.assertEqual(self.health()["rtma"]["fail_streak"], 1)
+
+    def test_live_files_carry_no_stale_while_revalidate(self):
+        # the settlement display fetches a live day's place file and day file
+        # again each minute; the CDN keeps the query string out of its cache
+        # key, so a stale-while-revalidate answer after the minute could be
+        # minutes old (2026-11-03). stale-if-error stays, and a final place-day
+        # keeps its longer life
+        self.assertNotIn("stale-while-revalidate", analysis.CACHE_LIVE)
+        self.assertEqual(analysis.CACHE_LIVE, "public, max-age=60, stale-if-error=86400")
+        self.assertEqual(analysis.CACHE_FINAL, "public, max-age=300, stale-while-revalidate=1800, stale-if-error=86400")
+        self.fx.add_hour("rtma", hour(2026, 9, 26, 19))
+        self.assertEqual(self.run_pass(), 0)
+        cc = {k: c for k, _, c in self.st.puts}
+        for key in (analysis.DAY_KEY.format(day="2026-09-26"), analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"),
+                    analysis.INDEX_KEY):
+            self.assertEqual(cc[key], analysis.CACHE_LIVE, key)
+        # past every place's cut-off the place-day is final with its
+        # precipitation resolved and goes to CACHE_FINAL; the day file stays live
+        n = len(self.st.puts)
+        self.assertEqual(self.run_pass(analysis.day_end("2026-09-26", "America/Los_Angeles") + dt.timedelta(hours=49)), 0)
+        cc = {k: c for k, _, c in self.st.puts[n:]}
+        self.assertEqual(cc[analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26")], analysis.CACHE_FINAL)
+        self.assertEqual(cc[analysis.DAY_KEY.format(day="2026-09-26")], analysis.CACHE_LIVE)
+
+
+class PassTiming(unittest.TestCase):
+    def test_every_pass_ends_before_the_next_minute_in_a_window(self):
+        self.assertEqual(analysis.WINDOW_MINUTES, (14, 16, 18, 20, 44, 46, 48, 50, 52, 54))
+        self.assertEqual(analysis.LOOK_MINUTES, {"anl": 44, "pcp": 14})
+        at = lambda m, s=0: dt.datetime(2026, 11, 3, 14, m, s, tzinfo=UTC)      # noqa: E731
+        self.assertEqual(analysis.next_window_minute(at(8, 3)), at(14))
+        self.assertEqual(analysis.next_window_minute(at(47, 10)), at(48))
+        self.assertEqual(analysis.next_window_minute(at(20)), at(44))
+        self.assertEqual(analysis.next_window_minute(at(54, 30)), dt.datetime(2026, 11, 3, 15, 14, tzinfo=UTC))
+        # the ten-minute pass outside the windows keeps its cap
+        for m in (8, 28, 38, 58):
+            self.assertEqual(analysis.pass_seconds(at(m), None), analysis.PASS_CAP_SECONDS, m)
+        # at :48 and :18 it has until ten seconds before the next windowed pass
+        self.assertEqual(analysis.pass_seconds(at(48), None), 110)
+        self.assertEqual(analysis.pass_seconds(at(18, 5), None), 105)
+        # never under the floor, and never past the invocation's budget
+        self.assertEqual(analysis.pass_seconds(at(47, 30), None), analysis.PASS_FLOOR_SECONDS)
+        self.assertEqual(analysis.pass_seconds(at(8), 200), 200)
+        self.assertEqual(analysis.pass_seconds(at(47, 30), 60), 60)
+
+    def test_the_analysis_is_looked_for_from_its_windows_opening(self):
+        # at the ten-minute pass's own minutes the walk looks for the hour the
+        # health check expects, as it did; inside :44 to :46 it looks one hour on
+        at = lambda m: dt.datetime(2026, 11, 3, 14, m, tzinfo=UTC)               # noqa: E731
+        for m in range(60):
+            same = analysis.due_latest("rtma", at(m)) == analysis.expected_latest("rtma", at(m))
+            self.assertEqual(same, m not in (44, 45, 46), m)
+        self.assertEqual(analysis.due_latest("rtma", at(44)), at(0))
+
 
 class Samples(unittest.TestCase):
     """The checked-in samples (samples/snapshots/analysis2), which the page
@@ -2044,6 +2333,7 @@ class Config(unittest.TestCase):
         from pipeline import run
         run._register()
         self.assertIs(run.JOBS["analysis"], analysis.analysis_pass)
+        self.assertIs(run.JOBS["analysis-window"], analysis.window_pass)
         with open(os.path.join(ROOT, "scripts", "package_lambda.py")) as fh:
             src = fh.read()
         for item in ("config/analysis_locations.json", "config/analysis_lattice.json", "geo/settlement_locations.csv"):
@@ -2052,7 +2342,32 @@ class Config(unittest.TestCase):
             tpl = fh.read()
         self.assertIn("cron(8/10 * * * ? *)", tpl)
         self.assertIn('{"job": "analysis"}', tpl)
-        self.assertIn("five EventBridge schedules", tpl)
+        self.assertIn('{"job": "analysis-window"}', tpl)
+        self.assertIn("eight EventBridge schedules", tpl)
+
+    def test_the_two_schedules_take_each_minute_in_a_window_once(self):
+        """The ten-minute pass keeps cron(8/10) and the windowed pass takes the
+        window minutes it does not, so no minute starts two passes, and the
+        ten-minute pass at :48 and :18 is the windowed pass of its minute."""
+        import re
+        with open(os.path.join(ROOT, "ops", "aws", "template.yaml")) as fh:
+            tpl = fh.read()
+        found = {}
+        for m in re.finditer(r'Name: !Sub "\$\{SiteName\}-([a-z-]+)"\n\s+ScheduleExpression: cron\(([0-9,/]+) \* \* \* \? \*\)'
+                             r".*?Input: '(\{[^']*\})'\n\s+RetryPolicy: \{ MaximumRetryAttempts: (\d+)", tpl, re.S):
+            field = m.group(2)
+            if "/" in field:
+                first, step = (int(x) for x in field.split("/"))
+                minutes = set(range(first, 60, step))
+            else:
+                minutes = {int(x) for x in field.split(",")}
+            found[m.group(1)] = (minutes, json.loads(m.group(3)), int(m.group(4)))
+        base, base_in, _ = found["analysis"]
+        win, win_in, win_retry = found["analysis-windows"]
+        self.assertEqual((base_in, win_in, win_retry), ({"job": "analysis"}, {"job": "analysis-window"}, 0))
+        self.assertEqual(base & win, set())
+        self.assertEqual(win, set(analysis.WINDOW_MINUTES) - base)
+        self.assertEqual(set(analysis.WINDOW_MINUTES) & base, {18, 48})
 
 
 # ------------------------------------------------------------------ the build script's geometry

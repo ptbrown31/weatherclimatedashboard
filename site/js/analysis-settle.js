@@ -9,8 +9,8 @@
    NOAA's own publication times where the files carry them (from 14 October)
    and at times estimated from the usual lags, marked ≈, before then. While
    the day is live it follows the clock, and inside the minutes the files
-   usually land it fetches the place file again, so the day fills in without
-   a reload.
+   usually land, or while a countdown reads late, it fetches the place file
+   again, so the day fills in without a reload.
 
    The page adds nothing up. Every figure is the lane's: each hour's value as
    the contract shows it (`show`), its exact value (the row's own fields, cut
@@ -39,6 +39,11 @@ window.WXSettle = (() => {
   // again every minute: about when the analysis lands (from :44 to :54) and
   // when the hour's precipitation does (from :14 to :20)
   const inWindow = m => (m >= 44 && m <= 54) || (m >= 14 && m <= 20);
+  // a countdown past its usual time keeps a live day fetched each minute for
+  // this long, so a file the lane reads late, on its ten-minute pass outside
+  // those windows, reaches the page a minute or two after the read and late
+  // ends when the file is in; past it the windows fetch the day twice an hour
+  const CHASE = 30 * MIN;
   const SRC = { nodd: 'NOAA Open Data', nomads: 'NOMADS' };
   // the precision each hourly value is shown at, as the contract rounds it and exactly
   const DEC = { temp: [0, 3], wind: [0, 3], gust: [0, 3], precip: [2, 4] };
@@ -137,6 +142,16 @@ window.WXSettle = (() => {
              lateA: o => o.anl && o.anlLate && atCut, lateP: o => o.pcp && o.pcpLate && atCut };
   }
 
+  // whether a countdown of the day reads late at `now` and has for no more
+  // than CHASE, the same test as the countdowns' own late state
+  function lateAt(P, now) {
+    const S = stateAt(P, now);
+    if (S.atCut) return false;
+    const a = P.hours.find(o => !S.inA(o)), r = P.hours.find(o => !S.inP(o));
+    const late = by => now > by && now <= by + CHASE;
+    return !!((a && late(a.t + LAG.anl.by)) || (r && late(r.end + LAG.pcp.by)));
+  }
+
   function create(opts) {
     const PRODUCT = opts.product || 'rtma', NAME = opts.productName || 'RTMA';
     const tip = WXC.tooltip();
@@ -218,7 +233,8 @@ window.WXSettle = (() => {
 
     /* Once a second: a live day follows the clock, the countdowns tick, and
        everything else is redrawn when the minute turns. Inside the arrival
-       windows a live day's file is fetched again each minute. */
+       windows, and while a countdown reads late, a live day's file is fetched
+       again each minute. */
     const ticker = setInterval(() => {
       if (!P || !node.isConnected || node.closest('[hidden]')) return;
       const now = Date.now(), b = bounds(P, now);
@@ -227,7 +243,8 @@ window.WXSettle = (() => {
       if (m !== lastMin) {
         lastMin = m;
         render();
-        if (b.live && !P.final && opts.refetch && !fetching && !document.hidden && inWindow(new Date(now).getUTCMinutes())) {
+        if (b.live && !P.final && opts.refetch && !fetching && !document.hidden
+            && (inWindow(new Date(now).getUTCMinutes()) || lateAt(P, now))) {
           const want = key;
           fetching = true;
           Promise.resolve(opts.refetch()).then(r => {
@@ -320,13 +337,13 @@ window.WXSettle = (() => {
         : 'Not published by the 12:45 AM cut-off, so the day’s total leaves this hour out.', 'missed');
       if (T < d.due) return box(w, label, span(d.due - T), '', 'Expected about ' + clock(tz, d.due) + ', usually by ' + clock(tz, d.by) + '.', 'counting');
       if (T <= d.by) return box(w, label, 'due now', '', 'Usually published by ' + clock(tz, d.by) + '.', 'due');
-      // the lane reads an hour's precipitation file with the next analysis,
-      // so on a live day it reaches the page about half an hour after NOAA
-      // publishes it, and the note says so rather than leave it looking lost;
-      // a replay runs at NOAA's own times, where late means NOAA was late
-      return box(w, label, 'late', ' late', kind === 'pcp' && live
-        ? 'Usually published by ' + clock(tz, d.by) + ', and read here with the next analysis. It counts if published by the cut-off, ' + cut + '.'
-        : 'Usually published by ' + clock(tz, d.by) + '. It counts if published by the cut-off, ' + cut + '.', 'late');
+      // late means the file is not in yet, past the time it is usually out
+      // by. The lane reads each file within about two minutes of NOAA
+      // publishing it inside the arrival windows, the precipitation as soon
+      // as it lands, and the display keeps fetching while a countdown reads
+      // late (CHASE), so the state ends when the file is in. A replay runs
+      // at NOAA's own times, where late means NOAA was late
+      return box(w, label, 'late', ' late', 'Usually published by ' + clock(tz, d.by) + '. It counts if published by the cut-off, ' + cut + '.', 'late');
     }
 
     // ---- the five values
@@ -633,5 +650,5 @@ window.WXSettle = (() => {
     return { node, show, destroy, chartOf: k => document.getElementById(CHART[k] || 'anaTemp'), state: () => (P ? { T, live, exact } : null) };
   }
 
-  return { create, CHART, LAG, inWindow, _model: model, _stateAt: stateAt, _bounds: bounds, zone };
+  return { create, CHART, LAG, CHASE, inWindow, _model: model, _stateAt: stateAt, _bounds: bounds, _lateAt: lateAt, zone };
 })();

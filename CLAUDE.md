@@ -241,7 +241,7 @@ parameters: `station`, `theme`, `market`.
     tests/           unittest, no network
     DEPLOY.md        the runbook for the steps that need the owner's accounts
 
-Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|advisories|quotes|reask|market|scorecard|normals|climate|season|discussion|subhourly|locator|traffic|catalogue|catquotes|series|severe|headline|report|accuracy|analysis|sst|floater|hrrr|ndfd|half-hourly|daily|all`.
+Jobs: `python3 -m pipeline.run --job archive|forecast|obs|hurricane|advisories|quotes|reask|market|scorecard|normals|climate|season|discussion|subhourly|locator|traffic|catalogue|catquotes|series|severe|headline|report|accuracy|analysis|analysis-window|sst|floater|hrrr|ndfd|half-hourly|daily|all`.
 Verification: `python3 -m unittest discover -s tests` and `python3 scripts/verify.py` (Playwright).
 
 ## Working style

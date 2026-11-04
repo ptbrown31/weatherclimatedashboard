@@ -41,6 +41,8 @@ Jobs:
                  archive prefix it writes to when its manifest changes  (every 30 min, after catquotes)
     analysis     gridded-analysis resolution at the 67 settlement locations,
                  RTMA from NOAA Open Data; its own schedule              (every 10 min, alone)
+    analysis-window  the same lane's windowed pass, only the files newly due
+                 (every 2 min inside :44 to :54 and :14 to :20)
     daily        scorecard, normals, climate, season, catalogue, headline, traffic: one scheduled invocation
     all          everything once, in order (local runs)
 """
@@ -85,6 +87,9 @@ def _register():
     # at H+47, and a pass may spend its whole budget on the backfill, which
     # no chained lane could afford to wait behind
     JOBS["analysis"] = analysis.analysis_pass
+    # and its windowed pass, every two minutes about when NOAA publishes each
+    # file; the lane's lease keeps it and the ten-minute pass from overlapping
+    JOBS["analysis-window"] = analysis.window_pass
     # hrrr is in no chain either: a pass reads a run's hours as NOAA publishes
     # them and may spend most of its budget on a 48-hour run
     JOBS["hrrr"] = hrrr.hrrr_pass
@@ -132,7 +137,7 @@ def _register():
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pipeline.run", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | accuracy | analysis | hrrr | ndfd | sst | floater | market | half-hourly | daily | all")
+    ap.add_argument("--job", required=True, help="archive | forecast | obs | hurricane | quotes | reask | scorecard | normals | climate | season | headline | accuracy | analysis | analysis-window | hrrr | ndfd | sst | floater | market | half-hourly | daily | all")
     ap.add_argument("--config", help="path to site.json (default config/site.json)")
     ap.add_argument("--backend", choices=["local", "s3"], help="override storage backend")
     ap.add_argument("--root", help="local backend: data directory")

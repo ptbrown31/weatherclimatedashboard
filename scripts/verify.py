@@ -1908,6 +1908,57 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             f"{lv_ka - 1} of " in rf0 and f"{lv_ka} of " in rf1 and any("?b=" in u_ for u_ in rf_seen),
                             str([rf0[:50], rf1[:50], rf_seen]))
                     rf_ctx.close()
+
+                    # late means not in yet. The accumulation's late note gives NOAA's
+                    # usual time and the cut-off and says nothing of the next analysis,
+                    # which the lane no longer waits for, and outside the arrival
+                    # windows a countdown that reads late keeps the place file fetched
+                    # each minute for half an hour past its usual time and no longer
+                    # (CHASE in js/analysis-settle.js)
+                    def late_page(at_, strip):
+                        c_ = browser.new_context(color_scheme=scheme, viewport={"width": 1200, "height": 900})
+                        c_.clock.install(time=at_)
+                        c_.clock.pause_at(at_)
+                        p_ = c_.new_page()
+                        errors_of(p_, into=errs)
+                        seen_ = []
+
+                        def route_(route):
+                            u = route.request.url
+                            seen_.append(u.split("/")[-1])
+                            resp = route.fetch(); d = json.loads(resp.text())
+                            if strip and "?b=" not in u:
+                                d["hours"][lv_ka - 1]["rtma"] = None
+                            return route.fulfill(response=resp, body=json.dumps(d))
+
+                        p_.route(f"**/analysis2/loc/new-york-ny/{ana_live}.json*", route_)
+                        p_.goto(lv_url); p_.wait_for_timeout(2200)
+                        return c_, p_, seen_
+
+                    # half past the hour, outside both windows, the accumulation of the
+                    # hour before is twelve minutes late, so the next minute fetches the day
+                    lt_ctx, lt, lt_seen = late_page(t_a + dt.timedelta(minutes=30, seconds=30), True)
+                    lt0 = lt.evaluate("""() => { const p = document.querySelector('#anaNext .anadue[data-kind="pcp"]');
+                      return { status: document.querySelector('#anaStatus').textContent, state: p ? p.dataset.state : '',
+                               note: p ? p.querySelector('.ananote').textContent : '' }; }""")
+                    lt.clock.run_for(61000); lt.wait_for_timeout(1500); lt.clock.run_for(2000); lt.wait_for_timeout(500)
+                    lt1 = lt.evaluate("() => document.querySelector('#anaStatus').textContent")
+                    lt_ctx.close()
+                    chk.add(f"{scheme} settlement display: a late accumulation's note gives NOAA's usual time and the cut-off, and nothing of the next analysis",
+                            lt0["state"] == "late" and lt0["note"].startswith("Usually published by ")
+                            and "next analysis" not in lt0["note"] and "It counts if published by the cut-off" in lt0["note"],
+                            str(lt0)[:200])
+                    chk.add(f"{scheme} settlement display: outside the arrival windows a late countdown keeps the place file fetched each minute, so the day fills in",
+                            f"{lv_ka - 1} of " in lt0["status"] and f"{lv_ka} of " in lt1 and any("?b=" in u_ for u_ in lt_seen),
+                            str([lt0["status"][:50], lt1[:50], lt_seen]))
+                    # half past the next hour both countdowns have read late for more
+                    # than half an hour, so outside the windows nothing is fetched
+                    lq_ctx, lq, lq_seen = late_page(t_a + dt.timedelta(minutes=90), False)
+                    lq.clock.run_for(61000); lq.wait_for_timeout(1500); lq.clock.run_for(61000); lq.wait_for_timeout(500)
+                    lq_states = lq.evaluate("() => [...document.querySelectorAll('#anaNext .anadue')].map(d => d.dataset.state)")
+                    lq_ctx.close()
+                    chk.add(f"{scheme} settlement display: past half an hour late, outside the windows, the place file is not fetched again",
+                            lq_states == ["late", "late"] and not any("?b=" in u_ for u_ in lq_seen), str([lq_states, lq_seen]))
                 # ---- cell mode (docs/analysis.md section 6): at the national
                 #      extent no cell is outlined; Zoom to the cell on New York
                 #      outlines its resolving cell in the ink, floats the dot's

@@ -3,7 +3,7 @@ Description: >
   Weather tools site: one private S3 bucket (site files at the root, snapshots and the
   archive under data/), a CloudFront distribution with Origin Access Control, one Lambda
   function that runs every pipeline job (archive, snapshots, hurricane, exchange quotes, the
-  gated vendor lane, the daily jobs, the analysis lane), five EventBridge schedules, and an error alarm.
+  gated vendor lane, the daily jobs, the analysis lane), eight EventBridge schedules, and an error alarm.
   Deployment-agnostic application code; this template is the only AWS-specific artefact
   besides pipeline/handler.py. See DEPLOY.md for the steps around it.
 
@@ -527,13 +527,15 @@ Resources:
         RoleArn: !GetAtt SchedulerRole.Arn
         Input: '{"job": "daily"}'
         RetryPolicy: { MaximumRetryAttempts: 2, MaximumEventAgeInSeconds: 3600 }
-  # The analysis lane has its own schedule rather than a place in a chain:
-  # RTMA lands about 47 minutes after each hour, so :08 catches each hour
-  # on the pass after it lands, and a pass may spend its whole budget
-  # walking the thirty-day backfill, which no chained lane could wait
-  # behind. Its minute is between the observation
-  # lane (:00) and the quote lane (:03), and the pass caps itself well under
-  # ten minutes (pipeline/analysis.py PASS_CAP_SECONDS) so two never overlap.
+  # The analysis lane has its own schedules rather than a place in a chain,
+  # because a pass may spend its whole budget walking the thirty-day
+  # backfill, which no chained lane could wait behind. This ten-minute pass
+  # keeps the backfill, the refresh and the pruning; its minute is between
+  # the observation lane (:00) and the quote lane (:03). The windowed passes
+  # below read each file as NOAA publishes it. A lease in the lane's archive
+  # (pipeline/analysis.py) keeps any two passes from overlapping, and every
+  # pass ends before the next minute in a window, so at :48 and :18 this pass
+  # does the windowed pass's work first and little after it.
   ScheduleAnalysis:
     Type: AWS::Scheduler::Schedule
     Properties:
@@ -546,6 +548,25 @@ Resources:
         RoleArn: !GetAtt SchedulerRole.Arn
         Input: '{"job": "analysis"}'
         RetryPolicy: { MaximumRetryAttempts: 0, MaximumEventAgeInSeconds: 300 }
+  # The analysis lane's windowed passes (owner's ruling 2026-11-03) run every
+  # two minutes inside :44 to :54 and :14 to :20, about when NOAA publishes the
+  # analysis (46 to 52 minutes after its hour over the two weeks to 3 November)
+  # and an hour's precipitation (16 to 18 minutes after the hour ends). :48 and
+  # :18 are the ten-minute pass's own. A windowed pass reads only the files
+  # newly due and exits within seconds when nothing is new; an invocation
+  # older than a minute is dropped, since the next pass is two minutes on.
+  ScheduleAnalysisWindows:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${SiteName}-analysis-windows"
+      ScheduleExpression: cron(14,16,20,44,46,50,52,54 * * * ? *)
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt Pipeline.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"job": "analysis-window"}'
+        RetryPolicy: { MaximumRetryAttempts: 0, MaximumEventAgeInSeconds: 60 }
   # The HRRR lane has its own schedule too (pipeline/hrrr.py). A run's files
   # land over the hour or two after its cycle, so a pass every fifteen minutes
   # reads its hours as they arrive. A pass caps itself at 780 s

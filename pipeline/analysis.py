@@ -72,11 +72,13 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
 Reads   noaa-rtma-pds (and NOMADS for a file it lacks) through
         pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
         range request per message (TMP 2 m, WIND 10 m, GUST 10 m, about 6 MB
-        each), the one-message precipitation file whole; GRIB2 decoded by
+        each), the one-message precipitation file whole, as soon as NOAA
+        publishes it rather than with the next analysis; GRIB2 decoded by
         pipeline/grib2.py.
 Writes  archive/analysis2/hours/rtma/<stamp>.json.gz      the places' hourly temperature, wind and gust in the file's units, write once
         archive/analysis2/precip/rtma/<stamp>.json.gz     the places' hourly accumulations in millimetres, filled in as reads add values
         archive/analysis2/_meta/state.json                cursors, gaps, pending precipitation, hours not published, stamps
+        archive/analysis2/_meta/lease.json                the lease that keeps two passes from overlapping
         archive/_meta/health_analysis.json                the lane's own failure streaks
         snapshots/analysis2/grid/rtma/<var>/<stamp>.json  one map frame on the 320 x 200 lattice, with the
                                                           21 x 21 cell window round each place at full resolution
@@ -87,13 +89,24 @@ Writes  archive/analysis2/hours/rtma/<stamp>.json.gz      the places' hourly tem
         snapshots/analysis2/csv/YYYY-MM-DD-{raw,processed}.csv   the day as CSV
         snapshots/analysis2/index.json                    last, so a reader sees a consistent set
 
-The pass runs on its own schedule (every ten minutes at :08) and is capped at
-PASS_CAP_SECONDS so two passes never overlap on the state file. Each pass
-retries the precipitation still pending, reads the live hours, rebuilds the
-days those hours touch, once a day sweeps for files the walks passed
-without, rewrites a few listed days that lack their CSV files or predate the
-current layout, and spends what budget remains walking backwards through the
-last thirty days, newest first, so the page fills in from today back.
+The lane runs two passes on its own schedules (owner's ruling 2026-11-03). The
+ten-minute pass, at :08, :18 and so on, reads the newest precipitation files
+and the live hours, retries the precipitation still pending, rebuilds the days
+those touch, once a day sweeps for files the walks passed without, rewrites a
+few listed days that lack their CSV files or predate the current layout, and
+spends what budget remains walking backwards through the last thirty days,
+newest first, so the page fills in from today back. The windowed pass runs
+every two minutes inside :44 to :54 and :14 to :20, about when NOAA publishes
+the analysis and an hour's precipitation, at the minutes the ten-minute pass
+does not take, and does only light work. It reads the files newly due and
+writes what they change, and when nothing is new it exits within seconds.
+An hour's precipitation is read as soon as NOAA publishes it, without waiting
+for the next analysis. Every pass ends before the next minute in a window
+(pass_seconds), so the ten-minute pass at :48 and :18 does the windowed
+pass's work first and little after it. A lease under archive/analysis2/ keeps
+any two passes from overlapping on the state and the files. A pass takes it
+with a conditional write before it reads the state, and one that finds it
+held exits with the status "lease held", which is not a failure.
 Nothing a NOAA object does (missing, short, refused by the decoder, a 5xx
 after the retries) fails the pass: each hour's read is guarded, the failure
 is recorded, and the state and the indexes are written in every case.
@@ -114,7 +127,7 @@ from zoneinfo import ZoneInfo
 
 from . import archive as arch
 from . import gov_weather as gw
-from .storage import Storage
+from .storage import Lease, Storage
 
 try:
     from . import grib2
@@ -148,11 +161,21 @@ HOUR_KEY = "archive/analysis2/hours/{product}/{stamp}.json.gz"
 # still without a value, while the analysis hour is written once
 PRECIP_KEY = "archive/analysis2/precip/{product}/{stamp}.json.gz"
 STATE_KEY = "archive/analysis2/_meta/state.json"
+# the lease (LEASE_* below) lives under data/archive/, which the Lambda's role can write and the
+# CDN never serves
+LEASE_KEY = "archive/analysis2/_meta/lease.json"
 HEALTH_KEY = "archive/_meta/health_analysis.json"   # this lane's own failure streaks (see archive.update_health)
 # frames never change and a final place-day changes only to show a late hour or when LAYOUT
-# does; everything else is live
+# does; everything else is live. A live file carries no stale-while-revalidate (2026-11-03).
+# The settlement display fetches a live day's place file and day file again each minute with a
+# stamp in the query string, and the CDN's snapshot policy keeps the query string out of its
+# cache key, so with it the first fetch after the minute was answered from the stale copy
+# while the edge refreshed behind it, up to max-age plus the 300 s, about six minutes old (a
+# CloudFront hit of age 179 s on Boston's place file, seen on the live page). Without it a
+# fetch is at most the minute old. stale-if-error stays, so an origin error still serves the
+# last copy
 CACHE_FINAL = "public, max-age=300, stale-while-revalidate=1800, stale-if-error=86400"
-CACHE_LIVE = "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400"
+CACHE_LIVE = "public, max-age=60, stale-if-error=86400"
 
 STATEMENT = "A proposed settlement framework. No contract settles on it."
 
@@ -160,10 +183,10 @@ STATEMENT = "A proposed settlement framework. No contract settles on it."
 # The analysis file is one per hour with a .idx sidecar; the precipitation
 # file is one message, on the smaller G184 grid. lagMinutes is the measured
 # landing time of the analysis after the valid hour (docs/analysis.md,
-# 2026-09-27), and is what the live lane and the health check expect, not a
-# promise NOAA makes. The lane is written over PRODUCTS so another analysis
-# could be added; since 2026-09-30 RTMA is the only one (the owner dropped
-# URMA, which does not resolve).
+# 2026-09-27), and is what the health check and the turn to NOMADS expect, not
+# a promise NOAA makes; when the live walk looks is WINDOWS's. The lane is
+# written over PRODUCTS so another analysis could be added; since 2026-09-30
+# RTMA is the only one (the owner dropped URMA, which does not resolve).
 NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com"}
 # NCEP's own server keeps the last fourteen days of the analysis under the
 # same directory and file names, and a file there counts as published
@@ -282,9 +305,36 @@ OVERDUE_HOURS = 2
 # a live cursor further behind than this stops walking hour by hour: it jumps
 # to the present and the span it skipped is queued for the backfill
 LIVE_CATCHUP_HOURS = 24
-PASS_CAP_SECONDS = 330          # with FETCH_TRIES x FETCH_TIMEOUT bounding an hour near 212 s,
-                                # a pass ends inside the ten-minute cadence, so passes never overlap
+PASS_CAP_SECONDS = 330          # the most a pass spends; with FETCH_TRIES x FETCH_TIMEOUT bounding an
+                                # hour near 212 s it ends inside the ten minutes, and the lease, not
+                                # this cap, is what keeps two passes from overlapping
 RESERVE_SECONDS = 45            # kept back from the lanes for the day rebuild, prune and index
+# the windowed passes (owner's ruling 2026-11-03) run every two minutes inside these minutes past
+# the hour, about when NOAA publishes each file. Over the two weeks to 2026-11-03 NOAA's own
+# publication times put the analysis 46 to 52 minutes after its hour (median 49) and an hour's
+# precipitation 16 to 18 minutes after the hour ends, so each window opens two minutes before
+# the earliest and closes two minutes after the latest. Minutes past the hour are the same in
+# UTC and in every zone the lane covers. The ten-minute pass takes :48 and :18 itself
+# (ops/aws/template.yaml)
+WINDOWS = {"anl": (44, 54), "pcp": (14, 20)}
+WINDOW_STEP = 2
+WINDOW_MINUTES = tuple(sorted(m for a, b in WINDOWS.values() for m in range(a, b + 1, WINDOW_STEP)))
+# a file is looked for from its window's opening, the analysis of hour H from H:44 and the
+# precipitation of the hour that ends at H from H:14
+LOOK_MINUTES = {kind: w[0] for kind, w in WINDOWS.items()}
+# every pass ends this long before the next minute in a window, so the pass then finds the
+# lease free, and has at least PASS_FLOOR_SECONDS whatever the clock says
+WINDOW_YIELD_SECONDS = 10
+PASS_FLOOR_SECONDS = RESERVE_SECONDS + 30
+# the newest precipitation files precip_lane reads as they land, the one now due and the two
+# before it
+PCP_LIVE_HOURS = 3
+# the lease lasts past the longest its holder can run, which is the pass's budget plus the 30 s
+# handler.py holds back from Lambda's timeout, plus a minute for clocks. A local run has no
+# budget, and Lambda's 900 s timeout stands in. A pass never renews it, so one killed before it
+# lets go (out of memory) holds the lane until it expires
+LEASE_SPARE_SECONDS = 90
+LEASE_DEFAULT_SECONDS = 900
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024   # a range for the last message of a file, whose end the sidecar cannot give
 STATE_EVERY = 20                # backfill hours between state writes, bounding what a timeout loses
 # every NOAA call from this lane: two tries of twenty seconds, so one hour's
@@ -960,7 +1010,7 @@ def precip_doc(product: str, t: dt.datetime, values: dict, now: dt.datetime, rea
 
 
 def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: bool, now: dt.datetime,
-              precip_if_absent: bool = True) -> HourResult:
+              precip_if_absent: bool = True, precip: bool = True) -> HourResult:
     """Fetch and decode one product-hour: the three analysis messages, then
     the precipitation file. With `frames` every field is sampled onto the
     lattice as well as at the fifty cells. Nothing raises out of here: any
@@ -972,7 +1022,10 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
     `precip_if_absent` is False (the store already holds all of it). The
     RTMA analysis of 2026-09-23 19Z never reached NOAA Open Data while its
     precipitation file did, and until 2026-09-29 the lane dropped that
-    hour's precipitation with the missing analysis."""
+    hour's precipitation with the missing analysis. With `precip` False the
+    precipitation file is not read at all, whether or not the analysis is
+    there, because the store holds all of it already, read as soon as it
+    landed (precip_lane); the result's precip_status is then None."""
     ks_wexp = [loc["cell"]["wexp"][2] for loc in locs]
     values: Dict[str, dict] = {loc["id"]: {} for loc in locs}
     out_frames: dict = {}
@@ -990,7 +1043,7 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
             idx_raw = gw.fetch_bytes(url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
             source = "nomads"
         if idx_raw is None:
-            if not precip_if_absent:
+            if not (precip and precip_if_absent):
                 return HourResult("absent")
             return _absent_with_precip(read_precip(product, t, locs, lattice if frames else None, now))
         entries = grib2.parse_idx(idx_raw.decode("ascii", "replace"))
@@ -1020,12 +1073,15 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
                 values[loc["id"]][var] = None if v is None else round(float(v), RAW_DIGITS[var])
     except Exception as e:  # noqa: BLE001
         return HourResult("error", error=f"{type(e).__name__}: {e}")
+    doc = {"schema": SCHEMA, "product": product, "valid": _iso(t), "written": _iso(now), "source": source,
+           "published": meta.get("lastModified"), "values": values}
+    if not precip:
+        return HourResult("ok", doc=doc, frames=out_frames if frames else None,
+                          windows=out_windows if frames else None)
     prec = read_precip(product, t, locs, lattice if frames else None, now)
     if frames:
         out_frames["precip"] = (prec.frames or {}).get("precip") if prec.status == "ok" else None
         out_windows["precip"] = (prec.windows or {}).get("precip") if prec.status == "ok" else None
-    doc = {"schema": SCHEMA, "product": product, "valid": _iso(t), "written": _iso(now), "source": source,
-           "published": meta.get("lastModified"), "values": values}
     return HourResult("ok", doc=doc, frames=out_frames if frames else None,
                       precip=prec.doc if prec.status == "ok" else None,
                       precip_error=prec.error if prec.status == "error" else None,
@@ -1235,7 +1291,11 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
         cut_iso = _iso(day_cutoff(day_iso, tz))
         for product in PRODUCTS:
             product_hours = {}
-            latest = expected_latest(product, now)
+            # no file for an hour that has not begun (an analysis) or ended (an
+            # accumulation) is looked for. This was expected_latest, which hid
+            # an hour's precipitation until the next analysis was due, about
+            # half an hour after the lane had read it (precip_lane)
+            latest = _floor_hour(now)
             for h, row in zip(hours, rows):
                 # each row is the analysis at the top of the hour and the
                 # precipitation over the hour that starts then, which NOAA
@@ -1517,9 +1577,11 @@ def _product_state() -> dict:
     # precipPending: archived hours whose precipitation is still being refetched;
     # missing / pmissing: hours whose analysis / precipitation file was on
     # neither NOAA Open Data nor NOMADS once it was due (not published, so a
-    # day resolves without them), unmarked if the file turns up
+    # day resolves without them), unmarked if the file turns up;
+    # lastRead: when a pass last read an hour, which the next ten-minute
+    # pass's health check counts (health_results)
     return {"newest": None, "scanned": None, "since": None, "gaps": [], "precipPending": [], "reads": 0,
-            "missing": [], "pmissing": []}
+            "missing": [], "pmissing": [], "lastRead": None}
 
 
 def _mark(ps: dict, key: str, t: dt.datetime) -> None:
@@ -1546,9 +1608,10 @@ def _mark_precip(ps: dict, product: str, t: dt.datetime, res: HourResult, now: d
 
 
 def new_state() -> dict:
+    # healthAt: when a ten-minute pass last advanced the failure streak
     return {"schema": SCHEMA, "layout": LAYOUT, "products": {p: _product_state() for p in PRODUCTS},
             "backfill": {p: {"cursor": None, "oldest": None, "done": False, "queue": []} for p in PRODUCTS},
-            "dayStatus": {}, "pruned": None, "precipSwept": None}
+            "dayStatus": {}, "pruned": None, "precipSwept": None, "healthAt": None}
 
 
 def load_state(store: Storage) -> dict:
@@ -1597,6 +1660,37 @@ def expected_latest(product: str, now: dt.datetime) -> dt.datetime:
     return _floor_hour(now - dt.timedelta(minutes=PRODUCTS[product]["lagMinutes"]))
 
 
+def due_latest(product: str, now: dt.datetime) -> dt.datetime:
+    """The newest hour whose analysis the live walk looks for. An analysis
+    is looked for from its window's opening, LOOK_MINUTES after the hour, two
+    minutes before NOAA's earliest publication in the two weeks to
+    2026-11-03. At the ten-minute pass's own minutes this is the hour
+    expected_latest gives."""
+    return _floor_hour(now - dt.timedelta(minutes=LOOK_MINUTES["anl"]))
+
+
+def next_window_minute(now: dt.datetime) -> dt.datetime:
+    """The next minute in a window after now, when the next windowed pass
+    runs or the ten-minute pass at :48 or :18 does the windowed pass's work."""
+    t = now.astimezone(dt.timezone.utc).replace(second=0, microsecond=0)
+    for _ in range(60):
+        t += dt.timedelta(minutes=1)
+        if t.minute in WINDOW_MINUTES:
+            break
+    return t
+
+
+def pass_seconds(now: dt.datetime, budget: Optional[float]) -> float:
+    """How long a pass may run. That is PASS_CAP_SECONDS, or the invocation's
+    budget when that is less, never closer than WINDOW_YIELD_SECONDS to the
+    next minute in a window and never under PASS_FLOOR_SECONDS. So no pass
+    keeps the next windowed one waiting on the lease, and the ten-minute pass
+    at :48 and :18 does the windowed pass's work and little more."""
+    cap = min(budget, PASS_CAP_SECONDS) if budget else PASS_CAP_SECONDS
+    room = (next_window_minute(now) - now).total_seconds() - WINDOW_YIELD_SECONDS
+    return min(cap, max(PASS_FLOOR_SECONDS, room))
+
+
 def _scan_cursor(ps: dict) -> Optional[dt.datetime]:
     """How far the live walk has looked: the later of the newest hour read
     and the newest hour scanned."""
@@ -1610,19 +1704,22 @@ def _advance(ps: dict, key: str, t: dt.datetime) -> None:
         ps[key] = _iso(t)
 
 
-def live_candidates(product: str, state: dict, now: dt.datetime) -> List[dt.datetime]:
+def live_candidates(product: str, state: dict, now: dt.datetime, light: bool = False) -> List[dt.datetime]:
     """The hours the live lane tries this pass, oldest first: the gaps still
-    worth retrying, then the hours after the walk's cursor up to what should
-    have landed. A first pass starts at the present; the backfill walks back."""
+    worth retrying, then the hours after the walk's cursor up to the hour now
+    due (due_latest). A first pass starts at the present; the backfill walks
+    back. A windowed pass (`light`) retries only the gap of the hour now due,
+    and leaves the older gaps to the ten-minute pass."""
     ps = state["products"][product]
-    latest = expected_latest(product, now)
+    latest = due_latest(product, now)
     out: List[dt.datetime] = []
     keep_gaps = []
     for g in ps.get("gaps") or []:
         t = _parse_iso(g)
         if now - t <= dt.timedelta(hours=CLOSE_AFTER_HOURS):
             keep_gaps.append(g)
-            out.append(t)
+            if not light or t >= latest:
+                out.append(t)
     ps["gaps"] = keep_gaps
     cursor = _scan_cursor(ps)
     if cursor is None:
@@ -1667,6 +1764,8 @@ def retry_precip(store: Storage, product: str, state: dict, locs: list, lattice:
             if get_precip(store, product, t, cache) is None:
                 _mark(ps, "pmissing", t)          # never read: not published
             continue
+        if (get_precip(store, product, t, cache) or {}).get("complete"):
+            continue                              # read whole since, by precip_lane, as it landed
         if deadline.over(RESERVE_SECONDS):
             keep.append(iso)
             continue
@@ -1707,29 +1806,35 @@ def _note_precip(ps: dict, product: str, t: dt.datetime, res: HourResult, now: d
         _mark(ps, "pmissing", t)                  # an old hour read by the backfill or the sweep
     elif res.precip is not None:
         _unmark(ps, "pmissing", t)
-    if (res.precip is None or not res.precip.get("complete")) and now < precip_due(product, t):
+    # a precipitation file not read with the hour (precip_status None) was
+    # already stored whole, so nothing waits on it
+    if (res.precip_status is not None and (res.precip is None or not res.precip.get("complete"))
+            and now < precip_due(product, t)):
         if iso not in ps["precipPending"]:
             ps["precipPending"].append(iso)
         status["waiting"].append(f"{product} {iso}")
 
 
 def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: dict, cache: dict,
-              grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
+              grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict, light: bool = False) -> set:
     """Up to LIVE_HOURS_PER_PASS new hours of one product, after the pending
     precipitation retries. Returns the (location, day) pairs the hours
     touched. An hour that fails to read is recorded against the product and
-    left as a gap for the next pass; the walk never stops on it."""
+    left as a gap for the next pass; the walk never stops on it. A windowed
+    pass (`light`) leaves the pending retries and the older gaps to the
+    ten-minute pass."""
     ps = state["products"][product]
     if not ps.get("since"):
         ps["since"] = _iso(now)
-    touched: set = retry_precip(store, product, state, locs, lattice, cache, grid_index, now, deadline, status)
+    touched: set = set() if light else retry_precip(store, product, state, locs, lattice, cache, grid_index, now,
+                                                    deadline, status)
     reads = 0
     frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
     # one refused precipitation file of an absent hour per pass: the absent
     # hours after it are passed without their precipitation, which the
     # retries of the gap or the daily sweep read later
     precip_ok = True
-    for t in live_candidates(product, state, now):
+    for t in live_candidates(product, state, now, light=light):
         if reads >= LIVE_HOURS_PER_PASS or deadline.over(RESERVE_SECONDS):
             break
         iso = _iso(t)
@@ -1743,9 +1848,12 @@ def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: di
                 res = HourResult("ok", doc=have)
             else:
                 # a gap retried pass after pass reads its precipitation only
-                # until every place has a value
-                need_p = precip_ok and not (get_precip(store, product, t, cache) or {}).get("complete")
-                res = read_hour(product, t, locs, lattice, frames=True, now=now, precip_if_absent=need_p)
+                # until every place has a value, and an hour whose
+                # precipitation precip_lane read whole as it landed does not
+                # fetch that file again with its analysis
+                whole = bool((get_precip(store, product, t, cache) or {}).get("complete"))
+                res = read_hour(product, t, locs, lattice, frames=True, now=now,
+                                precip_if_absent=precip_ok and not whole, precip=not whole)
                 # an archived hour whose frames could not be made is left as
                 # the gap the next passes retry; the archive already holds its
                 # values, and a read that keeps failing is a failure to report
@@ -1800,7 +1908,50 @@ def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: di
         _advance(ps, "newest", t)
         _advance(ps, "scanned", t)
         ps["reads"] = ps.get("reads", 0) + 1
+        ps["lastRead"] = _iso(now)
         _seed_backfill(state, product, iso)
+    return touched
+
+
+def precip_lane(store: Storage, product: str, state: dict, locs: list, lattice: dict, cache: dict,
+                grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
+    """The newest precipitation files, each read as soon as NOAA publishes it
+    (owner's ruling 2026-11-03), so an hour's rain reaches the place files
+    within minutes of landing. Until then the lane read it with the next
+    analysis, about half an hour later. A file is looked for from
+    LOOK_MINUTES after its hour ends, through the PCP_LIVE_HOURS newest files
+    now due, oldest first. A file already stored is left alone, since NOAA
+    writes each file once, and one short of a place is refetched by the
+    pending retries once its analysis is in. A file NOAA Open Data lacks is
+    looked for on NOMADS, as read_precip always has, from
+    PCP_NOMADS_AFTER_MINUTES after its hour ends. What counts is unchanged,
+    and the day takes the file by its publication time as before. Returns the
+    (location, day) pairs whose values changed."""
+    touched: set = set()
+    ps = state["products"][product]
+    newest = _floor_hour(now - dt.timedelta(minutes=LOOK_MINUTES["pcp"]))
+    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
+    for back in range(PCP_LIVE_HOURS - 1, -1, -1):
+        t = newest - dt.timedelta(hours=back)
+        if get_precip(store, product, t, cache) is not None:
+            continue
+        if deadline.over(RESERVE_SECONDS):
+            break
+        iso = _iso(t)
+        prec = read_precip(product, t, locs, lattice if t >= frame_cutoff else None, now)
+        if prec.status == "error":
+            # one refused file a pass, as in the live lane; the next pass tries again
+            _fail(status, f"{product} {iso} precipitation: {prec.error}")
+            break
+        if prec.status != "ok":
+            continue                              # not published yet, and the next pass looks again
+        _unmark(ps, "pmissing", t)
+        status["pcpRead"].append(f"{product} {iso}")
+        if write_precip(store, product, t, prec.doc, cache):
+            touched |= touched_by(t, locs)
+            if prec.frames and prec.frames.get("precip") is not None:
+                write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
+                write_grid_index(store, grid_index, now)
     return touched
 
 
@@ -2102,11 +2253,18 @@ def health_results(state: dict, status: dict, now: dt.datetime) -> dict:
     is a success. An empty pass is only a failure when a file failed to read
     or the newest hour READ is overdue, because between landings there is
     nothing to read and that is not a fault. A product nothing has ever
-    been read for is overdue once the lane has looked for it that long."""
+    been read for is overdue once the lane has looked for it that long.
+
+    Only the ten-minute pass judges, so the streak counts passes at the
+    cadence the alarm was set for. The windowed passes now read most hours
+    between two of them and never touch the streak, so an hour any pass read
+    since the last judgement (`lastRead` after `healthAt`) is a read here."""
     out = {}
     for p in PRODUCTS:
         ps = state["products"][p]
         ok = any(s.startswith(p + " ") for s in status["read"]) or status["backfilledBy"].get(p, 0) > 0
+        last, since = ps.get("lastRead"), state.get("healthAt")
+        ok = ok or bool(last and (not since or last > since))
         failed = any(s.startswith(p + " ") for s in status["errors"])
         # a failure outside the product lanes (the rebuild, the prune, a
         # refused snapshot write) is the lane's failure as well
@@ -2127,6 +2285,7 @@ def _health(store: Storage, state: dict, status: dict, now: dt.datetime) -> list
     """Advance the lane's failure streaks and name the alarms they raise."""
     try:
         health = arch.update_health(store, health_results(state, status, now), now, key=HEALTH_KEY)
+        state["healthAt"] = _iso(now)
         # a product the lane no longer reads keeps its last streak in the
         # file and raises nothing
         return ["analysis: no %s hour readable for %d passes" % (p, health[p]["fail_streak"])
@@ -2137,28 +2296,71 @@ def _health(store: Storage, state: dict, status: dict, now: dt.datetime) -> list
 
 
 # ------------------------------------------------------------------ the pass
-def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) -> int:
-    """Entry point. Returns 1 only when every read this pass failed, so the
-    scheduler flags an outage; a missing object is an absence, reported and
-    never a failure. Each lane is guarded on its own so one lane's trouble
-    never costs the day rebuild, the state or the indexes, which are
-    written in every case."""
+def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None, window: bool = False) -> int:
+    """Entry point of both passes, the ten-minute pass and, with `window`,
+    the windowed pass (window_pass). Returns 1 only when every read this pass
+    failed, so the scheduler flags an outage; a missing object is an
+    absence, reported and never a failure. A pass that finds the lease held
+    writes nothing and returns 0 with the status "lease held", which is not
+    a failure and raises no alarm. Each lane is guarded on its own so one
+    lane's trouble never costs the day rebuild, the state or the indexes."""
     t0 = time.time()
     now = now or dt.datetime.now(dt.timezone.utc)
+    mode = "window" if window else "baseline"
     gw.set_user_agent(cfg.get("user_agent", ""))
     budget = arch.remaining_budget(cfg)
-    deadline = arch.Deadline(min(budget, PASS_CAP_SECONDS) if budget else PASS_CAP_SECONDS)
-    status: dict = {"kind": "analysis", "read": [], "absent": [], "waiting": [], "errors": [], "failed": 0,
-                    "backfilled": 0, "backfilledBy": {p: 0 for p in PRODUCTS}, "days": 0, "pruned": 0}
-    alarms: list = []
+    status: dict = {"kind": "analysis", "mode": mode, "read": [], "pcpRead": [], "absent": [], "waiting": [],
+                    "errors": [], "failed": 0, "backfilled": 0, "backfilledBy": {p: 0 for p in PRODUCTS}, "days": 0,
+                    "pruned": 0}
     if grib2 is None:
         status["errors"].append("pipeline.grib2 is not available; nothing read")
-        arch.LAST_STATUS = {"job": "analysis", "errors": 1, "alarms": ["analysis: grib2 decoder missing"]}
+        arch.LAST_STATUS = {"job": "analysis", "mode": mode, "errors": 1, "alarms": ["analysis: grib2 decoder missing"]}
         print(json.dumps(status))
         return 1
+    # the lease is taken before the state is read, so no two passes ever work
+    # on the state and the files at once
+    lease = Lease(store, LEASE_KEY)
+    try:
+        got = lease.acquire(now, (budget or LEASE_DEFAULT_SECONDS) + LEASE_SPARE_SECONDS, mode)
+    except Exception as e:  # noqa: BLE001 - the store cannot say who holds the lane, so nothing is written
+        status["errors"].append(f"lease: {type(e).__name__}: {e}")
+        return _close(status, t0, mode, 1, lease="unknown")
+    if not got:
+        held = lease.held or {}
+        status["holder"] = {k: held.get(k) for k in ("mode", "acquired", "expires")}
+        return _close(status, t0, mode, 0, lease="held")
+    state, alarms = None, []
+    try:
+        state, alarms = _run(store, now, window, budget, status)
+    except Exception as e:  # noqa: BLE001 - the last resort; _run guards its own steps
+        _fail(status, f"pass: {type(e).__name__}: {e}")
+    finally:
+        try:
+            if not lease.release(now + dt.timedelta(seconds=time.time() - t0)):
+                _fail(status, "lease: taken over before this pass released it")
+        except Exception as e:  # noqa: BLE001 - a lease not released expires on its own
+            status["errors"].append(f"lease release: {type(e).__name__}: {e}")
+    reads = len(status["read"]) + len(status["pcpRead"]) + status["backfilled"]
+    errors = 1 if (status["failed"] and reads == 0) else 0
+    return _close(status, t0, mode, errors, alarms=alarms, state=state, lease="released")
+
+
+def window_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) -> int:
+    """The windowed pass, the job analysis-window (ops/aws/template.yaml),
+    which reads the files newly due, writes what they change and does nothing
+    else."""
+    return analysis_pass(cfg, store, now, window=True)
+
+
+def _run(store: Storage, now: dt.datetime, window: bool, budget: Optional[float], status: dict) -> Tuple[dict, list]:
+    """A pass's work under the lease, the ten-minute pass's steps or the
+    windowed pass's few. Returns the state and the alarms raised."""
+    deadline = arch.Deadline(pass_seconds(now, budget))
+    alarms: list = []
     locs = load_locations()
     lattice = load_lattice()
     state = load_state(store)
+    loaded = json.dumps(state, sort_keys=True)      # a windowed pass writes the state only when it moved
     cache: dict = {}
     grid_index = (_read_json(store, GRID_INDEX_KEY) or {}).get("frames") or {}
     # the frames of a product the lane no longer reads (URMA, dropped
@@ -2168,76 +2370,103 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None) 
             del grid_index[p]
     touched: set = set()
     try:
-        # 1. live hours, then 2. the days they touch (and any day due to close)
+        # 1. the newest precipitation files and the live hours, then 2. the
+        # days they touch (and on the ten-minute pass any day due to close)
         for product in PRODUCTS:
             try:
-                touched |= live_lane(store, product, state, locs, lattice, cache, grid_index, now, deadline, status)
+                touched |= precip_lane(store, product, state, locs, lattice, cache, grid_index, now, deadline, status)
+            except Exception as e:  # noqa: BLE001
+                _fail(status, f"{product} precipitation lane: {type(e).__name__}: {e}")
+            try:
+                touched |= live_lane(store, product, state, locs, lattice, cache, grid_index, now, deadline, status,
+                                     light=window)
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"{product} live lane: {type(e).__name__}: {e}")
-        try:
-            touched |= days_past_cutoff(store, locs, now)
-        except Exception as e:  # noqa: BLE001
-            _fail(status, f"days to close: {type(e).__name__}: {e}")
+        if not window:
+            try:
+                touched |= days_past_cutoff(store, locs, now)
+            except Exception as e:  # noqa: BLE001
+                _fail(status, f"days to close: {type(e).__name__}: {e}")
         status["days"] += rebuild_days(store, touched, locs, cache, now, state)
-        save_state(store, state, now)
-        # 3. once a day, the precipitation of hours whose analysis never landed
-        if not deadline.over(RESERVE_SECONDS + 120) and precip_sweep_due(state, now):
+        # the rest is the ten-minute pass's, and the windowed pass has done its work
+        if not window:
+            save_state(store, state, now)
+            # 3. once a day, the precipitation of hours whose analysis never landed
+            if not deadline.over(RESERVE_SECONDS + 120) and precip_sweep_due(state, now):
+                try:
+                    changed = precip_sweep(store, state, locs, lattice, cache, grid_index, now, deadline, status)
+                    status["days"] += rebuild_days(store, changed, locs, cache, now, state)
+                    save_state(store, state, now)
+                except Exception as e:  # noqa: BLE001
+                    _fail(status, f"precipitation sweep: {type(e).__name__}: {e}")
+            # 3b. listed days without their CSV files or in an older layout, a few a pass
+            if not deadline.over(RESERVE_SECONDS + 120):
+                try:
+                    status["days"] += refresh_days(store, state, locs, cache, now, deadline, status)
+                    save_state(store, state, now)
+                except Exception as e:  # noqa: BLE001
+                    _fail(status, f"refresh days: {type(e).__name__}: {e}")
+            # 4. backfill with what remains, then the days it touched
             try:
-                changed = precip_sweep(store, state, locs, lattice, cache, grid_index, now, deadline, status)
-                status["days"] += rebuild_days(store, changed, locs, cache, now, state)
-                save_state(store, state, now)
+                bt = backfill_lane(store, state, locs, lattice, cache, grid_index, now, deadline, status)
+                status["days"] += rebuild_days(store, bt, locs, cache, now, state)
             except Exception as e:  # noqa: BLE001
-                _fail(status, f"precipitation sweep: {type(e).__name__}: {e}")
-        # 3b. listed days without their CSV files or in an older layout, a few a pass
-        if not deadline.over(RESERVE_SECONDS + 120):
-            try:
-                status["days"] += refresh_days(store, state, locs, cache, now, deadline, status)
-                save_state(store, state, now)
-            except Exception as e:  # noqa: BLE001
-                _fail(status, f"refresh days: {type(e).__name__}: {e}")
-        # 4. backfill with what remains, then the days it touched
-        try:
-            bt = backfill_lane(store, state, locs, lattice, cache, grid_index, now, deadline, status)
-            status["days"] += rebuild_days(store, bt, locs, cache, now, state)
-        except Exception as e:  # noqa: BLE001
-            _fail(status, f"backfill: {type(e).__name__}: {e}")
-        # 5. prune once a day
-        pruned_at = state.get("pruned")
-        if not pruned_at or now - _parse_iso(pruned_at) >= dt.timedelta(hours=24):
-            try:
-                status["pruned"] = prune_frames(store, grid_index, now)
-                prune_state(state, now)
-                state["pruned"] = _iso(now)
-            except Exception as e:  # noqa: BLE001
-                _fail(status, f"prune: {type(e).__name__}: {e}")
+                _fail(status, f"backfill: {type(e).__name__}: {e}")
+            # 5. prune once a day
+            pruned_at = state.get("pruned")
+            if not pruned_at or now - _parse_iso(pruned_at) >= dt.timedelta(hours=24):
+                try:
+                    status["pruned"] = prune_frames(store, grid_index, now)
+                    prune_state(state, now)
+                    state["pruned"] = _iso(now)
+                except Exception as e:  # noqa: BLE001
+                    _fail(status, f"prune: {type(e).__name__}: {e}")
     except Exception as e:  # noqa: BLE001 - the last resort; the lanes guard their own hours
         _fail(status, f"pass: {type(e).__name__}: {e}")
     finally:
-        # the grid index, the state, the health file and the index are
-        # written whatever happened above, the index last so a reader sees
-        # a consistent set and every frame on the bucket is listed
         try:
-            days = index_days(store)
-            try:
-                refresh_day_status(store, state, locs, days)
-            except Exception as e:  # noqa: BLE001 - a status is a convenience; the index goes out without it
-                _fail(status, f"day status: {type(e).__name__}: {e}")
-            write_grid_index(store, grid_index, now)
-            save_state(store, state, now)
-            alarms = _health(store, state, status, now)
-            write_index(store, state, locs, grid_index, now, days=days)
+            if window:
+                # the windowed pass writes what changed and nothing else, the
+                # state when it moved and the index, last, when a file came in.
+                # Every frame written was followed by its grid index, and the
+                # health streak is the ten-minute pass's (health_results)
+                if json.dumps(state, sort_keys=True) != loaded:
+                    save_state(store, state, now)
+                if touched or status["read"] or status["pcpRead"]:
+                    write_index(store, state, locs, grid_index, now)
+            else:
+                # the grid index, the health file, the state and the index are
+                # written whatever happened above, the index last so a reader
+                # sees a consistent set and every frame on the bucket is listed;
+                # the health file before the state, which keeps when it was judged
+                days = index_days(store)
+                try:
+                    refresh_day_status(store, state, locs, days)
+                except Exception as e:  # noqa: BLE001 - a status is a convenience; the index goes out without it
+                    _fail(status, f"day status: {type(e).__name__}: {e}")
+                write_grid_index(store, grid_index, now)
+                alarms = _health(store, state, status, now)
+                save_state(store, state, now)
+                write_index(store, state, locs, grid_index, now, days=days)
         except Exception as e:  # noqa: BLE001
             _fail(status, f"index: {type(e).__name__}: {e}")
-    reads = len(status["read"]) + status["backfilled"]
-    errors = 1 if (status["failed"] and reads == 0) else 0
+    return state, alarms
+
+
+def _close(status: dict, t0: float, mode: str, errors: int, alarms: Optional[list] = None,
+           state: Optional[dict] = None, lease: str = "released") -> int:
+    """Print the pass's status line, leave its summary in arch.LAST_STATUS
+    and return its exit code."""
+    status["lease"] = lease
     status["seconds"] = round(time.time() - t0, 1)
     # the lists are for the log; the counts are what the status carries
-    for k in ("read", "absent", "waiting", "errors"):
+    for k in ("read", "pcpRead", "absent", "waiting", "errors"):
         status[k + "Count"] = len(status[k])
         status[k] = status[k][:12]
-    arch.LAST_STATUS = {"job": "analysis", "errors": errors, "alarms": alarms, "seconds": status["seconds"],
-                        "read": len(status["read"]), "backfilled": status["backfilled"], "days": status["days"],
-                        "absent": len(status["absent"]), "failed": status["failed"],
-                        "newest": {p: state["products"][p].get("newest") for p in PRODUCTS}}
+    arch.LAST_STATUS = {"job": "analysis", "mode": mode, "lease": lease, "errors": errors, "alarms": alarms or [],
+                        "seconds": status["seconds"], "read": status["readCount"], "pcpRead": status["pcpReadCount"],
+                        "backfilled": status["backfilled"], "days": status["days"], "absent": status["absentCount"],
+                        "failed": status["failed"],
+                        "newest": {p: state["products"][p].get("newest") for p in PRODUCTS} if state else {}}
     print(json.dumps(status, ensure_ascii=False))
     return errors
