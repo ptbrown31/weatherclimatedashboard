@@ -2098,9 +2098,21 @@ def refresh_days(store: Storage, state: dict, locs: list, cache: dict, now: dt.d
     return written
 
 
+def empty_loc_doc(lid: str, tz: str, day_iso: str, now: dt.datetime) -> dict:
+    """The loc/ document of a place with no hour yet on a listed day: no
+    rows and no summary, which the page reads as a day with no hour in yet."""
+    return {"schema": SCHEMA, "id": lid, "day": day_iso, "tz": tz, "rowShape": ROW_SHAPE, "asof": None,
+            "written": _iso(now), "hours": [], "summary": {}}
+
+
 def rebuild_days(store: Storage, touched: set, locs: list, cache: dict, now: dt.datetime, state: dict) -> int:
     """Rewrite every days/ file a touched (location, day) pair names, the
-    loc/ files of the touched pairs and the day's two CSV files. Returns the
+    loc/ files of the touched pairs and the day's two CSV files. When a day
+    is first listed, each place with no hour of it yet whose cut-off is
+    ahead gets a loc/ file with no rows (empty_loc_doc), so its page says no
+    hour is in yet instead of failing to read the file: between Eastern and
+    Pacific midnight a western place has no hour of the new day (owner's
+    approval 2026-11-04). Its first hour replaces the file. Returns the
     number of files written."""
     by_day: Dict[str, set] = {}
     for lid, day in touched:
@@ -2111,6 +2123,12 @@ def rebuild_days(store: Storage, touched: set, locs: list, cache: dict, now: dt.
         day_doc, loc_docs = build_day(store, day_iso, locs, cache, now, state, only=by_day[day_iso], raw=raw)
         if not day_doc["locations"]:
             continue
+        if day_iso not in (state.get("dayStatus") or {}):
+            # the day is not listed yet: this write lists it
+            for loc in locs:
+                if (loc["id"] not in day_doc["locations"] and loc["id"] not in loc_docs
+                        and now < day_cutoff(day_iso, loc["tz"])):
+                    loc_docs[loc["id"]] = empty_loc_doc(loc["id"], loc["tz"], day_iso, now)
         store.put(DAY_KEY.format(day=day_iso), _dump(day_doc), "application/json", CACHE_LIVE)
         store.put(CSV_RAW_KEY.format(day=day_iso), raw_csv(raw), "text/csv; charset=utf-8", CACHE_LIVE)
         store.put(CSV_DAY_KEY.format(day=day_iso), processed_csv(day_iso, day_doc, locs), "text/csv; charset=utf-8",

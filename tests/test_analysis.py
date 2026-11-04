@@ -2124,6 +2124,30 @@ class Job(unittest.TestCase):
         self.assertEqual((r["temp_k"], r["analysis_late_copy"], r["analysis_settled"]), ("293.15", "true", iso(froze)))
         self.assertGreater(r["analysis_nomads_first_seen"], r["analysis_settled"])
 
+    def test_a_newly_listed_day_gives_each_place_without_an_hour_a_file_with_no_rows(self):
+        # between Eastern and Pacific midnight a western place has no hour of the
+        # new day, and its page found no file to read: the day is listed with a
+        # file of no rows for each such place, and its first hour replaces it
+        t = hour(2026, 9, 27, 4)                         # midnight in New York, 23:00 in Chicago, 21:00 in Los Angeles
+        day = "2026-09-27"
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, precip=False)
+        at = t + dt.timedelta(minutes=55)
+        self.assertEqual(self.run_pass(at), 0)
+        self.assertEqual(sorted(self.read(analysis.DAY_KEY.format(day=day))["locations"]), ["new-york-ny"])
+        ny = self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=day))
+        self.assertTrue(any(r.get("rtma") for r in ny["hours"]))
+        for lid, tz in (("chicago-il", "America/Chicago"), ("los-angeles-ca", "America/Los_Angeles")):
+            self.assertEqual(self.read(analysis.LOC_KEY.format(loc=lid, day=day)), analysis.empty_loc_doc(lid, tz, day, at))
+        # Chicago's first hour replaces its file, and the listed day's rebuild
+        # leaves Los Angeles's as it was
+        t2 = t + dt.timedelta(hours=1)
+        self.fx.add_hour("rtma", t2, precip=False)
+        self.assertEqual(self.run_pass(t2 + dt.timedelta(minutes=55)), 0)
+        self.assertTrue(any(r.get("rtma") for r in self.read(analysis.LOC_KEY.format(loc="chicago-il", day=day))["hours"]))
+        la = analysis.LOC_KEY.format(loc="los-angeles-ca", day=day)
+        self.assertEqual(([k for k, _, _ in self.st.puts].count(la), self.read(la)["hours"]), (1, []))
+
     def test_a_file_carried_over_from_before_settles_on_no_copy_for_days_already_final(self):
         # in a state from before 2026-11-03 the analysis of 19Z was a gap, and
         # the deploy comes after every cut-off of its days, which were final

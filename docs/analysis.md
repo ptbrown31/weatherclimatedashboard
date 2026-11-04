@@ -481,6 +481,12 @@ A file without `rowShape` was written before these fields. The page still draws 
 stands, with no running figures and no replay; the lane reads nothing from place files, and the
 `LAYOUT` change of section 5 rewrites the listed days in the new shape a few a pass.
 
+From 2026-11-04 (owner's approval) a place with no hour yet on a newly listed day gets a file with
+no rows (`"hours": []`) and an empty `summary` when the day is listed, if its cut-off is still
+ahead (`empty_loc_doc`). The page then says no hour is in yet, where it said the file could not be
+read: between Eastern and Pacific midnight a western place has no hour of the new day. Its first
+hour replaces the file, and the day file lists the place only from then.
+
 **`snapshots/analysis2/csv/YYYY-MM-DD-raw.csv` and `-processed.csv`** — the day as CSV (owner's
 decision 2026-09-29), rewritten with the day file. The raw file has one row per place and hour
 in the files' own units: `date, location, local_hour, valid_utc, temp_k, wind_ms, gust_ms,
@@ -1033,6 +1039,9 @@ report conventions have no analogue here.
   the same; the daily sweep recording what it finds and never using it; and a state from before
   2026-11-03 carrying its gaps and pending precipitation into the open list, a carried-over file
   settling on no copy for days already final.
+- `tests/test_analysis.py`, for a newly listed day (2026-11-04): each place with no hour of it gets
+  a file with no rows as the day is listed, its first hour replaces it, and a later rebuild of the
+  listed day writes no more of them.
 - `tests/test_analysis.py`, for the settlement display: the three half ties (280.65 K shows 46,
   250.65 K shows −9, 15.875 mm shows 0.63) by the rule and through the place file; a split
   precipitation total is summed in millimetres and converted once; the running values are the
