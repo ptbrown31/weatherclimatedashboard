@@ -479,7 +479,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         page.locator("#artMap").count() == 0, "")
                 chk.add(f"{scheme} article: it names the settlement source and the strict rule",
                         "Weather Underground" in art_t and "midnight to midnight local time" in art_t
-                        and "50.5%" in art_t, art_t[:80])
+                        and "51%" in art_t and "50.5%" not in art_t, art_t[:80])
                 chk.add(f"{scheme} article: it links the terms it describes",
                         page.locator("a[href$='DailyTemperatureTermsandConditions.pdf']").count() >= 1, "")
                 page.goto(f"{srv.url}/index.html"); page.wait_for_timeout(800)
