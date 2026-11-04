@@ -213,6 +213,32 @@ def fetch_bytes(url: str, tries: int = 3, timeout: int = 60, meta: Optional[dict
     return body
 
 
+def fetch_head(url: str, tries: int = 3, timeout: int = 60) -> Optional[dict]:
+    """An object's Last-Modified time and ETag from a HEAD request, without its
+    body, which is how the analysis lane looks whether a server has written a
+    file again since its first copy (pipeline/analysis.py recheck_lane). None
+    when the object is not there (403 or 404); other failures retry as in
+    _fetch_absent and raise once the tries are used up."""
+    for attempt in range(tries):
+        try:
+            req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return {"lastModified": last_modified(r.headers), "etag": r.headers.get("ETag")}
+        except urllib.error.HTTPError as e:
+            if e.code in (403, 404):
+                return None
+            if 400 <= e.code < 500 and e.code != 429:
+                raise
+            if attempt == tries - 1:
+                raise
+            time.sleep(2.5 * (attempt + 1))
+        except Exception:
+            if attempt == tries - 1:
+                raise
+            time.sleep(2.5 * (attempt + 1))
+    raise RuntimeError("unreachable")
+
+
 def _content_range_total(value: Optional[str]) -> Optional[int]:
     """The object length from a 206's Content-Range (`bytes 10-19/1234`),
     None when the header is absent or the length is unknown (`*`)."""

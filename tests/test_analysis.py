@@ -6,8 +6,10 @@ local day that spans two UTC directories, the 23- and 25-hour daylight-time
 days); index.json is the last write; a missing
 object is an absence and never a raised error; a raising fetch or decode is
 recorded against its product and the pass still writes everything else; the
-alarm fires when NOAA stops landing hours; precipitation coverage fills in
-through its own rewritable key; each frame carries the 21 x 21 cell window
+alarm fires when NOAA stops landing hours; each server's copy of each file
+is kept once with its times and hashes, the file settles once on the copy
+that counts, a later replacement is recorded and never used, and NOMADS is
+called within each pass's budget; each frame carries the 21 x 21 cell window
 round every place at the field's own values, on the grid the file is on, and
 the day rebuild never reads a frame. The fake bucket holds synthetic GRIB2
 "messages" that carry only their identity, and the fake fields answer by
@@ -75,7 +77,11 @@ class Fakes:
     overrides the grid a message claims. `raise_for` is a predicate on the
     URL: a matching fetch raises, the way gov_weather does after its tries.
     `published[url]` is the Last-Modified time a fetch reports for an
-    object (None, the default, is a server that sends none)."""
+    object: an analysis file 48 minutes after its hour and a precipitation
+    file 17 minutes after its hour ends unless a test says otherwise, and
+    None for a server that sends none. A file goes on both servers unless
+    `servers` names one; a `variant` gives NOMADS's copy other bytes, and
+    `values` keyed with the variant as a fourth item other values."""
     def __init__(self):
         self.bucket = {}
         self.published = {}
@@ -86,32 +92,45 @@ class Fakes:
 
     # ---- what a message is
     @staticmethod
-    def msg(product, name, t, grid):
-        return f"GRIB|{product}|{name}|{iso(t)}|{grid}".encode()
+    def msg(product, name, t, grid, variant=""):
+        return f"GRIB|{product}|{name}|{iso(t)}|{grid}|{variant}".encode()
 
     @staticmethod
     def parts(msg):
         return msg.decode().split("|")
 
-    def add_hour(self, product, t, precip=True):
-        base = analysis.anl_url(product, t)
-        body, lines, off = b"", [], 0
-        for n, (name, level) in enumerate(IDX_VARS, 1):
-            m = self.msg(product, name, t, "wexp")
-            lines.append(f"{n}:{off}:d={t:%Y%m%d%H}:{name}:{level}:anl:")
-            body += m
-            off += len(m)
-        self.bucket[base] = body
-        self.bucket[base + ".idx"] = "\n".join(lines).encode() + b"\n"
+    def add_hour(self, product, t, precip=True, servers=analysis.SERVERS, variant=""):
+        for server in servers:
+            base = analysis.anl_url(product, t, nomads=server == "nomads")
+            body, lines, off = b"", [], 0
+            for n, (name, level) in enumerate(IDX_VARS, 1):
+                m = self.msg(product, name, t, "wexp", variant if server == "nomads" else "")
+                lines.append(f"{n}:{off}:d={t:%Y%m%d%H}:{name}:{level}:anl:")
+                body += m
+                off += len(m)
+            self.bucket[base] = body
+            self.bucket[base + ".idx"] = "\n".join(lines).encode() + b"\n"
+            self.published.setdefault(base, iso(t + dt.timedelta(minutes=48)))
         if precip:
-            self.add_precip(product, t)
+            self.add_precip(product, t, servers=servers, variant=variant)
 
-    def add_precip(self, product, t):
+    def add_precip(self, product, t, servers=analysis.SERVERS, variant=""):
         grid = analysis.PRODUCTS[product]["pcpGrid"]
-        self.bucket[analysis.pcp_url(product, t)] = self.msg(product, "APCP", t, grid)
+        for server in servers:
+            url = analysis.pcp_url(product, t, nomads=server == "nomads")
+            self.bucket[url] = self.msg(product, "APCP", t, grid, variant if server == "nomads" else "")
+            self.published.setdefault(url, iso(t + dt.timedelta(minutes=17)))
 
     def drop_precip(self, product, t):
-        self.bucket.pop(analysis.pcp_url(product, t), None)
+        for nomads in (False, True):
+            self.bucket.pop(analysis.pcp_url(product, t, nomads=nomads), None)
+
+    def drop(self, product, t, server):
+        """Take one server's copies of an hour's two files away."""
+        nomads = server == "nomads"
+        for u in (analysis.anl_url(product, t, nomads=nomads), analysis.anl_url(product, t, nomads=nomads) + ".idx",
+                  analysis.pcp_url(product, t, nomads=nomads)):
+            self.bucket.pop(u, None)
 
     # ---- gov_weather
     def _maybe_raise(self, url):
@@ -135,6 +154,13 @@ class Fakes:
         data = self.bucket.get(url)
         self._meta(url, data, meta)
         return None if data is None else data[start:end + 1]
+
+    def fetch_head(self, url, tries=3, timeout=60):
+        self.fetched.append(f"HEAD {url}")
+        self._maybe_raise(url)
+        if url not in self.bucket:
+            return None
+        return {"lastModified": self.published.get(url), "etag": None}
 
     def set_user_agent(self, ua):
         pass
@@ -165,7 +191,9 @@ class Fakes:
 
     def _fn(self, msg):
         p = self.parts(msg)
-        v = self.values.get((p[1], VAR_OF.get(p[2], p[2]), p[3]))
+        v = self.values.get((p[1], VAR_OF.get(p[2], p[2]), p[3], p[5])) if p[5] else None
+        if v is None:
+            v = self.values.get((p[1], VAR_OF.get(p[2], p[2]), p[3]))
         if v is None:
             v = {"temp": 293.15, "wind": 5.0, "gust": 8.0, "precip": 0.0}.get(VAR_OF.get(p[2]), 0.0)
         return v if callable(v) else (lambda k, v=v: v)
@@ -196,8 +224,13 @@ class Fakes:
     # ---- as the module attributes the job uses
     def install(self, case):
         fake_gw = types.SimpleNamespace(fetch_bytes=self.fetch_bytes, fetch_range=self.fetch_range,
-                                        set_user_agent=self.set_user_agent,
-                                        NODD_RTMA=analysis.NODD_DEFAULT["rtma"])
+                                        fetch_head=self.fetch_head, set_user_agent=self.set_user_agent,
+                                        NODD_RTMA=analysis.NODD_DEFAULT["rtma"],
+                                        NOMADS_RTMA=analysis.NOMADS_DEFAULT["rtma"])
+        # no pause between NOMADS calls in the tests; the budget itself stands
+        keep_gap = analysis.NOMADS_MIN_INTERVAL
+        analysis.NOMADS_MIN_INTERVAL = 0
+        case.addCleanup(lambda: setattr(analysis, "NOMADS_MIN_INTERVAL", keep_gap))
         fake_grib2 = types.SimpleNamespace(WEXP=WEXP, G184=G184, grid_def=self.grid_def, same_grid=self.same_grid,
                                            product_def=self.product_def, decode=self.decode,
                                            decode_cells=self.decode_cells, parse_idx=self.parse_idx,
@@ -255,6 +288,12 @@ def values_of(cell):
     """The four hourly values of a place file's row, without the fields
     beside them (the shown values, the running values, the file times)."""
     return None if cell is None else {k: cell.get(k) for k in ("temp", "wind", "gust", "precip")}
+
+
+def blank_status():
+    """The status a pass starts with, for a lane called on its own."""
+    return {"read": [], "pcpRead": [], "copies": [], "absent": [], "waiting": [], "errors": [], "failed": 0,
+            "backfilled": 0, "backfilledBy": {"rtma": 0}, "days": 0, "pruned": 0}
 
 
 def raw_product_hours(raw_rows):
@@ -505,7 +544,9 @@ class Rules(unittest.TestCase):
                            "pub": iso(cut + dt.timedelta(hours=3)), "pcpPub": iso(cut + dt.timedelta(hours=3))}
         s2 = analysis.day_summary(ph, "America/New_York", "2026-09-26", cut + dt.timedelta(hours=4))
         self.assertEqual(s2, s)
-        # published by the cut-off but read after it (on NOMADS, say): it counts
+        # an hour published by the cut-off counts, whenever it was read: the
+        # summary goes by publication time, and which copy a row has is fixed
+        # when its file settles, so a copy read after that never reaches it
         ph[iso(hs[10])].update({"pub": iso(cut), "pcpPub": iso(cut)})
         s3 = analysis.day_summary(ph, "America/New_York", "2026-09-26", cut + dt.timedelta(hours=4))
         self.assertEqual((s3["hours"], s3["high"]["value"], s3["precip"]["value"]), (24, 99, 1.23))
@@ -770,20 +811,35 @@ class Job(unittest.TestCase):
         self.fx.values[("rtma", "temp", iso(t_r))] = lambda k: 300.15 if k == NY_K else 293.15
         self.fx.values[("rtma", "precip", iso(t_r))] = lambda k: 2.54 if k == NY["cell"]["g184"][2] else 0.0
         self.assertEqual(self.run_pass(), 0)
-        # the archive hour, write once, in the file's own units (kelvin and
-        # metres per second), nothing converted or rounded (2026-09-29)
+        # each server's first copy of each file, kept on its own, write once,
+        # in the file's own units (kelvin and metres per second, millimetres),
+        # nothing converted or rounded (owner's ruling 2026-11-03)
+        for kind in analysis.KINDS:
+            for server in analysis.SERVERS:
+                c = self.read(analysis.copy_key("rtma", kind, server, t_r))
+                landed = t_r + dt.timedelta(minutes=48 if kind == "anl" else 17)
+                self.assertEqual((c["kind"], c["server"], c["valid"], c["seen"], c["published"]),
+                                 (kind, server, iso(t_r), iso(NOW), iso(landed)), (kind, server))
+                self.assertEqual(sorted(c["sha256"]), ["gust", "temp", "wind"] if kind == "anl" else ["precip"])
+        nomads = self.read(analysis.copy_key("rtma", "anl", "nomads", t_r))
+        nodd = self.read(analysis.copy_key("rtma", "anl", "nodd", t_r))
+        self.assertEqual(nomads["values"]["new-york-ny"], {"temp": 300.15, "wind": 5.0, "gust": 8.0})
+        # NOMADS's copy was read first and decoded; NOAA Open Data's is the
+        # same bytes, so its values were taken and nothing decoded
+        self.assertEqual((nomads["decoded"], nodd["decoded"], nodd["values"], nodd["sha256"]),
+                         (["temp", "wind", "gust"], [], nomads["values"], nomads["sha256"]))
+        # NOMADS has the hour, so it settled at once: the archive hour and the
+        # precipitation key, each written once with the copy each place took
         arc = self.read(analysis.hour_key("rtma", t_r))
         self.assertEqual(arc["schema"], "analysis/2")
-        self.assertEqual((arc["valid"], arc["source"]), ("2026-09-26T19:00:00Z", "nodd"))
+        self.assertEqual((arc["valid"], arc["source"], arc["settled"], arc["hashMatch"]),
+                         ("2026-09-26T19:00:00Z", "nomads", iso(NOW), True))
+        self.assertEqual(set(arc["picks"].values()), {"nomads"})
         self.assertEqual(arc["values"]["new-york-ny"], {"temp": 300.15, "wind": 5.0, "gust": 8.0})
         self.assertEqual(arc["values"]["chicago-il"]["temp"], 293.15)
-        # the precipitation in its own key, in millimetres
         pre = self.read(analysis.precip_key("rtma", t_r))
-        self.assertEqual((pre["read"], pre["complete"], pre["missing"], pre["source"]), (True, True, [], "nodd"))
+        self.assertEqual((pre["read"], pre["complete"], pre["missing"], pre["source"]), (True, True, [], "nomads"))
         self.assertEqual(pre["values"]["new-york-ny"], 2.54)
-        merged = analysis.get_hour(self.st, "rtma", t_r, {})
-        self.assertEqual(merged["values"]["new-york-ny"], {"temp": 300.15, "wind": 5.0, "gust": 8.0, "precip": 2.54})
-        self.assertTrue(merged["precipRead"])
         # four frames, on the lattice, as scaled ints
         for var in analysis.HOURLY_VARS:
             fr = self.read(analysis.FRAME_KEY.format(product="rtma", var=var, stamp=analysis._stamp(t_r)))
@@ -813,13 +869,12 @@ class Job(unittest.TestCase):
         self.assertEqual(values_of(row["rtma"]), {"temp": 80.6, "wind": 11.184, "gust": 17.895, "precip": None})
         self.assertEqual(sorted(row), ["local", "rtma", "t"])
         # each row also carries its values as the contracts show them, the
-        # day's values so far and where its file came from (the fake sends no
-        # Last-Modified, so no publication time)
+        # day's values so far, and when and where its file was published
         self.assertEqual(loc["rowShape"], analysis.ROW_SHAPE)
         self.assertEqual(row["rtma"]["show"], {"temp": 81, "wind": 11, "gust": 18, "precip": None})
         self.assertEqual(row["rtma"]["run"]["high"], ny["rtma"]["high"])
         self.assertEqual(row["rtma"]["run"]["hours"], 1)
-        self.assertEqual((row["rtma"]["src"], "pub" in row["rtma"]), ("nodd", False))
+        self.assertEqual((row["rtma"]["src"], row["rtma"]["pub"]), ("nomads", iso(t_r + dt.timedelta(minutes=48))))
         # the accumulation NOAA files under 19Z is the rain of the hour that starts at 18Z
         before = next(r for r in loc["hours"] if r["t"] == "2026-09-26T18:00:00Z")
         self.assertEqual(values_of(before["rtma"]), {"temp": None, "wind": None, "gust": None, "precip": 0.1})
@@ -832,7 +887,7 @@ class Job(unittest.TestCase):
         self.assertEqual((list(state["products"]), list(state["backfill"])), (["rtma"], ["rtma"]))
         self.assertEqual(state["layout"], analysis.LAYOUT)
         self.assertNotIn("relayout", state)
-        self.assertEqual(state["products"]["rtma"]["precipPending"], [])
+        self.assertNotIn(iso(t_r), state["products"]["rtma"]["open"])        # both files settled
         idx = self.read(analysis.INDEX_KEY)
         self.assertEqual(idx["days"], ["2026-09-26"])
         self.assertEqual(idx["sources"]["rtma"]["latest"], iso(t_r))
@@ -847,12 +902,14 @@ class Job(unittest.TestCase):
                 self.assertIn(cache, (analysis.CACHE_FINAL, analysis.CACHE_LIVE), key)
         self.assertEqual(archive.LAST_STATUS["job"], "analysis")
         self.assertEqual(archive.LAST_STATUS["errors"], 0)
-        self.assertEqual(archive.LAST_STATUS["read"], 1)
-        # the archive hour is written once: a second pass reads nothing new and rewrites no frame
+        self.assertEqual((archive.LAST_STATUS["read"], archive.LAST_STATUS["pcpRead"], archive.LAST_STATUS["copies"]),
+                         (1, 1, 2))
+        # the archive hour is written once: a second pass reads nothing new for
+        # the hour and rewrites no frame (the backfill walks on behind it)
         n = len(self.st.puts)
         self.assertEqual(self.run_pass(), 0)
         self.assertFalse(any(k.startswith("snapshots/analysis2/grid/rtma/") for k, _, _ in self.st.puts[n:]))
-        self.assertFalse(any(k.startswith("archive/analysis2/") and not k.endswith("state.json") for k, _, _ in self.st.puts[n:]))
+        self.assertFalse([k for k, _, _ in self.st.puts[n:] if k.startswith("archive/analysis2/") and analysis._stamp(t_r) in k])
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
 
     def test_frames_carry_each_places_window_on_the_grid_the_file_is_on(self):
@@ -881,9 +938,10 @@ class Job(unittest.TestCase):
             k = (j + b) * 2345 + (i + a)
             self.assertEqual(w["values"][(b + 10) * 21 + (a + 10)], 320 + 10 * (k % 997), (a, b))
         self.assertEqual(w["values"][220], 320 + 10 * (NY_K % 997))
-        # the archive hour is the value at the resolving cell, unchanged in shape
+        # the archive hour, now the settled record, holds the value at the resolving cell
         arc = self.read(analysis.hour_key("rtma", t_r))
-        self.assertEqual(sorted(arc), ["product", "published", "schema", "source", "valid", "values", "written"])
+        self.assertEqual(sorted(arc), ["cutoffs", "hashMatch", "kind", "picks", "product", "published", "schema",
+                                       "servers", "settled", "source", "valid", "values", "written"])
         self.assertLess(abs(float(analysis.exact("temp", arc["values"]["new-york-ny"]["temp"])) - (32 + NY_K % 997)), 0.001)
         # a cell the bitmap leaves out is null in the window
         gust = self.read(analysis.FRAME_KEY.format(product="rtma", var="gust", stamp="20260926T19Z"))["windows"]["new-york-ny"]
@@ -907,7 +965,7 @@ class Job(unittest.TestCase):
             self.assertEqual(fr["windows"]["los-angeles-ca"]["grid"], "wexp", var)
             self.assertEqual(len(fr["windows"]["los-angeles-ca"]["values"]), 441, var)
 
-    def test_a_precipitation_refetch_rewrites_the_frame_with_its_window(self):
+    def test_a_precipitation_file_read_after_its_analysis_writes_its_frame_with_its_window(self):
         t = hour(2026, 9, 26, 19)
         self.fx.add_hour("rtma", t, precip=False)
         self.assertEqual(self.run_pass(), 0)
@@ -985,13 +1043,15 @@ class Job(unittest.TestCase):
     def test_an_hour_whose_analysis_never_lands_still_adds_its_precipitation(self):
         # RTMA 2026-09-23 19Z never reached NOAA Open Data; its precipitation file did
         t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
         self.fx.add_precip("rtma", t)
         self.fx.values[("rtma", "precip", iso(t))] = 2.54          # 0.1 in
         self.assertEqual(self.run_pass(), 0)
         self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
         self.assertTrue(self.read(analysis.precip_key("rtma", t))["complete"])
-        self.assertEqual(self.state()["products"]["rtma"]["gaps"], [iso(t)])
-        self.assertIsNone(self.state()["products"]["rtma"]["newest"])
+        # the precipitation settled; the analysis stays open, asked for again
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {iso(t): {"anl": {}}})
+        self.assertEqual(self.state()["products"]["rtma"]["newest"], iso(t - dt.timedelta(hours=1)))
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual((ny["hours"], ny["complete"], ny["final"]), (0, False, False))
         self.assertIsNone(ny["high"])
@@ -1002,18 +1062,19 @@ class Job(unittest.TestCase):
         self.assertEqual(values_of(row["rtma"]), {"temp": None, "wind": None, "gust": None, "precip": 0.1})
         fr = self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z"))
         self.assertIsNotNone(fr)
-        # the gap is retried for its analysis, and the whole precipitation is not fetched again
+        # the analysis is asked for again on both servers, and the settled precipitation is not fetched again
         n = len(self.fx.fetched)
         self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
-        self.assertNotIn(analysis.pcp_url("rtma", t), self.fx.fetched[n:])
+        self.assertFalse([u for u in self.fx.fetched[n:] if ".pcp." in u])
         self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[n:])
+        self.assertIn(analysis.anl_url("rtma", t, nomads=True) + ".idx", self.fx.fetched[n:])
         # the analysis lands late: the hour is read and the stored precipitation stands
         self.fx.add_hour("rtma", t, precip=False)
         self.fx.values[("rtma", "precip", iso(t))] = 5.08
         self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=20)), 0)
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual((ny["hours"], ny["high"]["value"], ny["precip"]["value"]), (1, 68, 0.1))
-        self.assertEqual(self.state()["products"]["rtma"]["gaps"], [])
+        self.assertNotIn(iso(t), self.state()["products"]["rtma"]["open"])
 
     def test_the_backfill_keeps_the_precipitation_of_an_hour_without_its_analysis(self):
         t = hour(2026, 9, 26, 19)
@@ -1041,26 +1102,38 @@ class Job(unittest.TestCase):
         state["products"]["rtma"]["newest"] = iso(hour(2026, 9, 26, 19))
         state["backfill"]["rtma"].update({"oldest": iso(hour(2026, 8, 28, 0)), "done": True,
                                           "queue": [[iso(hour(2026, 9, 21, 0)), iso(hour(2026, 9, 21, 12))]]})
-        status = {"errors": [], "failed": 0}
+        status = blank_status()
         n = len(self.fx.fetched)
+        # a budget past the span's NOMADS calls: what is swept is under test here, the budget below
         touched = analysis.precip_sweep(self.st, state, LOCS, analysis.load_lattice(), {}, {}, NOW,
-                                        archive.Deadline(600), status)
+                                        archive.Deadline(600), status, analysis.NomadsBudget(10000))
         self.assertIn(("new-york-ny", "2026-09-23"), touched)
-        self.assertTrue(self.read(analysis.precip_key("rtma", old))["complete"])
-        self.assertIsNotNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260923T19Z")))
-        self.assertNotIn(analysis.pcp_url("rtma", kept), self.fx.fetched[n:])
-        self.assertNotIn(analysis.pcp_url("rtma", queued), self.fx.fetched[n:])
-        # nothing newer than the live lane's own 48 hours of retries
-        self.assertNotIn(analysis.pcp_url("rtma", hour(2026, 9, 25, 19)), self.fx.fetched[n:])
+        # recorded from both servers and never used, since the hour's days were
+        # final without it (owner's ruling 2026-11-04)
+        pre = self.read(analysis.precip_key("rtma", old))
+        self.assertEqual((pre["complete"], pre["source"]), (False, None))
+        for server in analysis.SERVERS:
+            self.assertEqual(self.read(analysis.copy_key("rtma", "pcp", server, old))["values"]["new-york-ny"], 2.54)
+        self.assertIsNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260923T19Z")))
+        for server in analysis.SERVERS:
+            self.assertNotIn(analysis.file_url("rtma", "pcp", server, kept), self.fx.fetched[n:])
+            self.assertNotIn(analysis.file_url("rtma", "pcp", server, queued), self.fx.fetched[n:])
+            # nothing newer than the live lane's own 48 hours of asking
+            self.assertNotIn(analysis.file_url("rtma", "pcp", server, hour(2026, 9, 25, 19)), self.fx.fetched[n:])
         self.assertEqual((status["swept"]["filled"], status["swept"]["done"]), (1, True))
+        # both files of the swept hour settled on no copy
+        self.assertIn(iso(old), state["products"]["rtma"]["missing"])
+        self.assertIn(iso(old), state["products"]["rtma"]["pmissing"])
         self.assertEqual(state["precipSwept"], iso(NOW))
         self.assertFalse(analysis.precip_sweep_due(state, NOW + dt.timedelta(hours=23)))
         self.assertTrue(analysis.precip_sweep_due(state, NOW + dt.timedelta(hours=24)))
-        # the rebuilt day adds the swept hour to the day's precipitation
-        cache = {}
-        day, _ = analysis.build_day(self.st, "2026-09-23", LOCS, cache, NOW, state)
-        self.assertEqual(day["locations"]["new-york-ny"]["rtma"]["precip"]["value"], 0.1)
-        self.assertEqual(day["locations"]["new-york-ny"]["rtma"]["hours"], 0)
+        # the rebuilt day has no hour from it, and the raw CSV records the late copies
+        raw: list = []
+        day, _ = analysis.build_day(self.st, "2026-09-23", LOCS, {}, NOW, state, raw=raw)
+        self.assertEqual(day["locations"], {})
+        r = next(dict(zip(analysis.RAW_HEADER, x)) for x in raw
+                 if x[1] == "new-york-ny" and x[3] == iso(old - dt.timedelta(hours=1)))
+        self.assertEqual((r["precip_mm"], r["precip_nomads_mm"], r["precip_late_copy"]), (None, 2.54, True))
 
     def test_a_refused_file_ends_the_products_sweep_for_the_day(self):
         a, b = hour(2026, 9, 23, 19), hour(2026, 9, 23, 20)
@@ -1070,11 +1143,12 @@ class Job(unittest.TestCase):
         state = analysis.new_state()
         state["products"]["rtma"]["newest"] = iso(hour(2026, 9, 26, 19))
         state["backfill"]["rtma"].update({"oldest": iso(hour(2026, 9, 23, 0)), "done": True})
-        status = {"errors": [], "failed": 0}
+        status = blank_status()
         n = len(self.fx.fetched)
-        analysis.precip_sweep(self.st, state, LOCS, analysis.load_lattice(), {}, {}, NOW, archive.Deadline(600), status)
-        self.assertEqual(status["failed"], 1)
-        self.assertNotIn(analysis.pcp_url("rtma", b), self.fx.fetched[n:])
+        analysis.precip_sweep(self.st, state, LOCS, analysis.load_lattice(), {}, {}, NOW, archive.Deadline(600), status,
+                              analysis.NomadsBudget())
+        self.assertEqual(status["failed"], 2)                           # refused on each server
+        self.assertFalse([u for u in self.fx.fetched[n:] if analysis._stamp(b)[:8] in u and "2026092320" in u])
         self.assertIsNone(self.read(analysis.precip_key("rtma", b)))
         self.assertEqual(state["precipSwept"], iso(NOW))        # tried again tomorrow
 
@@ -1088,6 +1162,9 @@ class Job(unittest.TestCase):
             self.fx.bucket[b] = self.fx.bucket.pop(a)
 
     def test_a_file_missing_from_open_data_is_read_from_nomads_half_an_hour_after_it_is_due(self):
+        # read_hour, the reader of the archive's earlier shape, which the
+        # tests still make hours with; since 2026-11-03 the passes read every
+        # file from both servers (read_copy).
         # RTMA 2026-09-23 19Z reached NOMADS and never NOAA Open Data; a file
         # on NOMADS counts as published (owner's decision 2026-09-29). RTMA
         # usually lands 47 minutes after its hour, so NOMADS is asked from 77
@@ -1105,12 +1182,6 @@ class Job(unittest.TestCase):
         res = analysis.read_hour("rtma", t, LOCS, empty, frames=False, now=t + dt.timedelta(minutes=70))
         self.assertEqual((res.status, res.precip_status, res.precip["source"]), ("absent", "ok", "nomads"))
         self.assertFalse(any("nomads" in u and "2dvaranl" in u for u in self.fx.fetched))
-        self.assertFalse(analysis.absence_final("rtma", t, t + dt.timedelta(minutes=70)))
-        # a file on neither is listed as not published six hours after its
-        # hour; since 2026-10-14 the cut-off, not this, decides what a day counts
-        self.assertFalse(analysis.absence_final("rtma", t, t + dt.timedelta(minutes=77)))
-        self.assertFalse(analysis.absence_final("rtma", t, t + dt.timedelta(hours=5, minutes=59)))
-        self.assertTrue(analysis.absence_final("rtma", t, t + dt.timedelta(hours=6)))
         res = analysis.read_hour("rtma", t, LOCS, empty, frames=False, now=t + dt.timedelta(minutes=77))
         self.assertEqual((res.status, res.doc["source"], res.precip["source"]), ("ok", "nomads", "nomads"))
         self.assertEqual(res.doc["values"]["new-york-ny"]["temp"], 293.15)
@@ -1138,21 +1209,32 @@ class Job(unittest.TestCase):
         self.assertEqual((rows[-1]["local"], rows[-1]["rtma"]["precip"]), ("23", 0.1))
         self.assertIsNone(rows[0]["rtma"])
 
-    def test_the_sweep_reads_a_missing_analysis_from_nomads(self):
+    def test_the_sweep_records_a_file_found_after_its_days_were_final_and_never_uses_it(self):
         old = hour(2026, 9, 23, 19)
-        self.fx.add_hour("rtma", old)
-        self._to_nomads("rtma", old, precip=False)     # the analysis on NOMADS only, the precipitation on Open Data
+        # the analysis on NOMADS only, the precipitation on NOAA Open Data only
+        self.fx.add_hour("rtma", old, precip=False, servers=("nomads",))
+        self.fx.add_precip("rtma", old, servers=("nodd",))
         state = analysis.new_state()
         state["products"]["rtma"]["newest"] = iso(hour(2026, 9, 26, 19))
         state["backfill"]["rtma"].update({"oldest": iso(hour(2026, 9, 23, 0)), "done": True})
-        status = {"errors": [], "failed": 0}
+        status = blank_status()
         touched = analysis.precip_sweep(self.st, state, LOCS, analysis.load_lattice(), {}, {}, NOW,
-                                        archive.Deadline(600), status)
-        arc = self.read(analysis.hour_key("rtma", old))
-        self.assertEqual((arc["source"], arc["values"]["new-york-ny"]["temp"]), ("nomads", 293.15))
-        self.assertEqual(self.read(analysis.precip_key("rtma", old))["source"], "nodd")
+                                        archive.Deadline(600), status, analysis.NomadsBudget(10000))
+        # the hour's days were final without the files (owner's ruling
+        # 2026-11-04): each settles on no copy first, and what the sweep then
+        # finds is recorded, flagged as late, and never used or drawn
+        for kind, server in (("anl", "nomads"), ("pcp", "nodd")):
+            self.assertIsNotNone(self.read(analysis.copy_key("rtma", kind, server, old)), kind)
+            self.assertEqual(self.read((analysis.hour_key if kind == "anl" else analysis.precip_key)("rtma", old))["picks"],
+                             {"new-york-ny": None, "chicago-il": None, "los-angeles-ca": None}, kind)
+        self.assertIsNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="temp", stamp="20260923T19Z")))
         self.assertIn(("new-york-ny", "2026-09-23"), touched)
         self.assertEqual(status["failed"], 0)
+        raw: list = []
+        analysis.build_day(self.st, "2026-09-23", LOCS, {}, NOW, state, raw=raw)
+        r = next(dict(zip(analysis.RAW_HEADER, x)) for x in raw if x[1] == "new-york-ny" and x[3] == iso(old))
+        self.assertEqual((r["temp_k"], r["analysis_nomads_temp_k"], r["analysis_late_copy"], r["analysis_settled"]),
+                         (None, 293.15, True, iso(NOW)))
 
     def test_each_read_carries_its_files_publication_time(self):
         t = hour(2026, 9, 26, 12)
@@ -1222,7 +1304,6 @@ class Job(unittest.TestCase):
         self.fx.values[("rtma", "temp", iso(gone))] = 310.15                # 98.6 F, which would move the high
         res = analysis.read_hour("rtma", gone, LOCS, {"wexp": [], "g184": []}, frames=False, now=later)
         analysis.write_hour(self.st, "rtma", gone, res, gi, cache, later)
-        analysis._unmark(state["products"]["rtma"], "missing", gone)
         analysis.rebuild_days(self.st, {("new-york-ny", "2026-09-26")}, LOCS, cache, later, state)
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual((ny["hours"], ny["high"]["value"]), (23, 68))
@@ -1235,16 +1316,54 @@ class Job(unittest.TestCase):
         self.fx.add_hour("rtma", t)
         self.fx.add_precip("rtma", t + dt.timedelta(hours=1))
         self.fx.values[("rtma", "precip", iso(t + dt.timedelta(hours=1)))] = 2.54
-        self.assertEqual(self.run_pass(t + dt.timedelta(hours=1, minutes=50)), 0)
-        raw = self.st.get(analysis.CSV_RAW_KEY.format(day="2026-09-26")).decode().splitlines()
+        at = t + dt.timedelta(hours=1, minutes=50)
+        self.assertEqual(self.run_pass(at), 0)
+        text = self.st.get(analysis.CSV_RAW_KEY.format(day="2026-09-26")).decode()
+        raw = text.splitlines()
         self.assertEqual(raw[0], ",".join(analysis.RAW_HEADER))
-        self.assertEqual(raw[0], "date,location,local_hour,valid_utc,temp_k,wind_ms,gust_ms,precip_mm,precip_file_utc,"
-                                 "analysis_source,precip_source,analysis_published,precip_published")
-        ny = [l.split(",") for l in raw[1:] if l.split(",")[1] == "new-york-ny"]
-        self.assertEqual(len(ny), 2)                           # the 18Z row's rain and the 19Z row's analysis
-        row = next(r for r in ny if r[3] == iso(t))
-        self.assertEqual(row[2:9], ["15", iso(t), "293.15", "5.0", "8.0", "2.54", iso(t + dt.timedelta(hours=1))])
-        self.assertEqual(row[9:], ["nodd", "nodd", "", ""])            # the fake sends no Last-Modified
+        # the columns before 2026-11-03 keep their order and meaning, and each
+        # server's copy follows them in a fixed order (owner's ruling 2026-11-03)
+        self.assertEqual(analysis.RAW_HEADER, [
+            "date", "location", "local_hour", "valid_utc", "temp_k", "wind_ms", "gust_ms", "precip_mm", "precip_file_utc",
+            "analysis_source", "precip_source", "analysis_published", "precip_published",
+            "analysis_settled", "precip_settled",
+            "analysis_nodd_first_seen", "analysis_nodd_last_modified", "analysis_nodd_temp_k", "analysis_nodd_wind_ms",
+            "analysis_nodd_gust_ms", "analysis_nodd_temp_sha256", "analysis_nodd_wind_sha256", "analysis_nodd_gust_sha256",
+            "analysis_nomads_first_seen", "analysis_nomads_last_modified", "analysis_nomads_temp_k", "analysis_nomads_wind_ms",
+            "analysis_nomads_gust_ms", "analysis_nomads_temp_sha256", "analysis_nomads_wind_sha256", "analysis_nomads_gust_sha256",
+            "analysis_hash_match", "analysis_value_match", "analysis_late_copy",
+            "analysis_nodd_replacements", "analysis_nodd_replacement_seen", "analysis_nodd_replacement_last_modified",
+            "analysis_nodd_replacement_temp_sha256", "analysis_nodd_replacement_wind_sha256",
+            "analysis_nodd_replacement_gust_sha256",
+            "analysis_nomads_replacements", "analysis_nomads_replacement_seen", "analysis_nomads_replacement_last_modified",
+            "analysis_nomads_replacement_temp_sha256", "analysis_nomads_replacement_wind_sha256",
+            "analysis_nomads_replacement_gust_sha256",
+            "precip_nodd_first_seen", "precip_nodd_last_modified", "precip_nodd_mm", "precip_nodd_sha256",
+            "precip_nomads_first_seen", "precip_nomads_last_modified", "precip_nomads_mm", "precip_nomads_sha256",
+            "precip_hash_match", "precip_value_match", "precip_late_copy",
+            "precip_nodd_replacements", "precip_nodd_replacement_seen", "precip_nodd_replacement_last_modified",
+            "precip_nodd_replacement_sha256",
+            "precip_nomads_replacements", "precip_nomads_replacement_seen", "precip_nomads_replacement_last_modified",
+            "precip_nomads_replacement_sha256"])
+        rows = [r for r in csv.DictReader(io.StringIO(text)) if r["location"] == "new-york-ny"]
+        self.assertEqual(len(rows), 2)                         # the 18Z row's rain and the 19Z row's analysis
+        r = next(x for x in rows if x["valid_utc"] == iso(t))
+        landed, rained = iso(t + dt.timedelta(minutes=48)), iso(t + dt.timedelta(hours=1, minutes=17))
+        self.assertEqual([r[k] for k in analysis.RAW_HEADER[2:13]],
+                         ["15", iso(t), "293.15", "5.0", "8.0", "2.54", iso(t + dt.timedelta(hours=1)), "nomads", "nomads",
+                          landed, rained])
+        # each file's copy became final at the pass both servers' copies were in
+        self.assertEqual((r["analysis_settled"], r["precip_settled"]), (iso(at), iso(at)))
+        for server in analysis.SERVERS:
+            a_, p_ = f"analysis_{server}_", f"precip_{server}_"
+            self.assertEqual((r[a_ + "first_seen"], r[a_ + "last_modified"], r[a_ + "temp_k"], r[a_ + "wind_ms"], r[a_ + "gust_ms"]),
+                             (iso(at), landed, "293.15", "5.0", "8.0"), server)
+            self.assertEqual((r[p_ + "first_seen"], r[p_ + "last_modified"], r[p_ + "mm"]), (iso(at), rained, "2.54"), server)
+            self.assertTrue(all(len(r[a_ + v + "_sha256"]) == 64 for v in ("temp", "wind", "gust")) and len(r[p_ + "sha256"]) == 64)
+            self.assertEqual((r[a_ + "replacements"], r[a_ + "replacement_seen"], r[p_ + "replacements"]), ("0", "", "0"))
+        self.assertEqual((r["analysis_hash_match"], r["analysis_value_match"], r["analysis_late_copy"],
+                          r["precip_hash_match"], r["precip_value_match"], r["precip_late_copy"]),
+                         ("true", "true", "false", "true", "true", "false"))
         day = self.st.get(analysis.CSV_DAY_KEY.format(day="2026-09-26")).decode().splitlines()
         self.assertEqual(day[0], ",".join(analysis.DAY_HEADER))
         self.assertTrue(day[0].startswith("date,location,name,state,final,final_at,hours,of,high_f,"))
@@ -1340,13 +1459,13 @@ class Job(unittest.TestCase):
         # would be a read of its own (test_a_precipitation_read_is_a_read)
         self.fx.add_hour("rtma", t, precip=False)
         self.fx.grids[("rtma", "TMP", iso(t))] = "other"
-        self.assertEqual(self.run_pass(), 1)                   # the only read this pass failed
+        self.assertEqual(self.run_pass(), 1)                   # the only reads this pass failed
         self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
-        self.assertEqual(archive.LAST_STATUS["failed"], 1)
+        self.assertEqual(archive.LAST_STATUS["failed"], 2)     # refused on each server
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
-        # skipped like a missing file: a gap for the next passes, the walk past it
+        # the file stays open for the next passes, and the walk is past it
         state = self.state()
-        self.assertEqual(state["products"]["rtma"]["gaps"], [iso(t)])
+        self.assertIn("anl", state["products"]["rtma"]["open"][iso(t)])
         self.assertEqual(state["products"]["rtma"]["scanned"], iso(t))
 
     def test_a_raising_fetch_is_the_hours_failure_and_the_pass_writes_everything_else(self):
@@ -1362,14 +1481,14 @@ class Job(unittest.TestCase):
         self.assertIsNotNone(self.read(analysis.GRID_INDEX_KEY))
         self.assertIsNotNone(self.read(analysis.INDEX_KEY))
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
-        # the newest precipitation file, the hour's read, and the
-        # precipitation of the first absent hour the backfill reaches; each
-        # lane stops at its first refused file and the absent hours after it
-        # are walked past without their precipitation, so an outage costs
-        # one of each
-        self.assertEqual(archive.LAST_STATUS["failed"], 3)
+        # each lane stops asking a server for a kind of file at its first
+        # refusal, so an outage costs one failing read of each kind from each
+        # server in each lane: the live hour's analysis and precipitation from
+        # both servers, and the precipitation of the first hour the backfill
+        # reaches from both
+        self.assertEqual(archive.LAST_STATUS["failed"], 6)
         self.assertEqual(self.health()["rtma"]["fail_streak"], 1)
-        self.assertEqual(self.state()["products"]["rtma"]["gaps"], [iso(t)])
+        self.assertIn(iso(t), self.state()["products"]["rtma"]["open"])
         # persistently failing, the product reaches the alarm streak
         alarms = None
         for i in range(1, archive.FAIL_STREAK_ALARM):
@@ -1410,8 +1529,11 @@ class Job(unittest.TestCase):
         self.assertIsNotNone(self.read(analysis.INDEX_KEY))
         self.assertIsNotNone(self.read(analysis.GRID_INDEX_KEY))
         self.assertEqual(self.health()["rtma"]["fail_streak"], 1)
-        self.assertIn("rtma 2026-09-26T19:00:00Z: ValueError: data representation template 5.40 is not supported",
-                      self.errors)
+        # a message that will not decode fails the check, so neither download is a copy yet
+        for server in analysis.SERVERS:
+            self.assertIn(f"rtma 2026-09-26T19:00:00Z anl {server}: TMP: undecodable (ValueError: data representation "
+                          "template 5.40 is not supported)", self.errors)
+            self.assertIsNone(self.read(analysis.copy_key("rtma", "anl", server, t)))
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
 
     def test_the_alarm_fires_when_nothing_lands_and_asof_stays_on_the_hour_read(self):
@@ -1430,8 +1552,9 @@ class Job(unittest.TestCase):
         self.assertEqual(idx["asof"], iso(t_r))
         self.assertEqual(idx["sources"]["rtma"]["latest"], iso(t_r))
         self.assertEqual(self.read(analysis.GRID_INDEX_KEY)["asof"], iso(t_r))
-        # the hours that never landed are gaps, retried first when they do
-        self.assertEqual(len(state["products"]["rtma"]["gaps"]), 7)
+        # the hours that never landed stay open, asked for again until they land
+        opened = state["products"]["rtma"]["open"]
+        self.assertTrue(all(iso(t_r + dt.timedelta(hours=k)) in opened for k in range(1, 8)), sorted(opened))
         self.fx.add_hour("rtma", t_r + dt.timedelta(hours=1))
         self.run_pass(NOW + dt.timedelta(hours=8))
         self.assertEqual(self.state()["products"]["rtma"]["newest"], iso(t_r + dt.timedelta(hours=1)))
@@ -1446,11 +1569,14 @@ class Job(unittest.TestCase):
     def test_frames_are_indexed_as_soon_as_they_are_written(self):
         h1, h2 = hour(2026, 9, 26, 18), hour(2026, 9, 26, 19)
         self.fx.add_hour("rtma", h1)
-        self.fx.add_hour("rtma", h2)
+        self.fx.add_hour("rtma", h2, servers=("nodd",))
         state = analysis.new_state()
         state["products"]["rtma"]["newest"] = iso(hour(2026, 9, 26, 17))
         analysis.save_state(self.st, state, NOW)
-        bad = analysis.anl_url("rtma", h2) + ".idx"
+        # 19Z is not on NOMADS yet and NOAA Open Data refuses it, which keeps
+        # NOAA Open Data's analyses out of the rest of the pass; 18Z comes
+        # from NOMADS, its frames with it
+        bad = analysis.file_url("rtma", "anl", "nodd", h2) + ".idx"
         self.fx.raise_for = lambda url: url == bad
         self.assertEqual(self.run_pass(), 0)
         gi = self.read(analysis.GRID_INDEX_KEY)
@@ -1463,84 +1589,592 @@ class Job(unittest.TestCase):
         self.run_pass(NOW + dt.timedelta(minutes=10))
         self.assertEqual(self.read(analysis.GRID_INDEX_KEY)["frames"]["rtma"]["temp"], {"2026-09-26": ["18", "19"]})
 
-    def test_an_archived_hour_without_frames_gets_them_from_the_live_lane(self):
+    def test_a_file_stays_open_until_it_settles_and_one_on_neither_server_settles_on_no_copy(self):
         t = hour(2026, 9, 26, 19)
-        self.fx.add_hour("rtma", t)
-        res = analysis.read_hour("rtma", t, LOCS, {"wexp": [], "g184": []}, frames=False, now=NOW)
-        self.st.put(analysis.hour_key("rtma", t), gzip.compress(analysis._dump(res.doc)), "application/gzip")
-        self.assertEqual(self.run_pass(), 0)
-        self.assertIsNotNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="temp", stamp="20260926T19Z")))
-        self.assertEqual(self.read(analysis.GRID_INDEX_KEY)["frames"]["rtma"]["temp"], {"2026-09-26": ["19"]})
-        self.assertEqual(self.state()["products"]["rtma"]["newest"], iso(t))
-
-    def test_a_live_hour_is_archived_before_its_precipitation_which_is_retried_then_left(self):
-        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
         self.fx.add_hour("rtma", t, precip=False)
         self.assertEqual(self.run_pass(), 0)
-        # the analysis is archived at once and the precipitation is pending
-        arc = analysis.get_hour(self.st, "rtma", t, {})
-        self.assertEqual(arc["values"]["new-york-ny"]["temp"], 293.15)          # kelvin, as the file holds it
-        self.assertIsNone(arc["values"]["new-york-ny"]["precip"])
-        self.assertFalse(arc["precipRead"])
+        # both servers have the analysis, so it settled at once; the precipitation stays open
+        self.assertEqual(self.read(analysis.hour_key("rtma", t))["values"]["new-york-ny"]["temp"], 293.15)
         self.assertIsNone(self.read(analysis.precip_key("rtma", t)))
         self.assertEqual(self.state()["products"]["rtma"]["newest"], iso(t))
-        self.assertEqual(self.state()["products"]["rtma"]["precipPending"], [iso(t)])
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {iso(t): {"pcp": {}}})
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
-        self.assertEqual(ny["hours"], 1)
-        self.assertIsNone(ny["precip"])
-        # the file lands: the next pass fills the precipitation key and the day
+        self.assertEqual((ny["hours"], ny["precip"]), (1, None))
+        # the file lands on both servers: the next pass keeps both copies and settles it
         self.fx.add_precip("rtma", t)
         self.fx.values[("rtma", "precip", iso(t))] = 2.54
         self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
-        self.assertTrue(self.read(analysis.precip_key("rtma", t))["complete"])
-        self.assertEqual(self.state()["products"]["rtma"]["precipPending"], [])
+        self.assertEqual(self.read(analysis.precip_key("rtma", t))["source"], "nomads")
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {})
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual(ny["precip"], {"value": 0.1, "exact": 0.1, "hours": 1, "resolved": False, "resolvedAt": None})
-        # an hour whose file never lands is left with none once the wait runs out
+        # a precipitation file on neither server settles on no copy, for each
+        # day it fills at the first ten-minute pass after that day's cut-off
+        # (owner's ruling 2026-11-04), and its record is written with the last
         t2 = t + dt.timedelta(hours=1)
         self.fx.add_hour("rtma", t2, precip=False)
         self.assertEqual(self.run_pass(t2 + dt.timedelta(minutes=55)), 0)
-        self.assertEqual(self.state()["products"]["rtma"]["precipPending"], [iso(t2)])
-        self.assertEqual(self.run_pass(t2 + dt.timedelta(hours=analysis.NOT_PUBLISHED_AFTER_HOURS, minutes=-5)), 0)
-        self.assertEqual(self.state()["products"]["rtma"]["precipPending"], [iso(t2)])   # still waiting
-        later = t2 + dt.timedelta(hours=analysis.NOT_PUBLISHED_AFTER_HOURS, minutes=5)
-        self.assertEqual(self.run_pass(later), 0)
-        self.assertEqual(self.state()["products"]["rtma"]["precipPending"], [])
-        self.assertFalse(analysis.get_hour(self.st, "rtma", t2, {})["precipRead"])
+        last_cut = max(analysis.day_cutoff(analysis.row_day("pcp", t2, l["tz"]), l["tz"]) for l in LOCS)
+        self.assertEqual(last_cut, hour(2026, 9, 27, 7) + dt.timedelta(minutes=45))       # Los Angeles's 12:45 AM
+        self.assertEqual(self.run_pass(last_cut - dt.timedelta(minutes=10)), 0)
+        settled = self.state()["products"]["rtma"]["open"][iso(t2)]["pcp"]["cutoffs"]
+        self.assertEqual(sorted(settled), ["2026-09-27T04:45:00Z", "2026-09-27T05:45:00Z"])     # New York's, Chicago's
+        self.assertEqual({e["with"] == [] and e["src"] is None for e in settled.values()}, {True})
+        self.assertIsNone(self.read(analysis.precip_key("rtma", t2)))
+        # past two hours a file is asked for once an hour, and again at the
+        # first pass after each cut-off, which then settles that cut-off's days
+        urls = {analysis.file_url("rtma", "pcp", s, t2) for s in analysis.SERVERS}
+        k = len(self.fx.fetched)
+        self.assertEqual(self.run_pass(last_cut - dt.timedelta(minutes=5)), 0)
+        self.assertFalse(urls & set(self.fx.fetched[k:]))
+        self.assertIn(iso(t2), self.state()["products"]["rtma"]["open"])
+        k = len(self.fx.fetched)
+        self.assertEqual(self.run_pass(last_cut + dt.timedelta(minutes=3)), 0)
+        self.assertEqual(urls & set(self.fx.fetched[k:]), urls)
+        state = self.state()["products"]["rtma"]
+        self.assertIn(iso(t2), state["pmissing"])
+        pre = self.read(analysis.precip_key("rtma", t2))
+        self.assertEqual((pre["source"], pre["complete"], pre["settled"], set(pre["picks"].values())),
+                         (None, False, iso(last_cut + dt.timedelta(minutes=3)), {None}))
+        # it is still looked for until a day after its hour, and a copy that
+        # comes is recorded and flagged and never used
+        self.assertIn(iso(t2), state["open"])
 
-    def test_a_partial_bitmap_is_retried_and_a_later_read_fills_the_place(self):
-        # a precipitation file whose bitmap leaves out a place's cell: Los
-        # Angeles has no value, the hour is archived, and the retries fill it
-        # when a later read of the file has the cell
+    def test_when_the_two_copies_differ_nomads_counts_and_the_hash_and_value_differences_are_kept_apart(self):
+        # NOAA Open Data's precipitation copy leaves Los Angeles's cell out of
+        # its bitmap and NOMADS's has it, and the two analysis copies are other
+        # bytes holding the same values
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t, variant="b")
+        self.fx.values[("rtma", "precip", iso(t))] = lambda k: None if k == LA_K184 else 0.254
+        self.fx.values[("rtma", "precip", iso(t), "b")] = lambda k: 0.508 if k == LA_K184 else 0.254
+        self.assertEqual(self.run_pass(), 0)
+        nod = self.read(analysis.copy_key("rtma", "pcp", "nodd", t))
+        nom = self.read(analysis.copy_key("rtma", "pcp", "nomads", t))
+        self.assertNotEqual(nod["sha256"], nom["sha256"])
+        # the hashes differ, so both copies were decoded at the places
+        self.assertEqual((nod["decoded"], nod["missing"], nod["values"]["los-angeles-ca"]), (["precip"], ["los-angeles-ca"], None))
+        self.assertEqual((nom["decoded"], nom["missing"], nom["values"]["los-angeles-ca"]), (["precip"], [], 0.508))
+        pre = self.read(analysis.precip_key("rtma", t))
+        self.assertEqual((pre["source"], pre["hashMatch"], pre["complete"], pre["values"]["los-angeles-ca"]),
+                         ("nomads", False, True, 0.508))
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((arc["source"], arc["hashMatch"]), ("nomads", False))
+        # the map follows NOMADS's copy, read first, and NOAA Open Data's adds no frame
+        frames = [k for k, _, _ in self.st.puts if k.startswith("snapshots/analysis2/grid/rtma/")]
+        self.assertEqual(len(frames), 4)
+        # the raw CSV keeps the hash and the value differences apart
+        raw = list(csv.DictReader(io.StringIO(self.st.get(analysis.CSV_RAW_KEY.format(day="2026-09-26")).decode())))
+        la = next(r for r in raw if r["location"] == "los-angeles-ca" and r["valid_utc"] == iso(t - dt.timedelta(hours=1)))
+        ny = next(r for r in raw if r["location"] == "new-york-ny" and r["valid_utc"] == iso(t - dt.timedelta(hours=1)))
+        self.assertEqual((la["precip_mm"], la["precip_source"], la["precip_nodd_mm"], la["precip_nomads_mm"],
+                          la["precip_hash_match"], la["precip_value_match"]), ("0.508", "nomads", "", "0.508", "false", "false"))
+        self.assertEqual((ny["precip_hash_match"], ny["precip_value_match"]), ("false", "true"))
+        at = next(r for r in raw if r["location"] == "new-york-ny" and r["valid_utc"] == iso(t))
+        self.assertEqual((at["analysis_source"], at["analysis_hash_match"], at["analysis_value_match"], at["analysis_late_copy"]),
+                         ("nomads", "false", "true", "false"))
+        self.assertNotEqual(at["analysis_nodd_temp_sha256"], at["analysis_nomads_temp_sha256"])
+
+    # ---- each server's copy (owner's ruling 2026-11-03)
+    def raw_row(self, day, lid, t):
+        """The raw CSV row of one place and hour."""
+        text = self.st.get(analysis.CSV_RAW_KEY.format(day=day)).decode()
+        return next(r for r in raw_rows_of(text, lid) if r["valid_utc"] == iso(t))
+
+    def frame_puts(self, t):
+        return [k for k, _, _ in self.st.puts if k.startswith(analysis.PREFIX + "grid/rtma/") and analysis._stamp(t) in k]
+
+    def test_which_copy_counts_and_when_it_settles(self):
+        t = hour(2026, 9, 26, 19)
+        cut = "2026-09-27T04:45:00Z"                     # New York's cut-off for the hour
+
+        def c(pub, sha="a", seen=None):
+            return {"published": pub, "seen": seen or pub, "sha256": {"temp": sha}}
+        nod, nom, late = c("2026-09-26T19:47:00Z"), c("2026-09-26T19:49:00Z", "b"), c("2026-09-27T05:10:00Z", "b")
+        # NOMADS's copy counts when it was published by the cut-off, whatever
+        # NOAA Open Data's holds, then NOAA Open Data's; neither by then, and the
+        # row shows NOMADS's, which never counts
+        self.assertEqual(analysis.choose({"nodd": nod, "nomads": nom}, cut), "nomads")
+        self.assertEqual(analysis.choose({"nodd": nod, "nomads": None}, cut), "nodd")
+        self.assertEqual(analysis.choose({"nodd": nod, "nomads": late}, cut), "nodd")
+        self.assertEqual(analysis.choose({"nodd": c("2026-09-27T05:00:00Z"), "nomads": late}, cut), "nomads")
+        self.assertIsNone(analysis.choose({"nodd": None, "nomads": None}, cut))
+        # a copy without a Last-Modified is timed by when the lane first saw it
+        self.assertEqual(analysis.choose({"nodd": None, "nomads": c(None, seen="2026-09-27T04:40:00Z")}, cut), "nomads")
+        self.assertEqual((analysis.first_published({"nodd": nod, "nomads": nom}), analysis.first_server({"nodd": nod, "nomads": nom})),
+                         ("2026-09-26T19:47:00Z", "nodd"))
+        self.assertEqual((analysis.hash_match({"nodd": nod, "nomads": nom}), analysis.hash_match({"nodd": nod, "nomads": None})),
+                         (False, None))
+        # settling (owner's ruling 2026-11-04), cut-off by cut-off: New York's,
+        # Chicago's and Los Angeles's for this hour
+        cuts = sorted(set(analysis.place_cuts("anl", t, LOCS).values()))
+        self.assertEqual(cuts, ["2026-09-27T04:45:00Z", "2026-09-27T05:45:00Z", "2026-09-27T07:45:00Z"])
+
+        def put(server, pub, seen, temp):
+            values = {loc["id"]: {"temp": temp, "wind": 5.0, "gust": 8.0} for loc in LOCS}
+            analysis.write_copy(self.st, "rtma", "anl", server, t, {"server": server, "seen": seen, "published": pub,
+                                                                    "sha256": {"temp": server}, "values": values}, {})
+        put("nodd", "2026-09-26T19:47:00Z", "2026-09-26T19:50:00Z", 290.0)
+        slots: dict = {}
+        # one copy in hand settles nothing before a cut-off, nor on a windowed pass after one
+        self.assertFalse(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, LOCS, NOW, {}, True))
+        ny_pass = analysis._parse_iso(cuts[0]) + dt.timedelta(minutes=3)
+        self.assertFalse(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, LOCS, ny_pass, {}, False))
+        self.assertEqual(slots, {})
+        # the first ten-minute pass after New York's cut-off settles its rows on the copy in hand
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, LOCS, ny_pass, {}, True))
+        self.assertEqual(slots["cutoffs"], {cuts[0]: {"at": iso(ny_pass), "with": ["nodd"], "src": "nodd",
+                                                      "published": "2026-09-26T19:47:00Z", "pubSrc": "nodd"}})
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t)))           # two cut-offs still to come
+        # NOMADS's copy, published before every cut-off, comes after New York's
+        # rows settled: both copies are in, so the other cut-offs settle at once
+        # on it, and New York's rows keep NOAA Open Data's
+        later = ny_pass + dt.timedelta(minutes=10)
+        put("nomads", "2026-09-26T19:49:00Z", iso(later), 291.0)
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, LOCS, later, {}, False))
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual(arc["picks"], {"new-york-ny": "nodd", "chicago-il": "nomads", "los-angeles-ca": "nomads"})
+        self.assertEqual((arc["values"]["new-york-ny"]["temp"], arc["values"]["chicago-il"]["temp"]), (290.0, 291.0))
+        self.assertEqual([arc["cutoffs"][c_]["at"] for c_ in cuts], [iso(ny_pass), iso(later), iso(later)])
+        self.assertEqual(arc["source"], None)
+        ny = analysis.file_view(self.st, "rtma", "anl", t, "new-york-ny", cuts[0], later, None, {})
+        chi = analysis.file_view(self.st, "rtma", "anl", t, "chicago-il", cuts[1], later, None, {})
+        self.assertEqual((ny["src"], ny["settled"], ny["late"]), ("nodd", iso(ny_pass), True))
+        self.assertEqual((chi["src"], chi["settled"], chi["late"], chi["pub"], chi["pubSrc"]),
+                         ("nomads", iso(later), False, "2026-09-26T19:47:00Z", "nodd"))
+        # a file carried over from before 2026-11-03 settles on no copy for each
+        # cut-off that had passed by then, its days being final already; Los
+        # Angeles's, still to come then, settles at the next ten-minute pass
+        t2 = hour(2026, 9, 25, 19)
+        carried = {"migrated": "2026-09-26T06:00:00Z"}
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t2, carried, LOCS, NOW, {}, False))
+        self.assertEqual(carried["cutoffs"], {c_: {"at": "2026-09-26T06:00:00Z", "with": [], "src": None, "published": None,
+                                                   "pubSrc": None}
+                                              for c_ in ("2026-09-26T04:45:00Z", "2026-09-26T05:45:00Z")})
+        self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t2, carried, LOCS, NOW, {}, True))
+        self.assertEqual(self.read(analysis.hour_key("rtma", t2))["picks"],
+                         {"new-york-ny": None, "chicago-il": None, "los-angeles-ca": None})
+
+    def test_both_copies_are_kept_with_their_times_and_hashes_and_the_hour_takes_the_first_publication(self):
+        # rule 2: the publication time the cut-off is judged on is the first
+        # time the file was on either server; the values are NOMADS's copy,
+        # here the same bytes, so NOAA Open Data's copy takes NOMADS's values
+        # without decoding them
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.published[analysis.anl_url("rtma", t)] = "2026-09-26T19:47:00Z"
+        self.fx.published[analysis.anl_url("rtma", t, nomads=True)] = "2026-09-26T19:49:00Z"
+        self.fx.add_hour("rtma", t)
+        self.assertEqual(self.run_pass(), 0)
+        nod = self.read(analysis.copy_key("rtma", "anl", "nodd", t))
+        nom = self.read(analysis.copy_key("rtma", "anl", "nomads", t))
+        self.assertEqual((nom["decoded"], nod["decoded"], nod["sha256"] == nom["sha256"]), (["temp", "wind", "gust"], [], True))
+        self.assertEqual(nod["values"], nom["values"])
+        self.assertEqual((nod["seen"], nod["published"], nom["published"]), (iso(NOW), "2026-09-26T19:47:00Z", "2026-09-26T19:49:00Z"))
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((arc["source"], arc["published"], arc["hashMatch"], sorted(arc["servers"])),
+                         ("nomads", "2026-09-26T19:47:00Z", True, ["nodd", "nomads"]))
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {})
+        row = next(r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]
+                   if r["t"] == iso(t))["rtma"]
+        self.assertEqual((row["pub"], row["src"], row["pubSrc"]), ("2026-09-26T19:47:00Z", "nomads", "nodd"))
+        self.assertNotIn("lateCopy", row)
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        # both copies came in at this pass, so the row's copy became final then
+        self.assertEqual((r["temp_k"], r["analysis_source"], r["analysis_published"], r["analysis_settled"]),
+                         ("293.15", "nomads", "2026-09-26T19:47:00Z", iso(NOW)))
+        self.assertEqual(row["settled"], iso(NOW))
+        self.assertEqual((r["analysis_nodd_first_seen"], r["analysis_nodd_last_modified"], r["analysis_nodd_temp_k"],
+                          r["analysis_nomads_first_seen"], r["analysis_nomads_last_modified"], r["analysis_nomads_temp_k"]),
+                         (iso(NOW), "2026-09-26T19:47:00Z", "293.15", iso(NOW), "2026-09-26T19:49:00Z", "293.15"))
+        self.assertEqual((r["analysis_nodd_temp_sha256"], r["analysis_nomads_gust_sha256"]),
+                         (nod["sha256"]["temp"], nom["sha256"]["gust"]))
+        self.assertEqual((r["analysis_hash_match"], r["analysis_value_match"], r["analysis_late_copy"],
+                          r["analysis_nodd_replacements"], r["analysis_nomads_replacement_seen"]),
+                         ("true", "true", "false", "0", ""))
+
+    def test_a_file_settles_once_both_copies_are_in_and_a_missing_copy_is_looked_for_until_a_day_after_its_hour(self):
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, servers=("nomads",))
+        self.assertEqual(self.run_pass(), 0)
+        # NOMADS's copy alone settles nothing before the cut-off, since NOAA
+        # Open Data's may still come; the row shows NOMADS's, not yet final
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {iso(t): {"anl": {}, "pcp": {}}})
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        self.assertEqual((r["temp_k"], r["analysis_source"], r["analysis_settled"]), ("293.15", "nomads", ""))
+        # NOAA Open Data's copy comes: both are in, and the file settles at that pass
+        self.fx.add_hour("rtma", t, servers=("nodd",))
+        at = NOW + dt.timedelta(minutes=10)
+        self.assertEqual(self.run_pass(at), 0)
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {})
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((arc["source"], sorted(arc["servers"]), arc["settled"]), ("nomads", ["nodd", "nomads"], iso(at)))
+        self.assertEqual(self.read(analysis.copy_key("rtma", "anl", "nodd", t))["decoded"], [])
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        self.assertEqual((r["analysis_source"], r["analysis_nodd_temp_k"], r["analysis_hash_match"], r["analysis_settled"],
+                          r["analysis_late_copy"]), ("nomads", "293.15", "true", iso(at), "false"))
+        # the precipitation file that ends at 19Z is the 18Z row's
+        self.assertEqual(self.raw_row("2026-09-26", "new-york-ny", t - dt.timedelta(hours=1))["precip_hash_match"], "true")
+        # a file NOAA Open Data never has settles on NOMADS's copy at the first
+        # ten-minute pass after its cut-offs, is looked for on NOAA Open Data
+        # until a day after its hour, and then leaves the open list
+        t2 = t + dt.timedelta(hours=1)
+        self.fx.add_hour("rtma", t2, servers=("nomads",))
+        self.assertEqual(self.run_pass(t2 + dt.timedelta(minutes=55)), 0)
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t2)))
+        froze = max(analysis._cutoffs("anl", t2, LOCS)) + dt.timedelta(minutes=3)
+        self.assertEqual(self.run_pass(froze), 0)
+        arc2 = self.read(analysis.hour_key("rtma", t2))
+        self.assertEqual((arc2["source"], arc2["settled"]), ("nomads", iso(froze)))
+        self.assertIn(iso(t2), self.state()["products"]["rtma"]["open"])
+        s = self.state()
+        s["precipSwept"] = iso(t2 + dt.timedelta(hours=20))                    # no sweep in the way
+        analysis.save_state(self.st, s, t2)
+        self.assertEqual(self.run_pass(t2 + dt.timedelta(hours=analysis.RECHECK_AFTER_HOURS, minutes=8)), 0)
+        self.assertNotIn(iso(t2), self.state()["products"]["rtma"]["open"])
+        self.assertIsNone(self.read(analysis.copy_key("rtma", "anl", "nodd", t2)))
+        self.assertEqual(self.raw_row("2026-09-26", "new-york-ny", t2)["analysis_hash_match"], "")
+
+    def test_a_nomads_copy_that_differs_and_lands_after_the_cut_off_is_recorded_and_flagged_and_changes_nothing(self):
+        # rule 3: NOAA Open Data's copy was on file by the cut-off and NOMADS's,
+        # other bytes and other values, lands after it. The closed day keeps the
+        # copy that was on file; the later one is recorded, and the hour is
+        # flagged in the raw CSV and the place file, which changes no value,
+        # count or state. The owner rules on this case
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, servers=("nodd",))
+        self.assertEqual(self.run_pass(), 0)
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t)))             # NOMADS may still bring it
+        last_cut = max(analysis._cutoffs("anl", t, LOCS))
+        self.assertEqual(self.run_pass(last_cut + dt.timedelta(minutes=3)), 0)
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((arc["source"], arc["values"]["new-york-ny"]["temp"]), ("nodd", 293.15))
+        self.assertIn("anl", self.state()["products"]["rtma"]["open"][iso(t)])
+        day_key = analysis.DAY_KEY.format(day="2026-09-26")
+        loc_key = analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26")
+        before = self.read(day_key)["locations"]
+        self.assertTrue(before["new-york-ny"]["rtma"]["final"])
+        frames = len(self.frame_puts(t))
+        landed = iso(last_cut + dt.timedelta(minutes=20))
+        self.fx.published[analysis.anl_url("rtma", t, nomads=True)] = landed
+        self.fx.add_hour("rtma", t, servers=("nomads",), precip=False, variant="b")
+        self.fx.values[("rtma", "temp", iso(t), "b")] = 300.0
+        self.assertEqual(self.run_pass(last_cut + dt.timedelta(minutes=70)), 0)
+        nom = self.read(analysis.copy_key("rtma", "anl", "nomads", t))
+        self.assertEqual((nom["published"], nom["values"]["new-york-ny"]["temp"]), (landed, 300.0))
+        self.assertEqual(self.read(analysis.hour_key("rtma", t)), arc)
+        self.assertEqual(sorted(self.state()["products"]["rtma"]["open"][iso(t)]), ["pcp"])
+        self.assertEqual(self.read(day_key)["locations"], before)
+        self.assertEqual(len(self.frame_puts(t)), frames)                      # the map keeps the copy that counts
+        row = next(r for r in self.read(loc_key)["hours"] if r["t"] == iso(t))["rtma"]
+        self.assertEqual((row["temp"], row["src"], row["lateCopy"]), (analysis.cut(analysis.exact("temp", 293.15), 0.001),
+                                                                     "nodd", True))
+        self.assertNotIn("late", row)
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        # the row settled at the first ten-minute pass after its cut-off, before
+        # NOMADS's copy was first seen, which is therefore never used
+        froze = iso(last_cut + dt.timedelta(minutes=3))
+        self.assertEqual((r["temp_k"], r["analysis_source"], r["analysis_settled"], r["analysis_nomads_temp_k"],
+                          r["analysis_nomads_last_modified"], r["analysis_hash_match"], r["analysis_value_match"],
+                          r["analysis_late_copy"]),
+                         ("293.15", "nodd", froze, "300.0", landed, "false", "false", "true"))
+        self.assertGreater(r["analysis_nomads_first_seen"], r["analysis_settled"])
+        self.assertEqual(row["settled"], froze)
+
+    def test_nomads_copies_found_unsettled_before_the_cut_off_redraw_the_map(self):
+        # NOAA Open Data's copy comes first and is drawn; NOMADS's, other
+        # bytes published by the cut-off, counts and redraws the messages
+        # whose bytes differ
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, servers=("nodd",))
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(len(self.frame_puts(t)), 4)
+        self.fx.add_hour("rtma", t, servers=("nomads",), precip=False, variant="b")
+        self.fx.values[("rtma", "temp", iso(t), "b")] = 300.0
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
+        self.assertEqual(len(self.frame_puts(t)), 7)
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((arc["source"], arc["values"]["new-york-ny"]["temp"]), ("nomads", 300.0))
+
+    def test_a_later_replacement_is_recorded_beside_the_first_copy_and_never_used(self):
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t)
+        self.assertEqual(self.run_pass(), 0)
+        first = self.read(analysis.copy_key("rtma", "anl", "nomads", t))
+        arc = self.read(analysis.hour_key("rtma", t))
+        s = self.state()
+        s["precipSwept"] = iso(t + dt.timedelta(hours=20))                     # no sweep in the way
+        s["products"]["rtma"]["rechecked"] = iso(t - dt.timedelta(hours=1))    # the recheck is up to the hour before
+        analysis.save_state(self.st, s, t)
+        # NOMADS writes the analysis again, other bytes, three hours later
+        url = analysis.anl_url("rtma", t, nomads=True)
+        self.fx.add_hour("rtma", t, servers=("nomads",), precip=False, variant="c")
+        self.fx.published[url] = iso(t + dt.timedelta(hours=3))
+        # it is looked at again a day after the hour, when every cut-off has passed
+        at = t + dt.timedelta(hours=analysis.RECHECK_AFTER_HOURS, minutes=8)
+        k = len(self.fx.fetched)
+        self.assertEqual(self.run_pass(at), 0)
+        heads = [u for u in self.fx.fetched[k:] if u.startswith("HEAD ")]
+        self.assertEqual(sorted(heads), sorted("HEAD " + analysis.file_url("rtma", kind, s_, t)
+                                               for kind in analysis.KINDS for s_ in analysis.SERVERS))
+        later = self.read(analysis.later_key("rtma", "anl", "nomads", t))["later"]
+        self.assertEqual(len(later), 1)
+        self.assertEqual((later[0]["seen"], later[0]["published"]), (iso(at), iso(t + dt.timedelta(hours=3))))
+        self.assertNotEqual(later[0]["sha256"]["temp"], first["sha256"]["temp"])
+        self.assertIsNone(self.read(analysis.later_key("rtma", "anl", "nodd", t)))
+        # never used: the first copy and the archive hour stand
+        self.assertEqual(self.read(analysis.copy_key("rtma", "anl", "nomads", t)), first)
+        self.assertEqual(self.read(analysis.hour_key("rtma", t)), arc)
+        self.assertEqual(self.state()["products"]["rtma"]["rechecked"], iso(t))
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        self.assertEqual((r["temp_k"], r["analysis_nomads_replacements"], r["analysis_nomads_replacement_seen"],
+                          r["analysis_nomads_replacement_last_modified"], r["analysis_nomads_replacement_temp_sha256"],
+                          r["analysis_nodd_replacements"]),
+                         ("293.15", "1", iso(at), iso(t + dt.timedelta(hours=3)), later[0]["sha256"]["temp"], "0"))
+        # the same replacement seen again is not recorded twice
+        self.assertFalse(analysis.note_later(self.st, "rtma", "anl", "nomads", t,
+                                             dict(later[0], sha256=later[0]["sha256"]), {}))
+
+    def test_nomads_calls_stay_inside_the_pass_budget_and_a_skipped_call_records_nothing(self):
+        budget = analysis.NomadsBudget(3)
+        keep = analysis.NOMADS_MIN_INTERVAL
+        analysis.NOMADS_MIN_INTERVAL = 0.05
+        self.addCleanup(lambda: setattr(analysis, "NOMADS_MIN_INTERVAL", keep))
+        times = []
+        while budget.take():
+            times.append(time.time())
+        self.assertEqual((len(times), budget.left, budget.used), (3, 0, 3))
+        self.assertTrue(all(b - a >= 0.045 for a, b in zip(times, times[1:])), times)
+        analysis.NOMADS_MIN_INTERVAL = 0
+        # four calls a pass: the analysis takes them all (the sidecar and three
+        # messages), so the precipitation file waits for the next pass on
+        # NOMADS without a call, and nothing says NOMADS lacks it
+        keep_calls = analysis.NOMADS_CALLS_PER_PASS
+        analysis.NOMADS_CALLS_PER_PASS = 4
+        self.addCleanup(lambda: setattr(analysis, "NOMADS_CALLS_PER_PASS", keep_calls))
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t)
+        k = len(self.fx.fetched)
+        self.assertEqual(self.run_pass(), 0)
+        nomads = [u for u in self.fx.fetched[k:] if u.startswith(analysis.NOMADS_DEFAULT["rtma"])]
+        self.assertEqual((len(nomads), self.status["nomadsCalls"]), (4, 4))
+        self.assertNotIn(analysis.pcp_url("rtma", t, nomads=True), nomads)
+        self.assertEqual(self.read(analysis.hour_key("rtma", t))["source"], "nomads")
+        self.assertIsNotNone(self.read(analysis.copy_key("rtma", "pcp", "nodd", t)))
+        self.assertIsNone(self.read(analysis.precip_key("rtma", t)))
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {iso(t): {"pcp": {}}})
+        self.assertEqual(self.errors, [])
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
+        self.assertEqual(self.read(analysis.precip_key("rtma", t))["source"], "nomads")
+        self.assertEqual(self.state()["products"]["rtma"]["open"], {})
+
+    def test_the_backfill_stops_where_the_nomads_budget_runs_out_and_carries_on_next_pass(self):
+        keep_calls = analysis.NOMADS_CALLS_PER_PASS
+        analysis.NOMADS_CALLS_PER_PASS = 10
+        self.addCleanup(lambda: setattr(analysis, "NOMADS_CALLS_PER_PASS", keep_calls))
+        h16, h17, h18, h19 = (hour(2026, 9, 26, k) for k in (16, 17, 18, 19))
+        for t in (h16, h17, h18):
+            self.fx.add_hour("rtma", t)
+        state = analysis.new_state()
+        state["products"]["rtma"].update({"newest": iso(h19), "scanned": iso(h19), "since": iso(h19)})
+        state["backfill"]["rtma"].update({"cursor": iso(h19), "oldest": iso(h19)})
+        state["precipSwept"] = state["pruned"] = iso(h19)
+        analysis.save_state(self.st, state, h19)
+        # each hour takes five NOMADS calls, so 18Z and 17Z take the ten and 16Z
+        # keeps only NOAA Open Data's copies, unsettled, where the walk stops
+        self.assertEqual(self.run_pass(), 0)
+        s = self.state()
+        self.assertEqual((s["backfill"]["rtma"]["cursor"], self.status["nomadsCalls"]), (iso(h17), 10))
+        for t in (h17, h18):
+            self.assertEqual(self.read(analysis.hour_key("rtma", t))["source"], "nomads")
+        self.assertIsNone(self.read(analysis.hour_key("rtma", h16)))
+        self.assertIsNotNone(self.read(analysis.copy_key("rtma", "anl", "nodd", h16)))
+        self.assertNotIn(iso(h16), s["products"]["rtma"]["open"])
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
+        self.assertLessEqual(self.state()["backfill"]["rtma"]["cursor"], iso(h16))
+        self.assertEqual(self.read(analysis.hour_key("rtma", h16))["source"], "nomads")
+
+    def test_no_copy_is_started_once_the_pass_is_inside_its_reserve(self):
+        # the deadline is looked at before each copy, so a pass overruns it by
+        # one copy at most
         t = hour(2026, 9, 26, 19)
         self.fx.add_hour("rtma", t)
-        self.fx.values[("rtma", "precip", iso(t))] = lambda k: None if k == LA_K184 else 0.254
+        entry, k = {"anl": {}, "pcp": {}}, len(self.fx.fetched)
+        for kind in analysis.KINDS:
+            got = analysis.work_file(self.st, "rtma", kind, t, entry, LOCS, None, {}, {}, NOW, blank_status(),
+                                     analysis.NomadsBudget(), set(), analysis.new_state(), deadline=archive.Deadline(1))
+            self.assertEqual(got, set())
+        self.assertEqual((entry, self.fx.fetched[k:]), ({"anl": {}, "pcp": {}}, []))
+        got = analysis.work_file(self.st, "rtma", "anl", t, entry, LOCS, None, {}, {}, NOW, blank_status(),
+                                 analysis.NomadsBudget(), set(), analysis.new_state(), deadline=archive.Deadline(600))
+        self.assertTrue(got)
+        self.assertNotIn("anl", entry)
+
+    # ---- the freeze and broken transfers (owner's ruling 2026-11-04)
+    @staticmethod
+    def broken(body, name):
+        """An analysis file's bytes with one message claiming another grid, the
+        same length, as a transfer that broke might give."""
+        i = body.index(f"|{name}|".encode())
+        j = body.index(b"|wexp|", i)
+        return body[:j] + b"|oops|" + body[j + 6:]
+
+    def test_a_download_that_fails_the_check_is_no_copy_until_it_comes_whole(self):
+        # NOAA Open Data's analysis comes broken once, its TMP message claiming
+        # another grid, and whole the next pass; NOMADS's comes whole both times
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, precip=False)
+        url = analysis.anl_url("rtma", t)
+        good = self.fx.bucket[url]
+        self.fx.bucket[url] = self.broken(good, "TMP")
         self.assertEqual(self.run_pass(), 0)
-        pre = self.read(analysis.precip_key("rtma", t))
-        self.assertEqual((pre["read"], pre["complete"], pre["missing"]), (True, False, ["los-angeles-ca"]))
-        self.assertEqual(pre["values"]["new-york-ny"], 0.254)                 # millimetres
-        self.assertEqual(self.state()["products"]["rtma"]["precipPending"], [iso(t)])
-        self.assertEqual(self.state()["products"]["rtma"]["newest"], iso(t))
-        fr = self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z"))
-        self.assertEqual(fr["values"].count(None), 64000 - sum(1 for k in analysis.load_lattice()["g184"] if k >= 0 and k != LA_K184))
-        day = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]
-        self.assertIsNone(day["los-angeles-ca"]["rtma"]["precip"])
-        self.assertEqual(day["new-york-ny"]["rtma"]["precip"]["value"], 0.01)
-        # the same file again: nothing changes and nothing is rewritten
-        n = len(self.st.puts)
-        self.run_pass(NOW + dt.timedelta(minutes=10))
-        self.assertFalse(any(k.startswith("archive/analysis2/precip/") for k, _, _ in self.st.puts[n:]))
-        # a read with the cell: the key, the frame and the day are rewritten
-        self.fx.values[("rtma", "precip", iso(t))] = lambda k: 0.508 if k == LA_K184 else 0.254
-        self.run_pass(NOW + dt.timedelta(minutes=20))
-        pre = self.read(analysis.precip_key("rtma", t))
-        self.assertEqual((pre["complete"], pre["missing"], pre["values"]["los-angeles-ca"]), (True, [], 0.508))
-        self.assertEqual(pre["values"]["new-york-ny"], 0.254)         # a stored value stands
-        self.assertEqual(self.state()["products"]["rtma"]["precipPending"], [])
-        fr = self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z"))
-        self.assertEqual(fr["values"].count(None), 64000 - sum(1 for k in analysis.load_lattice()["g184"] if k >= 0))
-        day = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]
-        self.assertEqual(day["los-angeles-ca"]["rtma"]["precip"]["value"], 0.02)
+        self.assertIsNone(self.read(analysis.copy_key("rtma", "anl", "nodd", t)))
+        self.assertIn("rtma 2026-09-26T19:00:00Z anl nodd: TMP: message is on another grid", self.errors)
+        self.assertEqual(sorted(self.state()["products"]["rtma"]["open"][iso(t)]["anl"]["nodd"]["bad"]), ["temp"])
+        self.assertIsNone(self.read(analysis.hour_key("rtma", t)))              # NOMADS's copy alone, not final
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        self.assertEqual((r["temp_k"], r["analysis_source"], r["analysis_nodd_first_seen"]), ("293.15", "nomads", ""))
+        # the next pass downloads it whole: that is NOAA Open Data's copy, and the hour settles
+        self.fx.bucket[url] = good
+        at = NOW + dt.timedelta(minutes=10)
+        self.assertEqual(self.run_pass(at), 0)
+        nod = self.read(analysis.copy_key("rtma", "anl", "nodd", t))
+        self.assertEqual((nod.get("refused"), nod["seen"], nod["values"]["new-york-ny"]["temp"]), (None, iso(at), 293.15))
+        self.assertEqual((self.read(analysis.hour_key("rtma", t))["hashMatch"], self.state()["products"]["rtma"]["open"]),
+                         (True, {iso(t): {"pcp": {}}}))                   # the precipitation is not out yet
+
+    def test_the_same_failing_bytes_twice_are_noaas_own_file_and_can_count(self):
+        # NOMADS serves other bytes than NOAA Open Data, and its TMP message
+        # fails the check the same way twice: NOAA published that file, so it is
+        # NOMADS's copy, the message refused, and NOMADS's copy counts. Per file
+        # (owner's ruling 2026-11-04): the hour has no temperature at any place
+        t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, precip=False, variant="b")
+        url = analysis.anl_url("rtma", t, nomads=True)
+        self.fx.bucket[url] = self.broken(self.fx.bucket[url], "TMP")
+        self.assertEqual(self.run_pass(), 0)
+        self.assertIsNone(self.read(analysis.copy_key("rtma", "anl", "nomads", t)))
+        self.assertEqual(self.raw_row("2026-09-26", "new-york-ny", t)["temp_k"], "293.15")    # NOAA Open Data's, for now
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
+        nom = self.read(analysis.copy_key("rtma", "anl", "nomads", t))
+        self.assertEqual((sorted(nom["refused"]), nom["decoded"], sorted(nom["sha256"])),
+                         (["temp"], ["wind", "gust"], ["gust", "temp", "wind"]))
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((arc["source"], {v["temp"] for v in arc["values"].values()}, arc["values"]["new-york-ny"]["wind"]),
+                         ("nomads", {None}, 5.0))
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        self.assertEqual((r["temp_k"], r["wind_ms"], r["analysis_source"], r["analysis_nodd_temp_k"]),
+                         ("", "5.0", "nomads", "293.15"))
+
+    def test_a_message_with_no_value_at_any_place_is_no_copy_until_it_comes_again(self):
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_precip("rtma", t)
+        self.fx.values[("rtma", "precip", iso(t))] = lambda k: None          # every place out of the bitmap
+        first = analysis.read_copy("rtma", "pcp", "nodd", t, LOCS, None, NOW)
+        self.assertEqual((first.status, first.bad["precip"]["why"]), ("suspect", "APCP: no value at any place"))
+        again = analysis.read_copy("rtma", "pcp", "nodd", t, LOCS, None, NOW, prior_bad=first.bad)
+        self.assertEqual((again.status, again.doc["refused"], again.doc["missing"]),
+                         ("ok", {"precip": "APCP: no value at any place"}, sorted(l["id"] for l in LOCS)))
+
+    def test_a_day_is_final_only_once_every_file_of_it_has_settled(self):
+        # a day shown final never changes: past its cut-off it waits for the
+        # first ten-minute pass, which settles the files still open, and a
+        # windowed pass in between leaves it provisional
+        t = hour(2026, 9, 27, 3)                         # 23:00 in New York, its day's last analysis
+        self.caught_up(t - dt.timedelta(hours=1))
+        self.fx.add_hour("rtma", t, precip=False, servers=("nodd",))         # NOMADS never has it
+        self.assertEqual(self.run_pass(t + dt.timedelta(minutes=55)), 0)
+        cut = analysis.day_cutoff("2026-09-26", "America/New_York")
+        self.assertEqual(cut, hour(2026, 9, 27, 4) + dt.timedelta(minutes=45))
+        # the day's last accumulation lands after the cut-off; a windowed pass
+        # reads it and rebuilds the day, past its cut-off and still provisional
+        self.fx.add_precip("rtma", t + dt.timedelta(hours=1))
+        self.assertEqual(self.run_window(cut + dt.timedelta(minutes=1)), 0)
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["final"], ny["hours"]), (False, 1))
+        # the first ten-minute pass after it settles the analysis on NOAA Open
+        # Data's copy, NOMADS having none, and the day is final
+        froze = cut + dt.timedelta(minutes=3)
+        self.assertEqual(self.run_pass(froze), 0)
+        ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
+        self.assertEqual((ny["final"], ny["finalAt"], ny["hours"]), (True, iso(cut), 1))
+        self.assertEqual(self.state()["products"]["rtma"]["open"][iso(t)]["anl"]["cutoffs"][iso(cut)],
+                         {"at": iso(froze), "with": ["nodd"], "src": "nodd", "published": iso(t + dt.timedelta(minutes=48)),
+                          "pubSrc": "nodd"})
+        row = next(r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]
+                   if r["t"] == iso(t))["rtma"]
+        self.assertEqual((row["settled"], row["pcpSettled"]), (iso(froze), iso(cut + dt.timedelta(minutes=1))))
+        # a NOMADS copy found later is recorded and flagged, and the day stays as it was
+        before = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]
+        self.fx.add_hour("rtma", t, precip=False, servers=("nomads",), variant="b")
+        self.fx.values[("rtma", "temp", iso(t), "b")] = 305.0
+        self.assertEqual(self.run_pass(cut + dt.timedelta(minutes=63)), 0)
+        self.assertIsNotNone(self.read(analysis.copy_key("rtma", "anl", "nomads", t)))
+        self.assertEqual(self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"], before)
+        r = self.raw_row("2026-09-26", "new-york-ny", t)
+        self.assertEqual((r["temp_k"], r["analysis_late_copy"], r["analysis_settled"]), ("293.15", "true", iso(froze)))
+        self.assertGreater(r["analysis_nomads_first_seen"], r["analysis_settled"])
+
+    def test_a_file_carried_over_from_before_settles_on_no_copy_for_days_already_final(self):
+        # in a state from before 2026-11-03 the analysis of 19Z was a gap, and
+        # the deploy comes after every cut-off of its days, which were final
+        # without it; the file turns up then on both servers
+        t = hour(2026, 9, 26, 19)
+        old = analysis.new_state()
+        ps = old["products"]["rtma"]
+        del ps["open"], ps["rechecked"]
+        ps.update({"newest": iso(t), "scanned": iso(t), "since": iso(t - dt.timedelta(days=2)), "gaps": [iso(t)]})
+        back = iso(t - dt.timedelta(days=31))
+        old["backfill"]["rtma"].update({"cursor": back, "oldest": back, "done": True})
+        old["precipSwept"] = old["pruned"] = iso(t)
+        self.st.put(analysis.STATE_KEY, json.dumps(old).encode(), "application/json")
+        self.fx.add_hour("rtma", t)
+        at = analysis.day_end("2026-09-26", "America/Los_Angeles") + dt.timedelta(hours=2)
+        self.assertEqual(self.run_pass(at), 0)
+        arc = self.read(analysis.hour_key("rtma", t))
+        self.assertEqual((set(arc["picks"].values()), {e["with"] == [] for e in arc["cutoffs"].values()}), ({None}, {True}))
+        self.assertEqual(self.frame_puts(t), [])                                 # nor drawn on the map
+        # the copies are recorded beside it, flagged, and never used
+        raw: list = []
+        analysis.build_day(self.st, "2026-09-26", LOCS, {}, at, self.state(), raw=raw)
+        r = next(dict(zip(analysis.RAW_HEADER, x)) for x in raw if x[1] == "new-york-ny" and x[3] == iso(t))
+        self.assertEqual((r["temp_k"], r["analysis_nomads_temp_k"], r["analysis_late_copy"], r["analysis_settled"]),
+                         (None, 293.15, True, iso(at)))
+
+    def test_a_state_from_before_the_copies_carries_its_gaps_and_pending_precipitation_into_the_open_list(self):
+        h1, h2 = hour(2026, 9, 26, 17), hour(2026, 9, 26, 18)
+        old = analysis.new_state()
+        ps = old["products"]["rtma"]
+        del ps["open"], ps["rechecked"]
+        ps.update({"newest": iso(h2), "scanned": iso(h2), "since": iso(h1), "gaps": [iso(h1)],
+                   "precipPending": [iso(h1), iso(h2)]})
+        old["backfill"]["rtma"].update({"cursor": iso(h1), "oldest": iso(h1), "done": True})
+        old["precipSwept"] = old["pruned"] = iso(h2)
+        self.st.put(analysis.STATE_KEY, json.dumps(old).encode(), "application/json")
+        ps = analysis.load_state(self.st)["products"]["rtma"]
+        self.assertNotIn("gaps", ps)
+        self.assertNotIn("precipPending", ps)
+        self.assertEqual((ps["open"], ps["rechecked"]), ({iso(h1): {"anl": {}, "pcp": {}}, iso(h2): {"pcp": {}}}, None))
+        # 18Z's precipitation was stored short of a place before 2026-11-03: it
+        # stands, and the file is not fetched again
+        self.st.put(analysis.precip_key("rtma", h2),
+                    analysis._gz({"schema": analysis.SCHEMA, "values": {"new-york-ny": 0.0, "chicago-il": 0.0,
+                                                                         "los-angeles-ca": None},
+                                  "read": True, "complete": False}), "application/gzip")
+        k = len(self.fx.fetched)
+        self.assertEqual(self.run_pass(), 0)
+        self.assertFalse([u for u in self.fx.fetched[k:] if "2026092618" in u])
+        self.assertNotIn(iso(h2), self.state()["products"]["rtma"]["open"])
+        self.assertIn(iso(h1), self.state()["products"]["rtma"]["open"])
 
     def test_the_backfill_walks_back_from_the_first_live_hour(self):
         t = hour(2026, 9, 26, 19)
@@ -1549,8 +2183,6 @@ class Job(unittest.TestCase):
         self.assertEqual(self.run_pass(), 0)
         for back in range(1, 4):
             self.assertIsNotNone(self.read(analysis.hour_key("rtma", t - dt.timedelta(hours=back))), back)
-        state = self.state()
-        self.assertTrue(state["backfill"]["rtma"]["done"])
         self.assertEqual(archive.LAST_STATUS["backfilled"], 3)
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual(ny["hours"], 4)
@@ -1564,32 +2196,34 @@ class Job(unittest.TestCase):
         self.assertEqual(self.run_pass(), 0)
         state = self.state()
         self.assertIsNone(state["products"]["rtma"]["newest"])
-        self.assertEqual(state["products"]["rtma"]["gaps"], [iso(t)])
-        # the walk went the whole thirty days back through the absent hours
-        self.assertTrue(state["backfill"]["rtma"]["done"])
+        self.assertIn("anl", state["products"]["rtma"]["open"][iso(t)])
+        # the walk starts behind the late hour and reads the three hours there;
+        # the absent hours past them take NOMADS calls, and once the pass's
+        # budget is spent the walk carries on next pass
         self.assertEqual(archive.LAST_STATUS["backfilled"], 3)
+        self.assertLessEqual(state["backfill"]["rtma"]["cursor"], iso(t - dt.timedelta(hours=3)))
         for back in range(1, 4):
             self.assertIsNotNone(self.read(analysis.hour_key("rtma", t - dt.timedelta(hours=back))), back)
-        # the late hour lands: the live lane reads it as a gap
+        # the late hour lands: the live lane reads it from the open list
         self.fx.add_hour("rtma", t)
         self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 0)
         state = self.state()
         self.assertEqual(state["products"]["rtma"]["newest"], iso(t))
-        self.assertEqual(state["products"]["rtma"]["gaps"], [])
+        self.assertNotIn(iso(t), state["products"]["rtma"]["open"])
         self.assertIsNotNone(self.read(analysis.hour_key("rtma", t)))
 
     def test_a_catch_up_span_is_queued_once_and_clamped_to_the_backfill(self):
         state = analysis.new_state()
         state["products"]["rtma"]["newest"] = iso(NOW - dt.timedelta(days=3))
         for _ in range(3):
-            analysis.live_candidates("rtma", state, NOW)
+            analysis.walk_candidates("rtma", state, NOW)
         queue = state["backfill"]["rtma"]["queue"]
         self.assertEqual(len(queue), 1)
         self.assertEqual(queue[0][1], iso(analysis.expected_latest("rtma", NOW) - dt.timedelta(hours=analysis.LIVE_HOURS_PER_PASS)))
         self.assertEqual(state["products"]["rtma"]["scanned"], queue[0][1])
         state = analysis.new_state()
         state["products"]["rtma"]["newest"] = iso(NOW - dt.timedelta(days=40))
-        analysis.live_candidates("rtma", state, NOW)
+        analysis.walk_candidates("rtma", state, NOW)
         oldest = analysis._floor_hour(NOW) - dt.timedelta(days=analysis.BACKFILL_POINT_DAYS)
         self.assertEqual(state["backfill"]["rtma"]["queue"][0][0], iso(oldest))
         state["backfill"]["rtma"]["queue"] = [[iso(NOW - dt.timedelta(days=40)), iso(NOW - dt.timedelta(days=35))]]
@@ -1598,15 +2232,16 @@ class Job(unittest.TestCase):
 
     def test_a_day_whose_other_files_are_not_published_resolves_on_the_hours_available(self):
         # owner's decision 2026-09-29: a missing file does not hold a day open.
-        # One hour lands; the pass two days later walks the rest of the day,
-        # finds every other file on neither NOAA Open Data nor NOMADS, and the
-        # day resolves on the one hour it has, never closed
+        # One hour lands; the first ten-minute pass after the last cut-off
+        # walks the rest of the day, finds every other file on neither NOAA
+        # Open Data nor NOMADS, settles each on no copy, and the day resolves on
+        # the one hour it has, never closed
         t = hour(2026, 9, 26, 19)
         self.fx.add_hour("rtma", t)
         self.assertEqual(self.run_pass(), 0)
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual((ny["final"], ny["closed"]), (False, False))
-        later = analysis.day_end("2026-09-26", "America/Los_Angeles") + dt.timedelta(hours=49)
+        later = analysis.day_end("2026-09-26", "America/Los_Angeles") + dt.timedelta(minutes=48)
         self.assertEqual(self.run_pass(later), 0)
         day = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]
         self.assertEqual((day["new-york-ny"]["rtma"]["final"], day["new-york-ny"]["rtma"]["closed"]), (True, False))
@@ -1868,7 +2503,7 @@ class Job(unittest.TestCase):
             doc = self.read(key)
             doc.pop("rowShape")
             for r in doc["hours"]:
-                for k in ("show", "run", "pub", "pcpPub", "src", "pcpSrc"):
+                for k in ("show", "run", "pub", "pcpPub", "src", "pcpSrc", "pubSrc", "pcpPubSrc"):
                     (r["rtma"] or {}).pop(k, None)
             self.st.put(key, analysis._dump(doc), "application/json")
         old = {d: self.read(analysis.LOC_KEY.format(loc="new-york-ny", day=d)) for d in days}
@@ -1915,19 +2550,24 @@ class Job(unittest.TestCase):
         t = hour(2026, 9, 26, 19)                    # the file of the hour 18Z to 19Z, on the bucket at 19:17
         self.fx.add_precip("rtma", t)
         self.fx.values[("rtma", "precip", iso(t))] = lambda k: 2.54 if k == NY_K184 else 0.0
+        # NOMADS has it first: the file's published time is the first on either server
         self.fx.published[analysis.pcp_url("rtma", t)] = "2026-09-26T19:17:02Z"
+        self.fx.published[analysis.pcp_url("rtma", t, nomads=True)] = "2026-09-26T19:16:40Z"
         at = t + dt.timedelta(minutes=18)
         self.assertLess(analysis.expected_latest("rtma", at), t)     # the analysis it came with is not due till 19:47
         self.assertEqual(self.run_window(at), 0)
-        self.assertEqual(self.status["pcpReadCount"], 1)
+        self.assertEqual((self.status["pcpReadCount"], self.status["copiesCount"]), (1, 1))
         pre = self.read(analysis.precip_key("rtma", t))
-        self.assertEqual((pre["complete"], pre["published"], pre["values"]["new-york-ny"]), (True, "2026-09-26T19:17:02Z", 2.54))
+        self.assertEqual((pre["complete"], pre["published"], pre["source"], pre["values"]["new-york-ny"]),
+                         (True, "2026-09-26T19:16:40Z", "nomads", 2.54))
+        self.assertEqual((pre["servers"]["nodd"]["published"], pre["servers"]["nomads"]["published"]),
+                         ("2026-09-26T19:17:02Z", "2026-09-26T19:16:40Z"))
         self.assertIsNotNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="precip", stamp="20260926T19Z")))
         # in the place file and the day at once, in the row of the hour it starts
         row = next(r for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]
                    if r["t"] == iso(t - dt.timedelta(hours=1)))
-        self.assertEqual((row["rtma"]["precip"], row["rtma"]["show"]["precip"], row["rtma"]["pcpPub"]),
-                         (0.1, 0.1, "2026-09-26T19:17:02Z"))
+        self.assertEqual((row["rtma"]["precip"], row["rtma"]["show"]["precip"], row["rtma"]["pcpPub"], row["rtma"]["pcpSrc"]),
+                         (0.1, 0.1, "2026-09-26T19:16:40Z", "nomads"))
         self.assertEqual(row["rtma"]["run"]["precip"], {"value": 0.1, "exact": 0.1, "hours": 1})
         ny = self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]
         self.assertEqual(ny["precip"], {"value": 0.1, "exact": 0.1, "hours": 1, "resolved": False, "resolvedAt": None})
@@ -1936,13 +2576,11 @@ class Job(unittest.TestCase):
         self.fx.add_hour("rtma", t, precip=False)
         k = len(self.fx.fetched)
         self.assertEqual(self.run_window(t + dt.timedelta(minutes=50)), 0)
-        self.assertNotIn(analysis.pcp_url("rtma", t), self.fx.fetched[k:])
-        self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[k:])
+        self.assertFalse([u for u in self.fx.fetched[k:] if ".pcp." in u])
+        self.assertIn(analysis.anl_url("rtma", t, nomads=True) + ".idx", self.fx.fetched[k:])
         ps = self.state()["products"]["rtma"]
-        self.assertEqual((ps["newest"], ps["precipPending"]), (iso(t), []))
-        merged = analysis.get_hour(self.st, "rtma", t, {})
-        self.assertEqual((merged["values"]["new-york-ny"]["temp"], merged["values"]["new-york-ny"]["precip"], merged["precipRead"]),
-                         (293.15, 2.54, True))
+        self.assertEqual((ps["newest"], ps["open"]), (iso(t), {}))
+        self.assertEqual(self.read(analysis.hour_key("rtma", t))["values"]["new-york-ny"]["temp"], 293.15)
 
     def test_the_days_last_accumulation_is_in_before_its_cut_off_and_resolves_by_the_same_rules(self):
         # New York's 2026-09-26: its last hour's accumulation, 23:00 to
@@ -1976,12 +2614,16 @@ class Job(unittest.TestCase):
 
     def test_a_windowed_pass_with_nothing_new_writes_nothing_and_exits_at_once(self):
         t = hour(2026, 9, 26, 19)
+        self.caught_up(t - dt.timedelta(hours=1))
         self.fx.add_hour("rtma", t)
         self.assertEqual(self.run_pass(), 0)
+        # 20:14 opens the stamp whose precipitation is now due, which is new
+        self.assertEqual(self.run_window(hour(2026, 9, 26, 20) + dt.timedelta(minutes=14)), 0)
+        self.assertIn(iso(hour(2026, 9, 26, 20)), self.state()["products"]["rtma"]["open"])
         health = self.health()
         n, k = len(self.st.puts), len(self.fx.fetched)
         t0 = time.time()
-        self.assertEqual(self.run_window(hour(2026, 9, 26, 20) + dt.timedelta(minutes=14)), 0)
+        self.assertEqual(self.run_window(hour(2026, 9, 26, 20) + dt.timedelta(minutes=16)), 0)
         self.assertLess(time.time() - t0, 5)
         self.assertEqual(self.st.puts[n:], [])                 # no state, no index, no day, no health file
         self.assertEqual(self.health(), health)
@@ -1989,47 +2631,47 @@ class Job(unittest.TestCase):
                          ("window", "released", 0, 0))
         self.assertEqual((archive.LAST_STATUS["mode"], archive.LAST_STATUS["errors"], archive.LAST_STATUS["alarms"]),
                          ("window", 0, []))
-        # it fetches only what is newly due, never the analysis it has read,
-        # and of the precipitation only the newest files not yet stored
+        # it asks both servers for the one file newly due, and nothing else
         got = self.fx.fetched[k:]
-        self.assertFalse([u for u in got if "2dvaranl" in u])
-        self.assertIn(analysis.pcp_url("rtma", hour(2026, 9, 26, 20)), got)
-        self.assertTrue(all(any(f"{h:%Y%m%d%H}.pcp" in u for h in (hour(2026, 9, 26, 18), hour(2026, 9, 26, 20))) for u in got), got)
+        self.assertEqual(sorted(got), sorted(analysis.file_url("rtma", "pcp", s, hour(2026, 9, 26, 20)) for s in analysis.SERVERS))
 
     def test_a_windowed_pass_looks_for_the_analysis_from_its_windows_opening(self):
         t = hour(2026, 9, 26, 19)
         self.caught_up(t - dt.timedelta(hours=1))
         k = len(self.fx.fetched)
         self.run_window(t + dt.timedelta(minutes=44))
-        self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[k:])
-        self.assertEqual(self.state()["products"]["rtma"]["gaps"], [iso(t)])
+        for server in analysis.SERVERS:
+            self.assertIn(analysis.file_url("rtma", "anl", server, t) + ".idx", self.fx.fetched[k:])
+        self.assertIn("anl", self.state()["products"]["rtma"]["open"][iso(t)])
         k = len(self.fx.fetched)
         self.run_window(t + dt.timedelta(minutes=46))              # still not there, fetched again
-        self.assertIn(analysis.anl_url("rtma", t) + ".idx", self.fx.fetched[k:])
+        self.assertIn(analysis.anl_url("rtma", t, nomads=True) + ".idx", self.fx.fetched[k:])
         self.fx.add_hour("rtma", t)                                # NOAA publishes it at 19:47
         self.assertEqual(self.run_window(t + dt.timedelta(minutes=50)), 0)
         ps = self.state()["products"]["rtma"]
-        self.assertEqual((ps["newest"], ps["gaps"]), (iso(t), []))
+        self.assertEqual((ps["newest"], ps["open"]), (iso(t), {}))
         self.assertIsNotNone(self.read(analysis.FRAME_KEY.format(product="rtma", var="temp", stamp="20260926T19Z")))
 
-    def test_a_windowed_pass_leaves_the_older_gaps_the_retries_and_the_heavy_work_to_the_ten_minute_pass(self):
+    def test_a_windowed_pass_leaves_the_older_open_files_and_the_heavy_work_to_the_ten_minute_pass(self):
         h15, h16, h19, h20 = (hour(2026, 9, 26, k) for k in (15, 16, 19, 20))
-        self.fx.add_hour("rtma", h15)                    # an old gap whose file has landed since
-        self.fx.add_precip("rtma", h16)                  # an archived hour's precipitation, still pending
+        self.fx.add_hour("rtma", h15)                    # an older open file that has landed since
+        self.fx.add_hour("rtma", h16, precip=False)      # an hour archived before 2026-11-03 ...
+        res = analysis.read_hour("rtma", h16, LOCS, {"wexp": [], "g184": []}, frames=False, now=h19)
+        analysis.write_hour(self.st, "rtma", h16, res, {}, {}, h19)
+        self.fx.add_precip("rtma", h16)                  # ... whose precipitation is still open
         state = analysis.new_state()
         state["products"]["rtma"].update({"newest": iso(h19), "scanned": iso(h19), "since": iso(h15),
-                                          "gaps": [iso(h15)], "precipPending": [iso(h16)]})
+                                          "open": {iso(h15): {"anl": {}}, iso(h16): {"pcp": {}}}})
         state["backfill"]["rtma"].update({"cursor": iso(h19), "oldest": iso(h19)})
         state["layout"] = "cutoff-2026-10-14"
         analysis.save_state(self.st, state, h19)
         k = len(self.fx.fetched)
         self.assertEqual(self.run_window(h20 + dt.timedelta(minutes=46)), 0)
         got = self.fx.fetched[k:]
-        self.assertNotIn(analysis.anl_url("rtma", h15) + ".idx", got)
-        self.assertNotIn(analysis.pcp_url("rtma", h16), got)
+        self.assertFalse([u for u in got if "t15z" in u or "2026092615" in u or "2026092616" in u])
         self.assertIn(analysis.anl_url("rtma", h20) + ".idx", got)       # the hour now due, not there yet
         s = self.state()
-        self.assertEqual((s["products"]["rtma"]["gaps"], s["products"]["rtma"]["precipPending"]), ([iso(h15), iso(h20)], [iso(h16)]))
+        self.assertEqual(sorted(s["products"]["rtma"]["open"]), [iso(h15), iso(h16), iso(h20)])
         self.assertEqual((s["backfill"]["rtma"]["cursor"], s["precipSwept"], s["pruned"], s["layout"]),
                          (iso(h19), None, None, "cutoff-2026-10-14"))
         self.assertIsNone(self.read(analysis.hour_key("rtma", h15)))
@@ -2043,7 +2685,8 @@ class Job(unittest.TestCase):
         s = self.state()
         self.assertIsNotNone(self.read(analysis.hour_key("rtma", h15)))
         self.assertTrue(self.read(analysis.precip_key("rtma", h16))["complete"])
-        self.assertEqual((s["products"]["rtma"]["gaps"], s["products"]["rtma"]["precipPending"]), ([iso(h20)], []))
+        opened = s["products"]["rtma"]["open"]
+        self.assertEqual((iso(h15) in opened, iso(h16) in opened, iso(h20) in opened), (False, False, True))
         self.assertEqual((s["precipSwept"], s["pruned"], s["layout"]), (iso(at), iso(at), analysis.LAYOUT))
         self.assertNotEqual(s["backfill"]["rtma"]["cursor"], iso(h19))
 
@@ -2067,9 +2710,9 @@ class Job(unittest.TestCase):
         seen = {}
         keep = analysis.load_state
 
-        def peek(store):
+        def peek(store, now=None):
             seen.update(json.loads(store.get(analysis.LEASE_KEY)))
-            return keep(store)
+            return keep(store, now)
         analysis.load_state = peek
         self.addCleanup(lambda: setattr(analysis, "load_state", keep))
         self.cfg = {"pass_budget_seconds": 840}
@@ -2106,7 +2749,8 @@ class Job(unittest.TestCase):
         # a windowed pass whose read fails adds nothing to the streak; the
         # ten-minute pass that fails on the same file, with nothing read since, does
         self.fx.add_hour("rtma", t21, precip=False)
-        self.fx.grids[("rtma", "TMP", iso(t21))] = "other"
+        bad = {analysis.anl_url("rtma", t21, nomads=n) for n in (False, True)}
+        self.fx.raise_for = lambda url: url in bad                         # every message read fails, on both
         self.assertEqual(self.run_window(t21 + dt.timedelta(minutes=50)), 1)
         self.assertEqual(self.health()["rtma"]["fail_streak"], 0)
         self.run_pass(t21 + dt.timedelta(minutes=58))
@@ -2120,7 +2764,7 @@ class Job(unittest.TestCase):
         self.fx.add_hour("rtma", t)
         self.fx.grids[("rtma", "TMP", iso(t))] = "other"
         self.assertEqual(self.run_pass(), 0)
-        self.assertEqual((archive.LAST_STATUS["failed"], archive.LAST_STATUS["pcpRead"], archive.LAST_STATUS["read"]), (1, 1, 0))
+        self.assertEqual((archive.LAST_STATUS["failed"], archive.LAST_STATUS["pcpRead"], archive.LAST_STATUS["read"]), (2, 1, 0))
         self.assertTrue(self.read(analysis.precip_key("rtma", t))["complete"])
         self.assertEqual(self.health()["rtma"]["fail_streak"], 1)
 
@@ -2139,10 +2783,11 @@ class Job(unittest.TestCase):
         for key in (analysis.DAY_KEY.format(day="2026-09-26"), analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"),
                     analysis.INDEX_KEY):
             self.assertEqual(cc[key], analysis.CACHE_LIVE, key)
-        # past every place's cut-off the place-day is final with its
-        # precipitation resolved and goes to CACHE_FINAL; the day file stays live
+        # at the first ten-minute pass past every place's cut-off the place-day
+        # is final with its precipitation resolved and goes to CACHE_FINAL; the
+        # day file stays live
         n = len(self.st.puts)
-        self.assertEqual(self.run_pass(analysis.day_end("2026-09-26", "America/Los_Angeles") + dt.timedelta(hours=49)), 0)
+        self.assertEqual(self.run_pass(analysis.day_end("2026-09-26", "America/Los_Angeles") + dt.timedelta(minutes=48)), 0)
         cc = {k: c for k, _, c in self.st.puts[n:]}
         self.assertEqual(cc[analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26")], analysis.CACHE_FINAL)
         self.assertEqual(cc[analysis.DAY_KEY.format(day="2026-09-26")], analysis.CACHE_LIVE)

@@ -217,7 +217,7 @@ window.WXAnalysis = (() => {
     if (days.indexOf(S.day) < 0) S.day = (resolvedDay && days.indexOf(resolvedDay) >= 0) ? resolvedDay : days[days.length - 1];
     const tip = WXC.tooltip();
     const foot = $('#foot');
-    if (foot) foot.textContent = 'Analyses are NOAA’s Real-Time Mesoscale Analysis (RTMA), read from NOAA Open Data on AWS, or from NCEP’s NOMADS server for a file NOAA Open Data lacks. '
+    if (foot) foot.textContent = 'Analyses are NOAA’s Real-Time Mesoscale Analysis (RTMA), read from NOAA Open Data on AWS and from NCEP’s NOMADS server. '
       + 'Times are analysis valid times, never fetch times. ' + STATEMENT;
 
     // ---- The controls are the day and the place, each a button that opens
@@ -1495,7 +1495,7 @@ window.WXAnalysis = (() => {
     const s0 = src[PRODUCT] || {};
     host.appendChild(h('p', { text: 'Sources. RTMA is read from NOAA Open Data (' + (s0.bucket || 'noaa-rtma-pds') + '), '
       + lag(s0.lagMinutes) + ' after each hour' + latest(s0) + '; its precipitation is NOAA’s radar-only estimate. '
-      + 'A file NOAA Open Data does not have half an hour after it usually lands is read from NCEP’s NOMADS server.' }));
+      + 'Every file is read from NCEP’s NOMADS server as well, and where the two copies differ the NOMADS copy counts if it was published by the cut-off.' }));
     host.appendChild(h('p', { text: 'The map is a subsample. Each hourly field is sampled at a 3 px pitch in the site’s map space, about 14 km between points nationally, '
       + 'and the dot values come from the place’s own 2.5 km cell rather than from the picture.' }));
     host.appendChild(h('p', { text: 'Station report conventions have no analogue here. There is no last report in the hour, no special report and no tenths group; '

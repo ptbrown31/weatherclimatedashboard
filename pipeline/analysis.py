@@ -31,12 +31,13 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     that starts then, which NOAA files under the hour it ends. A place-day is
     final at its cut-off, 12:45 AM local time on the day after (owner's ruling
     2026-10-14, the draft terms), on the files published on NOAA Open Data or
-    NOMADS by then. A file's publication time is its Last-Modified time on the
-    server it was read from. A file published later is shown and never counted,
-    the first published version of a file counts, an hour missing at the
-    cut-off leaves the value on the hours available, and a place-day with no
-    hour by the cut-off goes to event review. Until 2026-10-14 a day was final
-    once every hour's file was read or known not published.
+    NOMADS by then. A file's publication time is the first time it was on
+    either server, its Last-Modified time there. A file published later is
+    shown and never counted, the first published version of a file counts, an
+    hour missing at the cut-off leaves the value on the hours available, and a
+    place-day with no hour by the cut-off goes to event review. Until
+    2026-10-14 a day was final once every hour's file was read or known not
+    published.
 
     Every stored value is in the file's own unit and is converted exactly, in
     decimal arithmetic, and the aggregate (the highest hourly temperature,
@@ -51,13 +52,21 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     keep the strict test, so on the boundary this framework and the board
     part company by design.
 
-    A file NOAA Open Data does not have half an hour after it usually lands is
-    read from NCEP's NOMADS server, and a file there counts as published; a
-    precipitation file is looked for there 27 minutes after its hour ends, so
-    the day's last accumulation is looked for before the cut-off. An
-    hour's precipitation is a separate file and is read even when its
-    analysis is missing: it adds to the day's total and never to the count of
-    analyses read.
+    Every file is read from NOAA Open Data and from NCEP's NOMADS server,
+    whose copy counts as published too (owner's ruling 2026-11-03). Each
+    server's first copy is kept on its own, with when this lane first saw it,
+    the server's Last-Modified time and a sha256 of each message; a download
+    with a message that fails the check is a copy only when the same bytes
+    come again (owner's ruling 2026-11-04). A row takes NOMADS's copy when it
+    was published by the day's cut-off, whatever NOAA Open Data's holds, then
+    NOAA Open Data's, and per file: a place the copy that counts has no value
+    for has none that hour. The choice is final once both copies are in, and
+    otherwise at the first ten-minute pass after the day's cut-off, on the
+    copies in hand (owner's ruling 2026-11-04). A copy read later, and a
+    later replacement of a file, are recorded and never used, and a day shown
+    final never changes. An hour's precipitation is a separate file and is
+    read even when its analysis is missing, adding to the day's total and
+    never to the count of analyses read.
 
     Each row of a place file also carries its values as the contracts show
     them (whole degrees, whole miles an hour, a hundredth of an inch, each
@@ -69,15 +78,17 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     2026-09-28, 0.83 in from its rounded hours against the 0.84 it resolved
     on).
 
-Reads   noaa-rtma-pds (and NOMADS for a file it lacks) through
+Reads   noaa-rtma-pds and NOMADS, every file from both, through
         pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
         range request per message (TMP 2 m, WIND 10 m, GUST 10 m, about 6 MB
         each), the one-message precipitation file whole, as soon as NOAA
-        publishes it rather than with the next analysis; GRIB2 decoded by
-        pipeline/grib2.py.
-Writes  archive/analysis2/hours/rtma/<stamp>.json.gz      the places' hourly temperature, wind and gust in the file's units, write once
-        archive/analysis2/precip/rtma/<stamp>.json.gz     the places' hourly accumulations in millimetres, filled in as reads add values
-        archive/analysis2/_meta/state.json                cursors, gaps, pending precipitation, hours not published, stamps
+        publishes it rather than with the next analysis, and a HEAD request
+        for each first copy a day later; GRIB2 decoded by pipeline/grib2.py.
+Writes  archive/analysis2/copies/rtma/<stamp>.<kind>.<server>.json.gz   each server's first copy of each file, write once
+        archive/analysis2/copies/rtma/<stamp>.<kind>.<server>.later.json.gz   its later replacements, never used
+        archive/analysis2/hours/rtma/<stamp>.json.gz      the hour's settled analysis, each place's copy and values, write once
+        archive/analysis2/precip/rtma/<stamp>.json.gz     the hour's settled accumulations in millimetres, write once
+        archive/analysis2/_meta/state.json                cursors, the open files, hours not published, stamps
         archive/analysis2/_meta/lease.json                the lease that keeps two passes from overlapping
         archive/_meta/health_analysis.json                the lane's own failure streaks
         snapshots/analysis2/grid/rtma/<var>/<stamp>.json  one map frame on the 320 x 200 lattice, with the
@@ -90,12 +101,12 @@ Writes  archive/analysis2/hours/rtma/<stamp>.json.gz      the places' hourly tem
         snapshots/analysis2/index.json                    last, so a reader sees a consistent set
 
 The lane runs two passes on its own schedules (owner's ruling 2026-11-03). The
-ten-minute pass, at :08, :18 and so on, reads the newest precipitation files
-and the live hours, retries the precipitation still pending, rebuilds the days
-those touch, once a day sweeps for files the walks passed without, rewrites a
-few listed days that lack their CSV files or predate the current layout, and
-spends what budget remains walking backwards through the last thirty days,
-newest first, so the page fills in from today back. The windowed pass runs
+ten-minute pass, at :08, :18 and so on, looks for every open file on both
+servers, rebuilds the days those touch, once a day sweeps for files the walks
+passed without, rewrites a few listed days that lack their CSV files or
+predate the current layout, looks at each first copy once more a day after
+its hour, and spends what budget remains walking backwards through the last
+thirty days, newest first, so the page fills in from today back. The windowed pass runs
 every two minutes inside :44 to :54 and :14 to :20, about when NOAA publishes
 the analysis and an hour's precipitation, at the minutes the ten-minute pass
 does not take, and does only light work. It reads the files newly due and
@@ -106,23 +117,26 @@ for the next analysis. Every pass ends before the next minute in a window
 pass's work first and little after it. A lease under archive/analysis2/ keeps
 any two passes from overlapping on the state and the files. A pass takes it
 with a conditional write before it reads the state, and one that finds it
-held exits with the status "lease held", which is not a failure.
-Nothing a NOAA object does (missing, short, refused by the decoder, a 5xx
-after the retries) fails the pass: each hour's read is guarded, the failure
-is recorded, and the state and the indexes are written in every case.
+held exits with the status "lease held", which is not a failure. A pass makes
+at most forty calls to NOMADS, two seconds apart, well inside the about 120
+requests a minute NOMADS allows a client. Nothing a NOAA object does
+(missing, short, refused by the decoder, a 5xx after the retries) fails the
+pass. Each copy's read is guarded, the failure is recorded, and the state and
+the indexes are written in every case.
 """
 from __future__ import annotations
 
 import datetime as dt
 import csv
 import gzip
+import hashlib
 import io
 import json
 import math
 import os
 import time
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from zoneinfo import ZoneInfo
 
 from . import archive as arch
@@ -157,9 +171,21 @@ CSV_DAY_KEY = PREFIX + "csv/{day}-processed.csv"
 HOUR_KEY = "archive/analysis2/hours/{product}/{stamp}.json.gz"
 # the precipitation of a product-hour is its own key because it is a
 # separate file that lands on its own time and is read even when the
-# analysis never lands (RTMA 2026-09-23 19Z); a later read fills a place
-# still without a value, while the analysis hour is written once
+# analysis never lands (RTMA 2026-09-23 19Z). Since 2026-11-03 it is written
+# once, as the analysis hour is; one written before was filled in by later
+# reads, a place still without a value taking the new read's
 PRECIP_KEY = "archive/analysis2/precip/{product}/{stamp}.json.gz"
+# each server's first copy of each file, on its own and written once (owner's
+# ruling 2026-11-03), with when the lane first saw it, the server's
+# Last-Modified, a sha256 of each message read and the values at the places.
+# A later read of the same server's file that differs is a replacement,
+# recorded beside it (LATER_KEY) and never used. Since then the archive hour
+# and the precipitation key above are each the hour's settled file, written
+# once when it has settled for every day it fills (settle_cuts); those
+# written before keep the earlier shape
+COPY_PREFIX = "archive/analysis2/copies/{product}/"
+COPY_KEY = COPY_PREFIX + "{stamp}.{kind}.{server}.json.gz"
+LATER_KEY = COPY_PREFIX + "{stamp}.{kind}.{server}.later.json.gz"
 STATE_KEY = "archive/analysis2/_meta/state.json"
 # the lease (LEASE_* below) lives under data/archive/, which the Lambda's role can write and the
 # CDN never serves
@@ -191,25 +217,50 @@ NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com"}
 # NCEP's own server keeps the last fourteen days of the analysis under the
 # same directory and file names, and a file there counts as published
 # (owner's decision 2026-09-29; the RTMA analysis of 2026-09-23 19Z never
-# reached NOAA Open Data and NOMADS had it). A file NOAA Open Data does not
-# have half an hour after the product usually lands is read from NOMADS, a
-# file on neither by then is not published, and the lane stops asking NOMADS
-# a day short of its fourteen
+# reached NOAA Open Data and NOMADS had it). Since the owner's ruling of
+# 2026-11-03 the lane reads every file from both servers, and NOMADS's copy
+# counts when the two differ, since an hour is final once NOMADS has it. The
+# lane stops asking NOMADS a day short of its fourteen. NOMADS_AFTER_MINUTES
+# and PCP_NOMADS_AFTER_MINUTES are when read_hour and read_precip, the readers
+# of the archive's earlier shape, turn to it
 NOMADS_DEFAULT = {"rtma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod"}
 NOMADS_AFTER_MINUTES = 30
 NOMADS_KEEP_HOURS = 13 * 24
-# a file on neither NOAA Open Data nor NOMADS this long after its valid time
-# (a precipitation file, after its hour ends) is listed in the state as not
-# published and its refetching stops; since 2026-10-14 the cut-off below
-# decides what a day counts
-NOT_PUBLISHED_AFTER_HOURS = 6
+# the two servers, in the order the CSV files name them, and the order a pass
+# reads them in, NOMADS first, since it usually has a file a couple of minutes
+# before NOAA Open Data and its copy is the one that counts
+SERVERS = ("nodd", "nomads")
+READ_ORDER = ("nomads", "nodd")
+# NOMADS blocks a client that makes more than about 120 requests a minute. A
+# pass makes at most NOMADS_CALLS_PER_PASS calls to it, at least
+# NOMADS_MIN_INTERVAL seconds apart, and passes never overlap, so the lane
+# makes at most about 30 calls a minute there, 60 requests if every call
+# needed its second try (NomadsBudget)
+NOMADS_CALLS_PER_PASS = 40
+NOMADS_MIN_INTERVAL = 2.0
+# the two files of an hour, the analysis (anl) and the precipitation file that
+# ends at the hour (pcp)
+KINDS = ("anl", "pcp")
+# a settled file is asked for from the server that has not given its copy
+# until this long after its hour, when every zone's cut-off has passed, so
+# both servers' copies are kept and a NOMADS copy that lands after the cut-off
+# is recorded. Then each first copy is looked at once more by its
+# Last-Modified, so a file its server writes again is recorded as a later
+# replacement; neither is ever used. RECHECK_HOURS_PER_PASS hours of them a
+# ten-minute pass at most
+RECHECK_AFTER_HOURS = 26
+RECHECK_HOURS_PER_PASS = 4
+# a file not on a server is asked for again every pass for this long after its
+# hour, and once an hour after that, while the server keeps the hour
+RETRY_EVERY_PASS_HOURS = 2
 # the cut-off of the draft terms (owner's ruling 2026-10-14): a place-day is
 # final at 12:45 AM local time on the day after it, on the files published by
 # then, and a place-day with no hour by then goes to event review
 CUTOFF_AFTER_DAY = dt.timedelta(minutes=45)
-# a precipitation file NOAA Open Data does not have this long after its hour
-# ends is looked for on NOMADS, so the day's last accumulation, usually on the
-# bucket 17 minutes after midnight, is looked for there before the cut-off
+# read_precip, the earlier shape's reader, looks on NOMADS for a precipitation
+# file NOAA Open Data does not have this long after its hour ends, so the
+# day's last accumulation, usually on the bucket 17 minutes after midnight, is
+# looked for there before the cut-off
 PCP_NOMADS_AFTER_MINUTES = 27
 # the product that resolves (owner's decision 2026-09-29): RTMA for every
 # variable, precipitation included
@@ -222,9 +273,11 @@ PRODUCTS = {
 # rewritten, a few a pass, so no day keeps the old one (2026-09-30: URMA
 # dropped from the days, the place files and the CSV files; 2026-10-14: the
 # cut-off rule, the review state and the publication times in the CSV files;
-# and on 2026-11-03 each row of a place file gained its value as the contract
-# shows it and the day's values so far, for the settlement display)
-LAYOUT = "running-2026-11-03"
+# on 2026-11-03 each row of a place file gained its value as the contract
+# shows it and the day's values so far, for the settlement display; then the
+# raw CSV file gained each server's copy of each file, and on 2026-11-04 each
+# row the pass at which its copies became final)
+LAYOUT = "copies-2026-11-04"
 # the shape of a place file's rows, stamped on the file as `rowShape` so the
 # page can tell a file whose rows carry `show`, `run` and the publication
 # times from one written before them, which it still draws, with no running
@@ -287,10 +340,7 @@ BACKFILL_FRAME_DAYS = 7         # map frames this far back
 FRAME_KEEP_DAYS = 30            # frames older than this are pruned
 INDEX_DAYS = 60                 # index.json lists this many newest days; the day files themselves are kept
 CLOSE_AFTER_HOURS = 48          # a day still incomplete this long after its local end is closed
-LIVE_HOURS_PER_PASS = 3         # new hours read per product per pass
-# a product-hour whose precipitation file is absent, refused, or short of a
-# location cell has that file refetched every pass until NOT_PUBLISHED_AFTER_HOURS
-# after its hour ends (precip_due); after that the hour keeps whatever coverage it has
+LIVE_HOURS_PER_PASS = 3         # the hours a catch-up jump opens at the present (walk_candidates)
 # how often the pass looks, over the backfill's reach, for hours whose
 # analysis never landed and whose precipitation was never read
 PRECIP_SWEEP_HOURS = 24
@@ -305,9 +355,10 @@ OVERDUE_HOURS = 2
 # a live cursor further behind than this stops walking hour by hour: it jumps
 # to the present and the span it skipped is queued for the backfill
 LIVE_CATCHUP_HOURS = 24
-PASS_CAP_SECONDS = 330          # the most a pass spends; with FETCH_TRIES x FETCH_TIMEOUT bounding an
-                                # hour near 212 s it ends inside the ten minutes, and the lease, not
-                                # this cap, is what keeps two passes from overlapping
+PASS_CAP_SECONDS = 330          # the most a pass spends; the deadline is looked at before each copy,
+                                # and with FETCH_TRIES x FETCH_TIMEOUT bounding a copy near 170 s it
+                                # ends inside the ten minutes, and the lease, not this cap, is what
+                                # keeps two passes from overlapping
 RESERVE_SECONDS = 45            # kept back from the lanes for the day rebuild, prune and index
 # the windowed passes (owner's ruling 2026-11-03) run every two minutes inside these minutes past
 # the hour, about when NOAA publishes each file. Over the two weeks to 2026-11-03 NOAA's own
@@ -326,8 +377,8 @@ LOOK_MINUTES = {kind: w[0] for kind, w in WINDOWS.items()}
 # lease free, and has at least PASS_FLOOR_SECONDS whatever the clock says
 WINDOW_YIELD_SECONDS = 10
 PASS_FLOOR_SECONDS = RESERVE_SECONDS + 30
-# the newest precipitation files precip_lane reads as they land, the one now due and the two
-# before it
+# the newest precipitation files a windowed pass asks for, the one now due and the two before
+# it (_newly_due)
 PCP_LIVE_HOURS = 3
 # the lease lasts past the longest its holder can run, which is the pass's budget plus the 30 s
 # handler.py holds back from Lambda's timeout, plus a minute for clocks. A local run has no
@@ -337,9 +388,10 @@ LEASE_SPARE_SECONDS = 90
 LEASE_DEFAULT_SECONDS = 900
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024   # a range for the last message of a file, whose end the sidecar cannot give
 STATE_EVERY = 20                # backfill hours between state writes, bounding what a timeout loses
-# every NOAA call from this lane: two tries of twenty seconds, so one hour's
-# five fetches cannot hold the pass for more than a few minutes and the
-# 900 s Lambda timeout is never the thing that stops it
+# every NOAA call from this lane: two tries of twenty seconds, so one copy's
+# four fetches at most (an analysis's sidecar and three messages) cannot hold
+# the pass for more than a few minutes and the 900 s Lambda timeout is never
+# the thing that stops it
 FETCH_TRIES = 2
 FETCH_TIMEOUT = 20
 
@@ -370,15 +422,20 @@ CONVENTIONS = {
               "current daily temperature and wind contracts resolve a value equal to the strike No.",
     "provisional": "RTMA resolves, precipitation included (owner's decision 2026-09-29). A place-day is final at "
                    "its cut-off, 12:45 AM local time on the day after (owner's ruling 2026-10-14), on the files "
-                   "published on NOAA Open Data or NOMADS by then, and provisional until then. A file published "
-                   "after the cut-off is shown and never counted, the first published version of a file counts, "
-                   "and an hour missing at the cut-off leaves the value on the hours available.",
+                   "published on NOAA Open Data or NOMADS by then, and provisional until then. Each hour's copy is "
+                   "fixed once both servers' copies are in, or at the first ten-minute pass after the cut-off on "
+                   "the copies read by then, and the day turns final once every hour's copy is fixed, so a final "
+                   "day never changes (owner's ruling 2026-11-04). A file published after the cut-off is shown and "
+                   "never counted, a copy read after its hour was fixed is recorded and never used, and an hour "
+                   "missing at the cut-off leaves the value on the hours available.",
     "review": "A place-day with no hour published by its cut-off has no value and is marked for event review, "
               "as the draft terms provide.",
-    "missing": "A file NOAA Open Data does not have half an hour after the product usually lands is read from "
-               "NCEP's NOMADS server, a precipitation file 27 minutes after its hour ends, and a file on NOMADS "
-               "counts as published. A file's publication time is its Last-Modified time on the server it was "
-               "read from.",
+    "missing": "Every file is read from NOAA Open Data and from NCEP's NOMADS server, and a file on either counts "
+               "as published, from the first time it was on either, its Last-Modified time there. A file missing "
+               "from one server counts from the other. Where the two copies differ, NOMADS's counts when it was "
+               "published by the cut-off, and otherwise NOAA Open Data's. A place the copy that counts has no "
+               "value for has no value that hour (owner's ruling 2026-11-04). A download whose message fails the "
+               "check counts only once a second download returns the same bytes.",
     "hourly": "Each row is the analysis at the top of the hour and the precipitation over the hour that starts "
               "then, which NOAA files under the hour it ends. Station report conventions (the last report in "
               "the hour, specials, the tenths group) have no analogue here.",
@@ -615,7 +672,7 @@ def _in_time(published: Optional[str], cutoff_iso: str) -> bool:
 
 
 def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, prior: Optional[dict] = None,
-                missing: Optional[set] = None, pmissing: Optional[set] = None) -> Optional[dict]:
+                missing: Optional[set] = None, pmissing: Optional[set] = None, pending: bool = False) -> Optional[dict]:
     """One product-day at a place, from its exact hourly values.
 
     product_hours maps the hour's UTC ISO string to {temp, wind, gust, precip}
@@ -642,11 +699,16 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     it is rebuilt. Before the cut-off the values run over the hours read. A
     place-day with no analysis that counts at the cut-off has no value and
     goes to event review (`review`), and one with no accumulation that counts
-    has `precip.review`. `prior`, `missing` and `pmissing` are accepted from
+    has `precip.review`. Since 2026-11-04 the day waits past its cut-off
+    while a file of its rows may still change for it (`pending`, build_day's
+    _pending), at most until the first ten-minute pass after the cut-off for
+    the files the live lane holds, and longer only while a catch-up span or
+    the backfill has yet to reach the day, so a day shown final never changes
+    (owner's ruling). `prior`, `missing` and `pmissing` are accepted from
     callers that still pass them and are no longer used."""
     hours = local_day_hours(day_iso, tz)
     cut_iso = _iso(day_cutoff(day_iso, tz))
-    at_cutoff = now >= day_cutoff(day_iso, tz)
+    at_cutoff = now >= day_cutoff(day_iso, tz) and not pending
     read = []
     for h in hours:
         rec = product_hours.get(_iso(h))
@@ -848,22 +910,6 @@ def nomads_ok_pcp(product: str, t: dt.datetime, now: dt.datetime) -> bool:
     return t + dt.timedelta(minutes=PCP_NOMADS_AFTER_MINUTES) <= now <= t + dt.timedelta(hours=NOMADS_KEEP_HOURS)
 
 
-def absence_final(product: str, t: dt.datetime, now: dt.datetime) -> bool:
-    """Whether a file missing from NOAA Open Data (and from NOMADS, which was
-    asked if it still keeps the hour) counts as not published, so the day
-    resolves without it (owner's decisions 2026-09-29 and 2026-10-13): six
-    hours after t, the analysis's valid time or the end of the precipitation
-    file's hour."""
-    return now >= t + dt.timedelta(hours=NOT_PUBLISHED_AFTER_HOURS)
-
-
-def precip_due(product: str, t: dt.datetime) -> dt.datetime:
-    """When the lane stops refetching an hour's precipitation file and keeps
-    whatever coverage it has: when a place's value still missing from it is
-    not published, six hours after the hour ends (the filed terms)."""
-    return t + dt.timedelta(hours=NOT_PUBLISHED_AFTER_HOURS)
-
-
 def check_message(msg: bytes, var: str, grid: dict, t: "Optional[dt.datetime]" = None) -> Optional[str]:
     """Why a message is not the one wanted, or None. Section 3 must be the
     grid the cells were computed on, since a cell index on any other grid is
@@ -939,6 +985,13 @@ def _sample(msg: bytes, var: str, grid_name: str, ks: list, lattice: Optional[di
     return cells, frame, wins
 
 
+# The readers and writers of the archive's earlier shape, in which one file
+# was read from one server (NOAA Open Data, else NOMADS once the file was
+# overdue there) and stored as the archive hour and a precipitation key that
+# later reads filled in. Every hour archived before 2026-11-03 has that shape, and build_day and
+# file_view still read it; the passes now keep each server's copy instead
+# (read_copy, write_copy, settle_cuts) and write this shape no more. The tests make
+# hours of that shape with these.
 class HourResult:
     """What reading one product-hour came to: `status` is ok, absent (the
     analysis file is not on the bucket, and the hour's precipitation, read
@@ -1024,8 +1077,8 @@ def read_hour(product: str, t: dt.datetime, locs: list, lattice: dict, frames: b
     precipitation file did, and until 2026-09-29 the lane dropped that
     hour's precipitation with the missing analysis. With `precip` False the
     precipitation file is not read at all, whether or not the analysis is
-    there, because the store holds all of it already, read as soon as it
-    landed (precip_lane); the result's precip_status is then None."""
+    there, because the store holds all of it already; the result's
+    precip_status is then None."""
     ks_wexp = [loc["cell"]["wexp"][2] for loc in locs]
     values: Dict[str, dict] = {loc["id"]: {} for loc in locs}
     out_frames: dict = {}
@@ -1100,6 +1153,448 @@ def _absent_with_precip(prec: HourResult) -> HourResult:
     return HourResult("absent", precip_error=prec.error if prec.status == "error" else None, precip_status=prec.status)
 
 
+# ------------------------------------------------------------------ each server's copy (2026-11-03)
+class Skipped(Exception):
+    """A NOMADS call the pass's budget has no room for. The file waits for the
+    next pass, and nothing about this one is recorded."""
+
+
+class NomadsBudget:
+    """The NOMADS calls a pass may still make (NOMADS_CALLS_PER_PASS), each at
+    least NOMADS_MIN_INTERVAL seconds after the one before it."""
+    def __init__(self, calls: Optional[int] = None):
+        self.left = NOMADS_CALLS_PER_PASS if calls is None else calls
+        self.used = 0
+        self._last = 0.0
+
+    def take(self) -> bool:
+        if self.left <= 0:
+            return False
+        wait = self._last + NOMADS_MIN_INTERVAL - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        self.left -= 1
+        self.used += 1
+        self._last = time.time()
+        return True
+
+
+def _call(server: str, budget: Optional[NomadsBudget], fn: Callable, *args, **kwargs):
+    """One government call for one server's file, a NOMADS one only within the
+    pass's budget (a caller outside a pass gives none, and no limit)."""
+    if server == "nomads" and budget is not None and not budget.take():
+        raise Skipped()
+    return fn(*args, **kwargs)
+
+
+def file_url(product: str, kind: str, server: str, t: dt.datetime) -> str:
+    """Where a server keeps a file, hour t's analysis or the precipitation
+    file of the hour that ends at t."""
+    return (anl_url if kind == "anl" else pcp_url)(product, t, nomads=server == "nomads")
+
+
+class CopyResult:
+    """What reading one server's copy of one file came to. `status` is ok,
+    absent, error, suspect (a message failed the check and these bytes have
+    not been seen before, so the transfer may have broken) or skipped (the
+    pass's NOMADS budget is spent), `doc` the copy, `frames` and `windows` the
+    map samples of the messages it decoded with a lattice, `bad` the failing
+    messages' hashes and reasons, and `error` why it was refused."""
+    def __init__(self, status: str, doc: Optional[dict] = None, frames: Optional[dict] = None,
+                 windows: Optional[dict] = None, error: Optional[str] = None, bad: Optional[dict] = None):
+        self.status, self.doc, self.frames, self.windows, self.error = status, doc, frames, windows, error
+        self.bad = bad
+
+
+def read_copy(product: str, kind: str, server: str, t: dt.datetime, locs: list, lattice: Optional[dict],
+              now: dt.datetime, other: Optional[dict] = None, budget: Optional[NomadsBudget] = None,
+              decode: bool = True, prior_bad: Optional[dict] = None) -> CopyResult:
+    """One server's copy of one file (owner's ruling 2026-11-03), hour t's
+    analysis (kind anl, its TMP, WIND and GUST messages by range from the
+    .idx sidecar) or the precipitation file of the hour that ends at t (kind
+    pcp, one message, whole). Each message is hashed (sha256) and checked, for
+    its grid, its parameter and its valid time, a clean decode and a value at
+    one place at least. A message whose hash equals the same message in
+    `other`, the other server's first copy, is the same bytes, so its values
+    are taken from there. Any other is decoded at the places, which is how two
+    copies whose hashes differ are compared by value, and onto the lattice and
+    the windows when one is given. A download with a message that fails the
+    check is not a copy (owner's ruling 2026-11-04), since a broken transfer
+    looks just like that: it is `suspect`, and it becomes the server's copy
+    only when a later download fails with the same bytes (`prior_bad`, from
+    the one before), which is NOAA's own file, kept with those messages
+    `refused`. With `decode` False nothing is decoded, for a later read kept
+    only as its hashes. The copy records when this pass saw it (`seen`) and
+    the server's Last-Modified (`published`). Nothing raises out of here."""
+    grid_name = "wexp" if kind == "anl" else PRODUCTS[product]["pcpGrid"]
+    ks = [loc["cell"][grid_name][2] for loc in locs]
+    wins = None if lattice is None else [window_indices(loc["cell"][grid_name], _grid(grid_name)) for loc in locs]
+    url = file_url(product, kind, server, t)
+    meta: dict = {}
+    sha: Dict[str, str] = {}
+    decoded: List[str] = []
+    bad: Dict[str, dict] = {}
+    values: Dict[str, dict] = {loc["id"]: {} for loc in locs}
+    frames: dict = {}
+    windows: dict = {}
+    try:
+        if kind == "anl":
+            idx = _call(server, budget, gw.fetch_bytes, url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+            if idx is None:
+                return CopyResult("absent")
+            entries = grib2.parse_idx(idx.decode("ascii", "replace"))
+            wanted = []
+            for var, name, level in MESSAGES:
+                hit = [e for e in entries if e.get("var") == name and e.get("level") == level]
+                if not hit:
+                    return CopyResult("error", error=f"no {name} message in the sidecar")
+                wanted.append((var, name, hit[0]))
+        else:
+            wanted = [("precip", "APCP", None)]
+        for var, name, e in wanted:
+            if e is None:
+                msg = _call(server, budget, gw.fetch_bytes, url, tries=FETCH_TRIES, timeout=FETCH_TIMEOUT, meta=meta)
+                if msg is None:
+                    return CopyResult("absent")
+            else:
+                # the last message of a file has no end in the sidecar, and
+                # fetch_range accepts the clamped 206 S3 answers for it
+                end = e["end"] if e.get("end") is not None else e["start"] + MAX_MESSAGE_BYTES
+                msg = _call(server, budget, gw.fetch_range, url, e["start"], end, tries=FETCH_TRIES,
+                            timeout=FETCH_TIMEOUT, meta=meta)
+                if msg is None:
+                    return CopyResult("error", error=f"{name} message missing")
+            sha[var] = hashlib.sha256(msg).hexdigest()
+            for lid in values:
+                values[lid][var] = None
+            why = check_message(msg, var, _grid(grid_name), t)
+            if why is None and other is not None and (other.get("sha256") or {}).get(var) == sha[var]:
+                # the same bytes as the other server's copy, so the same values
+                for lid in values:
+                    values[lid][var] = _value_at(other, kind, lid, var)
+            elif why is None and decode:
+                try:
+                    cells, frame, wvals = _sample(msg, var, grid_name, ks, lattice, wins)
+                except Exception as ex:  # noqa: BLE001 - a message that will not decode fails the check
+                    why = f"undecodable ({type(ex).__name__}: {ex})"
+                else:
+                    if locs and all(v is None for v in cells):
+                        why = "no value at any place"
+                    else:
+                        decoded.append(var)
+                        for loc, v in zip(locs, cells):
+                            values[loc["id"]][var] = None if v is None else round(float(v), RAW_DIGITS[var])
+                        if lattice is not None:
+                            frames[var] = frame
+                            windows[var] = {loc["id"]: window_doc(grid_name, w) for loc, w in zip(locs, wvals)}
+            if why is not None:
+                bad[var] = {"sha256": sha[var], "why": f"{name}: {why}"}
+            del msg
+    except Skipped:
+        return CopyResult("skipped")
+    except Exception as e:  # noqa: BLE001
+        return CopyResult("error", error=f"{type(e).__name__}: {e}")
+    if bad and not all((prior_bad or {}).get(var, {}).get("sha256") == b["sha256"] for var, b in bad.items()):
+        return CopyResult("suspect", bad=bad, error="; ".join(b["why"] for b in bad.values()))
+    doc = {"schema": SCHEMA, "product": product, "kind": kind, "server": server, "valid": _iso(t),
+           "seen": _iso(now), "published": meta.get("lastModified"), "sha256": sha, "decoded": decoded,
+           "written": _iso(now)}
+    if bad:
+        # NOAA's own file, fetched twice with the same bytes: kept, the
+        # messages that fail the check without values
+        doc["refused"] = {var: b["why"] for var, b in bad.items()}
+    if decode:
+        if kind == "pcp":
+            # millimetres, as the file holds them
+            doc["values"] = {lid: v.get("precip") for lid, v in values.items()}
+            doc["missing"] = sorted(lid for lid, v in doc["values"].items() if v is None)
+        else:
+            # kelvin and metres per second, as the file holds them
+            doc["values"] = values
+    return CopyResult("ok", doc=doc, frames=frames or None, windows=windows or None)
+
+
+def _value_at(c: Optional[dict], kind: str, lid: str, var: Optional[str] = None):
+    """A copy's value at a place, an analysis's temperature, wind and gust (or
+    the one `var`) or a precipitation file's millimetres."""
+    v = ((c or {}).get("values") or {}).get(lid)
+    if kind == "pcp" or var is None:
+        return v
+    return (v or {}).get(var)
+
+
+def copy_key(product: str, kind: str, server: str, t: dt.datetime) -> str:
+    return COPY_KEY.format(product=product, stamp=_stamp(t), kind=kind, server=server)
+
+
+def later_key(product: str, kind: str, server: str, t: dt.datetime) -> str:
+    return LATER_KEY.format(product=product, stamp=_stamp(t), kind=kind, server=server)
+
+
+def get_copy(store: Storage, product: str, kind: str, server: str, t: dt.datetime, cache: dict) -> Optional[dict]:
+    """A server's first copy of a file, or None."""
+    ck = ("copy", product, kind, server, _iso(t))
+    if ck not in cache:
+        cache[ck] = _read_gz(store, copy_key(product, kind, server, t))
+    return cache[ck]
+
+
+def copies_of(store: Storage, product: str, kind: str, t: dt.datetime, cache: dict) -> dict:
+    """Both servers' first copies of a file, None for a server with none."""
+    return {s: get_copy(store, product, kind, s, t, cache) for s in SERVERS}
+
+
+def get_later(store: Storage, product: str, kind: str, server: str, t: dt.datetime, cache: dict) -> Optional[dict]:
+    """The later replacements a server's file has been seen with, or None."""
+    ck = ("later", product, kind, server, _iso(t))
+    if ck not in cache:
+        cache[ck] = _read_gz(store, later_key(product, kind, server, t))
+    return cache[ck]
+
+
+def prime_copies(store: Storage, product: str, t0: dt.datetime, t1: dt.datetime, cache: dict) -> None:
+    """One listing of the copies of the hours t0 to t1, so the day rebuild asks
+    the store only for copies and replacements that exist."""
+    prefix = COPY_PREFIX.format(product=product)
+    keys = set(store.list(prefix, start_after=prefix + _stamp(t0 - dt.timedelta(hours=1))))
+    t = t0
+    while t <= t1:
+        for kind in KINDS:
+            for server in SERVERS:
+                for ck, key in ((("copy", product, kind, server, _iso(t)), copy_key(product, kind, server, t)),
+                                (("later", product, kind, server, _iso(t)), later_key(product, kind, server, t))):
+                    if ck not in cache and key not in keys:
+                        cache[ck] = None
+        t += dt.timedelta(hours=1)
+
+
+def write_copy(store: Storage, product: str, kind: str, server: str, t: dt.datetime, doc: dict, cache: dict) -> bool:
+    """Keep a server's first copy of a file, once (owner's ruling 2026-11-03):
+    a copy already kept stands, and a later read that differs is recorded by
+    note_later and never used. Returns True when this one was kept."""
+    wrote = store.put_if_absent(copy_key(product, kind, server, t), _gz(doc), "application/gzip")
+    if wrote:
+        cache[("copy", product, kind, server, _iso(t))] = doc
+    return wrote
+
+
+def note_later(store: Storage, product: str, kind: str, server: str, t: dt.datetime, later: dict,
+               cache: dict) -> bool:
+    """Record a later read of a server's file that is not its first copy
+    (other bytes, or another Last-Modified where the first copy had one)
+    beside the first copy, with when the lane saw it, its Last-Modified and
+    its hashes. It is never used (owner's ruling 2026-11-03). Returns True
+    when the record gained it."""
+    first = get_copy(store, product, kind, server, t, cache)
+    if first is None:
+        return False
+    if first.get("sha256") == later.get("sha256") and first.get("published") in (None, later.get("published")):
+        return False
+    entry = {"seen": later.get("seen"), "published": later.get("published"), "sha256": later.get("sha256")}
+    doc = get_later(store, product, kind, server, t, cache) or {
+        "schema": SCHEMA, "product": product, "kind": kind, "server": server, "valid": _iso(t), "later": []}
+    if any(e.get("published") == entry["published"] and e.get("sha256") == entry["sha256"] for e in doc["later"]):
+        return False
+    doc = dict(doc, later=doc["later"] + [entry])
+    store.put(later_key(product, kind, server, t), _gz(doc), "application/gzip")
+    cache[("later", product, kind, server, _iso(t))] = doc
+    return True
+
+
+# ------------------------------------------------------------------ which copy counts (2026-11-03)
+def _pub(c: Optional[dict]) -> Optional[str]:
+    """When a copy's file was on its server, its Last-Modified or, failing
+    that, when this lane first saw it there."""
+    return None if not c else (c.get("published") or c.get("seen"))
+
+
+def first_published(copies: dict) -> Optional[str]:
+    """The first time a file was on either server, which the cut-off is judged
+    on, since the draft filings count a file that was on NOAA Open Data or
+    NOMADS by then."""
+    ts = [p for p in (_pub(c) for c in copies.values()) if p]
+    return min(ts) if ts else None
+
+
+def first_server(copies: dict) -> Optional[str]:
+    """The server a file was on first, whose time first_published gives; NOAA
+    Open Data on a tie."""
+    have = [(p, i, server) for i, server in enumerate(SERVERS) for p in [_pub(copies.get(server))] if p]
+    return min(have)[2] if have else None
+
+
+def hash_match(copies: dict) -> Optional[bool]:
+    """Whether the two servers' copies are the same bytes, message by message;
+    None while either is missing."""
+    if any(copies.get(s) is None for s in SERVERS):
+        return None
+    return copies["nodd"].get("sha256") == copies["nomads"].get("sha256")
+
+
+def value_match(copies: dict, kind: str, lid: str) -> Optional[bool]:
+    """Whether the two servers' copies give a place the same values; None while
+    either is missing."""
+    if any(copies.get(s) is None for s in SERVERS):
+        return None
+    return _value_at(copies["nodd"], kind, lid) == _value_at(copies["nomads"], kind, lid)
+
+
+def row_day(kind: str, t: dt.datetime, tz: str) -> str:
+    """The local day of the row a file fills, which is an analysis's own
+    hour's, and for a precipitation file the day of the hour before its
+    stamp."""
+    return local_day_of(t if kind == "anl" else t - dt.timedelta(hours=1), tz)
+
+
+def choose(copies: dict, cut_iso: str) -> Optional[str]:
+    """Which server's copy a row uses on a day with this cut-off, from the
+    copies given (owner's ruling 2026-11-03): NOMADS's when it was published
+    by the cut-off, whatever NOAA Open Data's holds, else NOAA Open Data's
+    when it was, else neither counts and the row shows NOMADS's, or NOAA Open
+    Data's when NOMADS has none, as published late. None for no copy."""
+    nod, nom = copies.get("nodd"), copies.get("nomads")
+    if nom is not None and _pub(nom) <= cut_iso:
+        return "nomads"
+    if nod is not None and _pub(nod) <= cut_iso:
+        return "nodd"
+    if nom is not None:
+        return "nomads"
+    return "nodd" if nod is not None else None
+
+
+def place_cuts(kind: str, t: dt.datetime, locs: list) -> Dict[str, str]:
+    """The cut-off of the day each place's row of a file falls on, by place."""
+    by_tz: Dict[str, str] = {}
+    out = {}
+    for loc in locs:
+        tz = loc["tz"]
+        if tz not in by_tz:
+            by_tz[tz] = _iso(day_cutoff(row_day(kind, t, tz), tz))
+        out[loc["id"]] = by_tz[tz]
+    return out
+
+
+def _cut_entry(copies: dict, held: list, cut_iso: str, at: str) -> dict:
+    """How a file settled for the days of one cut-off: when (`at`, the pass),
+    on which copies (`with`, the servers whose first copies were in hand),
+    the copy chosen (`src`), and the first time the file was on either of
+    those servers and which one (`published`, `pubSrc`)."""
+    sub = {s: copies.get(s) for s in held}
+    return {"at": at, "with": list(held), "src": choose(sub, cut_iso), "published": first_published(sub),
+            "pubSrc": first_server(sub)}
+
+
+def settled_doc(product: str, kind: str, t: dt.datetime, copies: dict, cutoffs: dict, picks: dict,
+                now: dt.datetime) -> dict:
+    """A file's settled record, with how it settled for each cut-off of its
+    days (`cutoffs`), the copy each place settled on and its value, and each
+    server's first copy's times and hashes as they stood."""
+    values = {lid: (_value_at(copies.get(server), kind, lid) if server else None) for lid, server in picks.items()}
+    used = sorted({s for s in picks.values() if s})
+    doc = {"schema": SCHEMA, "product": product, "kind": kind, "valid": _iso(t), "settled": _iso(now),
+           "written": _iso(now), "published": first_published(copies), "cutoffs": cutoffs,
+           # the one copy every place settled on; the picks name it per place when they differ
+           "source": used[0] if len(used) == 1 else None, "picks": picks, "values": values,
+           "servers": {s: {k: c.get(k) for k in ("seen", "published", "sha256")} for s, c in copies.items() if c},
+           "hashMatch": hash_match(copies)}
+    if kind == "pcp":
+        doc["missing"] = sorted(lid for lid, v in values.items() if v is None)
+        doc.update({"read": True, "complete": not doc["missing"]})
+    return doc
+
+
+def settle_cuts(store: Storage, product: str, kind: str, t: dt.datetime, slots: dict, locs: list,
+                now: dt.datetime, cache: dict, freeze: bool) -> bool:
+    """Settle what of a file can be settled (owner's rulings 2026-11-03 and
+    2026-11-04). Every cut-off of its days settles at the pass at which both
+    servers' first copies are in, since no later read can count; and on a
+    ten-minute pass (`freeze`) each cut-off that has passed settles on the
+    copies in hand, NOMADS's or not. A cut-off settled stays as it settled,
+    in `slots["cutoffs"]`, and a copy read later never changes it. A file
+    carried over from before 2026-11-03 (`slots["migrated"]`) settles on no
+    copy for every cut-off that passed before then, since its days were
+    final already. Once every cut-off has settled the file's settled record
+    is written, once, the archive hour or the precipitation key, even with no
+    copy at all. Returns True when a cut-off settled."""
+    copies = copies_of(store, product, kind, t, cache)
+    held = [s for s in SERVERS if copies.get(s) is not None]
+    by_place = place_cuts(kind, t, locs)
+    done = dict(slots.get("cutoffs") or {})
+    migrated = slots.get("migrated")
+    changed = False
+    for cut_iso in sorted(set(by_place.values())):
+        if cut_iso in done:
+            continue
+        if migrated and cut_iso <= migrated:
+            done[cut_iso] = _cut_entry(copies, [], cut_iso, migrated)
+        elif len(held) == len(SERVERS) or (freeze and _iso(now) >= cut_iso):
+            done[cut_iso] = _cut_entry(copies, held, cut_iso, _iso(now))
+        else:
+            continue
+        changed = True
+    if changed:
+        slots["cutoffs"] = done
+    if by_place and all(c in done for c in by_place.values()):
+        picks = {lid: done[c]["src"] for lid, c in by_place.items()}
+        doc = settled_doc(product, kind, t, {s: copies.get(s) for s in SERVERS}, dict(done), picks, now)
+        store.put_if_absent(hour_key(product, t) if kind == "anl" else precip_key(product, t), _gz(doc),
+                            "application/gzip")
+        cache[("anl" if kind == "anl" else "precip", product, _iso(t))] = doc
+    return changed
+
+
+def _late(src: Optional[str], held: list, copies: dict) -> bool:
+    """Whether a row's file has a copy that came too late to count (owner's
+    rulings 2026-11-03 and 2026-11-04, a record only): a copy read after the
+    row settled, from either server, or a NOMADS copy in hand that differs
+    from the NOAA Open Data copy the row keeps, having been published after
+    the cut-off."""
+    if any(copies.get(s) is not None and s not in held for s in SERVERS):
+        return True
+    nod, nom = copies.get("nodd"), copies.get("nomads")
+    return bool(src == "nodd" and "nomads" in held and nod is not None and nom is not None
+                and nom.get("sha256") != nod.get("sha256"))
+
+
+def file_view(store: Storage, product: str, kind: str, t: dt.datetime, lid: str, cut_iso: str, now: dt.datetime,
+              slots: Optional[dict], cache: dict) -> Optional[dict]:
+    """What one file gives one row, which is the value the row uses (an
+    analysis's temperature, wind and gust, or a precipitation file's
+    millimetres), whose copy it is (`src`), when the file was first on either
+    server (`pub`) and which server that was (`pubSrc`), when the row's copy
+    became final (`settled`, the pass, None until then), whether a copy came
+    too late to count (`late`, a record only), and, for the raw CSV, both
+    servers' copies and their later replacements. A settled row reads only
+    the copies it settled on. A file in the archive's earlier shape gives its
+    one copy. None when nothing of the file was read."""
+    rec = get_anl(store, product, t, cache) if kind == "anl" else get_precip(store, product, t, cache)
+    if rec is not None and "settled" not in rec:
+        # read before 2026-11-03 from one server, with no copies beside it
+        return {"value": (rec.get("values") or {}).get(lid), "src": rec.get("source"), "pub": rec.get("published"),
+                "pubSrc": rec.get("source"), "settled": None, "late": None, "copies": None, "later": None}
+    copies = copies_of(store, product, kind, t, cache)
+    if rec is None and not any(copies.values()):
+        return None
+    entry = ((rec if rec is not None else slots) or {}).get("cutoffs", {}).get(cut_iso)
+    if entry is None and rec is not None:
+        # a cut-off the record does not name (a zone added since): the copies it was written with
+        entry = _cut_entry(copies, sorted(rec.get("servers") or {}), cut_iso, rec.get("settled"))
+    if entry is not None:
+        src, held = entry.get("src"), entry.get("with") or []
+        if rec is not None and (rec.get("picks") or {}).get(lid, src) == src:
+            value = (rec.get("values") or {}).get(lid)
+        else:
+            value = _value_at(copies.get(src), kind, lid) if src else None
+        pub, pub_src, settled = entry.get("published"), entry.get("pubSrc"), entry.get("at")
+    else:
+        src, held = choose(copies, cut_iso), [s for s in SERVERS if copies.get(s) is not None]
+        value = _value_at(copies.get(src), kind, lid) if src else None
+        pub, pub_src, settled = first_published(copies), first_server(copies), None
+    return {"value": value, "src": src, "pub": pub, "pubSrc": pub_src, "settled": settled,
+            "late": _late(src, held, copies), "copies": copies,
+            "later": {s: get_later(store, product, kind, s, t, cache) for s in SERVERS}}
+
+
 # ------------------------------------------------------------------ writing
 def hour_key(product: str, t: dt.datetime) -> str:
     return HOUR_KEY.format(product=product, stamp=_stamp(t))
@@ -1109,41 +1604,11 @@ def precip_key(product: str, t: dt.datetime) -> str:
     return PRECIP_KEY.format(product=product, stamp=_stamp(t))
 
 
-def _merged(doc: dict, pdoc: Optional[dict]) -> dict:
-    """The archive hour with its precipitation folded in, the shape the day
-    rebuild reads: values[place].precip from the precipitation key (None
-    where no value has been read) and precipRead when every place has one.
-    An hour archived before the precipitation key existed carries its own
-    precip values and precipRead, and those are used when no key is stored."""
-    out = dict(doc)
-    pvals = (pdoc or {}).get("values") or {}
-    vals = {}
-    for lid, v in (doc.get("values") or {}).items():
-        v = dict(v)
-        v["precip"] = pvals.get(lid) if pdoc is not None else v.get("precip")
-        vals[lid] = v
-    out["values"] = vals
-    out["precipRead"] = bool(pdoc.get("complete")) if pdoc is not None else bool(doc.get("precipRead", False))
-    return out
-
-
 def get_precip(store: Storage, product: str, t: dt.datetime, cache: dict) -> Optional[dict]:
     ck = ("precip", product, _iso(t))
     if ck not in cache:
         cache[ck] = _read_gz(store, precip_key(product, t))
     return cache[ck]
-
-
-def get_hour(store: Storage, product: str, t: dt.datetime, cache: dict) -> Optional[dict]:
-    """The archived product-hour merged with its precipitation, or None."""
-    ck = (product, _iso(t))
-    if ck in cache:
-        return cache[ck]
-    doc = _read_gz(store, hour_key(product, t))
-    if doc is not None:
-        doc = _merged(doc, get_precip(store, product, t, cache))
-    cache[ck] = doc
-    return doc
 
 
 def get_anl(store: Storage, product: str, t: dt.datetime, cache: dict) -> Optional[dict]:
@@ -1192,9 +1657,6 @@ def write_precip(store: Storage, product: str, t: dt.datetime, pdoc: dict, cache
     if changed:
         store.put(precip_key(product, t), _gz(merged), "application/gzip")
     cache[("precip", product, _iso(t))] = merged
-    hk = (product, _iso(t))
-    if hk in cache and cache[hk] is not None:
-        cache[hk] = _merged(cache[hk], merged)
     return changed
 
 
@@ -1205,7 +1667,6 @@ def write_hour(store: Storage, product: str, t: dt.datetime, res: HourResult, gr
     a frame on the bucket is never one the page cannot find."""
     store.put_if_absent(hour_key(product, t), _gz(res.doc), "application/gzip")
     cache[("anl", product, _iso(t))] = res.doc
-    cache[(product, _iso(t))] = _merged(res.doc, get_precip(store, product, t, cache))
     if res.precip is not None:
         write_precip(store, product, t, res.precip, cache)
     if res.frames:
@@ -1252,13 +1713,6 @@ def write_frames(store: Storage, product: str, t: dt.datetime, frames: dict, gri
             hours.sort()
 
 
-def frames_indexed(grid_index: dict, product: str, t: dt.datetime) -> bool:
-    """Whether the hour's analysis frames (temperature, wind, gust) are in
-    the grid index; the precipitation frame follows its file and may lag."""
-    day, hh = f"{t:%Y-%m-%d}", f"{t:%H}"
-    return all(hh in grid_index.get(product, {}).get(var, {}).get(day, []) for var in ANALYSIS_VARS)
-
-
 def touched_by(t: dt.datetime, locs: list) -> set:
     """The (location, local day) pairs one UTC hour belongs to: the day its
     analysis falls on, and the day of the hour before it, whose row carries
@@ -1274,15 +1728,55 @@ def touched_by(t: dt.datetime, locs: list) -> set:
     return out
 
 
+def _will_look(state: dict, product: str, t: dt.datetime, now: dt.datetime) -> bool:
+    """Whether the lane will still look for a file of hour t it holds nothing
+    of and is not looking for: the live walk has not opened its stamp, it lies
+    in a queued catch-up span, or the backfill has yet to reach it."""
+    ps = ((state or {}).get("products") or {}).get(product) or {}
+    bf = ((state or {}).get("backfill") or {}).get(product) or {}
+    cursor = _scan_cursor(ps)
+    if cursor is not None and t > cursor:
+        return True
+    for a, b in bf.get("queue") or []:
+        if _parse_iso(a) <= t <= _parse_iso(b):
+            return True
+    oldest = _floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS)
+    return bool(not bf.get("done") and bf.get("cursor") and oldest <= t < _parse_iso(bf["cursor"]))
+
+
+def _pending(view: Optional[dict], slots: Optional[dict], state: dict, product: str, t: dt.datetime,
+             now: dt.datetime, cut_iso: str) -> bool:
+    """Whether a row's file may still change for the days of this cut-off,
+    which it may until it has settled for that cut-off, while the lane holds
+    it open or will still look for it (owner's ruling 2026-11-04: a day shown
+    final never changes)."""
+    if view is not None and (view.get("settled") or view.get("copies") is None):
+        return False
+    if slots is not None:
+        return cut_iso not in (slots.get("cutoffs") or {})
+    return _will_look(state, product, t, now)
+
+
+def _has_copy(view: Optional[dict]) -> bool:
+    return bool(view and view.get("copies") and any(view["copies"].values()))
+
+
 def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.datetime, state: dict,
               only: Optional[set] = None, raw: Optional[list] = None) -> Tuple[dict, dict]:
     """The days/ document for one local date and the loc/ documents of the
     places in `only` (all of them when None), from the archive hours. With
     `raw`, the day's rows in the files' own units are appended to it for the
-    raw CSV."""
+    raw CSV. A place-day turns final, or goes to event review, at its cut-off
+    once no file of its rows may still change for it (_pending)."""
     day_doc: dict = {"schema": SCHEMA, "day": day_iso, "asof": None, "written": _iso(now), "locations": {}}
     loc_docs: dict = {}
     asof = None
+    waiting: Dict[str, bool] = {}
+    # one listing of the copies the day's hours have, in every zone
+    span = [h for tz in sorted({loc["tz"] for loc in locs}) for h in local_day_hours(day_iso, tz)]
+    if span:
+        for product in PRODUCTS:
+            prime_copies(store, product, min(span), max(span) + dt.timedelta(hours=1), cache)
     for loc in locs:
         lid, tz = loc["id"], loc["tz"]
         hours = local_day_hours(day_iso, tz)
@@ -1291,10 +1785,12 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
         cut_iso = _iso(day_cutoff(day_iso, tz))
         for product in PRODUCTS:
             product_hours = {}
+            pending = False
+            opened = (((state or {}).get("products") or {}).get(product) or {}).get("open") or {}
             # no file for an hour that has not begun (an analysis) or ended (an
             # accumulation) is looked for. This was expected_latest, which hid
             # an hour's precipitation until the next analysis was due, about
-            # half an hour after the lane had read it (precip_lane)
+            # half an hour after the lane had read it
             latest = _floor_hour(now)
             for h, row in zip(hours, rows):
                 # each row is the analysis at the top of the hour and the
@@ -1304,12 +1800,21 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 # An hour whose analysis never landed still carries its
                 # precipitation, a separate file (RTMA 2026-09-23 19Z).
                 end = h + dt.timedelta(hours=1)
-                anl = get_anl(store, product, h, cache) if h <= latest else None
-                pre = get_precip(store, product, end, cache) if end <= latest else None
-                va = ((anl or {}).get("values") or {}).get(lid)
-                vp = ((pre or {}).get("values") or {}).get(lid)
+                sa, sp = (opened.get(_iso(h)) or {}).get("anl"), (opened.get(_iso(end)) or {}).get("pcp")
+                fa = file_view(store, product, "anl", h, lid, cut_iso, now, sa, cache) if h <= latest else None
+                fp = file_view(store, product, "pcp", end, lid, cut_iso, now, sp, cache) if end <= latest else None
+                pending = (pending or _pending(fa, sa, state, product, h, now, cut_iso)
+                           or _pending(fp, sp, state, product, end, now, cut_iso))
+                va = (fa or {}).get("value")
+                vp = (fp or {}).get("value")
                 row[product] = None
                 if va is None and vp is None:
+                    # a copy with no value the row uses, read too late, say: the
+                    # raw CSV still records it
+                    if raw is not None and product == SETTLE and (_has_copy(fa) or _has_copy(fp)):
+                        raw.append([day_iso, lid, hour_label(h, tz), _iso(h), None, None, None, None, _iso(end),
+                                    None, fp["src"] if fp is not None else None, None,
+                                    fp["pub"] if fp is not None else None] + raw_copy_columns(fa, fp, lid))
                     continue
                 rec = {var: exact(var, (va or {}).get(var)) for var in ANALYSIS_VARS}
                 rec["precip"] = exact("precip", vp)
@@ -1317,10 +1822,12 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 rec["mm"] = vp
                 rec["anl"] = va is not None
                 # the file was read and had no value at the place: read, not pending
-                rec["pcpRead"] = pre is not None
-                # when each file was published, which the day's cut-off is judged on
-                rec["pub"] = (anl or {}).get("published") if va is not None else None
-                rec["pcpPub"] = (pre or {}).get("published") if pre is not None else None
+                rec["pcpRead"] = fp is not None
+                # when each file was first on either server, which the day's
+                # cut-off is judged on (a file read before 2026-11-03 carries
+                # its one server's time)
+                rec["pub"] = fa["pub"] if va is not None else None
+                rec["pcpPub"] = fp["pub"] if fp is not None else None
                 product_hours[_iso(h)] = rec
                 # the hourly values in the contract's units, cut to a
                 # thousandth (precipitation a ten-thousandth of an inch)
@@ -1330,23 +1837,40 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     row[product]["late"] = True
                 if vp is not None and not _in_time(rec["pcpPub"], cut_iso):
                     row[product]["pcpLate"] = True
-                # when and where each file was published, for the page's
-                # arrival times (none on a file read before 2026-10-14)
+                # when each file was first on either server and which server
+                # that was, for the page's arrival times (none on a file read
+                # before 2026-10-14), and whose copy the row uses
                 for key, val in (("pub", rec["pub"]), ("pcpPub", rec["pcpPub"] if vp is not None else None),
-                                 ("src", (anl or {}).get("source") if va is not None else None),
-                                 ("pcpSrc", (pre or {}).get("source") if vp is not None else None)):
+                                 ("src", fa["src"] if va is not None else None),
+                                 ("pcpSrc", fp["src"] if vp is not None else None),
+                                 ("pubSrc", fa["pubSrc"] if va is not None else None),
+                                 ("pcpPubSrc", fp["pubSrc"] if vp is not None else None),
+                                 # when each file's copy for the row became final, the pass
+                                 ("settled", (fa or {}).get("settled")), ("pcpSettled", (fp or {}).get("settled"))):
                     if val:
                         row[product][key] = val
+                # a copy read after the row settled, or a NOMADS copy that
+                # differs from the NOAA Open Data copy the row keeps, having
+                # been published after the cut-off, is a record only and
+                # changes no value, count or state (owner's rulings 2026-11-03
+                # and 2026-11-04)
+                if (fa or {}).get("late"):
+                    row[product]["lateCopy"] = True
+                if (fp or {}).get("late"):
+                    row[product]["pcpLateCopy"] = True
                 if raw is not None and product == SETTLE:
                     raw.append([day_iso, lid, hour_label(h, tz), _iso(h),
                                 (va or {}).get("temp"), (va or {}).get("wind"), (va or {}).get("gust"),
-                                vp, _iso(end), (anl or {}).get("source") if va is not None else None,
-                                (pre or {}).get("source") if pre is not None else None, rec["pub"], rec["pcpPub"]])
+                                vp, _iso(end), fa["src"] if va is not None else None,
+                                fp["src"] if fp is not None else None, rec["pub"], rec["pcpPub"]]
+                               + raw_copy_columns(fa, fp, lid))
                 if asof is None or h > asof:
                     asof = h
-            s = day_summary(product_hours, tz, day_iso, now)
+            s = day_summary(product_hours, tz, day_iso, now, pending=pending)
             if s is not None:
                 entry[product] = s
+            if product == SETTLE:
+                waiting[lid] = pending
             # each row with a value carries it as the contract shows it, and
             # the day's values over the hours up to it, which the settlement
             # display steps through; only the place files carry them
@@ -1370,7 +1894,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
     if day_doc["locations"]:
         for loc in locs:
             lid, tz = loc["id"], loc["tz"]
-            if lid in day_doc["locations"] or now < day_cutoff(day_iso, tz):
+            if lid in day_doc["locations"] or now < day_cutoff(day_iso, tz) or waiting.get(lid):
                 continue
             entry = {product: review_entry(day_iso, tz) for product in PRODUCTS}
             day_doc["locations"][lid] = entry
@@ -1446,6 +1970,60 @@ def last_resolved_day(state: dict, days: list) -> Optional[str]:
 RAW_HEADER = ["date", "location", "local_hour", "valid_utc", "temp_k", "wind_ms", "gust_ms",
               "precip_mm", "precip_file_utc", "analysis_source", "precip_source", "analysis_published",
               "precip_published"]
+# each server's copy of each file, after the columns above (owner's ruling
+# 2026-11-03), which keep their order and their meaning. temp_k, wind_ms,
+# gust_ms and precip_mm are the values the row settles on, NOMADS's copy when
+# the two differ and it was published by the cut-off; analysis_source and
+# precip_source name that copy's server; and analysis_published and
+# precip_published are the first time the file was on either server, of the
+# copies the row settled on. Then, for each file, the pass at which the copy
+# the row uses became final (owner's ruling 2026-11-04, empty until then); each
+# server's first copy, when this lane first saw it, the server's
+# Last-Modified, its values at the place and the sha256 of each message;
+# whether the two copies are the same bytes and give the place the same
+# values; whether a copy came too late to count (a record that changes
+# nothing); and how many replacements each server's file was later seen with,
+# and the newest of them. All empty for a file read before 2026-11-03, or not
+# read
+RAW_COPY_HEADER = (
+    ["analysis_settled", "precip_settled"]
+    + [f"analysis_{s}_{f}" for s in SERVERS
+       for f in ("first_seen", "last_modified", "temp_k", "wind_ms", "gust_ms", "temp_sha256", "wind_sha256",
+                 "gust_sha256")]
+    + ["analysis_hash_match", "analysis_value_match", "analysis_late_copy"]
+    + [f"analysis_{s}_{f}" for s in SERVERS
+       for f in ("replacements", "replacement_seen", "replacement_last_modified", "replacement_temp_sha256",
+                 "replacement_wind_sha256", "replacement_gust_sha256")]
+    + [f"precip_{s}_{f}" for s in SERVERS for f in ("first_seen", "last_modified", "mm", "sha256")]
+    + ["precip_hash_match", "precip_value_match", "precip_late_copy"]
+    + [f"precip_{s}_{f}" for s in SERVERS
+       for f in ("replacements", "replacement_seen", "replacement_last_modified", "replacement_sha256")])
+RAW_HEADER = RAW_HEADER + RAW_COPY_HEADER
+
+
+def raw_copy_columns(fa: Optional[dict], fp: Optional[dict], lid: str) -> list:
+    """A raw CSV row's columns for each server's copy, in RAW_COPY_HEADER's
+    order, from the row's two file views (file_view)."""
+    out = [(fa or {}).get("settled"), (fp or {}).get("settled")]
+    for kind, view, fields in (("anl", fa, ANALYSIS_VARS), ("pcp", fp, ("precip",))):
+        copies = (view or {}).get("copies") or {}
+        later = (view or {}).get("later") or {}
+        for s in SERVERS:
+            c = copies.get(s)
+            v = _value_at(c, kind, lid) if c else None
+            vals = [(v or {}).get(var) for var in fields] if kind == "anl" else [v]
+            out += ([c.get("seen") if c else None, c.get("published") if c else None] + vals
+                    + [((c or {}).get("sha256") or {}).get(var) for var in fields])
+        out += [hash_match(copies) if copies else None, value_match(copies, kind, lid) if copies else None,
+                view.get("late") if copies else None]
+        for s in SERVERS:
+            entries = (later.get(s) or {}).get("later") or []
+            e = entries[-1] if entries else {}
+            out += ([len(entries) if copies else None, e.get("seen"), e.get("published")]
+                    + [(e.get("sha256") or {}).get(var) for var in fields])
+    return out
+
+
 DAY_HEADER = ["date", "location", "name", "state", "final", "final_at", "hours", "of",
               "high_f", "high_exact", "low_f", "low_exact", "gust_mph", "gust_exact", "wind_mph", "wind_exact",
               "precip_in", "precip_exact", "precip_hours", "precip_resolved", "precip_resolved_at", "review",
@@ -1465,8 +2043,9 @@ def raw_csv(rows: list) -> bytes:
     """Every hour and place of a day in the files' own units: temperature in
     kelvin, wind and gust in metres per second as the analysis file holds
     them, and the precipitation of the hour that starts at the row's time in
-    millimetres, with the valid time of the file it comes from and where each
-    file was read (nodd or nomads). Nothing converted or rounded."""
+    millimetres, with the valid time of the file it comes from, whose copy
+    each value is (nodd or nomads), and after them each server's copy
+    (RAW_COPY_HEADER). Nothing converted or rounded."""
     return _csv(rows, RAW_HEADER)
 
 
@@ -1570,18 +2149,21 @@ def days_past_cutoff(store: Storage, locs: list, now: dt.datetime) -> set:
 
 # ------------------------------------------------------------------ state
 def _product_state() -> dict:
-    # newest: the newest hour READ (what asof and the alarm go by);
-    # scanned: how far the live walk has looked, absent hours included;
-    # since: when the lane first looked, so a product that has never landed
-    # can still become overdue; gaps: hours the walk passed without reading;
-    # precipPending: archived hours whose precipitation is still being refetched;
-    # missing / pmissing: hours whose analysis / precipitation file was on
-    # neither NOAA Open Data nor NOMADS once it was due (not published, so a
-    # day resolves without them), unmarked if the file turns up;
-    # lastRead: when a pass last read an hour, which the next ten-minute
-    # pass's health check counts (health_results)
-    return {"newest": None, "scanned": None, "since": None, "gaps": [], "precipPending": [], "reads": 0,
-            "missing": [], "pmissing": [], "lastRead": None}
+    # newest: the newest hour whose analysis was READ, from either server
+    # (what asof and the alarm go by); scanned: how far the live walk has
+    # opened stamps; since: when the lane first looked, so a product that has
+    # never landed can still become overdue; open: the stamps whose files
+    # have not settled, or wait for a copy still to come, each file with when
+    # each server was last asked and the download that last failed the check
+    # ({server: {tried, bad}}), how it settled for each cut-off (cutoffs) and,
+    # carried over from before 2026-11-03, since when (migrated) (work_file);
+    # missing / pmissing: hours whose analysis / precipitation file settled
+    # on no copy; lastRead: when a pass last read an hour, which the
+    # next ten-minute pass's health check counts (health_results);
+    # rechecked: the newest hour whose copies were looked at again
+    # (recheck_lane)
+    return {"newest": None, "scanned": None, "since": None, "open": {}, "reads": 0,
+            "missing": [], "pmissing": [], "lastRead": None, "rechecked": None}
 
 
 def _mark(ps: dict, key: str, t: dt.datetime) -> None:
@@ -1591,22 +2173,6 @@ def _mark(ps: dict, key: str, t: dt.datetime) -> None:
         lst.append(iso)
 
 
-def _unmark(ps: dict, key: str, t: dt.datetime) -> None:
-    lst = ps.get(key) or []
-    iso = _iso(t)
-    if iso in lst:
-        lst.remove(iso)
-
-
-def _mark_precip(ps: dict, product: str, t: dt.datetime, res: HourResult, now: dt.datetime) -> None:
-    """After a read of hour t's precipitation file: a file read unmarks it;
-    an absent one past its due time is not published."""
-    if res.precip is not None:
-        _unmark(ps, "pmissing", t)
-    elif res.precip_status == "absent" and absence_final(product, t, now):
-        _mark(ps, "pmissing", t)
-
-
 def new_state() -> dict:
     # healthAt: when a ten-minute pass last advanced the failure streak
     return {"schema": SCHEMA, "layout": LAYOUT, "products": {p: _product_state() for p in PRODUCTS},
@@ -1614,7 +2180,7 @@ def new_state() -> dict:
             "dayStatus": {}, "pruned": None, "precipSwept": None, "healthAt": None}
 
 
-def load_state(store: Storage) -> dict:
+def load_state(store: Storage, now: Optional[dt.datetime] = None) -> dict:
     s = _read_json(store, STATE_KEY)
     if not s:
         return new_state()
@@ -1637,6 +2203,18 @@ def load_state(store: Storage) -> dict:
         for k, v in _product_state().items():
             ps.setdefault(k, v)
         s["backfill"].setdefault(p, base["backfill"][p])
+        # in a state written before 2026-11-03, an hour the walk passed
+        # without reading joins the open list with both its files, and an
+        # archived hour whose precipitation was still being fetched with that
+        # file. A file the archive holds stands (work_file), so a precipitation
+        # file stored short of a place is not fetched again, and one carried
+        # over settles on no copy for each day already past its cut-off, which
+        # was final without it (settle_cuts)
+        since = _iso(now) if now is not None else s.get("updated")
+        for g in ps.pop("gaps", None) or []:
+            ps["open"].setdefault(g, {k: ({"migrated": since} if since else {}) for k in KINDS})
+        for g in ps.pop("precipPending", None) or []:
+            ps["open"].setdefault(g, {}).setdefault("pcp", {"migrated": since} if since else {})
     return s
 
 
@@ -1647,11 +2225,13 @@ def save_state(store: Storage, state: dict, now: dt.datetime) -> None:
 
 def prune_state(state: dict, now: dt.datetime) -> None:
     """Drop the hours known not published that are past the reach of any
-    rebuild."""
+    rebuild, and the open stamps past the reach of either server."""
     oldest = _iso(_floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS + 3))
     for ps in (state.get("products") or {}).values():
         for k in ("missing", "pmissing"):
             ps[k] = [iso for iso in ps.get(k) or [] if iso >= oldest]
+        reach = _iso(_floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS))
+        ps["open"] = {iso: e for iso, e in (ps.get("open") or {}).items() if iso >= reach}
 
 
 # ------------------------------------------------------------------ the lanes of a pass
@@ -1704,30 +2284,20 @@ def _advance(ps: dict, key: str, t: dt.datetime) -> None:
         ps[key] = _iso(t)
 
 
-def live_candidates(product: str, state: dict, now: dt.datetime, light: bool = False) -> List[dt.datetime]:
-    """The hours the live lane tries this pass, oldest first: the gaps still
-    worth retrying, then the hours after the walk's cursor up to the hour now
-    due (due_latest). A first pass starts at the present; the backfill walks
-    back. A windowed pass (`light`) retries only the gap of the hour now due,
-    and leaves the older gaps to the ten-minute pass."""
+def walk_candidates(product: str, state: dict, now: dt.datetime) -> List[dt.datetime]:
+    """The stamps the live walk opens this pass, oldest first, which are every
+    hour after the walk's cursor (the later of `newest` and `scanned`) whose
+    precipitation file is due, LOOK_MINUTES after its hour ends; the analysis
+    stamped with the same hour is due half an hour later. A first pass starts
+    at the present; the backfill walks back. A cursor further behind than
+    LIVE_CATCHUP_HOURS jumps to the present and queues the span it skipped for
+    the backfill, once, and no older than the backfill reaches."""
     ps = state["products"][product]
-    latest = due_latest(product, now)
-    out: List[dt.datetime] = []
-    keep_gaps = []
-    for g in ps.get("gaps") or []:
-        t = _parse_iso(g)
-        if now - t <= dt.timedelta(hours=CLOSE_AFTER_HOURS):
-            keep_gaps.append(g)
-            if not light or t >= latest:
-                out.append(t)
-    ps["gaps"] = keep_gaps
+    latest = _floor_hour(now - dt.timedelta(minutes=LOOK_MINUTES["pcp"]))
     cursor = _scan_cursor(ps)
     if cursor is None:
         start = latest
     elif latest - cursor > dt.timedelta(hours=LIVE_CATCHUP_HOURS):
-        # too far behind to walk: jump to the present, queue the span for the
-        # backfill (once, and no older than the backfill reaches), and move
-        # the walk to the jump so the next pass carries on from there
         start = latest - dt.timedelta(hours=LIVE_HOURS_PER_PASS - 1)
         a = max(cursor + dt.timedelta(hours=1), _floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS))
         b = start - dt.timedelta(hours=1)
@@ -1738,220 +2308,228 @@ def live_candidates(product: str, state: dict, now: dt.datetime, light: bool = F
         ps["scanned"] = _iso(b)
     else:
         start = cursor + dt.timedelta(hours=1)
+    out: List[dt.datetime] = []
     t = start
     while t <= latest:
-        if t not in out:
-            out.append(t)
+        out.append(t)
         t += dt.timedelta(hours=1)
     return out
 
 
-def retry_precip(store: Storage, product: str, state: dict, locs: list, lattice: dict, cache: dict,
-                 grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
-    """Refetch the precipitation of the archived hours still pending: an
-    hour whose file was absent, refused, or short of a place's cell at the
-    last read. A read that adds values rewrites the precipitation key and
-    (within the frame window) the precipitation frame; an hour past its
-    wait is dropped from the list with whatever coverage it has. Returns
-    the (location, day) pairs whose values changed."""
-    ps = state["products"][product]
+def _due(kind: str, t: dt.datetime, now: dt.datetime) -> bool:
+    """Whether a file can be on a server yet, which it can from LOOK_MINUTES
+    after its stamp, an analysis's hour and the end of a precipitation file's
+    hour."""
+    return now >= t + dt.timedelta(minutes=LOOK_MINUTES[kind])
+
+
+def _newly_due(product: str, kind: str, t: dt.datetime, now: dt.datetime) -> bool:
+    """Whether a file is among those newly due, all a windowed pass asks for:
+    the analysis of the hour now due, and the PCP_LIVE_HOURS newest
+    precipitation files."""
+    if kind == "anl":
+        return t >= due_latest(product, now)
+    newest = _floor_hour(now - dt.timedelta(minutes=LOOK_MINUTES["pcp"]))
+    return t >= newest - dt.timedelta(hours=PCP_LIVE_HOURS - 1)
+
+
+def _reach(server: str) -> dt.timedelta:
+    """How far back the lane looks on a server for an hour, a day short of the
+    fourteen days NOMADS keeps and the backfill's thirty days on NOAA Open
+    Data."""
+    return dt.timedelta(hours=NOMADS_KEEP_HOURS if server == "nomads" else BACKFILL_POINT_DAYS * 24)
+
+
+def _cutoffs(kind: str, t: dt.datetime, locs: list) -> List[dt.datetime]:
+    """The cut-offs of the days a file fills, one per zone, earliest first."""
+    return sorted({day_cutoff(row_day(kind, t, tz), tz) for tz in {loc["tz"] for loc in locs}})
+
+
+def _ask(server: str, slot: Optional[dict], t: dt.datetime, now: dt.datetime, force: bool,
+         cuts: Sequence[dt.datetime] = ()) -> bool:
+    """Whether to look on a server for a file it has not given. It is every
+    pass for RETRY_EVERY_PASS_HOURS after the hour, then once an hour, at the
+    first pass after each cut-off in `cuts`, so the ten-minute pass that
+    settles the days of that cut-off looks once more first, and at the next
+    pass after a download that failed the check, while the lane reaches the
+    hour there."""
+    if now > t + _reach(server):
+        return False
+    tried = (slot or {}).get("tried")
+    if force or not tried or (slot or {}).get("bad") or now - t <= dt.timedelta(hours=RETRY_EVERY_PASS_HOURS):
+        return True
+    if any(tried < _iso(c) <= _iso(now) for c in cuts):
+        return True
+    return now - _parse_iso(tried) >= dt.timedelta(hours=1)
+
+
+def _record(store: Storage, product: str, kind: str, t: dt.datetime, cache: dict) -> Optional[dict]:
+    return (get_anl if kind == "anl" else get_precip)(store, product, t, cache)
+
+
+def _settle(store: Storage, product: str, kind: str, t: dt.datetime, slots: dict, locs: list, now: dt.datetime,
+            cache: dict, state: dict, freeze: bool) -> set:
+    """settle_cuts, with the hour listed as without the file once it has
+    settled on no copy. Returns the (location, day) pairs it changed."""
     touched: set = set()
-    keep: List[str] = []
-    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
-    for iso in sorted(set(ps.get("precipPending") or [])):
-        t = _parse_iso(iso)
-        if now >= precip_due(product, t):
-            if get_precip(store, product, t, cache) is None:
-                _mark(ps, "pmissing", t)          # never read: not published
-            continue
-        if (get_precip(store, product, t, cache) or {}).get("complete"):
-            continue                              # read whole since, by precip_lane, as it landed
-        if deadline.over(RESERVE_SECONDS):
-            keep.append(iso)
-            continue
-        try:
-            prec = read_precip(product, t, locs, lattice if t >= frame_cutoff else None, now)
-            if prec.status == "ok":
-                _unmark(ps, "pmissing", t)
-                if write_precip(store, product, t, prec.doc, cache):
-                    touched |= touched_by(t, locs)
-                    if prec.frames and prec.frames.get("precip") is not None:
-                        write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
-                        write_grid_index(store, grid_index, now)
-                stored = get_precip(store, product, t, cache) or {}
-                if stored.get("complete"):
-                    continue
-            elif prec.status == "absent" and absence_final(product, t, now):
-                if "pmissing" not in ps or iso not in ps["pmissing"]:
-                    _mark(ps, "pmissing", t)
-                    touched |= touched_by(t, locs)
-            elif prec.status == "error":
-                _fail(status, f"{product} {iso} precipitation: {prec.error}")
-        except Exception as e:  # noqa: BLE001
-            _fail(status, f"{product} {iso} precipitation: {type(e).__name__}: {e}")
-        keep.append(iso)
-        status["waiting"].append(f"{product} {iso}")
-    ps["precipPending"] = keep
+    if settle_cuts(store, product, kind, t, slots, locs, now, cache, freeze):
+        touched |= touched_by(t, locs)
+    if _record(store, product, kind, t, cache) is not None and not any(copies_of(store, product, kind, t, cache).values()):
+        _mark(state["products"][product], "missing" if kind == "anl" else "pmissing", t)
     return touched
 
 
-def _note_precip(ps: dict, product: str, t: dt.datetime, res: HourResult, now: dt.datetime, status: dict) -> None:
-    """After an hour is archived: record a refused precipitation file, and
-    queue the hour for refetching when its precipitation is short and the
-    wait has not run out."""
+def settle_file(store: Storage, product: str, kind: str, t: dt.datetime, entry: dict, locs: list, now: dt.datetime,
+                cache: dict, state: dict, freeze: bool) -> set:
+    """Settle an open file as far as it can be (settle_cuts), and take it off
+    `entry` once its settled record is written and both servers' copies are
+    kept, or RECHECK_AFTER_HOURS after its hour, when every zone's cut-off has
+    passed; until then a copy still to come is looked for, kept and flagged
+    as late, and never used. Returns the (location, day) pairs it changed."""
+    touched: set = set()
+    slots = entry.get(kind)
+    if slots is None:
+        return touched
+    rec = _record(store, product, kind, t, cache)
+    if rec is None:
+        touched |= _settle(store, product, kind, t, slots, locs, now, cache, state, freeze)
+        rec = _record(store, product, kind, t, cache)
+    if rec is not None and (all(get_copy(store, product, kind, s, t, cache) is not None for s in SERVERS)
+                            or now >= t + dt.timedelta(hours=RECHECK_AFTER_HOURS)):
+        entry.pop(kind, None)
+    return touched
+
+
+def work_file(store: Storage, product: str, kind: str, t: dt.datetime, entry: dict, locs: list, lattice: dict,
+              cache: dict, grid_index: dict, now: dt.datetime, status: dict, budget: NomadsBudget, blocked: set,
+              state: dict, force: bool = False, lane: str = "live", deadline: Optional[arch.Deadline] = None,
+              freeze: bool = True, settle_first: bool = False, settle: bool = True) -> set:
+    """Work one open file of one stamp. Each server that has not given its
+    copy is asked for it (NOMADS first), what comes is kept (write_copy) with
+    its frames, and the file settles as far as it can (settle_file), which a
+    windowed pass does only once both copies are in (`freeze` False). With
+    `settle_first` the file settles on what is in hand before any server is
+    asked, so what comes is recorded and never used (the daily sweep). A file
+    the archive holds from before 2026-11-03 stands, with no copies beside
+    it. A server that refuses a file is asked for no more files of that kind
+    this pass, as (kind, server) in `blocked`, so an outage costs one failing
+    read of each; a download that fails the check is not a copy until a later
+    one fails with the same bytes (read_copy); a NOMADS call past the budget
+    leaves NOMADS for the next pass, as the server's name in `blocked`. Each
+    slot of `entry[kind]` keeps, per server, when it was last asked (`tried`)
+    and the last download that failed the check (`bad`), and under
+    `cutoffs` how the file settled for each cut-off. The pass's `deadline` is
+    looked at before each copy, so a pass overruns it by one copy at most.
+    Returns the (location, day) pairs whose files changed."""
+    touched: set = set()
+    ps = state["products"][product]
     iso = _iso(t)
-    if res.precip_error:
-        _fail(status, f"{product} {iso} precipitation: {res.precip_error}")
-    if res.precip is None and res.precip_status == "absent" and now >= precip_due(product, t):
-        _mark(ps, "pmissing", t)                  # an old hour read by the backfill or the sweep
-    elif res.precip is not None:
-        _unmark(ps, "pmissing", t)
-    # a precipitation file not read with the hour (precip_status None) was
-    # already stored whole, so nothing waits on it
-    if (res.precip_status is not None and (res.precip is None or not res.precip.get("complete"))
-            and now < precip_due(product, t)):
-        if iso not in ps["precipPending"]:
-            ps["precipPending"].append(iso)
-        status["waiting"].append(f"{product} {iso}")
+    slots = entry.setdefault(kind, {})
+    rec = _record(store, product, kind, t, cache)
+    if rec is not None and "settled" not in rec:
+        entry.pop(kind, None)
+        return touched
+    if not _due(kind, t, now):
+        return touched
+    if rec is None and (settle_first or slots.get("migrated")):
+        # the sweep's file settles on what is in hand before it is read, and a
+        # file carried over from before 2026-11-03 for the days already final
+        touched |= _settle(store, product, kind, t, slots, locs, now, cache, state, settle_first)
+        rec = _record(store, product, kind, t, cache)
+    # nothing read once a cut-off has settled changes the map
+    settled_any = rec is not None or bool(slots.get("cutoffs"))
+    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
+    cuts = _cutoffs(kind, t, locs)
+    for server in READ_ORDER:
+        if get_copy(store, product, kind, server, t, cache) is not None:
+            slots.pop(server, None)
+            continue
+        if (server in blocked or (kind, server) in blocked
+                or not _ask(server, slots.get(server), t, now, force, cuts)):
+            continue
+        if deadline is not None and deadline.over(RESERVE_SECONDS):
+            break
+        other = get_copy(store, product, kind, "nodd" if server == "nomads" else "nomads", t, cache)
+        lat = lattice if t >= frame_cutoff and not settled_any and (other is None or server == "nomads") else None
+        res = read_copy(product, kind, server, t, locs, lat, now, other=other, budget=budget,
+                        prior_bad=(slots.get(server) or {}).get("bad"))
+        # when a server was asked is kept only once it can matter, from the
+        # hour on which it is asked once an hour (_ask), so a pass that finds
+        # nothing new changes nothing
+        if now - t >= dt.timedelta(hours=RETRY_EVERY_PASS_HOURS):
+            slots.setdefault(server, {})["tried"] = _iso(now)
+        if res.status == "skipped":
+            blocked.add(server)
+            continue
+        if res.status == "absent":
+            status["absent"].append(f"{product} {iso} {kind} {server}")
+            continue
+        if res.status in ("error", "suspect"):
+            _fail(status, f"{product} {iso} {kind} {server}: {res.error}")
+            if res.status == "suspect":
+                # not a copy: the next pass downloads it again, and the same
+                # bytes failing again make it the server's copy
+                slots.setdefault(server, {})["bad"] = res.bad
+            blocked.add((kind, server))
+            continue
+        write_copy(store, product, kind, server, t, res.doc, cache)
+        slots.pop(server, None)
+        # the map follows the copy that counts, the first copy kept and then
+        # NOMADS's where its bytes differ (read_copy samples only those), while
+        # no cut-off has settled and when it was published by the first one
+        if res.frames and (other is None or (cuts and _pub(res.doc) <= _iso(cuts[0]))):
+            write_frames(store, product, t, res.frames, grid_index, now, res.windows)
+            write_grid_index(store, grid_index, now)
+        touched |= touched_by(t, locs)
+        if other is not None:
+            status["copies"].append(f"{product} {iso} {kind} {server}")
+        elif kind == "pcp":
+            status["pcpRead"].append(f"{product} {iso}")
+        elif lane == "live":
+            status["read"].append(f"{product} {iso}")
+            _advance(ps, "newest", t)
+            ps["reads"] = ps.get("reads", 0) + 1
+            ps["lastRead"] = _iso(now)
+        else:
+            status["backfilled"] += 1
+            status["backfilledBy"][product] += 1
+    if settle:
+        touched |= settle_file(store, product, kind, t, entry, locs, now, cache, state, freeze)
+    return touched
 
 
 def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: dict, cache: dict,
-              grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict, light: bool = False) -> set:
-    """Up to LIVE_HOURS_PER_PASS new hours of one product, after the pending
-    precipitation retries. Returns the (location, day) pairs the hours
-    touched. An hour that fails to read is recorded against the product and
-    left as a gap for the next pass; the walk never stops on it. A windowed
-    pass (`light`) leaves the pending retries and the older gaps to the
-    ten-minute pass."""
+              grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict, budget: NomadsBudget,
+              light: bool = False) -> set:
+    """The live hours (owner's rulings 2026-11-03 and 2026-11-04). The walk
+    opens each stamp as its precipitation file becomes due, and each open
+    file is asked for from each server that has not given its copy, newest
+    stamp first, until the file settles and leaves the open list (work_file).
+    On a ten-minute pass every open file is worked, and once the deadline is
+    near it is settled without a read, so each settles at the first
+    ten-minute pass after its cut-off on the copies in hand. A windowed pass
+    (`light`) asks only for the files newly due and settles a file only once
+    both copies are in. Returns the (location, day) pairs whose files
+    changed."""
     ps = state["products"][product]
     if not ps.get("since"):
         ps["since"] = _iso(now)
-    touched: set = set() if light else retry_precip(store, product, state, locs, lattice, cache, grid_index, now,
-                                                    deadline, status)
-    reads = 0
-    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
-    # one refused precipitation file of an absent hour per pass: the absent
-    # hours after it are passed without their precipitation, which the
-    # retries of the gap or the daily sweep read later
-    precip_ok = True
-    for t in live_candidates(product, state, now, light=light):
-        if reads >= LIVE_HOURS_PER_PASS or deadline.over(RESERVE_SECONDS):
-            break
-        iso = _iso(t)
-        is_gap = iso in (ps.get("gaps") or [])
-        try:
-            # a crash between the archive write and the state write leaves an
-            # hour archived but unrecorded; it counts as read, not fetched
-            # again, unless its frames never reached the grid index
-            have = get_hour(store, product, t, cache)
-            if have is not None and (frames_indexed(grid_index, product, t) or t < frame_cutoff):
-                res = HourResult("ok", doc=have)
-            else:
-                # a gap retried pass after pass reads its precipitation only
-                # until every place has a value, and an hour whose
-                # precipitation precip_lane read whole as it landed does not
-                # fetch that file again with its analysis
-                whole = bool((get_precip(store, product, t, cache) or {}).get("complete"))
-                res = read_hour(product, t, locs, lattice, frames=True, now=now,
-                                precip_if_absent=precip_ok and not whole, precip=not whole)
-                # an archived hour whose frames could not be made is left as
-                # the gap the next passes retry; the archive already holds its
-                # values, and a read that keeps failing is a failure to report
-                if res.status == "ok":
-                    write_hour(store, product, t, res, grid_index, cache, now)
-                    _unmark(ps, "missing", t)
-                    _note_precip(ps, product, t, res, now, status)
-        except Exception as e:  # noqa: BLE001
-            _fail(status, f"{product} {iso}: {type(e).__name__}: {e}")
-            break
-        if res.status == "absent":
-            status["absent"].append(f"{product} {iso}")
-            # the analysis is missing but its precipitation may not be: it is
-            # stored now, and the hour stays a gap for its analysis
-            if res.precip_error:
-                _fail(status, f"{product} {iso} precipitation: {res.precip_error}")
-                precip_ok = False
-            try:
-                if write_precip_only(store, product, t, res, grid_index, cache, now):
-                    touched |= touched_by(t, locs)
-            except Exception as e:  # noqa: BLE001
-                _fail(status, f"{product} {iso} precipitation: {type(e).__name__}: {e}")
-            # on neither NOAA Open Data nor NOMADS once it was due: not
-            # published, and the days it belongs to resolve without it
-            if absence_final(product, t, now) and iso not in (ps.get("missing") or []):
-                _mark(ps, "missing", t)
-                touched |= touched_by(t, locs)
-            _mark_precip(ps, product, t, res, now)
-            if not is_gap:
-                # an hour the bucket has not got: remembered and retried, and
-                # the walk moves on so one missing file cannot stall the lane
-                ps["gaps"].append(iso)
-                _advance(ps, "scanned", t)
-                _seed_backfill(state, product, iso)
-            continue
-        if res.status == "error":
-            _fail(status, f"{product} {iso}: {res.error}")
-            if is_gap:
-                continue
-            # an unreadable object is skipped like a missing one: a gap the
-            # next passes retry, and the walk moves past it; one such error
-            # per pass bounds what an outage costs the pass
-            ps["gaps"].append(iso)
-            _advance(ps, "scanned", t)
-            _seed_backfill(state, product, iso)
-            break
-        reads += 1
-        status["read"].append(f"{product} {iso}")
-        touched |= touched_by(t, locs)
-        if is_gap:
-            ps["gaps"].remove(iso)
-        _advance(ps, "newest", t)
+    opened = ps.setdefault("open", {})
+    for t in walk_candidates(product, state, now):
+        opened.setdefault(_iso(t), {k: {} for k in KINDS})
         _advance(ps, "scanned", t)
-        ps["reads"] = ps.get("reads", 0) + 1
-        ps["lastRead"] = _iso(now)
-        _seed_backfill(state, product, iso)
-    return touched
-
-
-def precip_lane(store: Storage, product: str, state: dict, locs: list, lattice: dict, cache: dict,
-                grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
-    """The newest precipitation files, each read as soon as NOAA publishes it
-    (owner's ruling 2026-11-03), so an hour's rain reaches the place files
-    within minutes of landing. Until then the lane read it with the next
-    analysis, about half an hour later. A file is looked for from
-    LOOK_MINUTES after its hour ends, through the PCP_LIVE_HOURS newest files
-    now due, oldest first. A file already stored is left alone, since NOAA
-    writes each file once, and one short of a place is refetched by the
-    pending retries once its analysis is in. A file NOAA Open Data lacks is
-    looked for on NOMADS, as read_precip always has, from
-    PCP_NOMADS_AFTER_MINUTES after its hour ends. What counts is unchanged,
-    and the day takes the file by its publication time as before. Returns the
-    (location, day) pairs whose values changed."""
+        _seed_backfill(state, product, _iso(t))
     touched: set = set()
-    ps = state["products"][product]
-    newest = _floor_hour(now - dt.timedelta(minutes=LOOK_MINUTES["pcp"]))
-    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
-    for back in range(PCP_LIVE_HOURS - 1, -1, -1):
-        t = newest - dt.timedelta(hours=back)
-        if get_precip(store, product, t, cache) is not None:
-            continue
-        if deadline.over(RESERVE_SECONDS):
-            break
-        iso = _iso(t)
-        prec = read_precip(product, t, locs, lattice if t >= frame_cutoff else None, now)
-        if prec.status == "error":
-            # one refused file a pass, as in the live lane; the next pass tries again
-            _fail(status, f"{product} {iso} precipitation: {prec.error}")
-            break
-        if prec.status != "ok":
-            continue                              # not published yet, and the next pass looks again
-        _unmark(ps, "pmissing", t)
-        status["pcpRead"].append(f"{product} {iso}")
-        if write_precip(store, product, t, prec.doc, cache):
-            touched |= touched_by(t, locs)
-            if prec.frames and prec.frames.get("precip") is not None:
-                write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
-                write_grid_index(store, grid_index, now)
+    blocked: set = set()
+    for iso in sorted(opened, reverse=True):
+        t, entry = _parse_iso(iso), opened[iso]
+        for kind in KINDS:
+            if kind in entry and (not light or _newly_due(product, kind, t, now)):
+                touched |= work_file(store, product, kind, t, entry, locs, lattice, cache, grid_index, now,
+                                     status, budget, blocked, state, deadline=deadline, freeze=not light)
+        if not entry:
+            del opened[iso]
+    status["waiting"] += [f"{product} {iso} {' '.join(k for k in KINDS if k in opened[iso])}" for iso in sorted(opened)]
     return touched
 
 
@@ -1981,24 +2559,37 @@ def _stamps(store: Storage, key_fmt: str, product: str, start: dt.datetime) -> s
     return {k[len(prefix):-len(tail)] for k in keys if k.startswith(prefix) and k.endswith(tail)}
 
 
+def _held(store: Storage, product: str, kind: str, start: dt.datetime) -> set:
+    """The stamps from `start` on whose file of this kind the archive holds,
+    settled, read before 2026-11-03, or as a copy from either server."""
+    have = _stamps(store, HOUR_KEY if kind == "anl" else PRECIP_KEY, product, start)
+    prefix = COPY_PREFIX.format(product=product)
+    for k in store.list(prefix, start_after=prefix + _stamp(start - dt.timedelta(hours=1))):
+        parts = k[len(prefix):].split(".")
+        if len(parts) >= 2 and parts[1] == kind:
+            have.add(parts[0])
+    return have
+
+
 def precip_sweep(store: Storage, state: dict, locs: list, lattice: dict, cache: dict, grid_index: dict,
-                 now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
+                 now: dt.datetime, deadline: arch.Deadline, status: dict, budget: NomadsBudget) -> set:
     """Once a day, over every hour the live walk and the backfill have both
-    passed: read the analysis of an hour without one while NOMADS may still
-    keep it, and the precipitation of an hour without it. The live lane
-    retries a missing analysis for CLOSE_AFTER_HOURS and the backfill walks
-    past one; the RTMA analysis of 2026-09-23 19Z never reached NOAA Open Data
-    while NOMADS had it and NOAA Open Data had its precipitation file. Hours
-    in a queued catch-up span are left to the backfill. A refused file ends
-    that product's sweep until the next day's, so an outage costs one failing
-    read. A sweep cut short by the deadline is not stamped and is due again
-    next pass. Returns the (location, day) pairs whose values changed."""
+    passed and the open list no longer holds, ask both servers again for a
+    file the archive has nothing of, neither settled nor as a copy; NOMADS is
+    asked while it keeps the hour and within the pass's budget. The file
+    settles on no copy first, since its days were final without it, so what
+    comes is recorded and flagged as late and never shown or counted (owner's
+    ruling 2026-11-04). Hours in a queued catch-up span are left to the
+    backfill. A refused file ends that product's sweep until the next day's,
+    and a sweep cut short by the deadline or the budget is not stamped and is
+    due again next pass. Returns the (location, day) pairs whose files
+    changed."""
     touched: set = set()
-    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
     window_start = _floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS)
     tried = filled = 0
     for product in PRODUCTS:
-        cursor = _scan_cursor(state["products"][product])
+        ps = state["products"][product]
+        cursor = _scan_cursor(ps)
         bf = state["backfill"][product]
         if cursor is None or not bf.get("oldest"):
             continue
@@ -2012,55 +2603,30 @@ def precip_sweep(store: Storage, state: dict, locs: list, lattice: dict, cache: 
             while t <= _parse_iso(b):
                 queued.add(t)
                 t += dt.timedelta(hours=1)
-        have_anl = _stamps(store, HOUR_KEY, product, start)
-        have_pcp = _stamps(store, PRECIP_KEY, product, start)
+        have = {kind: _held(store, product, kind, start) for kind in KINDS}
+        opened = ps.setdefault("open", {})
+        blocked: set = set()
         t = start
         while t <= end:
-            stamp, iso_ = _stamp(t), _iso(t)
-            want_anl = stamp not in have_anl and nomads_ok(product, t, now)
-            want_pcp = stamp not in have_pcp
-            if (want_anl or want_pcp) and t not in queued:
-                if deadline.over(RESERVE_SECONDS + 30):
+            iso_, stamp = _iso(t), _stamp(t)
+            want = [kind for kind in KINDS if stamp not in have[kind]]
+            if want and t not in queued and iso_ not in opened:
+                if deadline.over(RESERVE_SECONDS + 30) or budget.left <= 0:
                     status["swept"] = {"tried": tried, "filled": filled, "done": False}
                     return touched
                 tried += 1
-                frames = t >= frame_cutoff
-                ps = state["products"][product]
-                if want_anl:
-                    res = read_hour(product, t, locs, lattice, frames=frames, now=now, precip_if_absent=want_pcp)
-                    if res.status == "ok":
-                        write_hour(store, product, t, res, grid_index, cache, now)
-                        _unmark(ps, "missing", t)
+                entry = {kind: {} for kind in want}
+                failed = status["failed"]
+                for kind in want:
+                    touched |= work_file(store, product, kind, t, entry, locs, lattice, cache, grid_index, now,
+                                         status, budget, blocked, state, force=True, lane="sweep",
+                                         deadline=deadline, settle_first=True)
+                    if any(copies_of(store, product, kind, t, cache).values()):
                         filled += 1
-                        touched |= touched_by(t, locs)
-                    elif res.status == "absent":
-                        if write_precip_only(store, product, t, res, grid_index, cache, now):
-                            filled += 1
-                            touched |= touched_by(t, locs)
-                        if iso_ not in (ps.get("missing") or []):
-                            _mark(ps, "missing", t)
-                            touched |= touched_by(t, locs)
-                    if want_pcp:
-                        _mark_precip(ps, product, t, res, now)
-                    if res.status == "error" or res.precip_error:
-                        _fail(status, f"{product} {_iso(t)}: {res.error or res.precip_error}")
-                        break
-                else:
-                    prec = read_precip(product, t, locs, lattice if frames else None, now)
-                    if prec.status == "absent" and iso_ not in (ps.get("pmissing") or []):
-                        _mark(ps, "pmissing", t)
-                        touched |= touched_by(t, locs)
-                    if prec.status == "ok":
-                        _unmark(ps, "pmissing", t)
-                        if write_precip(store, product, t, prec.doc, cache):
-                            filled += 1
-                            touched |= touched_by(t, locs)
-                            if prec.frames and prec.frames.get("precip") is not None:
-                                write_frames(store, product, t, prec.frames, grid_index, now, prec.windows)
-                                write_grid_index(store, grid_index, now)
-                    elif prec.status == "error":
-                        _fail(status, f"{product} {_iso(t)} precipitation: {prec.error}")
-                        break
+                if entry:
+                    opened[iso_] = entry
+                if status["failed"] > failed:
+                    break
             t += dt.timedelta(hours=1)
     state["precipSwept"] = _iso(now)
     status["swept"] = {"tried": tried, "filled": filled, "done": True}
@@ -2111,74 +2677,59 @@ def backfill_advance(product: str, state: dict, t: dt.datetime) -> None:
 
 
 def backfill_lane(store: Storage, state: dict, locs: list, lattice: dict, cache: dict, grid_index: dict,
-                  now: dt.datetime, deadline: arch.Deadline, status: dict) -> set:
-    """With the remaining budget, walk the products backwards, newest
-    first, alternating when there is more than one. Hours within
-    BACKFILL_FRAME_DAYS get frames; older ones are point reads only. An
-    hour that fails to read is skipped, like a missing one."""
+                  now: dt.datetime, deadline: arch.Deadline, status: dict, budget: NomadsBudget) -> set:
+    """With the remaining budget, walk the products backwards, newest first,
+    alternating when there is more than one. Each hour's two files are looked
+    for on both servers (NOMADS while it keeps the hour, within the pass's
+    budget) and kept, and each file then settles for every cut-off that has
+    passed, on the copies in hand, since this is the first ten-minute pass
+    that has worked it (owner's ruling 2026-11-04); the days it fills were
+    never final without it (build_day). A file with a day still before its
+    cut-off, or whose other copy is still to come within a day of its hour,
+    joins the open list. Once the pass's NOMADS budget is spent, or the
+    deadline comes within an hour, the walk stops at the hour it is on,
+    unpassed and unsettled, and carries on next pass. Hours within
+    BACKFILL_FRAME_DAYS get frames; older ones are point reads only."""
     touched: set = set()
-    frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
     since_save = 0
-    # as in the live lane: after one refused precipitation file of an absent
-    # hour, a product's absent hours are walked past without their
-    # precipitation this pass, and the daily sweep reads it later
-    precip_ok = {p: True for p in PRODUCTS}
+    # a refused file or a spent budget holds for the rest of the pass, as in the live lane
+    blocked = {p: set() for p in PRODUCTS}
+    stopped: set = set()
     while not deadline.over(RESERVE_SECONDS):
         progressed = False
         for product in PRODUCTS:
             if deadline.over(RESERVE_SECONDS):
                 break
+            if product in stopped:
+                continue
             t = backfill_next(product, state, now)
             if t is None:
                 state["backfill"][product]["done"] = True
                 continue
             progressed = True
             iso = _iso(t)
+            reach = now <= t + _reach("nomads")
+            if reach and "nomads" in blocked[product]:
+                # NOMADS's budget for the pass is spent: the hour waits for the next pass
+                stopped.add(product)
+                continue
+            entry = {kind: {} for kind in KINDS}
             try:
-                want_frames = t >= frame_cutoff
-                have = get_hour(store, product, t, cache)
-                if have is not None and (not want_frames or frames_indexed(grid_index, product, t)):
-                    res = HourResult("ok", doc=have)
-                else:
-                    need_p = precip_ok[product] and not (get_precip(store, product, t, cache) or {}).get("complete")
-                    res = read_hour(product, t, locs, lattice, frames=want_frames, now=now, precip_if_absent=need_p)
-                    if have is not None and res.status != "ok":
-                        # the archive holds the hour and only its frames are
-                        # missing; the backfill does not retry, so it says so
-                        # rather than counting the hour as read in silence
-                        _fail(status, f"{product} {iso}: frames not made ({res.error or res.status})")
-                        res = HourResult("ok", doc=have)
-                    elif res.status == "ok":
-                        write_hour(store, product, t, res, grid_index, cache, now)
-                        _unmark(state["products"][product], "missing", t)
-                        _note_precip(state["products"][product], product, t, res, now, status)
+                for kind in KINDS:
+                    touched |= work_file(store, product, kind, t, entry, locs, lattice, cache, grid_index, now, status,
+                                         budget, blocked[product], state, force=True, lane="backfill",
+                                         deadline=deadline, settle=False)
+                if entry and ((reach and "nomads" in blocked[product]) or deadline.over(RESERVE_SECONDS)):
+                    # NOMADS's budget ran out, or the deadline came, within the
+                    # hour: it waits for the next pass, unsettled
+                    stopped.add(product)
+                    continue
+                for kind in list(entry):
+                    touched |= settle_file(store, product, kind, t, entry, locs, now, cache, state, True)
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"{product} {iso}: {type(e).__name__}: {e}")
-                backfill_advance(product, state, t)
-                continue
-            if res.status == "absent":
-                status["absent"].append(f"{product} {iso}")
-                if res.precip_error:
-                    _fail(status, f"{product} {iso} precipitation: {res.precip_error}")
-                    precip_ok[product] = False
-                try:
-                    if write_precip_only(store, product, t, res, grid_index, cache, now):
-                        touched |= touched_by(t, locs)
-                except Exception as e:  # noqa: BLE001
-                    _fail(status, f"{product} {iso} precipitation: {type(e).__name__}: {e}")
-                if absence_final(product, t, now):
-                    _mark(state["products"][product], "missing", t)
-                    touched |= touched_by(t, locs)
-                _mark_precip(state["products"][product], product, t, res, now)
-                backfill_advance(product, state, t)
-                continue
-            if res.status == "error":
-                _fail(status, f"{product} {iso}: {res.error}")
-                backfill_advance(product, state, t)
-                continue
-            status["backfilled"] += 1
-            status["backfilledBy"][product] += 1
-            touched |= touched_by(t, locs)
+            if entry:
+                state["products"][product].setdefault("open", {}).setdefault(iso, {}).update(entry)
             backfill_advance(product, state, t)
             since_save += 1
             if since_save >= STATE_EVERY:
@@ -2186,6 +2737,54 @@ def backfill_lane(store: Storage, state: dict, locs: list, lattice: dict, cache:
                 since_save = 0
         if not progressed:
             break
+    return touched
+
+
+def recheck_lane(store: Storage, product: str, state: dict, locs: list, cache: dict, now: dt.datetime,
+                 deadline: arch.Deadline, status: dict, budget: NomadsBudget) -> set:
+    """Each first copy looked at once more RECHECK_AFTER_HOURS after its hour,
+    when every zone's cut-off has passed, by its server's Last-Modified from a
+    HEAD request (owner's ruling 2026-11-03). A file its server has written
+    again since is fetched and hashed and recorded as a later replacement
+    (note_later), and never used. RECHECK_HOURS_PER_PASS hours a pass at most,
+    NOMADS within the pass's budget; an hour is passed only once all its
+    copies have been looked at. Returns the (location, day) pairs whose raw
+    CSV rows gained a replacement."""
+    ps = state["products"][product]
+    upto = _floor_hour(now - dt.timedelta(hours=RECHECK_AFTER_HOURS))
+    t = _parse_iso(ps["rechecked"]) + dt.timedelta(hours=1) if ps.get("rechecked") else upto
+    t = max(t, _floor_hour(now) - dt.timedelta(days=BACKFILL_POINT_DAYS))
+    touched: set = set()
+    found = done = 0
+    while t <= upto and done < RECHECK_HOURS_PER_PASS and not deadline.over(RESERVE_SECONDS):
+        try:
+            for kind in KINDS:
+                for server in SERVERS:
+                    first = get_copy(store, product, kind, server, t, cache)
+                    if first is None or now > t + _reach(server):
+                        continue
+                    head = _call(server, budget, gw.fetch_head, file_url(product, kind, server, t),
+                                 tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+                    if not head or not head.get("lastModified") or head["lastModified"] == first.get("published"):
+                        continue
+                    res = read_copy(product, kind, server, t, [], None, now, budget=budget, decode=False)
+                    if res.status == "skipped":
+                        raise Skipped()
+                    if res.status in ("error", "suspect"):
+                        # a download that fails the check is no replacement
+                        _fail(status, f"{product} {_iso(t)} {kind} {server} recheck: {res.error}")
+                    elif res.status == "ok" and note_later(store, product, kind, server, t, res.doc, cache):
+                        found += 1
+                        touched |= touched_by(t, locs)
+        except Skipped:
+            break
+        except Exception as e:  # noqa: BLE001
+            _fail(status, f"{product} {_iso(t)} recheck: {type(e).__name__}: {e}")
+            break
+        ps["rechecked"] = _iso(t)
+        t += dt.timedelta(hours=1)
+        done += 1
+    status["rechecked"] = {"hours": done, "replaced": found}
     return touched
 
 
@@ -2309,7 +2908,7 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None, 
     mode = "window" if window else "baseline"
     gw.set_user_agent(cfg.get("user_agent", ""))
     budget = arch.remaining_budget(cfg)
-    status: dict = {"kind": "analysis", "mode": mode, "read": [], "pcpRead": [], "absent": [], "waiting": [],
+    status: dict = {"kind": "analysis", "mode": mode, "read": [], "pcpRead": [], "copies": [], "absent": [], "waiting": [],
                     "errors": [], "failed": 0, "backfilled": 0, "backfilledBy": {p: 0 for p in PRODUCTS}, "days": 0,
                     "pruned": 0}
     if grib2 is None:
@@ -2356,10 +2955,11 @@ def _run(store: Storage, now: dt.datetime, window: bool, budget: Optional[float]
     """A pass's work under the lease, the ten-minute pass's steps or the
     windowed pass's few. Returns the state and the alarms raised."""
     deadline = arch.Deadline(pass_seconds(now, budget))
+    nomads = NomadsBudget()                         # this pass's NOMADS calls, shared by every lane
     alarms: list = []
     locs = load_locations()
     lattice = load_lattice()
-    state = load_state(store)
+    state = load_state(store, now)
     loaded = json.dumps(state, sort_keys=True)      # a windowed pass writes the state only when it moved
     cache: dict = {}
     grid_index = (_read_json(store, GRID_INDEX_KEY) or {}).get("frames") or {}
@@ -2370,16 +2970,12 @@ def _run(store: Storage, now: dt.datetime, window: bool, budget: Optional[float]
             del grid_index[p]
     touched: set = set()
     try:
-        # 1. the newest precipitation files and the live hours, then 2. the
-        # days they touch (and on the ten-minute pass any day due to close)
+        # 1. the live hours, each file from both servers, then 2. the days
+        # they touch (and on the ten-minute pass any day due to close)
         for product in PRODUCTS:
             try:
-                touched |= precip_lane(store, product, state, locs, lattice, cache, grid_index, now, deadline, status)
-            except Exception as e:  # noqa: BLE001
-                _fail(status, f"{product} precipitation lane: {type(e).__name__}: {e}")
-            try:
                 touched |= live_lane(store, product, state, locs, lattice, cache, grid_index, now, deadline, status,
-                                     light=window)
+                                     nomads, light=window)
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"{product} live lane: {type(e).__name__}: {e}")
         if not window:
@@ -2391,10 +2987,11 @@ def _run(store: Storage, now: dt.datetime, window: bool, budget: Optional[float]
         # the rest is the ten-minute pass's, and the windowed pass has done its work
         if not window:
             save_state(store, state, now)
-            # 3. once a day, the precipitation of hours whose analysis never landed
+            # 3. once a day, the files of hours both walks passed without them
             if not deadline.over(RESERVE_SECONDS + 120) and precip_sweep_due(state, now):
                 try:
-                    changed = precip_sweep(store, state, locs, lattice, cache, grid_index, now, deadline, status)
+                    changed = precip_sweep(store, state, locs, lattice, cache, grid_index, now, deadline, status,
+                                           nomads)
                     status["days"] += rebuild_days(store, changed, locs, cache, now, state)
                     save_state(store, state, now)
                 except Exception as e:  # noqa: BLE001
@@ -2406,9 +3003,17 @@ def _run(store: Storage, now: dt.datetime, window: bool, budget: Optional[float]
                     save_state(store, state, now)
                 except Exception as e:  # noqa: BLE001
                     _fail(status, f"refresh days: {type(e).__name__}: {e}")
+            # 3c. each first copy looked at once more after every cut-off,
+            # then the days whose raw CSV a replacement adds to
+            for product in PRODUCTS:
+                try:
+                    changed = recheck_lane(store, product, state, locs, cache, now, deadline, status, nomads)
+                    status["days"] += rebuild_days(store, changed, locs, cache, now, state)
+                except Exception as e:  # noqa: BLE001
+                    _fail(status, f"{product} recheck: {type(e).__name__}: {e}")
             # 4. backfill with what remains, then the days it touched
             try:
-                bt = backfill_lane(store, state, locs, lattice, cache, grid_index, now, deadline, status)
+                bt = backfill_lane(store, state, locs, lattice, cache, grid_index, now, deadline, status, nomads)
                 status["days"] += rebuild_days(store, bt, locs, cache, now, state)
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"backfill: {type(e).__name__}: {e}")
@@ -2424,6 +3029,7 @@ def _run(store: Storage, now: dt.datetime, window: bool, budget: Optional[float]
     except Exception as e:  # noqa: BLE001 - the last resort; the lanes guard their own hours
         _fail(status, f"pass: {type(e).__name__}: {e}")
     finally:
+        status["nomadsCalls"] = nomads.used
         try:
             if window:
                 # the windowed pass writes what changed and nothing else, the
@@ -2460,13 +3066,14 @@ def _close(status: dict, t0: float, mode: str, errors: int, alarms: Optional[lis
     status["lease"] = lease
     status["seconds"] = round(time.time() - t0, 1)
     # the lists are for the log; the counts are what the status carries
-    for k in ("read", "pcpRead", "absent", "waiting", "errors"):
+    for k in ("read", "pcpRead", "copies", "absent", "waiting", "errors"):
         status[k + "Count"] = len(status[k])
         status[k] = status[k][:12]
     arch.LAST_STATUS = {"job": "analysis", "mode": mode, "lease": lease, "errors": errors, "alarms": alarms or [],
                         "seconds": status["seconds"], "read": status["readCount"], "pcpRead": status["pcpReadCount"],
                         "backfilled": status["backfilled"], "days": status["days"], "absent": status["absentCount"],
-                        "failed": status["failed"],
+                        "failed": status["failed"], "copies": status["copiesCount"],
+                        "nomadsCalls": status.get("nomadsCalls", 0),
                         "newest": {p: state["products"][p].get("newest") for p in PRODUCTS} if state else {}}
     print(json.dumps(status, ensure_ascii=False))
     return errors

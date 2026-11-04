@@ -24,9 +24,15 @@ neither server six hours after its hour was not published, and a day was final o
 was in or not published), which had replaced half an hour after the product usually lands. 2026-11-03 (owner's ruling):
 **the job checks every two minutes around the expected arrivals** (section 5), and reads each
 hour's precipitation file as soon as NOAA publishes it rather than with the next analysis. The
-same ruling has the job read NOMADS for every hour, since an hour is final once NOMADS has it;
-that part is not built yet, and until it is the job reads NOMADS only for a file NOAA Open Data
-lacks (section 1). 2026-09-30: **URMA is dropped from the lane and the page**, since
+same ruling has the job **read every file from NOMADS as well as NOAA Open Data** and keep each
+server's first copy, NOMADS's counting when the two differ (section 1). A file's publication time
+is since then the first time it was on either server. 2026-11-04 (owner's ruling): **the choice of
+copy for every hour of a day is final at the first ten-minute pass after the day's cut-off**, on
+the copies read by then, or earlier once both servers' copies are in; a copy read later is
+recorded and flagged and never used, and **a day shown final never changes**. The same ruling
+keeps the choice per file (a place the copy that counts has no value for has none that hour), and
+a download whose message fails the check is a server's copy only when a second download returns
+the same bytes. 2026-09-30: **URMA is dropped from the lane and the page**, since
 it does not resolve. The lane read it for comparison until then; it reads RTMA only now, the
 published days, place files and CSV files were rewritten without it (`LAYOUT`, section 5),
 and its archive and frames under `archive/analysis2/{hours,precip}/urma/` and
@@ -62,19 +68,64 @@ NOMADS had (published there at 19:46Z) and which never reached the bucket. NCEP'
 server lists fourteen day directories under the same directory and file names
 (`https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod/`) and answers byte ranges with 206; on
 2026-10-13 it held the analysis files for about the last ten days (the oldest valid 2026-10-03 20Z)
-and the precipitation files for all fourteen. A file on NOMADS counts as published (owner's decision 2026-09-29): a file NOAA Open
-Data does not have half an hour after the product usually lands (`lagMinutes` plus
-`NOMADS_AFTER_MINUTES = 30`) is read from there while NOMADS still keeps it (section 5), a file on
-neither `NOT_PUBLISHED_AFTER_HOURS = 6` hours after its valid time (a precipitation file, after its
-hour ends) is listed in the state as not published, and every archive document records its
-`source` and its `published` time, the Last-Modified header of the server it was read from (from
-2026-10-14; earlier documents carry none). A precipitation file NOAA Open Data lacks is looked for
-on NOMADS from `PCP_NOMADS_AFTER_MINUTES = 27` after its hour ends, so the day's last
-accumulation, usually on the bucket 17 minutes after midnight, is looked for before the cut-off.
-The draft terms (owner's decision 2026-10-14) say the NOMADS copy counts when the two servers'
-copies of a file differ, and that values count as published, without adjustment. The lane reads
-NOAA Open Data first and NOMADS only for a file NOAA Open Data lacks, so it never compares the
-two copies; no difference between them has been seen.
+and the precipitation files for all fourteen. A file on NOMADS counts as published (owner's
+decision 2026-09-29). The draft terms (owner's decision 2026-10-14) say the NOMADS copy counts
+when the two servers' copies of a file differ, and that values count as published, without
+adjustment.
+
+**Both servers (owner's ruling 2026-11-03).** The lane reads every analysis and precipitation
+file from NOMADS and from NOAA Open Data, NOMADS first, from the moment the file is due, and
+NOMADS while it keeps the hour (`NOMADS_KEEP_HOURS`, thirteen days, a day short of its
+fourteen). Each server's first copy of a file is kept on its own and written once (section 4),
+with when this lane first saw it, the server's Last-Modified time and a sha256 of each message
+read. Where a message's hash equals the other server's, its values are that copy's; where the
+hashes differ, both copies are decoded at the places, and the raw CSV keeps the hash comparison
+apart from the value comparison. A later read of the same server's file with other bytes or
+another Last-Modified time is a replacement, recorded beside the first copy and never used
+(section 5). Each place's row takes one copy, by the day's cut-off:
+
+- NOMADS's copy, when it was published by the cut-off, whatever NOAA Open Data's holds;
+- otherwise NOAA Open Data's, when it was;
+- otherwise neither counts, and the row shows NOMADS's copy, or NOAA Open Data's when NOMADS has
+  none, as published late.
+
+The choice is per file (owner's ruling 2026-11-04). If the copy that counts has no value at a
+place, from a bitmap that leaves the place out or a message refused, that place has no value for
+the hour, whatever the other copy holds. A file's publication time, which the cut-off is judged
+on, is the first time it was on either server, its Last-Modified time there, or when this lane
+first saw it where a server sent none, counting, once the row has settled, only the copies it
+settled on.
+
+**When the choice is final (owner's ruling 2026-11-04).** A file settles for the days of each
+cut-off, and the pass at which it did is kept (`settled`). It settles at the pass at which both
+servers' first copies are in, since no later read can count, which is usually minutes after NOAA
+publishes it and long before any cut-off. Otherwise it settles at the first ten-minute pass after
+the cut-off, on the copies read by then. If NOMADS could not be reached and no NOMADS copy is in
+hand, that is NOAA Open Data's copy, when it was published by the cut-off; if neither server has
+given one, the hour has no file. The lane looks for every open file once more at that pass before
+it settles it. A copy read after its file settled, from either server and whatever its
+Last-Modified, is recorded beside the others and flagged (`lateCopy` or `pcpLateCopy` in the place
+file, `analysis_late_copy` or `precip_late_copy` in the raw CSV), as is a NOMADS copy in hand that
+differs from the NOAA Open Data copy a row keeps, having been published after the cut-off. Neither
+ever changes a value, a count, a day state or a map frame. A place-day turns final only once every
+file of its rows has settled for its cut-off, so a day shown final never changes; at the cut-off
+that is at once when every file has both copies, and otherwise at that first ten-minute pass. The
+settled record of a file (the archive hour, or the precipitation key) is written once, when it has
+settled for every cut-off of its days, with no copy in it when neither server gave one. Until
+2026-11-04 a file settled at once on NOMADS's copy, and otherwise waited past the cut-off for each
+server without a copy to say it had none, for up to thirteen days when NOMADS could not be reached.
+
+**Broken transfers (owner's ruling 2026-11-04).** Each message is checked for its grid, its
+parameter, its valid time, a clean decode and a value at one place at least. A download whose
+message fails that check is not a server's copy, since a transfer that broke looks just like it,
+and the server has no copy for the hour until the next pass downloads the file again within the
+NOMADS budget. A download that comes whole is the copy. One that fails with the same bytes as the
+download before is NOAA's own file, and becomes the server's copy with the failing messages
+refused and without values; when it is the copy that counts, those values are missing for the
+hour, as the file is. The rule is the same on both servers. Until 2026-11-03 the lane read NOAA
+Open Data first and NOMADS only for a file NOAA Open Data lacked (half an hour after the product
+usually lands, and a precipitation file 27 minutes after its hour ends), so it never compared the
+two copies.
 
 **Where each variable comes from.**
 
@@ -174,9 +225,11 @@ the owner's decision.
 **Hourly values.** Each row of a day is the analysis at the top of that hour and the
 precipitation over the hour that starts then. The archive keeps the files' own numbers
 (kelvin, metres per second, millimetres); the place files show them converted and cut to a
-thousandth (precipitation a ten-thousandth of an inch). A place's hourly precipitation value,
-once read and stored, stands, and a later file only fills the hours and places that had no
-value yet, which on RTMA, whose files are never rewritten, is only a place a partial read missed.
+thousandth (precipitation a ten-thousandth of an inch). Each server's first copy of a file
+stands, and a file's settled record is written once, so a settled value never changes. A place
+the copy that counts has no value for has no value that hour (owner's ruling 2026-11-04, per
+file). Until 2026-11-03 a later read of a precipitation file filled a place a partial read had
+missed.
 There is no analogue of the station report conventions (last report in the hour, specials,
 tenths group); the page says this in its method note.
 
@@ -186,21 +239,26 @@ tenths group); the page says this in its method note.
 whose files were published by then (owner's ruling 2026-10-14, the draft terms): an analysis
 counts when its file's `published` time is at or before the cut-off, and an accumulation when
 its file's is and the file holds a value at the place. A document read before 2026-10-14
-carries no `published` time and counts. Until the cut-off the day is *provisional* and its
-values run over the hours read. At the cut-off `finalAt` and `resolvedAt` are the cut-off
-itself, and a day short of hours says so (`hours < of`, "final, 23 of 24 hours" on the page). A
-file published after the cut-off is shown in the place file, marked `late` (or `pcpLate`),
-dimmed on the page, and never counted; one published before the cut-off and read after it
+carries no `published` time and counts. Since 2026-11-04 the day turns final at the cut-off only
+once every file of its rows has settled for it (above), so while a file the lane holds open or
+will still read (the live walk, a queued catch-up span, the backfill) may change, the day stays
+provisional past its cut-off, for minutes when every file has a copy in hand, and a day shown
+final never changes. Until then the day is *provisional* and its values run over the hours read.
+At the cut-off `finalAt` and `resolvedAt` are the cut-off itself, and a day short of hours says
+so (`hours < of`, "final, 23 of 24 hours" on the page). A file published after the cut-off and
+read by the time its row settled is shown in the place file, marked `late` (or `pcpLate`),
+dimmed on the page, and never counted; one published before the cut-off and read by then
 counts, so the summary comes out the same whenever it is rebuilt and needs no memory of an
-earlier one. The first published version of a file counts: the analysis hour is written once,
-and a precipitation read of the same server's file with another Last-Modified time adds nothing
-and is recorded as `replaced`. A place with no analysis that counts at the cut-off has no value
+earlier one. The first published version of a file counts. Each server's first copy is kept and
+the settled record is written once, and a later version is recorded and never used (until
+2026-11-03 a precipitation read of the same server's file with another Last-Modified time was
+recorded as `replaced`). A place with no analysis that counts at the cut-off has no value
 and is marked for event review (`review`), and one with no accumulation that counts has
 `precip.review`; a place with nothing read at all gets `review_entry` when other places of the
 day have hours, and a day with nothing read anywhere is not written. There is no closed state
 any more: `closed` is always false, and the page still reads it in files written before
-2026-10-14. The state lists hours on neither server six hours after they were due (`missing`,
-`pmissing`) for the lane's own bookkeeping; they no longer decide anything about a day. The
+2026-10-14. The state lists the files that settled on no copy (`missing`, `pmissing`) for the
+lane's own bookkeeping; they decide nothing about a day. The
 valid times of the analyses are the `at`, `t`, `valid` and `asof` stamps, and `written` is the
 pass that wrote a file.
 
@@ -368,7 +426,7 @@ place with no hours yet is absent until its cut-off. `high`, `low`, `gust`, `win
   "hours": [ {"local": "00", "t": "2026-09-26T04:00:00Z",
               "rtma": {"temp": 63.14, "wind": 18.223, "gust": 33.506, "precip": 0.0197,
                        "pub": "2026-09-26T04:48:31Z", "pcpPub": "2026-09-26T05:17:02Z",
-                       "src": "nodd", "pcpSrc": "nodd",
+                       "src": "nomads", "pcpSrc": "nomads", "pubSrc": "nodd", "pcpPubSrc": "nomads",
                        "show": {"temp": 63, "wind": 18, "gust": 34, "precip": 0.02},
                        "run": {"hours": 1,
                                "high": {"value": 63, "exact": 63.14, "at": "2026-09-26T04:00:00Z"},
@@ -404,9 +462,20 @@ rounded hours against the 0.84 it resolved on).
   the day's summary by construction, and tests check it for every hour of every place-day built
   from the fixtures and from the samples. The flags that turn on the clock (final, review,
   resolved) stay in the summary.
-- `pub`, `pcpPub`, `src` and `pcpSrc` say when and where each file was published (its
-  Last-Modified time and `nodd` or `nomads`), the same figures as the raw CSV, present only
-  when known, so a file read before 2026-10-14 has no publication times.
+- `pub` and `pcpPub` are when each file was first on either server (its Last-Modified time
+  there), which the cut-off is judged on, and `pubSrc` and `pcpPubSrc` which server that was
+  (`nodd` or `nomads`, from 2026-11-03), which the display names beside the time. `src` and
+  `pcpSrc` name the server whose copy the row's values are, NOMADS's when it counts (section 1).
+  They are the raw CSV's figures, present only when known, so a file read before 2026-10-14 has
+  no publication times and one read before 2026-11-03 names its one server in `src`.
+- `settled` and `pcpSettled`, from 2026-11-04, are the pass at which the copy each file gives the
+  row became final (section 1), absent until then; the raw CSV's `analysis_settled` and
+  `precip_settled` are the same times.
+- `lateCopy` and `pcpLateCopy`, from 2026-11-03, mark an hour with a copy that came too late to
+  count, read after its row settled, or a NOMADS copy that differs from the NOAA Open Data copy
+  the row keeps, having been published after the cut-off (section 1). They change no value,
+  count or state. An hour whose files gave its row no value has no place-file row to carry them,
+  and the raw CSV records it.
 
 A file without `rowShape` was written before these fields. The page still draws it, as the file
 stands, with no running figures and no replay; the lane reads nothing from place files, and the
@@ -417,8 +486,35 @@ decision 2026-09-29), rewritten with the day file. The raw file has one row per 
 in the files' own units: `date, location, local_hour, valid_utc, temp_k, wind_ms, gust_ms,
 precip_mm, precip_file_utc, analysis_source, precip_source, analysis_published, precip_published`
 (the files' Last-Modified times, empty for a file read before 2026-10-14), the precipitation being the hour that
-starts at `valid_utc` and filed under `precip_file_utc`, nothing converted or rounded. The
-processed file has one row per place: `date, location, name, state, final, final_at, hours, of,
+starts at `valid_utc` and filed under `precip_file_utc`, nothing converted or rounded. Those
+columns keep their order and their meaning from 2026-11-03. `temp_k`, `wind_ms`, `gust_ms` and
+`precip_mm` are the values the row settles on, NOMADS's copy when the two differ and it counts;
+`analysis_source` and `precip_source` name that copy's server; and `analysis_published` and
+`precip_published` are the first time the file was on either server, of the copies the row
+settled on once it has. After them come each server's copy of each file, in this order
+(`RAW_COPY_HEADER`):
+
+- `analysis_settled`, `precip_settled`, the pass (a UTC time) at which the copy the row uses
+  became final, empty until then and for a file read before 2026-11-03. Until 2026-11-04 they
+  were `true` or `false`; the names and places are unchanged. A copy whose `first_seen` is later
+  than its row's settled time is never the one the row uses;
+- for the analysis, for `nodd` and then `nomads`, `analysis_<server>_first_seen`,
+  `_last_modified`, `_temp_k`, `_wind_ms`, `_gust_ms`, `_temp_sha256`, `_wind_sha256` and
+  `_gust_sha256`;
+- `analysis_hash_match`, `analysis_value_match` (the two copies' bytes, and their values at the
+  place) and `analysis_late_copy` (section 1);
+- for `nodd` and then `nomads`, `analysis_<server>_replacements` (how many later replacements
+  were recorded) and the newest one's `_replacement_seen`, `_replacement_last_modified`,
+  `_replacement_temp_sha256`, `_replacement_wind_sha256` and `_replacement_gust_sha256`;
+- the same for the precipitation file, `precip_<server>_first_seen`, `_last_modified`, `_mm` and
+  `_sha256`, then `precip_hash_match`, `precip_value_match` and `precip_late_copy`, then
+  `precip_<server>_replacements`, `_replacement_seen`, `_replacement_last_modified` and
+  `_replacement_sha256`.
+
+A copy's columns are empty when that server's copy was never read, and the comparisons are
+empty until both copies are in. A row is written when either file gives it a value, and from
+2026-11-04 also when either file has a copy and gives it none, a copy read too late, say, with
+the value columns empty. The processed file has one row per place: `date, location, name, state, final, final_at, hours, of,
 high_f, high_exact, low_f, low_exact, gust_mph, gust_exact, wind_mph, wind_exact, precip_in,
 precip_exact, precip_hours, precip_resolved, precip_resolved_at, review, precip_review`. Both carried a `product` column
 until 2026-09-30. The page links both for the selected day.
@@ -459,30 +555,55 @@ its `precip` set.
 precipitation in inches). A precipitation frame is rewritten when a refetch of the hour's
 file adds coverage within the frame window.
 
-**Archive.** `archive/analysis2/hours/<product>/YYYYMMDDTHHZ.json.gz` holds the locations'
-hourly temperature (kelvin), wind and gust (metres per second) for that product-hour, the
-files' own numbers kept to four decimals, and `source` (`nodd` or `nomads`) (write once,
-`put_if_absent`). `archive/analysis2/precip/<product>/YYYYMMDDTHHZ.json.gz` holds the
-locations' accumulation for the hour ending then, in millimetres to a millionth, and may be
-rewritten: `read` (a file was decoded), `complete` (every place has a value), `missing` (the
-places whose cell was absent from the bitmap), `source` and `values`; a rewrite only ever adds
-values, never changes one. Together they let any day file be rebuilt from the archive without
-re-reading NOAA. `archive/analysis2/_meta/state.json` holds the cursors: per product `missing` and `pmissing` (the
-hours whose analysis or precipitation file is known not published, pruned past 33 days), `newest` (the
-newest hour read), `scanned` (how far the live walk has looked), `since` (when the lane first
-looked), `gaps` (hours passed without a read, retried for 48 hours), `precipPending`
-(archived hours whose precipitation file is still being refetched), `reads` and `lastRead`
-(when a pass last read an hour); per product
+**Archive.** `archive/analysis2/copies/<product>/YYYYMMDDTHHZ.<kind>.<server>.json.gz` is one
+server's first copy of one file (owner's ruling 2026-11-03), `kind` being `anl` (the analysis
+of that hour) or `pcp` (the precipitation file of the hour ending then) and `server` `nodd` or
+`nomads`, written once (`put_if_absent`). It holds `seen` (when this lane first saw it),
+`published` (the server's Last-Modified time), `sha256` (a hash of each message read, by
+variable), `decoded` (the messages decoded, since one whose hash equals the other server's takes
+that copy's values), `values` (kelvin and metres per second, or millimetres, the files' own
+numbers), for a precipitation file `missing` (the places its bitmap leaves out), and `refused`
+(the messages that failed the check in NOAA's own file, fetched twice with the same bytes, which
+have hashes and no values; section 1). A later replacement of the same server's file is
+appended to the copy's `.later.json.gz` beside it, with when the lane saw it, its Last-Modified
+time and its hashes, and is never used.
+`archive/analysis2/hours/<product>/YYYYMMDDTHHZ.json.gz` and
+`archive/analysis2/precip/<product>/YYYYMMDDTHHZ.json.gz` are each the file's settled record,
+written once when it has settled for every cut-off of its days (section 1): `settled` (that
+pass), `cutoffs` (for each cut-off, the pass it settled at, `at`, the servers whose copies were
+in hand, `with`, the copy chosen, `src`, and the first publication of those copies and its
+server, `published` and `pubSrc`), `picks` (the server each place's row uses, `null` for
+none), `values` (that copy's values), `source` (the one server every place settled on, `null`
+when they differ or none), `published`, `servers` (each server's copy's `seen`, `published` and
+`sha256` at the time) and `hashMatch`, and for the precipitation `missing`, `read` and
+`complete`. A file that settled on no copy has one too, every pick `null`. A record written before 2026-11-03 has the
+earlier shape, one file read from one server with its `source` and `published` time, and
+stands; the precipitation key of that shape was filled in by later reads, never changing a
+value. Together they let any day file be rebuilt from the archive without re-reading NOAA.
+`archive/analysis2/_meta/state.json` holds the cursors: per product `missing` and `pmissing`
+(the hours whose analysis or precipitation file settled on no copy, pruned past 33 days),
+`newest` (the newest hour whose analysis was read, from either server), `scanned` (how far the
+live walk has opened stamps), `since` (when the lane first looked), `open` (the stamps whose
+files have not settled, or have settled while a server's copy is still to come, each file with,
+per server, when it was last looked at, `tried`, and the download that last failed the check,
+`bad`, its hashes and reasons, and how the file has settled so far, `cutoffs`, and for a file
+carried over from before 2026-11-03 since when, `migrated`), `rechecked` (the newest hour whose
+copies were looked at again), `reads` and `lastRead` (when a pass last read an hour); per
+product
 the backfill `cursor`, `oldest`, `done` and queued catch-up spans; `layout`, the `LAYOUT` the
 listed days were last all written in, and `relayout`, the listed days still to be rewritten
 after it changed; the day statuses; the prune stamp; `precipSwept`, the time of the last
-precipitation sweep (step 4); and `healthAt`, when a ten-minute pass last advanced the failure
+precipitation sweep (step 3); and `healthAt`, when a ten-minute pass last advanced the failure
 streak (section 5). `archive/analysis2/_meta/lease.json` is the lease of section 5, the token
 of the pass that holds it with the pass's kind (`baseline` or `window`), when it was taken,
 when it expires and when it was released; it is under `data/archive/`, which the Lambda's role
 can write and the CDN never serves. A state written before 2026-09-30 loses its `urma` lanes and its
 re-read and revision records when it is loaded, and has no `layout`, which queues every listed
-day for rewriting.
+day for rewriting. A state written before 2026-11-03 carries `gaps` and `precipPending`, which
+join `open` when it is loaded, a gap with both its files and a pending hour with its
+precipitation file; a file the archive holds stands, so a precipitation file stored short of a
+place is not fetched again, and a file carried over settles on no copy for each day already
+past its cut-off, since that day was final without it.
 A precipitation key without an archive hour is the precipitation of an hour whose analysis
 file never landed. `archive/_meta/health_analysis.json` is the lane's own failure
 streak file, written through `archive.update_health` under the market lane's convention so
@@ -506,13 +627,15 @@ Each pass runs under `arch.Deadline(pass_seconds(now, budget))`, which is `PASS_
 before the next minute in a window, and never under `PASS_FLOOR_SECONDS = 75`. The ten-minute
 pass outside the windows keeps its 330 s. At :48 and :18 it has until ten seconds before the
 windowed pass two minutes on, room for the windowed work and a little backfill, so the sweep and
-the refresh, which want 165 s, wait for the next ten-minute pass outside the windows. With
-`FETCH_TRIES = 2` and `FETCH_TIMEOUT = 20` (about 212 s for the worst hour) a pass ends inside
-the ten minutes. Each pass keeps `RESERVE_SECONDS = 45` back from the lanes for the rebuild and
-the indexes, and sets `arch.LAST_STATUS` with its `mode` (`baseline` or `window`). Every NOAA
-call is `fetch_range` or `fetch_bytes` in `pipeline/gov_weather.py` with the site's User-Agent,
-two tries of twenty seconds each, so one hour's five fetches cannot hold a pass for more than a
-few minutes and the 900 s Lambda timeout is never what stops it.
+the refresh, which want 165 s, wait for the next ten-minute pass outside the windows. The
+deadline is looked at before each server's copy of each file, and with `FETCH_TRIES = 2` and
+`FETCH_TIMEOUT = 20` a copy takes about 170 s at worst (an analysis's sidecar and three messages,
+each timing out once), so a pass ends inside the ten minutes. Until 2026-11-03 the unit was an
+hour, about 212 s at worst. Each pass keeps `RESERVE_SECONDS = 45` back from the lanes for the
+rebuild and the indexes, and sets `arch.LAST_STATUS` with its `mode` (`baseline` or `window`).
+Every NOAA call is `fetch_range`, `fetch_bytes` or `fetch_head` in `pipeline/gov_weather.py`
+with the site's User-Agent, two tries of twenty seconds each, so the 900 s Lambda timeout is
+never what stops a pass.
 
 **The lease.** No two passes ever overlap. Before it reads the state, a pass takes the lease,
 `archive/analysis2/_meta/lease.json` (section 4), with conditional writes on the store
@@ -533,104 +656,122 @@ minutes after the pass began (a budget of about 870 s, plus the 90 s).
 A pass releases the lease after its last write. A release that finds the lease taken over is
 recorded as a failure, since it would mean a pass outran its lease.
 
-**The windowed pass** does only light work. It reads the newest precipitation files (step 1),
-then the analysis hours after the walk's cursor and the gap of the hour now due (step 2),
-rebuilds the days they touch (step 3), and writes the state when it moved and `index.json` when
-a file came in. It leaves the pending precipitation, the older gaps, the days past their cut-off,
-the sweep, the refresh, the backfill, the prune and the health file to the ten-minute pass. When
-nothing is new it writes nothing but the lease and exits within seconds, its requests being the
-lease, the state, the grid index, the newest hours' precipitation keys and a fetch or two of NOAA
-files not yet published.
+**The windowed pass** does only light work. It opens the stamps now due and looks for the files
+newly due, the analysis of the hour now due and the `PCP_LIVE_HOURS = 3` newest precipitation
+files (step 1), settles a file only once both copies are in, rebuilds the days they touch (step
+2), and writes the state when it moved and `index.json` when a file came in. It leaves the older
+open files, the settling at the cut-offs, the days past their cut-off,
+the sweep, the refresh, the recheck, the backfill, the prune and the health file to the
+ten-minute pass. When nothing is new it writes nothing but the lease and exits within seconds,
+its requests being the lease, the state, the grid index, the copies of the files it looks for
+and a fetch or two from each server of files not yet published.
 
-1. **Precipitation.** First the newest files, on both passes (`precip_lane`). An hour's
-   precipitation file is read as soon as NOAA publishes it, without waiting for the next
-   analysis, which it was read with until 2026-11-03, about half an hour after it landed. A
-   file is looked for from 14 minutes after its hour ends (`LOOK_MINUTES`, its window's
-   opening), through the `PCP_LIVE_HOURS = 3` newest files now due, oldest first. A file already
-   stored is left alone, and one NOAA Open Data lacks 27 minutes after its hour ends is looked
-   for on NOMADS as before. A read writes the precipitation key, its frame and `grid/index.json`.
-   What counts is unchanged, and the day takes the file by its publication time as before; the
-   day's last accumulation, on the bucket about 17 minutes after local midnight, is now in the
-   day's total before the 12:45 AM cut-off. Then, on the ten-minute pass only, refetch the
-   precipitation file of every archived hour in `precipPending`, an hour whose file was absent,
-   refused, or short of a place's cell at the last read. A read that adds values rewrites the
-   precipitation key and (within the frame window) the precipitation frame; an hour whose file
-   is complete leaves the list, without a fetch when the newest files' read has stored it
-   whole since; an hour past `precip_due`, six hours after its hour ends, is dropped
-   with whatever coverage it has, a place still without a value being not published. The lane never waits on a precipitation file before
-   archiving an analysis hour.
-2. **Live hours.** For each product, the hours to try are the `gaps` first, then the hours
-   after the walk's cursor (the later of `newest` and `scanned`) up to the hour now due
-   (`due_latest`). An analysis is looked for from 44 minutes after its hour, its window's
-   opening, two minutes before NOAA's earliest publication; at the ten-minute pass's own
-   minutes that is the hour the product's 47-minute lag gives, as before. The windowed pass
-   retries only the gap of the hour now due and leaves the older gaps to the ten-minute pass. A
-   first pass starts at the present. A cursor more than 24 hours behind jumps to the present and
-   queues the skipped span for the backfill (once, and no older than the backfill reaches). For
-   each hour, up to three reads per product per pass: fetch the `.idx`, range-fetch TMP, WIND
-   and GUST, sample each field at the places' cells and onto the lattice, then fetch the
-   precipitation file, unless step 1 has stored it whole already, and do the same. Write the archive hour (once), the precipitation key, the four
-   frames and `grid/index.json`; queue the hour in `precipPending` when its precipitation
-   is short and its wait has not run out. A file NOAA Open Data does not have is looked for
-   on NOMADS from `settled_after` (the product's lag plus `NOMADS_AFTER_MINUTES = 30`) until
-   `NOMADS_KEEP_HOURS` (thirteen days, a day short of what NOMADS keeps), and the archive
-   document records `source: "nomads"`; a file on neither six hours after its hour
-   (`absence_final`) goes on the state's `missing` (or `pmissing`) list. The days an hour belongs
-   to resolve at their cut-off whatever the lane has found by then, and `days_past_cutoff` rebuilds
-   a recent place-day whose cut-off has passed while its summary is still provisional or absent. A `.idx` that is on neither (403 or 404) is an
-   *absence*: the hour becomes a gap, `scanned` moves past it, and the walk continues. The
-   absent hour's precipitation file is read all the same, on every retry of the gap until
-   every place has a value, and stored without an archive hour. After one refused
-   precipitation file of an absent hour, the lane reads no more absent hours' precipitation
-   that pass; the gap's retries or the sweep of step 4 read it later. A
-   read that fails (a short body, a message the decoder refuses, a 5xx after the retries)
-   is an *error* recorded against the product in `errors`; the hour becomes a gap,
-   `scanned` moves past it, and the product's walk stops for this pass so an outage costs
-   at most one failing read per product per pass. An hour already archived (a crash between
-   the archive write and the state write, or the backfill) counts as read without a fetch,
-   unless it is within the frame window and its frames are not in the grid index, in which
-   case it is read again for its frames. `newest` only ever moves on a read. The backfill's
-   cursor is seeded by the first hour the walk looks at, read or not (on 2026-09-27 a fresh
-   lane first looked while the newest hours were half an hour late, and a cursor
-   seeded only by a read would have left the backfill idle until one landed).
-3. **Days.** Rebuild every `days/` and `loc/` file that a new hour or a filled
-   precipitation key touches (a UTC hour lands in one local day per zone), and on the
-   ten-minute pass any day past its cut-off, from the archive hours, applying section 1's
-   rules. A row reads the files of any hour that has begun (its analysis) or ended (its
-   accumulation). Until 2026-11-03 it read only the hours the product's lag said had landed,
-   which hid an hour's precipitation until the next analysis was due. The state is saved.
-4. **Sweep.** Once a day (`PRECIP_SWEEP_HOURS = 24`), over the hours both walks have passed
+**NOMADS's limit.** NOMADS blocks a client that makes more than about 120 requests a minute. A
+pass makes at most `NOMADS_CALLS_PER_PASS = 40` calls to it, shared by every lane of the pass
+(`NomadsBudget`), each at least `NOMADS_MIN_INTERVAL = 2` seconds after the one before, and passes
+never overlap, so the lane makes at most about 30 calls a minute there, 60 requests if every call
+needed its second try. An analysis copy is four calls (the sidecar and three messages), a
+precipitation copy one, a file not there yet one, and a recheck one more. A call the budget has
+no room for is not made. The file waits for the next pass with nothing recorded about it, a copy
+cut short that way is dropped whole, and the backfill stops at the hour it is on. A normal hour
+takes five or six calls of the forty.
+
+1. **Live files.** The walk opens each stamp as its precipitation file becomes due, 14 minutes
+   after its hour ends (`LOOK_MINUTES`, its window's opening), every stamp after the walk's
+   cursor (the later of `newest` and `scanned`), into the state's `open` list with both its
+   files, the precipitation file that ends at the stamp and the analysis of that hour, which is
+   due from 44 minutes after the hour, two minutes before NOAA's earliest publication. A first
+   pass starts at the present, and a cursor more than 24 hours behind jumps to the present and
+   queues the skipped span for the backfill (once, and no older than the backfill reaches). Then
+   each open file is looked for on each server that has not given its copy, NOMADS first, newest
+   stamp first (`work_file`). A server is asked every pass for two hours after the hour
+   (`RETRY_EVERY_PASS_HOURS`), then once an hour, and again at the first ten-minute pass after
+   each of the file's cut-offs, and at the next pass after a download that failed the check,
+   while the lane reaches the hour there. A copy (`read_copy`) is the `.idx` sidecar and a range
+   request for each of TMP, WIND and GUST, or the precipitation file whole, each message hashed
+   and checked (section 1). A message whose hash equals the other server's copy takes that copy's
+   values, and any other is decoded at the places and, within the frame window, onto the lattice.
+   The copy is written once with its frames and `grid/index.json`. The map follows the copy that
+   counts, the first copy kept and NOMADS's where its bytes differ, while no cut-off of the file
+   has settled and when it was published by the first one. The file then settles as far as it
+   can (`settle_cuts`, section 1), for every cut-off once both copies are in, and on the
+   ten-minute pass for each cut-off that has passed, on the copies in hand. Every open file is
+   worked on the ten-minute pass, and once the deadline is near it is settled without a read, so
+   none misses the first ten-minute pass after its cut-off. Its settled record is written once it
+   has settled for every cut-off, and it leaves the open list once both servers' copies are kept,
+   or `RECHECK_AFTER_HOURS = 26` after its hour, when every zone's cut-off has passed; so the
+   second copy of a file that settled on the first is kept too, and recorded as late when it came
+   after. A file that settled on no copy leaves the hour without it and goes on the state's
+   `missing` (or `pmissing`) list. When a server was asked is kept only once it can matter, so a
+   pass that finds nothing new changes nothing. A `.idx` or a file not there (403 or 404) is an
+   *absence*. A copy that fails (a short body, a 5xx after the retries) is an *error*, and a
+   download whose message fails the check is *suspect* and no copy (section 1); both are recorded
+   against the product in `errors`, and that server is asked for no more files of that kind this
+   pass, so an outage costs one failing read of each. `newest`
+   only ever moves on the first copy of an analysis. The backfill's cursor is seeded by the first
+   stamp the walk opens, read or not (on 2026-09-27 a fresh lane first looked while the newest
+   hours were half an hour late, and a cursor seeded only by a read would have left the backfill
+   idle until one landed). An hour's precipitation is read as soon as NOAA publishes it, without
+   waiting for the next analysis, which it was read with until 2026-11-03, about half an hour
+   after it landed, so the day's last accumulation, on the bucket about 17 minutes after local
+   midnight, is in the day's total before the 12:45 AM cut-off. The days an hour belongs to
+   resolve once their files have settled for their cut-off, whatever the lane has found by then,
+   and `days_past_cutoff` rebuilds a recent place-day whose cut-off has passed while its summary is
+   still provisional or absent.
+2. **Days.** Rebuild every `days/` and `loc/` file that a new copy or a settled file touches (a
+   UTC hour lands in one local day per zone), and on the ten-minute pass any day past its
+   cut-off, from the archive, applying section 1's rules. A row reads the files of any hour that
+   has begun (its analysis) or ended (its accumulation). Until 2026-11-03 it read only the hours
+   the product's lag said had landed, which hid an hour's precipitation until the next analysis
+   was due. The state is saved.
+3. **Sweep.** Once a day (`PRECIP_SWEEP_HOURS = 24`), over the hours both walks have passed
    (from the backfill's `oldest`, at most 30 days back, to 48 hours before the live cursor,
-   outside queued catch-up spans): read the analysis of every hour that has no archive hour
-   while NOMADS may still keep it, and the precipitation of every hour that has no
-   precipitation key, and rebuild the days they touch. A refused file ends that product's
-   sweep until the next day's; a sweep cut short by the deadline is not stamped and is due
-   again next pass.
-5. **Refresh.** Rewrite, newest first and `REFRESH_DAYS_PER_PASS = 6` a pass, the listed days
+   outside queued catch-up spans and the open list): look on both servers for every file the
+   archive has nothing of, neither a settled record nor a copy, NOMADS while it may still keep
+   the hour and within the pass's budget, and rebuild the days they touch. The file settles on no
+   copy first, since its days were final without it, so what the sweep finds is recorded and
+   flagged as late and never shown or counted. A refused file ends that product's sweep until the
+   next day's; a sweep cut short by the deadline or the budget is not stamped and is due again
+   next pass.
+4. **Refresh.** Rewrite, newest first and `REFRESH_DAYS_PER_PASS = 6` a pass, the listed days
    that lack either CSV file and the days still in `relayout`. When `LAYOUT` changes (it was
    set to `rtma-only-2026-09-30` when URMA was dropped, `cutoff-2026-10-14` with the cut-off
-   rule, and `running-2026-11-03` when the place files gained `show`, `run` and the publication
-   times) the first pass queues every listed day,
+   rule, `running-2026-11-03` when the place files gained `show`, `run` and the publication
+   times, and `copies-2026-11-04` when the raw CSV gained each server's copy and the rows the pass
+   their copies became final at) the first pass
+   queues every listed day,
    so the listed days (sixty at most) are rewritten within about two hours; a day with no archive hours
    writes nothing and leaves the queue. The running values cost about 0.3 s of computing a day of
    sixty-seven places on a laptop (0.41 s against 0.10 s without them), inside the same deadline
    checks as every other rebuild.
-6. **Backfill.** With the remaining budget, walk back, newest first: a queued catch-up span first, then from the cursor back to 30 days ago;
-   frames for the last seven days, point reads only before that. The cursor advances only
-   after a product-hour is written or known absent or unreadable (an unreadable hour is
-   skipped and recorded, like a missing one). An absent hour's precipitation is read and
-   stored as in step 2, with the same limit of one refused file per product per pass. The
-   state is saved every twenty hours read.
-7. **Prune**, once a day: frames older than 30 days and their index entries, and the state's
-   lists of hours not published older than 33 days.
+5. **Recheck.** Each first copy is looked at once more `RECHECK_AFTER_HOURS = 26` after its hour,
+   when every zone's cut-off has passed, by its server's Last-Modified time from a HEAD request
+   (`recheck_lane`, `gov_weather.fetch_head`), `RECHECK_HOURS_PER_PASS = 4` hours a pass at most,
+   NOMADS within the pass's budget. A file its server has written again since is fetched and
+   hashed, not decoded, and recorded as a later replacement (`note_later`), never used, and the
+   days whose raw CSV it adds to are rebuilt; a download that fails the check is no replacement
+   and is reported as an error. An hour is passed (`rechecked`) only once all its copies have been
+   looked at.
+6. **Backfill.** With the remaining budget, walk back, newest first: a queued catch-up span first,
+   then from the cursor back to 30 days ago. Each hour's two files are looked for on both servers
+   (NOMADS while it keeps the hour) and kept, and each file then settles for every cut-off that has
+   passed, on the copies in hand, this being the first ten-minute pass to work it; frames for the
+   last seven days, point reads only before that. The days it fills were never final without it,
+   since a day waits while the backfill has yet to reach any of its hours (section 1). A file
+   with a day still before its cut-off, or whose other copy is still to come within a day of its
+   hour, joins the open list. Once the pass's NOMADS budget is spent, or the deadline comes, within
+   an hour, the walk stops at the hour it is on, unpassed and unsettled, and carries on next pass.
+   The state is saved every twenty hours.
+7. **Prune**, once a day: frames older than 30 days and their index entries, the state's
+   lists of hours not published older than 33 days, and open stamps older than 30 days.
 8. **Always**, in a `finally`. On the ten-minute pass `grid/index.json`, the health file, the
    state and `index.json` last, so a reader sees a consistent set whatever happened above (the
    health file before the state, which keeps when it was written). On the windowed pass the
    state when it moved and `index.json` when a file came in; every frame it wrote was followed
-   by its grid index. Steps 4 to 7 are the ten-minute pass's.
+   by its grid index. Steps 3 to 7 are the ten-minute pass's.
 
-Nothing a NOAA object does fails the pass. Every fetch and decode of an hour is guarded
-inside `read_hour` and `read_precip`; every lane call is guarded in the pass; the pass-level
+Nothing a NOAA object does fails the pass. Every fetch and decode of a copy is guarded
+inside `read_copy`; every lane call is guarded in the pass; the pass-level
 `except` is the last resort and still reaches the `finally`. A pass returns 1 only when a
 read failed and nothing at all was read, a precipitation file included. The health file keeps a failure streak per product
 through `archive.update_health`: a pass with a read of that product resets it; a pass counts
@@ -646,8 +787,9 @@ and never touch it, so an hour any pass read since the last ten-minute pass (`la
 `healthAt` in the state) is a read there, and a read that fails in a windowed pass counts once
 the ten-minute pass meets the same file with nothing read since. The health file keeps URMA's last streak from before 2026-09-30; a product the lane no
 longer reads raises no alarm. `LAST_STATUS` carries the pass's `mode` and `lease` (`released`,
-`held`, or `unknown` when the store could not be read), the counts and the lists (reads,
-precipitation reads, absences, waiting precipitation, errors), and `newest` per product.
+`held`, or `unknown` when the store could not be read), the counts (reads, precipitation reads,
+second copies, absences, errors, the NOMADS calls made) and `newest` per product. The printed
+status adds the lists, the files left open (`waiting`) and the recheck's and the sweep's counts.
 
 Write budget per pass (measured with fifty places, when the lane read two products): a pass
 where one hour of each product landed wrote about 70 objects; an empty pass five; a
@@ -659,7 +801,11 @@ and its days rebuilt on their own, one more rebuild an hour (a day file, two CSV
 sixty-seven place files, twice that across a local midnight), and each of the fourteen passes an
 hour writes the lease about three times (a create the store refuses, a takeover, a release) and
 reads it once, about 30k lease writes and 10k reads a month. A windowed pass with nothing new
-writes only the lease. Schema 2's first 30 days were filled on 2026-09-29 by a local run of
+writes only the lease. With both servers read (2026-11-03, counted the same way) each hour writes
+four copies and two settled records where it wrote an archive hour and a precipitation key, and a
+second copy that lands in a later pass than the first, which NOAA Open Data's usually does,
+trailing NOMADS by a couple of minutes, rebuilds the days it touches again for the raw CSV, up to
+two more rebuilds an hour, about 100k more PUTs a month at most. Schema 2's first 30 days were filled on 2026-09-29 by a local run of
 the lane's own `read_hour`, `write_hour` and `rebuild_days` with the reads in parallel, then
 uploaded, so the live lane started with its backfill done.
 
@@ -795,7 +941,7 @@ averages or rounds a value, and its only sums are of times and pixels. In order:
   marked, and hourly precipitation bars with the running total as a step line. Each shades the
   hours still to come, draws a now line at the clock and a dashed line at the next hour due, and
   answers hover with the hour's values, its exact values under the toggle and when its file was
-  published, and where;
+  first published, and on which server (`pubSrc`, or `src` on a file written before 2026-11-03);
 - every hour in a table, the shown or exact values, the running precipitation total and the
   analysis's publication time (≈ where estimated), with a footnote that the rounded hours can
   add up to a different figure than the total, which is the column the contract resolves on.
@@ -842,26 +988,51 @@ report conventions have no analogue here.
   fetch or decode is the hour's failure, the pass still writes the state, the grid index and
   the index, and a persisting one reaches the alarm streak; a product the lane no longer
   reads raises no alarm; the alarm fires after the outage passes and `asof` stays on the hour
-  read; frames are indexed the pass they are written; a partial bitmap is retried and filled;
-  days written before URMA was dropped are rewritten a few a pass and the grid index drops
+  read; frames are indexed the pass they are written; days written before URMA was dropped are rewritten a few a pass and the grid index drops
   URMA's frames without deleting them; the catch-up span is queued once and clamped; the backfill starts behind
   a late newest hour; the place file carries the precipitation in the row of the hour it
   starts; the day's precipitation runs midnight to midnight; a value the file holds exactly is
   converted exactly and the aggregate rounded once; a complete day is final at its cut-off,
   12:45 AM local time the next day, and not before, stamped with the cut-off; a short day is
   final there on the hours available and never closed; a file published after the cut-off never
-  counts and is shown as late, one published before it and read after it counts, and the day's
+  counts and is shown as late, one published before it counts (the summary goes by publication
+  time, and the copy a row has is fixed when its file settles), and the day's
   last accumulation landing after the cut-off leaves the total; a place with nothing published by
   the cut-off goes to event review, through a pass, on a day other places have hours for, and a
-  day with nothing read anywhere is not written; a replaced precipitation file keeps its first
-  version; each read carries its file's Last-Modified time, which `fetch_bytes` and `fetch_range`
-  report; a file missing from NOAA Open Data is read from NOMADS half an hour after it is due (a
-  precipitation file 27 minutes after its hour ends) and not past thirteen days, and the sweep
-  reads a missing analysis from there; the day is written as raw and processed CSV; an
-  hour whose analysis never lands still adds its precipitation, in the live lane, in the
-  backfill and through the daily sweep, without counting toward the day's analyses, and a
-  refused file ends a product's sweep for the day;
-  `fetch_range` accepts the clamped 206 for a last message.
+  day with nothing read anywhere is not written; each read carries its file's Last-Modified
+  time, which `fetch_bytes` and `fetch_range` report, and `fetch_head` gives it without the body;
+  the day is written as raw and processed CSV; an hour whose analysis never lands still adds its
+  precipitation, in the live lane and in the backfill, without counting toward the day's
+  analyses, and a refused file ends a product's sweep for the day;
+  `fetch_range` accepts the clamped 206 for a last message. The readers and writers of the
+  archive's earlier shape, which the tests still make hours with, keep their own tests (a
+  replaced precipitation file keeps its first version, a file missing from NOAA Open Data is
+  read from NOMADS half an hour after it is due and not past thirteen days).
+- `tests/test_analysis.py`, for both servers (2026-11-03) and the freeze (2026-11-04): which copy
+  counts, case by case (`choose`), the first publication on either server and its server, and
+  settling cut-off by cut-off (nothing on one copy before a cut-off or on a windowed pass, a
+  cut-off's days at the first ten-minute pass after it on the copy in hand, the rest at once when
+  the second copy comes, a copy read after a cut-off settled late for its days, a carried-over
+  file settling on no copy); both copies kept with their times and hashes, the second taking the
+  first's values without decoding where the bytes match, the hour taking the first publication
+  while its values are NOMADS's, and the settled time in the raw CSV and the place file; a file
+  settling once both copies are in, and one NOAA Open Data never has settling on NOMADS's at the
+  first ten-minute pass after its cut-offs and looked for until a day after its hour; a file on
+  neither server settling on no copy for each day at that pass, with its record written with the
+  last; the two copies differing, NOMADS's counting, and the hash and value differences kept
+  apart in the raw CSV; a NOMADS copy that differs and lands after the cut-off recorded and
+  flagged in the raw CSV and the place file, with the archive hour, the day, the map and every
+  value unchanged; a NOMADS copy that differs before the cut-off redrawing the map; a day staying
+  provisional past its cut-off until its files settle, a windowed pass leaving it so, then final
+  and unchanged by a copy found later; a later replacement found by the recheck recorded beside
+  the first copy, added to the raw CSV and never used; the NOMADS budget's cap and spacing, a call
+  it has no room for neither made nor recorded, and the backfill stopping on it, unpassed, and
+  carrying on; no copy started once the pass is inside its reserve; a download that fails the
+  check no copy until it comes whole, the same failing bytes twice kept as NOAA's own file with
+  the message refused and counting per file, and a message with no value at any place treated
+  the same; the daily sweep recording what it finds and never using it; and a state from before
+  2026-11-03 carrying its gaps and pending precipitation into the open list, a carried-over file
+  settling on no copy for days already final.
 - `tests/test_analysis.py`, for the settlement display: the three half ties (280.65 K shows 46,
   250.65 K shows −9, 15.875 mm shows 0.63) by the rule and through the place file; a split
   precipitation total is summed in millimetres and converted once; the running values are the
@@ -878,8 +1049,8 @@ report conventions have no analogue here.
   and the analysis read later does not fetch it again; New York's last accumulation of a day is
   in before the 12:45 AM cut-off and the day resolves on it by the same rules; a windowed pass
   with nothing new writes nothing and fetches only the files newly due; the analysis is
-  looked for from :44; a windowed pass leaves the older gaps, the pending precipitation, the
-  backfill, the sweep, the refresh and the prune to the ten-minute pass, which does them; a pass
+  looked for from :44; a windowed pass leaves the older open files, the backfill, the sweep, the
+  refresh and the prune to the ten-minute pass, which does them; a pass
   that finds the lease held writes and fetches nothing and is not a failure, a pass holds the
   lease while it reads the state and for its budget plus 90 s, and one left by a pass that died
   is taken over once it expires; a windowed pass's read counts for the next ten-minute pass's

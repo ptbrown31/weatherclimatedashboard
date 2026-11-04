@@ -84,9 +84,10 @@ the thirty-day backfill (`docs/analysis.md`), and the `analysis-windows` schedul
 `analysis-window`), every two minutes about when NOAA publishes each file. A lease under
 `data/archive/analysis2/` keeps the two from overlapping. A stack update that adds a schedule
 for a job the deployed code does not know, as `analysis-window` did on 2026-11-03, needs the
-code uploaded first (section 4), or each of its invocations fails as an unknown job. It reads RTMA from NOAA Open Data
-(`noaa-rtma-pds`; public, no credential), and from NCEP's NOMADS server a file NOAA Open Data
-lacks, and writes `data/snapshots/analysis2/` and `data/archive/analysis2/`. The page it feeds, `analysis-resolution.html`, is unlisted and
+code uploaded first (section 4), or each of its invocations fails as an unknown job. It reads every RTMA file from NOAA Open Data
+(`noaa-rtma-pds`; public, no credential) and from NCEP's NOMADS server (since 2026-11-03, at most
+forty calls a pass, two seconds apart, well inside the about 120 requests a minute NOMADS allows a
+client), and writes `data/snapshots/analysis2/` and `data/archive/analysis2/`. The page it feeds, `analysis-resolution.html`, is unlisted and
 `noindex`. It also creates the `hrrr` schedule (`cron(12/15 * * * ? *)`, every fifteen minutes at
 :12, no retry) for the HRRR lane (`pipeline/hrrr.py`), which reads each run's six station fields from
 NOAA Open Data (`noaa-hrrr-bdp-pds`; public, no credential) as the hours land and writes
@@ -209,7 +210,7 @@ takes minutes to an hour.
 | Analysis lane stale (`sources.*.latest` old) | Read the last `analysis` invocation's log: a missing NOAA object is reported as `absent`, never an error; an unreadable one is recorded under `errors` against its product and skipped; `data/archive/_meta/health_analysis.json` holds the streaks, and the alarm fires after six passes with a product two hours or more overdue or failing to read. |
 | Market overlay needs to go dark | `market_overlay.standalone` to `off` in `config/site.json`, rebuild and sync the site (step 6); the pipeline can keep quoting. |
 | Traffic cost check | CloudFront's free tier is 1 TB out, 10M requests and 2M function invocations a month. A cold page view measures about 82 KB, 12 requests and 8.5 function invocations, so the function allowance binds first, at roughly 235k views a month; past that the cost is a few dollars per million views. Nothing in the request path can be overloaded: the pipeline runs on a schedule, not on visits. |
-| Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs, about 200k for the quote job (45 objects a pass, 144 passes a day) and about 110k for the analysis lane (an archive hour, a precipitation key, four frames, a day file and fifty place files per product-hour, 48 product-hours a day, plus five bookkeeping writes a pass and the precipitation retries; a one-time 15k for its backfill), roughly $2.60 a month in total; the lane's frames hold about 1.3 GB. Lambda stays inside the always-free allowance (the quote pass about 90 s and an analysis landing pass well under a minute, both at 512 MB). `aws ce` or the billing console. |
+| Cost check | S3 PUTs are the only meaningful line: about 200k a month for the weather jobs, about 200k for the quote job (45 objects a pass, 144 passes a day) and about 110k for the analysis lane (an archive hour, a precipitation key, four frames, a day file and fifty place files per product-hour, 48 product-hours a day, plus five bookkeeping writes a pass and the precipitation retries; a one-time 15k for its backfill), roughly $2.60 a month in total before 2026-11-03. Since then, by count from the code and not measured, the lane writes about 30k more for its lease and, with both servers read, up to about 100k more for each server's copy and a second day rebuild when the second copy lands, about $0.65 a month more at $0.005 per thousand PUTs; the lane's frames hold about 1.3 GB. Lambda stays inside the always-free allowance (the quote pass about 90 s and an analysis landing pass well under a minute, both at 512 MB). `aws ce` or the billing console. |
 
 ## 10. The vendor lane (live-storm wind probabilities)
 

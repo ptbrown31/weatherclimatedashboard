@@ -557,6 +557,9 @@ window.WXSettle = (() => {
         : hourZ(tz, o.t) + ' · ' + utc(o.t) + ' UTC';
       const pairs = [];
       let footer;
+      // the server the file was on first, whose time it is (`pubSrc`, from
+      // 2026-11-03, when the lane began reading both); a file written before
+      // names its one server in `src`
       const arrived = (at, isEst, src) => (isEst ? 'Arrived about ' : 'Published ') + clock(tz, at) + (src && SRC[src] ? ' on ' + SRC[src] : '') + (isEst ? ', estimated' : '');
       if (k !== 'pcp') {
         const inn = S.inA(o), lt = S.lateA(o);
@@ -566,7 +569,7 @@ window.WXSettle = (() => {
           const one = (name, key) => { pairs.push([name, fx(shown(o, key), P.running ? DEC[key][0] : DEC[key][1]) + (key === 'temp' ? '°F' : ' mph')]);
             if (exact && P.running && o.v[key] != null) pairs.push(['Exact', fx(o.v[key], DEC[key][1]) + (key === 'temp' ? '°F' : ' mph')]); };
           if (k === 'temp') one('Temperature', 'temp'); else { one('Wind', 'wind'); one('Gust', 'gust'); }
-          footer = lt ? 'Published ' + clock(tz, o.anlAt) + ', after the cut-off, and not counted.' : arrived(o.anlAt, o.anlEst, o.v.src);
+          footer = lt ? 'Published ' + clock(tz, o.anlAt) + ', after the cut-off, and not counted.' : arrived(o.anlAt, o.anlEst, o.v.pubSrc || o.v.src);
         }
       } else {
         const inn = S.inP(o), lt = S.lateP(o);
@@ -577,7 +580,7 @@ window.WXSettle = (() => {
           if (exact && P.running) pairs.push(['Exact', fx(o.v.precip, 4) + ' in']);
           const rp = o.run && o.run.precip;
           if (!lt && rp) pairs.push(['Total by ' + hourOnly(tz, o.end), fx(exact ? rp.exact : rp.value, exact ? 4 : 2) + ' in']);
-          footer = lt ? 'Published ' + clock(tz, o.pcpAt) + ', after the cut-off, and not counted.' : arrived(o.pcpAt, o.pcpEst, o.v.pcpSrc);
+          footer = lt ? 'Published ' + clock(tz, o.pcpAt) + ', after the cut-off, and not counted.' : arrived(o.pcpAt, o.pcpEst, o.v.pcpPubSrc || o.v.pcpSrc);
         }
       }
       return tip.rows(title, pairs, footer);
