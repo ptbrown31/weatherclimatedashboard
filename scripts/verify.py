@@ -4183,6 +4183,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 STORM_OPENED = "() => !!document.querySelector('#liveStorms details.stormdone[open] .attrib')"
                 # the open storm's panel ends on the vendor's attribution, cards or none
                 STORM_PANEL = "() => " + HUR_MAP + " && !!document.querySelector('#liveStorms .attrib')"
+                # a series click opens its contract on IBKR's app in a new tab, and Playwright reports
+                # a popup only once its first request has been answered, so a slow answer from IBKR
+                # stopped a full run once (5 November 2026). The checks read the address the page
+                # opened, so the app is answered here and never asked, for the rest of this context
+                page.context.route("https://www.interactivebrokers.com/predictionmarkets/**",
+                                   lambda r: r.fulfill(status=200, content_type="text/html",
+                                                       body="<!doctype html><title>IBKR app</title>"))
                 for tag, _interim, _final in (("live", False, False), ("interim", True, False), ("settled", True, True)):
                     page.route("**/data/snapshots/**", _storm_routes(_interim, _final))
                     page.goto(f"{srv.url}/hurricane.html")
