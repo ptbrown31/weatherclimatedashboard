@@ -290,6 +290,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
         except PlaywrightError:
             pass                    # a page that never asks for it is read as it stands
 
+    def clear_routes(pg):
+        """Take every route off `pg` once the handlers still running have answered.
+        Most handlers here read the real file with route.fetch() and answer with an
+        edited copy. If a page loses its last route while one of them is still reading,
+        Playwright sends that request on to the server, and the handler's own answer
+        then fails with "Route is already handled!" at the run's next Playwright call.
+        That stopped a full run once, on 5 November 2026. Closing the context under such
+        a handler fails it in the same way. With nothing in flight this returns at once."""
+        pg.unroute_all(behavior="wait")
+
     # What each page has drawn once it is done. A read waits for what it needs, a page that
     # draws in stages is read once its last stage is in, and one that draws again as a late
     # file lands is read once that file is in, so no redraw falls between a hover and its read.
@@ -973,7 +983,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(hov and any("Sustained" in t for t in hov)
                              and any("ten knots" in t or "none at this hour" in t for t in hov)),
                         str(hov)[:180])
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- a report with no temperature carries the day's peak
                 #
@@ -1019,7 +1029,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} wind panel: the caption names that report's gust as the peak so far",
                         bool(nt and any("46 mph peak so far" in c for c in nt["caps"])),
                         str(nt and nt["caps"])[:170])
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- the day control, and the desk's anticipated ladder
                 #
@@ -1203,7 +1213,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         }""", zt["station"])
                         chk.add(f"{scheme} wind map: a dot clicked while zoomed still scrolls to its station's panel",
                                 land["y"] > 0 and abs(land["top"] - 12) <= 4 and "wind-markets" in land["path"], str(land))
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 page.context.close(); page = page_wall
 
                 # ---- the analysis resolution page: a proposed settlement
@@ -1317,7 +1327,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 ana_nr = page.evaluate("() => [[...document.querySelectorAll('#anaCalGrid td.open')].map(t => t.dataset.day), location.search]")
                 chk.add(f"{scheme} analysis: an index without the field opens on the newest day",
                         ana_nr[0] == [ana_days[-1]] and f"day={ana_days[-1]}" in ana_nr[1], str(ana_nr))
-                page.unroute("**/analysis2/index.json")
+                clear_routes(page)
                 ana_goto(page, f"?day={ana_day}")
                 a0 = page.evaluate("""() => ({
                   labels: Object.fromEntries([...document.querySelectorAll('#anaDots g.pd')].map(g => [g.dataset.loc, (g.querySelector('text.pvt') || {}).textContent || ''])),
@@ -1471,7 +1481,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   line: (document.querySelector('#anaStatus') || {}).textContent || '',
                   cards: document.querySelectorAll('#locPanel .anacard').length,
                   prov: document.querySelectorAll('#anaDots g.pd[data-loc="new-york-ny"] .pv.prov').length })""")
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 chk.add(f"{scheme} analysis: ?loc= opens the panel on load",
                         st_p["open"] and len(st_p["pills"]) == 1 and st_p["cards"] == 5, str(st_p)[:160])
                 chk.add(f"{scheme} analysis: the status line says provisional when RTMA is incomplete, with the count, and the map dashes the label",
@@ -1502,7 +1512,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 cards_r = page.eval_on_selector_all("#locPanel .anacard .ae", "e => e.map(x => x.textContent)")
                 novalue_r = page.locator("#locPanel .anacard .av.dim").count()
                 hollow_r = page.locator('#anaDots g.pd[data-loc="new-york-ny"] .pv.none').count()
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 chk.add(f"{scheme} analysis: a place with no hour by the cut-off says under review on every card, with no value, and is hollow on the map",
                         pills_r == ["Under review"] and "under review" in page.evaluate("() => document.querySelector('#anaStatus').textContent")
                         and len(cards_r) == 5 and novalue_r == 5 and all("12:45 AM cut-off" in c_ for c_ in cards_r) and hollow_r == 1,
@@ -1520,7 +1530,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 ana_goto(page, "")
                 fr = page.evaluate("""() => ({ cls: document.querySelector('.status').className, text: document.querySelector('.status').textContent,
                                               newest: (document.querySelector('#anaNewest') || {}).textContent || '' })""")
-                page.unroute("**/analysis2/index.json")
+                clear_routes(page)
                 ana_latest = {k: (v.get("latest") or "").replace("T", " ").replace(":00Z", " UTC") for k, v in (ana_index.get("sources") or {}).items()}
                 chk.add(f"{scheme} analysis: the freshness pill reads the index's written time against the job cadence",
                         "live" in fr["cls"] and "behind" not in fr["text"] and "every 10 minutes" in fr["text"], str(fr)[:160])
@@ -1648,7 +1658,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         k4["open"] == [ana_pick] and f"day={ana_pick}" in k4["url"] and "loc=new-york-ny" in k4["url"] and k4["place"].startswith("New York")
                         and k4["head"] == f"{ana_pk:%A}, {ana_pk:%B} {ana_pk.day}, {ana_pk.year}" and k4["rows"] == 24,
                         str([k4["open"], k4["url"], k4["head"], k4["rows"]]))
-                page.unroute("**/analysis2/index.json")
+                clear_routes(page)
                 # ---- the map's box finds a place by name for the keyboard, a
                 #      screen reader and a phone: every place is in its list, a
                 #      typed name narrows it, the arrows move through it, Enter
@@ -2372,7 +2382,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     chk.add(f"{scheme} settlement display: inside an arrival window the place file is fetched again with ?b= and the day fills in without a reload",
                             f"{lv_ka - 1} of " in rf0 and f"{lv_ka} of " in rf1 and any("?b=" in u_ for u_ in rf_seen),
                             str([rf0[:50], rf1[:50], rf_seen]))
-                    rf_ctx.close()
+                    clear_routes(rf); rf_ctx.close()
 
                     # late means not in yet. The accumulation's late note gives NOAA's
                     # usual time and the cut-off and says nothing of the next analysis,
@@ -2408,7 +2418,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                note: p ? p.querySelector('.ananote').textContent : '' }; }""")
                     lt.clock.run_for(61000)
                     lt1 = ana_until(lt, "(w) => { const s = document.querySelector('#anaStatus').textContent; return s.includes(w) && s; }", ms=5000, arg=f"{lv_ka} of ") or ""
-                    lt_ctx.close()
+                    clear_routes(lt); lt_ctx.close()
                     chk.add(f"{scheme} settlement display: a late accumulation's note gives NOAA's usual time and the cut-off, and nothing of the next analysis",
                             lt0["state"] == "late" and lt0["note"].startswith("Usually published by ")
                             and "next analysis" not in lt0["note"] and "It counts if published by the cut-off" in lt0["note"],
@@ -2422,7 +2432,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     lq_ctx, lq, lq_seen = late_page(t_a + dt.timedelta(minutes=90), False)
                     lq.clock.run_for(61000); lq.wait_for_timeout(1500); lq.clock.run_for(61000); lq.wait_for_timeout(500)
                     lq_states = lq.evaluate("() => [...document.querySelectorAll('#anaNext .anadue')].map(d => d.dataset.state)")
-                    lq_ctx.close()
+                    clear_routes(lq); lq_ctx.close()
                     chk.add(f"{scheme} settlement display: past half an hour late, outside the windows, the place file is not fetched again",
                             lq_states == ["late", "late"] and not any("?b=" in u_ for u_ in lq_seen), str([lq_states, lq_seen]))
                 # no time is estimated anywhere: no ≈ on the samples' final day, on
@@ -2471,7 +2481,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 hm = page.eval_on_selector_all("#vmap g.dot", "e=>e.map(x=>x.getAttribute('data-station'))")
                 chk.add(f"{scheme} hourly map: a station carried for its wind is not on it",
                         bool(hm) and "KBOS" not in hm, str(len(hm)) + " dots")
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- the hourly map times a reading by the report it came from.
                 # The newest report here carries no temperature, so the newest
@@ -2507,7 +2517,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} hourly map: a reading is timed by the report it came from",
                         bool(lt and "71° at" in lt["tip"] and lt["reading"] in lt["tip"]
                              and lt["report"] not in lt["tip"]), str(lt)[:200])
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- the city page stacks its other contracts, wind then hourly
                 #
@@ -2614,7 +2624,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             bool(hit and hit["isRung"]), str(hit))
                     chk.add(f"{scheme} city page: hourly rungs are drawn in the plot, not in a side column",
                             cc["columnPrices"] == 0, str(cc))
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 page.context.close(); page = page_wall
 
                 # ---- the cyclone area: one map per ocean, each opening its own view
@@ -2801,7 +2811,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 vdots = len(page.eval_on_selector_all("#vmap g.dot", "e=>e.map(x=>1)"))
                 chk.add(f"{scheme} wind-only stations: they stay on the wind map, which is why they are carried",
                         vdots == base["onConus"], f"{vdots} of {base['onConus']}")
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # The built page itself, for a station the real roster flags.
                 #
@@ -2872,7 +2882,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             page.locator("#windLinks a[href='wind-markets.html']").count() == 1, "")
                     chk.add(f"{scheme} wind-only page: it renders without a script error",
                             len(errs) == errs_wo, str(errs[errs_wo:][:1]))
-                    page.unroute("**/data/snapshots/**")
+                    clear_routes(page)
                     page.context.close(); page = page_wall
                 page.goto(f"{srv.url}/index.html"); until(page, MAP_DRAWN)
 
@@ -3183,7 +3193,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} rows: the HRRR is in the additional variables panels too",
                         fam["advHrrr"] and fam["advLine"] >= 1, str({k: fam[k] for k in ("advHrrr", "advLine")}))
                 chk.add(f"{scheme} rows: the station's other contracts sit at the foot of the page", fam["foot"], "")
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 # a station whose snapshot carries no HRRR (off the grid) shows none
                 page.goto(f"{srv.url}/city.html?station=KSFO"); until(page, CITY_CHART)
                 none_leg = page.eval_on_selector_all("#chart text", "e=>e.map(x=>x.textContent)")
@@ -4818,7 +4828,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     chk.add(f"{scheme} storm ({tag}): a rising ladder fires no settlement-pending note",
                             page.locator("#liveStorms .note.warn").count() == 0, "")
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
-                    page.unroute("**/data/snapshots/**")
+                    clear_routes(page)
 
                 # ---- the settled gust is rounded half up to a whole mile an hour, the figure the
                 # wind contracts resolve on (owner, 2026-10-12): a final of 99.5 mph prints 100 and
@@ -4848,7 +4858,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} storm: where interim squares stack, the strike nearest Yes and No stands on top",
                         bool(stack and stack["n"] == 3 and stack["stroke"] == "hsl(210 70% 45%)" and stack["glyph"] == "\u2713"),
                         str(stack))
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- a settled storm whose pool the exchange has dropped from its listing (Isaias,
                 # 2026-10-13): the section draws the pool's kept series and how it resolved, found
@@ -4876,7 +4886,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(gone["series"] and "(LHLERG)" in gone["title"] and gone["lines"] >= 1 and gone["resolved"]
                              and "96 mph · Yes" in gone["rows"] and "41 mph · No" in gone["rows"]
                              and 26 in gone["dots"] and not gone["vague"]), str(gone)[:300])
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- the end of a long storm's delivery axis. Isaias settled with fourteen
                 # cycles, so its cards' sixteen columns stood closer together than the two
@@ -4959,7 +4969,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                             bool(pool_end and pool_end["apart"] and not pool_end["crowd"] and pool_end["inside"]
                                  and pool_end["nextOver"]), str(pool_end)[:300])
                     chk.add(f"{scheme} storm ({tag}): no script errors", not errs, "; ".join(errs)[:200])
-                    page.unroute("**/data/snapshots/**")
+                    clear_routes(page)
 
                 # ---- a cycle recorded after a later one keeps its place in cycle order
                 # (Reask, 7 October: Isaias's 00Z read after its 06Z for an hour once the
@@ -5012,7 +5022,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 }""")
                 chk.add(f"{scheme} hurricane: on a narrow screen a link naming a location scrolls to its card",
                         bool(nr and nr["side"] == "none" and nr["y"] > 0 and nr["top"] < nr["h"] and nr["bottom"] > 0), str(nr))
-                nctx.close()
+                clear_routes(npg); nctx.close()
                 # ---- the exchange's category aliases (IBKR, 2026-10-07): its research button
                 # opens /<category id>.html, and the page moves the reader on, carrying what
                 # the link adds while the destination's own terms win a clash
@@ -5144,8 +5154,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 back = page.evaluate('() => ((document.querySelector("#liveStorms") || {}).textContent || "")')
                 chk.add(f"{scheme} basins: switching back restores the Atlantic storm",
                         "Erin" in back and "Lowell" not in back, back[:90])
-                page.unroute(_cfg_url, _expected_cfg)
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- the replay (owner, 2026-10-20): the storm's map steps through NHC's
                 # advisories with the section's timeline, each place carrying the median gust
@@ -5331,7 +5340,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} replay: a settled Pacific storm stays on the Pacific view after NHC's roster lets it go",
                         "Nolo" not in al_txt and "Nolo" in ep_txt, str(["Nolo" in al_txt, "Nolo" in ep_txt]))
                 page.locator("#b1").click(); page.wait_for_timeout(400)
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- the page's order, the standing links, and a storm that
                 #      has stopped updating alongside one still running
@@ -5528,7 +5537,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                              and "file expected" in cd["line"]
                              and "4 to 6 hours after their cycle" in cd["line"]),
                         str(cd))
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 page.goto(f"{srv.url}/hurricane.html")
                 until(page, HUR_DRAWN)
@@ -5597,7 +5606,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 page.goto(f"{srv.url}/hurricane.html"); until(page, HUR_DRAWN)
                 page.locator("#b2").click(); page.wait_for_timeout(700)
                 hs1 = page.evaluate(hur_state)
-                page.unroute("**/snapshots/hurricane.json")
+                clear_routes(page)
                 chk.add(f"{scheme} hurricane: a point with NHC's category reads it, short on the map and in full in its hover",
                         any(t.endswith("115 mph Cat 3") for t in hs1["labels"])
                         and any("Wind115 mph, Category 3 hurricane" in t for t in hs1["tips"]), str(hs1["labels"][:6]))
@@ -5708,7 +5717,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     .some(c => /no price is resting on it yet/.test(c.textContent)) })""")
                 chk.add(f"{scheme} pool with a placeholder book: the desk's figure stands and the page says why",
                         ph["desk"] >= 2 and ph["noprice"] >= 1 and ph["said"], str(ph))
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
 
                 # ---- hurricane contract links, on every surface that shows a price
                 RE = (r"^https://www\.interactivebrokers\.com/predictionmarkets/app/#/(\d+)/product-details/"
@@ -5984,7 +5993,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(f_off and f_back and f_off["roads"] == 0 and f_off["groups"] == 0
                              and f_back["roads"] == 1 and f_back["names"] == f0["names"]),
                         f"off={f_off and (f_off['roads'], f_off['groups'])} back={f_back and (f_back['roads'], f_back['names'])}")
-                page.unroute("**/data/snapshots/hurricane.json", _storm_here)
+                clear_routes(page)
                 # ---- a satellite loop for each storm on view (owner, 2026-10-10): STAR's floater
                 # frames, copied into the bucket by pipeline/floater.py, under the map; the newest
                 # frame shows at once, the loop plays while the card is on screen, and a storm the
@@ -6042,8 +6051,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 n_ep = page.locator("#stormLoops .loopcard").count()
                 chk.add(f"{scheme} storm loop: the other ocean's view carries no card for this storm",
                         n_ep == 0 and page.locator("#stormLoops").evaluate("e => e.hidden"), f"cards={n_ep}")
-                page.unroute("**/data/snapshots/floater/**", _floater)
-                page.unroute("**/data/snapshots/hurricane.json", _storm_here)
+                clear_routes(page)
                 # with no loop to draw nothing changes on the page, so the read waits for the page's
                 # answer for the loops' index
                 goto_answered(page, f"{srv.url}/hurricane.html", "/floater/index.json"); until(page, HUR_DRAWN)
@@ -6134,7 +6142,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # the six counties the samples list, plus Escambia, and none of the other 209
                 chk.add(f"{scheme} landfall: a county the exchange lists is outlined and priced, an unlisted one is not drawn",
                         n_ink == 7 and "Landfall contract" in esc_tip and "17" in esc_tip, f"outlined={n_ink} tip={esc_tip[:90]}")
-                page.unroute("**/data/snapshots/market/hurricane.json", _hlf_county)
+                clear_routes(page)
                 # ---- the Pacific view: a landfall region there (Hawaii, as the exchange lists it) is
                 # listed, drawn and priced on that view and kept off the Atlantic one
                 lf_txt = page.locator("#landfall").inner_text()
@@ -6443,8 +6451,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 g5 = _gdp_state()
                 chk.add(f"{scheme} gdp: at another end year the listed prices are not drawn, and the line goes with them",
                         not g5["links"] and not g5["note"] and str(gdp_end) in g5["ladderSub"], f"{len(g5['links'])} {g5['note']} {g5['ladderSub']}")
-                page.unroute(gdp_cfg_url, _gdp_cfg)
-                page.unroute("**/data/snapshots/catalogue/**", _gdp_cat)
+                clear_routes(page)
                 # a phone keeps the page inside its width; each figure scrolls inside its own card
                 page.set_viewport_size({"width": 375, "height": 800})
                 page.goto(f"{srv.url}/climate-gdp.html"); until(page, GDP_RAN, cap_ms=20000)
@@ -6800,7 +6807,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   hits[0].dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 300, clientY: 300 }));
                   return { nan, tip: document.querySelector('#tip').innerText };
                 }""")
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 chk.add(f"{scheme} locator: a variable wind draws no staff, reads as variable and throws nothing",
                         bool(vr and vr["nan"] == 0 and vr["tip"] and "variable at" in vr["tip"]) and len(errs) == errs_v,
                         str(vr)[:160] + " " + "; ".join(errs[errs_v:])[:160])
@@ -6979,7 +6986,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 }""")
                 chk.add(f"{scheme} advanced: a report with no temperature still draws its wind",
                         bool(nb and nb["barbs"] >= 4 and nb["lines"] == 4), str(nb))
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 page.goto(_ksfo); until(page, CITY_CHART)
                 # the main chart's lead-in hours keep the forecast that stood
                 # for them, and its level labels say when each was issued
@@ -7067,7 +7074,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   await new Promise(r => setTimeout(r, 500));
                   return out;
                 }""")
-                page.unroute("**/data/snapshots/**")
+                clear_routes(page)
                 # the crosshair and the postmortem below read the chart, the panels and the discussion
                 page.goto(_ksfo)
                 until(page, "() => document.querySelectorAll('#chart path').length >= 2 && !!document.querySelector('#advPanels svg') && !!document.querySelector('#discussion .afdtext')")
@@ -7437,7 +7444,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     chk.add(f"{scheme} scorecard ({_wo_page}): a wind-only station is scored but left off the figure",
                             "Nantucket" not in wo_labels and _first.get("city") in wo_labels,
                             str(["Nantucket" in wo_labels, _first.get("city") in wo_labels]))
-                page.unroute(_wo_url, _wind_only)
+                clear_routes(page)
 
                 # ---- the scorecard grid: a row per station, a column per system
                 # the grid and the standings draw in one pass once the scorecard is in
