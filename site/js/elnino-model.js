@@ -27,7 +27,7 @@
 (function (root) {
   'use strict';
 
-  const FIELD_NAMES = ['d0', 'idx', 'z26', 'z27', 'future', 't27bins'];
+  const FIELD_NAMES = ['d0', 'idx', 'z26', 'z27', 'future', 't27bins', 'd0base'];
 
   // ---------------------------------------------------------------- loading
   function views(buf, fields, n) {
@@ -60,7 +60,7 @@
     this._url = url;
     this._getBin = getBin;
     this.irfTables = {};
-    this.frozen = null;
+    this.trendPaths = {};                           // the trend baseline's paths, by file
     this.n = meta.n;
     this.irfByKey = {};
     meta.irfs.forEach(e => { this.irfByKey[e.key] = e; });
@@ -73,14 +73,24 @@
     if (!this.irfTables[S.irf]) {
       this.irfTables[S.irf] = new Int16Array(await this._getBin(this._url(e.draws.file)));
     }
-    if (S.baseline === 'frozen' && !this.frozen) {
-      const pf = this.meta.pathsFrozen;
-      this.frozen = views(await this._getBin(this._url(pf.file)), pf.fields, this.n);
+    if (S.baseline === 'frozen') {
+      const tm = this.trendMeta(S);
+      if (!this.trendPaths[tm.file]) this.trendPaths[tm.file] = views(await this._getBin(this._url(tm.file)), tm.fields, this.n);
     }
   };
 
   Model.prototype.ready = function (S) {
-    return !!this.irfTables[S.irf] && (S.baseline !== 'frozen' || !!this.frozen);
+    return !!this.irfTables[S.irf] && (S.baseline !== 'frozen' || !!this.trendPaths[this.trendMeta(S).file]);
+  };
+
+  // the trend baseline for the setting's first year of the average: its paths file, average and mean
+  // miss path. A bundle without start years has only the published window (pathsFrozen, frozen).
+  Model.prototype.trendMeta = function (S) {
+    const t = this.meta.trend;
+    const start = S.trendStart == null ? (t ? t.default : null) : S.trendStart;
+    if (t && t.starts[String(start)]) return t.starts[String(start)];
+    if (t && start != null) throw new Error('no trend baseline from ' + start);
+    return Object.assign({}, this.meta.pathsFrozen, this.meta.frozen);
   };
 
   /* The estimate a path uses, after the uncertainty setting:
@@ -167,8 +177,9 @@
 
     // no-effect paths: the baseline's mean path and each path's distance from it
     const frozen = S.baseline === 'frozen';
-    const d0 = frozen ? this.frozen.d0 : P.d0;
-    const Dbar = frozen ? meta.frozen.Dbar : meta.imf.Dbar;
+    const tm = frozen ? this.trendMeta(S) : null;
+    const d0 = frozen ? this.trendPaths[tm.file].d0 : P.d0;
+    const Dbar = frozen ? tm.Dbar : meta.imf.Dbar;
     const missShare = frozen ? 1 : (S.missShare == null ? 1 : S.missShare);
     const spread = S.spread == null ? 1 : S.spread;
     const share = S.share == null ? 1 : S.share;
@@ -269,7 +280,7 @@
   // the no-effect path's average projected growth from 2026 to E
   Result.prototype.mu = function (E) {
     const meta = this.model.meta;
-    if (this.S.baseline === 'frozen') return meta.frozen.mu;
+    if (this.S.baseline === 'frozen') return this.model.trendMeta(this.S).mu;
     let s = 0;
     for (let t = meta.base + 1; t <= E; t++) s += meta.imf.growth[String(t)];
     return s / (E - meta.base);

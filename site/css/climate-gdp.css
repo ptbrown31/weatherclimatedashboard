@@ -78,7 +78,30 @@
 .gdp-tbl th,.gdp-tbl td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
 .gdp-tbl th{font-weight:700;color:var(--navy);background:var(--shade)}
 .gdp-tblwrap{overflow-x:auto}
+/* a long address in the text breaks rather than widening the page on a phone */
+.gdp-article a{overflow-wrap:anywhere}
 .gdp-article a.figref{white-space:nowrap}
+
+/* the Letter: affiliations, the summary paragraph, citations, panel letters, equations, references, tables */
+.gdp-aff{font-size:12px;color:var(--muted);line-height:1.45;margin:-8px 0 14px}
+.gdp-aff sup,.gdp-byline sup{font-size:.72em}
+.gdp-summary{max-width:72ch;margin:6px auto 22px;font-size:15.5px;line-height:1.62;font-weight:650;color:var(--ink)}
+sup.cite{font-size:.72em;line-height:0}
+sup.cite a{text-decoration:none}
+.gdp-pl{font-size:15px;font-weight:800;color:var(--ink);margin:10px 0 2px 2px}
+.gdp-cap1{margin-top:10px}
+.gdp-eq{overflow-x:auto;overflow-y:hidden;margin:4px 0 14px}
+.gdp-article h3 .anchor{margin-left:6px;font-weight:400;color:var(--muted);text-decoration:none;opacity:0}
+.gdp-article h3:hover .anchor,.gdp-article h3 .anchor:focus{opacity:1}
+.gdp-refs{font-size:13px;line-height:1.5;padding-left:2.4em;margin:0}
+.gdp-refs li{margin:0 0 6px;overflow-wrap:anywhere}
+.gdp-refs li:target{background:var(--shade)}
+.gdp-ltbl{margin:18px 0}
+.gdp-tblcap{font-size:12.5px;color:var(--muted);line-height:1.5;margin:0 2px 6px}
+.gdp-tblcap b{color:var(--ink)}
+.gdp-img img{display:block;width:100%;height:auto;border-radius:6px;background:#fff}
+details.gdp-si>summary{cursor:pointer;font-weight:700;color:var(--navy);margin:4px 0 12px}
+@media (max-width:720px){#gdpLevels{min-width:680px}}
 
 /* reproduction */
 .gdp-repro{font-size:13px;line-height:1.55}

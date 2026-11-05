@@ -365,17 +365,20 @@ CDN serves with the snapshots' behaviour (the origin's Cache-Control, compressed
 Neither the pipeline nor the site sync in section 6 touches that prefix, and `samples/snapshots/elnino/`
 is a frozen copy for local mode only.
 
-- `model.json` and `article.json`: `Content-Type: application/json`,
-  `Cache-Control: public, max-age=300, stale-while-revalidate=3600, stale-if-error=86400`.
+- `model.json`, `letter.json` and `article.json`: `Content-Type: application/json`,
+  `Cache-Control: public, max-age=300, stale-while-revalidate=3600, stale-if-error=86400`. The page draws
+  the Letter from `letter.json` when it is there and the cover article from `article.json` otherwise.
 - The `.bin` files: `Content-Type: application/octet-stream`. `model.json` names each one, so a name that
   carries its content hash (`paths.<hash>.bin`) can take `public, max-age=31536000, immutable`. A file
   kept under a fixed name takes the JSON files' header instead.
-- Upload the `.bin` files before `model.json`, and keep the previous month's for a day, because a reader
-  holding the old `model.json` still asks for them. No invalidation is needed.
+- The Letter's figure images, `letter/<hash>.png`: `Content-Type: image/png`, named by their content hash
+  in `letter.json`, so they take `public, max-age=31536000, immutable` too.
+- Upload the `.bin` files and the images before `model.json` and `letter.json`, and keep the previous
+  month's for a day, because a reader holding the old JSON still asks for them. No invalidation is needed.
 
-`article.json` carries the draft's file name and dates only, never its Drive id. Once the exchange lists
-the contract, set `gdp_contract.product` in `config/site.json`, add the product to `config/contracts.json`
-(`scripts/build_contracts.py`) and deploy the site.
+`letter.json` and `article.json` carry the draft's file name and dates only, never its Drive id. Once the
+exchange lists the contract, set `gdp_contract.product` in `config/site.json`, add the product to
+`config/contracts.json` (`scripts/build_contracts.py`) and deploy the site.
 
 ## Cloudflare alternative
 

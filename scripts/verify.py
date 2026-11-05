@@ -33,6 +33,7 @@ import re
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 from html import unescape
 
@@ -6238,22 +6239,30 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 t_note = page.locator("#panels .panel .note").first.inner_text()
                 chk.add(f"{scheme} climate: the trend fit reports crossings",
                         "per decade" in t_note and "crosses" in t_note, t_note[:90])
-                # ---- the world GDP contract's page (owner, 2026-11-02): the article with its figures
-                # drawn live by the contract's model, the controls re-running it, each view's chance
-                # of Yes marked as not a price, and the proposed ladder carrying no link until the
-                # exchange lists the contract
+                # ---- the world GDP contract's page (owner, 2026-11-02): the Letter (owner, 2026-11-05)
+                # with its figures drawn live by the contract's model or from the published run, the
+                # controls re-running it, each view's chance of Yes never called a price (owner,
+                # 2026-11-05), and the proposed ladder carrying no link until the exchange lists the
+                # contract
                 chk.add(f"{scheme} climate: a card leads to the world GDP contract's page",
                         page.locator("a#gdpCard[href='climate-gdp.html']").count() == 1, "")
                 gdp_model = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/elnino/model.json").read().decode())
                 gdp_pub = gdp_model["published"]["contract"]
+                gdp_letter = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/elnino/letter.json").read().decode())
 
                 def _gdp_state():
                     return page.evaluate("""() => ({
                       status: (document.querySelector('#gdpRunStatus') || {}).textContent || '',
                       strip: (document.querySelector('#pageStatus .status') || {}).textContent || '',
                       tiles: [...document.querySelectorAll('.gdp-tile .tv')].map(e => e.textContent),
-                      notPrice: [...document.querySelectorAll('.gdp-tile.null .ts, .gdp-tile.paper .ts')]
-                        .every(e => /not a price/.test(e.textContent)),
+                      chanceOnly: [...document.querySelectorAll('.gdp-tile.null .ts, .gdp-tile.paper .ts')]
+                        .every(e => /^chance of Yes\\./.test(e.textContent) && !/price|fair value/i.test(e.textContent)),
+                      h1: (document.querySelector('#gdpTitle') || {}).textContent || '',
+                      summary: !!document.querySelector('p.gdp-summary + #contract'),
+                      sections: [...document.querySelectorAll('.secttl')].map(e => e.id),
+                      refs: document.querySelectorAll('ol.gdp-refs li[id^="ref-"]').length,
+                      levels: (document.querySelector('#fig1 #gdpLevels') || { childElementCount: 0 }).childElementCount,
+                      figids: [...document.querySelectorAll('figure.gdp-fig')].map(f => f.id),
                       nav: [...document.querySelectorAll('header.site nav a.on')].map(a => a.textContent),
                       figs: [...document.querySelectorAll('figure.gdp-fig > .card > svg')].map(s => s.childElementCount),
                       notes: document.querySelectorAll('button.accnote-btn').length,
@@ -6278,19 +6287,33 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} gdp: the page belongs to the Climate Change category",
                         g0["nav"] == ["Climate & Weather", "Climate Change"], str(g0["nav"]))
                 gdp_p = [int(t.rstrip("%")) for t in g0["tiles"][:2] if t.endswith("%")]
-                chk.add(f"{scheme} gdp: at the article's settings the two chances are the published run's",
+                chk.add(f"{scheme} gdp: at the article's settings the two chances are the published run's, each a chance of Yes and never a price",
                         len(gdp_p) == 2 and abs(gdp_p[0] - 100 * (1 - gdp_pub["false_positive"])) <= 3
-                        and abs(gdp_p[1] - 100 * (1 - gdp_pub["sensitivity"])) <= 3 and g0["notPrice"], str(g0["tiles"]))
-                chk.add(f"{scheme} gdp: seven live figures, each with its details of calculation",
-                        len(g0["figs"]) == 7 and min(g0["figs"] or [0]) > 10 and g0["notes"] == 8, f"figs={g0['figs']} notes={g0['notes']}")
+                        and abs(gdp_p[1] - 100 * (1 - gdp_pub["sensitivity"])) <= 3 and g0["chanceOnly"], str(g0["tiles"]))
+                # Fig. 1 is the contract's figure, its levels panel above the ladder; the others sit in the text,
+                # the quadrant schematic an image and the rest drawn, two of them in two panels
+                chk.add(f"{scheme} gdp: the Letter's figures are drawn, each with its details of calculation",
+                        g0["figids"] == [k_ for k_ in gdp_letter["figures"] if k_ != "fig1"] and len(g0["figs"]) == 12
+                        and min(g0["figs"] or [0]) > 10 and g0["levels"] > 10 and g0["notes"] == 11,
+                        f"figs={g0['figids']} {g0['figs']} levels={g0['levels']} notes={g0['notes']}")
+                gdp_refs = len(next(s_ for s_ in gdp_letter["sections"] if s_["id"] == "references")["refs"])
+                chk.add(f"{scheme} gdp: the page carries the Letter, its summary above the contract, then its Methods, "
+                        "Extended Data, references, notes and Supplementary Information",
+                        g0["h1"] == gdp_letter["title"] and g0["summary"] and g0["refs"] == gdp_refs
+                        and all(s_ in g0["sections"] for s_ in ("methods", "extended-data", "references", "notes", "supplementary")),
+                        f"{g0['h1'][:40]} summary={g0['summary']} refs={g0['refs']} {g0['sections']}")
+                page.locator("figure#ed1 img").scroll_into_view_if_needed()
+                GDP_IMG = "() => { const i = document.querySelector('figure#ed1 img'); return !!i && i.complete && i.naturalWidth > 0; }"
+                chk.add(f"{scheme} gdp: the quadrant schematic's image loads", until(page, GDP_IMG), "")
+                page.evaluate("() => window.scrollTo(0, 0)")
                 chk.add(f"{scheme} gdp: until it lists, the ladder is the proposed strikes, hatched, with two marks and no link",
                         g0["hatched"] == len(gdp_model["ladder"]["strikes"]) and g0["marks"] == 2 * g0["hatched"]
                         and not g0["links"] and not g0["note"] and "Not listed yet" in g0["listing"],
                         f"hatched={g0['hatched']} marks={g0['marks']} links={len(g0['links'])} notes={g0['note']}")
                 page.locator("#gdpMain rect[fill='url(#gdpHatch)']").first.hover(force=True); page.wait_for_timeout(150)
-                chk.add(f"{scheme} gdp: a strike's box gives both chances and says they are not prices",
-                        "Not prices" in page.locator("#tip").inner_text() and "lists" in page.locator("#tip").inner_text(),
-                        page.locator("#tip").inner_text()[:120])
+                t_strike = page.locator("#tip").inner_text()
+                chk.add(f"{scheme} gdp: a strike's box gives both chances and when it lists, never calling them prices",
+                        t_strike.count("Chance of Yes") == 2 and "lists" in t_strike and "price" not in t_strike.lower(), t_strike[:120])
                 page.locator("#gdpMainMethod button.accnote-btn").click(); page.wait_for_timeout(200)
                 gn = page.evaluate("""() => { const b = document.querySelector('#gdpMainMethod .accnote');
                   return { open: !!b && !b.hidden, tex: b ? b.querySelectorAll('.katex').length : 0,
@@ -6317,6 +6340,56 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} gdp: a shared address loads its settings, fetching what they need",
                         "50,000 paths" in g3["status"] and g3["tiles"][:2] != g0["tiles"][:2]
                         and page.locator(".gdp-figstate.mine").count() == 7, f"{g3['status']} {g3['tiles']}")
+                # the trend baseline's first year (owner, 2026-11-05) goes in the address, sets its control and
+                # moves the trend view
+                page.evaluate(GDP_MARK)
+                page.goto(f"{srv.url}/climate-gdp.html#baseline=frozen"); until(page, GDP_RERUN, cap_ms=20000)
+                g6 = _gdp_state()
+                page.evaluate(GDP_MARK)
+                page.goto(f"{srv.url}/climate-gdp.html#baseline=frozen&trendStart=1995"); until(page, GDP_RERUN, cap_ms=20000)
+                g7 = _gdp_state()
+                g7c = page.evaluate("""() => { const i = [...document.querySelectorAll('#gdpPanel input[type=range]')]
+                    .find(x => x.getAttribute('aria-label') === 'First year of the average');
+                  return i ? [i.value, i.min, i.max, !!i.offsetParent] : null; }""")
+                gdp_starts = sorted(gdp_model["trend"]["starts"])
+                chk.add(f"{scheme} gdp: the trend's first year goes in the address, sets its control and moves the view",
+                        g7c == ["1995", gdp_starts[0], gdp_starts[-1], True] and g7["tiles"] != g6["tiles"]
+                        and g7["hash"] == "#baseline=frozen&trendStart=1995", f"{g7c} {g6['tiles']} -> {g7['tiles']} {g7['hash']}")
+                # a Fig. 4 row with settings of its own draws the whole page at them
+                gdp_set = [r_ for r_ in gdp_model["published"]["sensitivity"]["rows"] if r_.get("settings")]
+                gdp_row = next((r_ for r_ in gdp_set if "trendStart" in r_["settings"]), gdp_set[0])
+                page.goto(f"{srv.url}/climate-gdp.html"); until(page, GDP_RAN, cap_ms=20000)
+                page.evaluate(GDP_MARK)
+                page.locator("#fig4 svg rect[style*='cursor']").nth(gdp_set.index(gdp_row)).click(force=True)
+                until(page, GDP_RERUN, cap_ms=20000)
+                g8 = _gdp_state()
+                gdp_want = {k_: ("1" if v_ is True else "0" if v_ is False else str(v_)) for k_, v_ in gdp_row["settings"].items()}
+                chk.add(f"{scheme} gdp: a Fig. 4 row draws the whole page at its settings",
+                        dict(urllib.parse.parse_qsl(g8["hash"][1:])) == gdp_want and page.locator(".gdp-figstate.mine").count() == 7,
+                        f"{gdp_row['label']}: {g8['hash']} want {gdp_want}")
+                # a link to a figure moves the page and leaves the reader's settings as they were
+                page.evaluate(GDP_MARK)
+                page.goto(f"{srv.url}/climate-gdp.html#share=0.5"); until(page, GDP_RERUN, cap_ms=20000)
+                g9 = _gdp_state()
+                page.locator("a.figref[href='#fig2']").first.click()
+                until(page, "() => location.hash === '#fig2'"); page.wait_for_timeout(800)
+                g10 = _gdp_state()
+                chk.add(f"{scheme} gdp: a link to a figure keeps the reader's settings",
+                        g10["hash"] == "#fig2" and g10["tiles"] == g9["tiles"] and g9["tiles"] != g0["tiles"],
+                        f"{g9['tiles']} -> {g10['tiles']} {g10['hash']}")
+                # a second change of setting while the first one's file loads: the page ends at the second,
+                # with no error on the way (each trend file held back half a second, as on a slow connection)
+                gdp_e0 = len(errs)
+                page.goto(f"{srv.url}/climate-gdp.html"); until(page, GDP_RAN, cap_ms=20000)
+                page.evaluate("""() => { const f = window.fetch; window.fetch = (u, o) => /paths_trend_/.test(String(u))
+                  ? new Promise(r => setTimeout(r, 500)).then(() => f(u, o)) : f(u, o); }""")
+                page.goto(f"{srv.url}/climate-gdp.html#baseline=frozen"); page.wait_for_timeout(100)
+                page.goto(f"{srv.url}/climate-gdp.html#baseline=frozen&trendStart=1995")
+                until(page, "(t) => [...document.querySelectorAll('.gdp-tile .tv')].map(e => e.textContent).join() === t"
+                      " && / paths\\.$/.test(document.querySelector('#gdpRunStatus').textContent)", cap_ms=20000, arg=",".join(g7["tiles"]))
+                g11 = _gdp_state()
+                chk.add(f"{scheme} gdp: two quick changes while a file loads end at the second, with no error",
+                        g11["tiles"] == g7["tiles"] and errs[gdp_e0:] == [], f"{g11['tiles']} {g11['status']} {errs[gdp_e0:][:2]}")
                 # listed: the check's own product, added to config.js, and its terms and quotes, so the
                 # check does not depend on what the exchange or config/site.json carry. The exchange
                 # lists its own strikes, so the check carries a ladder of six rather than the article's one.
@@ -6360,8 +6433,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         g4["hatched"] == 1, f"hatched={g4['hatched']}")
                 page.locator("#gdpMain rect[data-contract-url]").first.hover(force=True); page.wait_for_timeout(150)
                 t_gdp = page.locator("#tip").inner_text()
-                chk.add(f"{scheme} gdp: a price's box gives the standing book and both chances, not prices",
-                        "Standing Yes bid" in t_gdp and "Chance of Yes" in t_gdp and "Not prices" in t_gdp, t_gdp[:140])
+                chk.add(f"{scheme} gdp: a price's box gives the standing book and both chances as each view's share of the paths",
+                        "Standing Yes bid" in t_gdp and "Chance of Yes" in t_gdp and "share of" in t_gdp, t_gdp[:140])
                 page.evaluate(GDP_MARK)
                 page.evaluate("""() => { const i = [...document.querySelectorAll('#gdpPanel input[type=range]')]
                     .find(x => x.getAttribute('aria-label') === 'Last year of the growth period');
@@ -7661,8 +7734,10 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
             # the owner's own copy, which the style rules do not touch
             OWNER = ("faq.html", "daily-temperature-markets.html")
             bad_title, bad_colon, bad_not = [], [], []
-            # the world GDP page's article is the owner's own copy too; its method notes are the page's
-            OWNS = "e=>e.filter(x=>!(x.closest('#gdpArticle') && !x.closest('.accnote')))"
+            # the world GDP page's Letter is the owner's own copy too, with its summary, affiliations and
+            # Fig. 1 legend, and so is the article before it; its method notes are the page's
+            OWNS = ("e=>e.filter(x=>!((x.closest('.gdp-article') || x.closest('.gdp-summary') || x.closest('.gdp-aff')"
+                    " || x.closest('.gdp-cap1')) && !x.closest('.accnote')))")
             # each page is read once all of its copy has drawn, so copy drawn late is checked too;
             # the analysis page is drawn once every place on its map has its label
             PROSE_READY = {"index.html": INDEX_ALL, "city.html?station=KLAX": CITY_ALL, "hurricane.html": HUR_DRAWN,

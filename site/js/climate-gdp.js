@@ -36,13 +36,14 @@ window.WXGdp = (() => {
   const cents = d => (d == null ? null : Math.round(d * 1000) / 10);
 
   // ---------------------------------------------------------------- settings
-  const KEYS = ['irf', 'uncertainty', 'share', 'baseline', 'missShare', 'spread', 'netting', 't26', 't26Value',
-                't27', 't27Value', 'future', 'scope', 'endYear', 'strike'];
-  const NUMERIC = new Set(['share', 'missShare', 'spread', 't26Value', 't27Value', 'endYear', 'strike']);
+  const KEYS = ['irf', 'uncertainty', 'share', 'baseline', 'trendStart', 'missShare', 'spread', 'netting', 't26',
+                't26Value', 't27', 't27Value', 'future', 'scope', 'endYear', 'strike'];
+  const NUMERIC = new Set(['share', 'trendStart', 'missShare', 'spread', 't26Value', 't27Value', 'endYear', 'strike']);
   const same = (a, b) => (typeof a === 'number' && typeof b === 'number') ? Math.abs(a - b) < 1e-9 : a === b;
   // settings that change nothing in the current state (a set value no one is using) do not count as changes
   const live = (k, s) => !((k === 't26Value' && s.t26 !== 'value') || (k === 't27Value' && s.t27 !== 'value')
-    || ((k === 'missShare' || k === 'netting') && s.baseline === 'frozen'));
+    || ((k === 'missShare' || k === 'netting') && s.baseline === 'frozen')
+    || (k === 'trendStart' && (s.baseline !== 'frozen' || !M.meta.trend)));
   const changed = s => KEYS.filter(k => live(k, s) && !same(s[k], D[k]));
   const atArticle = s => changed(s).length === 0;
 
@@ -58,6 +59,7 @@ window.WXGdp = (() => {
     });
     if (!M.irfByKey[s.irf]) s.irf = D.irf;
     if (s.uncertainty === 'nw' && s.irf !== 'PWT_ts') s.uncertainty = 'boot';
+    if (M.meta.trend && !M.meta.trend.starts[String(s.trendStart)]) s.trendStart = D.trendStart;
     return s;
   }
   function writeHash() {
@@ -78,7 +80,8 @@ window.WXGdp = (() => {
     if (busy) { schedule(30); return; }
     busy = true;
     try {
-      if (!M.ready(S)) { status('Loading what that setting needs…', true); await M.ensure(S); }
+      // a setting changed while a file loads can need another file, so load until the current settings are ready
+      while (!M.ready(S)) { status('Loading what that setting needs…', true); await M.ensure(S); }
       const t0 = performance.now();
       R = M.run(S);
       scanCache = null;
@@ -174,12 +177,14 @@ window.WXGdp = (() => {
   // index of GDP per person, 2026 = 100, on a view's mean path or a quantile of it
   function cumBase(t) {
     const m = M.meta;
-    if (S.baseline === 'frozen') return m.frozen.mu * (t - m.base);
+    if (S.baseline === 'frozen') return M.trendMeta(S).mu * (t - m.base);
     let s = 0;
     for (let y = m.base + 1; y <= t; y++) s += m.imf.growth[String(y)];
     return s;
   }
   const idx = (t, dev) => 100 * Math.exp((cumBase(t) + dev) / 100);
+  // the trend baseline's window, from the chosen first year through the year before the pandemic
+  const trendLabel = () => { const c = M.trendMeta(S).calib || M.meta.frozen.calib; return c[0] + '–' + c[1] + ' average'; };
   const strikeLevel = (x, E) => 100 * Math.exp(x * (E - M.meta.base) / 100);
 
   // ---------------------------------------------------------------- the method notes
@@ -311,7 +316,7 @@ window.WXGdp = (() => {
         const url = WXM.contractUrl(book.productConid, row.conidYes);
         const gw = px(v) - px(0);
         const html = tip.rows(title, WXM.bookRows(cents(row.bid), row.ask == null ? null : cents(1 - row.ask), false).concat(chances),
-          'ForecastEx quote, ' + asofText(book.asof) + '. The chances are each view’s share of ' + M.n.toLocaleString() + ' simulated paths. Not prices.');
+          'ForecastEx quote, ' + asofText(book.asof) + '. The chances are each view’s share of ' + M.n.toLocaleString() + ' simulated paths.');
         [[px(0), gw, 'var(--yes)'], [px(0) + gw, px(100) - px(0) - gw, 'var(--no)']].forEach(([x0, w, c]) => {
           const bar = el('rect', { x: x0, y: yy - 7, width: Math.max(w, 1), height: 14, fill: c, stroke: 'var(--panel)', 'stroke-width': 0.6 });
           hover(bar, () => html);
@@ -333,7 +338,7 @@ window.WXGdp = (() => {
           : extra ? 'not a listed strike'
           : !priced ? 'listed for ' + m.base + '–' + D.endYear + ', so its price shows at that end year'
           : row && WXM.emptyBook(row) ? 'listed; both sides bid the minimum, so no price' : 'listed; no standing bids';
-        hover(bar, () => tip.rows(title, [['Status', status]].concat(chances), 'Each view’s share of ' + M.n.toLocaleString() + ' simulated paths. Not prices.'));
+        hover(bar, () => tip.rows(title, [['Status', status]].concat(chances), 'Each view’s share of ' + M.n.toLocaleString() + ' simulated paths.'));
       }
       svg.appendChild(txt('> ' + x.toFixed(1) + '%' + (extra ? ' (yours)' : ''), { x: RL - 6, y: yy + 4, 'text-anchor': 'end', class: 'ax', 'font-weight': mine ? 700 : 400, fill: mine ? INK : null }));
       [[p0, NULL, -1], [p1, PAPER, 1]].forEach(([p, c, side]) => {
@@ -367,7 +372,7 @@ window.WXGdp = (() => {
     k.appendChild(item(NULL, 'No temperature effect: the IMF’s projection less its average past miss'));
     k.appendChild(item(PAPER, 'The paper’s estimate applied to every temperature shock since 2015'));
     k.appendChild(item(INK, 'Growth at exactly the strike', true));
-    k.appendChild(h('span', { text: 'Shading spans the 80% ranges. The marks on the ladder are each view’s chance of Yes at that strike, not prices.' }));
+    k.appendChild(h('span', { text: 'Shading spans the 80% ranges. The marks on the ladder are each view’s chance of Yes at that strike.' }));
   }
 
   // ---------------------------------------------------------------- readout and question
@@ -378,9 +383,9 @@ window.WXGdp = (() => {
     const who = S.share === 1 ? 'If the paper is right' : 'If ' + pct(S.share) + ' of the paper’s effect is real';
     $('#gdpRead').innerHTML =
       '<div class="gdp-tile null"><div class="tl">If temperature shocks have no effect</div><div class="tv">' + pct(p0) + '</div>'
-      + '<div class="ts">chance of Yes, not a price. Average growth ' + f1(g(0)) + '% a year, 80% range ' + f1(q(0, 0.1)) + ' to ' + f1(q(0, 0.9)) + '%.</div></div>'
+      + '<div class="ts">chance of Yes. Average growth ' + f1(g(0)) + '% a year, 80% range ' + f1(q(0, 0.1)) + ' to ' + f1(q(0, 0.9)) + '%.</div></div>'
       + '<div class="gdp-tile paper"><div class="tl">' + esc(who) + '</div><div class="tv">' + pct(p1) + '</div>'
-      + '<div class="ts">chance of Yes, not a price. Average growth ' + f1(g(1)) + '% a year, 80% range ' + f1(q(1, 0.1)) + ' to ' + f1(q(1, 0.9)) + '%.</div></div>'
+      + '<div class="ts">chance of Yes. Average growth ' + f1(g(1)) + '% a year, 80% range ' + f1(q(1, 0.1)) + ' to ' + f1(q(1, 0.9)) + '%.</div></div>'
       + '<div class="gdp-tile cut"><div class="tl">The cutoff that best separates the views</div><div class="tv">' + f2(y.growth) + '%</div>'
       + '<div class="ts">a year. At it the contract resolves in line with the true view ' + pct((y.sensitivity + 1 - y.falsePositive) / 2) + ' of the time on average (Youden’s J ' + y.J.toFixed(2) + ').</div></div>';
     const art = atArticle(S);
@@ -466,7 +471,7 @@ window.WXGdp = (() => {
     const proj = [], expect = [];
     for (let t = m.base + 1; t <= E; t++) {
       proj.push([t, m.imf.growth[String(t)]]);
-      expect.push([t, S.baseline === 'frozen' ? m.frozen.mu : m.imf.growth[String(t)] + S.missShare * m.imf.meanErrorByLead[t - m.anchor - 1]]);
+      expect.push([t, S.baseline === 'frozen' ? M.trendMeta(S).mu : m.imf.growth[String(t)] + S.missShare * m.imf.meanErrorByLead[t - m.anchor - 1]]);
     }
     const g0 = R.growthMean(0, E), g1 = R.growthMean(1, E), q10 = R.growthQuantile(0, E, 0.1), q90 = R.growthQuantile(0, E, 0.9);
     const F = frame({ W: 960, H: 420, L: 58, R: 230, T: 22, B: 36, x0: 1990, x1: E + 1, y0: -5.4, y1: 6.2 });
@@ -495,7 +500,7 @@ window.WXGdp = (() => {
     hoverBand(svg, F, proj.map(p => p[0]), t => {
       const i = t - m.base - 1;
       return { title: String(t), rows: [['IMF projection', f2(proj[i][1]) + '%'],
-        [sw(NULL) + (S.baseline === 'frozen' ? '2000–2019 average' : 'Less the IMF’s average miss' + (S.missShare !== 1 ? ' × ' + pct(S.missShare) : '')), f2(expect[i][1]) + '%']],
+        [sw(NULL) + (S.baseline === 'frozen' ? trendLabel() : 'Less the IMF’s average miss' + (S.missShare !== 1 ? ' × ' + pct(S.missShare) : '')), f2(expect[i][1]) + '%']],
         foot: 'growth per person, 100 × log points' };
     });
   }
@@ -635,12 +640,12 @@ window.WXGdp = (() => {
   // ---------------------------------------------------------------- Figure 8: timeline
   function drawTimeline(svg) {
     clear(svg);
-    const m = M.meta, E = S.endYear, settle = E + 2, d = (y, mo) => y + (mo - 1) / 12;
+    const m = M.meta, E = S.endYear, settle = E + 1, d = (y, mo) => y + (mo - 1) / 12;
     const F = frame({ W: 960, H: 300, L: 290, R: 20, T: 70, B: 30, x0: d(2026, 7), x1: d(settle + 1, 3), y0: 0, y1: 4 });
     const rows = [['Open for comment; estimates updated monthly', d(2026, 10), d(2027, 1.5), 'var(--gdp-paper)'],
                   ['Conditional contracts trade', d(2027, 1.5), d(2028, 1.5), 'var(--accent)'],
                   ['Growth period measured', d(m.base + 1, 1), d(E + 1, 1), NULL],
-                  ['World Bank publishes and revises the data', d(E + 1, 7), d(settle, 10), 'var(--muted)']];
+                  ['World Bank publishes its ' + E + ' estimate', d(E + 1, 7), d(settle, 10), 'var(--muted)']];
     const rowY = i => F.T + 12 + i * 52;
     for (let y = 2027; y <= settle + 1; y++) {
       svg.appendChild(el('line', { x1: F.x(y), x2: F.x(y), y1: F.T - 6, y2: F.H - F.B, class: 'grid' }));
@@ -665,21 +670,21 @@ window.WXGdp = (() => {
     const m = M.meta, ck = m.checks, E = S.endYear, n = M.n.toLocaleString();
     const ref = 'run of ' + dateOf(m.refreshedUtc);
     const e = M.irfByKey[S.irf];
-    return {
+    const N = {
       main: {
         title: 'How the two views, the cutoff and the ladder are computed',
         body: [
           'Each line is the average of ' + n + ' simulated paths of world GDP per person, as a level with ' + m.base + ' = 100; the shading spans the 10th to 90th percentile of the paths in each year. A path is one possible ' + m.base + '–2035 for the world economy and for global temperature, built from the record of each, as the other figures’ notes describe.',
           'With no temperature effect, GDP per person follows the IMF’s projection plus the path’s own forecast miss:',
           { tex: '\\ln y^{0}_{t} = \\ln y_{' + m.base + '} + \\sum_{s=' + (m.base + 1) + '}^{t} g^{\\mathrm{IMF}}_{s} + D_{t}' },
-          'where $g^{\\mathrm{IMF}}_s$ is the IMF’s October 2026 projection of world growth per person, put in World Bank units, and $D_t$ is the miss from ' + m.base + ' to $t$, drawn from the IMF’s own record of misses (Figure 3’s note).',
+          'where $g^{\\mathrm{IMF}}_s$ is the IMF’s October 2026 projection of world growth per person, put in World Bank units, and $D_t$ is the miss from ' + m.base + ' to $t$, drawn from the IMF’s own record of misses (' + (A.schema === 2 ? 'Extended Data Fig. 4' : 'Figure 3') + '’s note).',
           'If the paper is right, the same path also carries the paper’s effect of every temperature shock since 2015, and of the simulated shocks after 2027:',
           { tex: '\\ln y^{1}_{t} = \\ln y^{0}_{t} + \\lambda \\left[ \\sum_{\\tau} u_{\\tau} \\left( \\theta_{t-\\tau} - \\theta_{' + m.base + '-\\tau} \\right) - N_{t} \\right]' },
           '$u_\\tau$ is the part of year $\\tau$’s shock that the two shocks before it do not predict (the paper’s projection controls for them), $\\theta_h$ is the paper’s estimated response after $h$ years, held at its year-10 value after that, and the path draws its own $\\theta$ from the estimate’s bootstrap. $N_t$ removes the part of the IMF’s past misses that the paper’s estimates attribute to past temperature shocks, so a temperature effect is not counted twice. $\\lambda$ is the share of the paper’s effect, 1 at the article’s settings.',
           'The contract resolves Yes when average growth beats the strike $X$:',
           { tex: '\\bar g = \\frac{100}{T-' + m.base + '} \\ln \\frac{y_{T}}{y_{' + m.base + '}} > X' },
           'Each view’s chance of Yes is the share of the ' + n + ' paths for which that holds. The cutoff that best separates the views maximises Youden’s $J(c) = P_{1}(\\bar g \\le c) - P_{0}(\\bar g \\le c)$, the chance of No if the paper is right plus the chance of Yes if it is not, less one; it is the median of the candidate cutoffs whose J is within 0.0025 of the best, which keeps Monte Carlo noise out of it.',
-          'Until the contract lists, ' + (m.ladder.strikes.length > 1 ? 'each proposed strike' : 'the proposed strike') + ' on the ladder sits at the level that growth of exactly that much reaches by ' + E + ', hatched, with two marks for the two views’ chances of Yes. They are not prices and not a fair value. Where the market’s price settles between the two marks, once it trades, is a running public measure of how much credence its participants give the paper. Once the exchange lists the contract, its prices replace the hatching and each bar opens the contract on IBKR.',
+          'Until the contract lists, ' + (m.ladder.strikes.length > 1 ? 'each proposed strike' : 'the proposed strike') + ' on the ladder sits at the level that growth of exactly that much reaches by ' + E + ', hatched, with two marks for the two views’ chances of Yes. Where the market’s price settles between the two marks, once it trades, is a running public measure of how much credence its participants give the paper. Once the exchange lists the contract, its prices replace the hatching and each bar opens the contract on IBKR.',
           'This page re-runs the model in your browser on the same paths as the published analysis. The IMF misses, the bootstrap draw each path uses, the 2026–27 temperatures and the simulated shocks after 2027 are read from that run, not drawn again, and only what a control names is changed. At the article’s settings it reproduces the run within 0.002 points of GDP on every path; the repository’s test checks this on twelve designs.',
         ],
         table: variantsTable(),
@@ -718,7 +723,7 @@ window.WXGdp = (() => {
           'The IMF’s October forecasts of 1990–2020 (' + ck.imfErrors.n_forecasts + ' forecasts) missed world growth by ' + f1(ck.imfErrors.sum_over_statistic_mean) + ' points on average over years 2–6 ahead, and fell short in ' + ck.imfErrors.n_below_forecast + ' of them. The no-effect path keeps that average miss, times the share on the control (1 at the article’s settings). Each path’s own miss is one historical forecast’s whole miss path, pulled part of the way to the average, plus noise with the same covariance across years:',
           { tex: 'e_{\\ell} = \\bar e_{\\ell} + \\kappa \\left( e^{(j)}_{\\ell} - \\bar e_{\\ell} \\right) + \\kappa\\,\\tfrac{1}{2}\\,\\eta_{\\ell}, \\qquad \\kappa = 1/\\sqrt{1.25}, \\qquad D_t = \\sum_{\\ell \\le t-2025} e_{\\ell}' },
           'so recessions and slowdowns keep their persistence across years, and the mixture keeps the record’s mean and covariance. Past six years ahead, each year is drawn on its own from the six-year-ahead misses. The spread control scales each path’s distance from the average miss.',
-          'The 2000–2019 trend option replaces the IMF projection with that period’s average growth and draws its spread from that period’s years, resampled, with the average itself redrawn by bootstrap.',
+          'The trend option replaces the IMF projection with average growth from a first year through 2019, before the pandemic, and draws its spread from those years, resampled, with the average itself redrawn by bootstrap. The first year runs from 1991 to 2005 on the control and is 2000 at the article’s settings. It is now ' + trendLabel().replace(' average', '') + '.',
         ],
         code: [['IMF baseline and misses', 'bk_elnino/imf_baseline.py'], ['the trend option', 'bk_elnino/baseline.py']],
         n: m.imfSources.baseline + '. ' + m.imfSources.errors.replace(/ forecasts: /, ' forecasts of ') + '.',
@@ -754,10 +759,36 @@ window.WXGdp = (() => {
       },
       8: {
         title: 'Dates in the terms',
-        body: ['The terms are fixed when NOAA publishes its 2026 annual value, in mid-January 2027, and the conditional contracts list right after. When NOAA publishes 2027’s value, in mid-January 2028, positions in the matching contract convert into a regular contract at the same cost and the other two are refunded. All resolve on October 1 two years after the end year, once the World Bank has published and revised that year’s figure.'],
+        body: ['The terms are fixed when NOAA publishes its 2026 annual value, in mid-January 2027, and the conditional contracts list right after. When NOAA publishes 2027’s value, in mid-January 2028, positions in the matching contract convert into a regular contract at the same cost and the other two are refunded. All resolve on October 1 of the year after the end year, about three months after the World Bank’s first estimate for that year, or on the first business day of a later month if that estimate is late.'],
         n: 'End year ' + E + '.',
       },
     };
+    if (A.schema !== 2) return N;
+    // the Letter's figures: Fig. 1 adds its levels panel, Fig. 3 its ranges panel, and three figures are new
+    const P = m.published;
+    N.main = Object.assign({}, N.main, { body: ['Panel a shows world GDP per person in 2021 international dollars, the World Bank’s series from 2010, with each view’s median and 80% range from the published run. NOAA’s temperature sits above it on the same years, with the record, the ' + m.base + ' estimate and the ' + (m.base + 1) + ' forecast with their 90% ranges, and the simulated years’ median and 80% range. Panel a stays at the article’s settings. Panel b and the readout follow the controls.'].concat(N.main.body) });
+    N.fig3 = Object.assign({}, N[7], { body: N[7].body.concat(['Panel b gives, for each range of NOAA’s ' + (m.base + 1) + ' value, each view’s chance of Yes at that range’s own strike, the strike’s Youden’s J and the range’s chance today, all from the published run.']) });
+    N.sens = {
+      title: 'The sensitivity rows',
+      body: ['Each row changes one setting of the published design and gives each view’s chance of Yes at ' + P.sensitivity.strike.toFixed(1) + '% a year, the row’s own best threshold and its Youden’s J, from the published run. Extended Data Table 2 lists the same numbers. The cool and warm rows restrict NOAA’s ' + (m.base + 1) + ' value to that range, and the trend rows replace the IMF baseline with average growth from the stated year through 2019.',
+             'A row with a setting on the controls draws the whole page at that setting when clicked. The page’s model reproduces those rows, and the repository’s test checks each one. Measuring growth from ' + (m.base + 1) + ' is not on the controls, so that row is drawn from the run only.'],
+      code: [['the rows', 'bk_elnino/analysis.py'], ['the check against the page', 'tests/test_site_model.py']],
+      n: n + ' simulated paths per row, the ' + ref + '.',
+    };
+    N.starts = {
+      title: 'The trend baseline’s first year',
+      body: ['For each first year from ' + P.trendStartScan.rows[0].start + ' to ' + P.trendStartScan.rows[P.trendStartScan.rows.length - 1].start + ', the trend baseline extends average growth from that year through ' + P.trendStartScan.window_end + ' and draws its spread from the same years, so every window holds the 2009 recession. Panel a gives the best threshold with its Youden’s J against the IMF baseline’s, and panel b each view’s chance of Yes at ' + P.trendStartScan.strike.toFixed(1) + '% a year.',
+             'Choose the trend under Background growth and move its first year to draw the whole page that way. Windows that start in 2010 or later hold no recession and make the trend look far more certain than growth has been. The control runs from ' + P.trendStartScan.rows[0].start + ' to ' + P.trendStartScan.rows[P.trendStartScan.rows.length - 1].start + '.'],
+      code: [['the scan', 'run_analysis.py'], ['the trend baseline', 'bk_elnino/baseline.py']],
+      n: n + ' simulated paths per first year, the ' + ref + '.',
+    };
+    N.known27 = {
+      title: 'A contract written once ' + (m.base + 1) + ' is known',
+      body: ['Each point is the best threshold and its Youden’s J for a contract written after NOAA publishes its ' + (m.base + 1) + ' value, with ' + m.base + ' at today’s estimate (' + P.t27Grid.T2026.toFixed(2) + ' °C), from the published run’s threshold grid. The shading marks the cool and warm ranges of the conditional contracts.'],
+      code: [['the grid', 'run_analysis.py']],
+      n: n + ' simulated paths per point, the ' + ref + '.',
+    };
+    return N;
   }
 
   // the published run's Youden's J for an end year (2027 drawn from today's forecast)
@@ -773,22 +804,296 @@ window.WXGdp = (() => {
     return h('div', { class: 'gdp-tblwrap' }, [h('div', { class: 'rule', text: 'The same contract under other designs, from the published run (each at its own best cutoff; most can be set on the controls):' }), t]);
   }
 
+  // ---------------------------------------------------------------- the Letter's figures drawn from the published run
+  // These six show the published run's numbers (model.json's published block), so they stay at the
+  // article's settings whatever the controls say; each figure's line under it says which panels move.
+  const signed2 = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(2);
+  const money = v => '$' + Math.round(v * 1000).toLocaleString('en-US');
+  const letterIn = (svg, s, y) => svg.appendChild(txt(s, { x: 4, y, 'font-size': 15, 'font-weight': 800, fill: INK }));
+
+  // Fig. 1a: world GDP per person and global temperature as levels, the record and each view
+  function drawLevels(svg) {
+    clear(svg);
+    const m = M.meta, P = m.published, E = D.endYear, ft = P.futureTemperatures, t26 = m.temps.T26, t27 = m.temps.T27;
+    const first = 2010, obs = [], fut = [];
+    for (let t = first; t <= m.anchor; t++) obs.push(t);
+    for (let t = m.base; t <= E; t++) fut.push(t);
+    const temp = t => m.noaa.T[t - m.noaa.first], sim = fut.filter(t => t > m.base + 1);
+    const tv = obs.map(temp).concat(sim.map(t => ft[String(t)].q90), sim.map(t => ft[String(t)].q10), [t27.mean + 1.645 * t27.sd]);
+    const W = 960, L = 74, Rm = 210;
+    const T = frame({ W, H: 172, L, R: Rm, T: 30, B: 6, x0: first - 0.5, x1: E + 0.5, y0: Math.floor(Math.min(...tv) * 5) / 5, y1: Math.ceil(Math.max(...tv) * 5) / 5 });
+    svg.appendChild(txt('Global temperature (NOAA), °C above the 1901–2000 average', { x: L, y: 16, class: 'axl', 'font-weight': 700 }));
+    yGrid(svg, T, ticksFor(T.y0, T.y1, 3), v => minus(v.toFixed(1)));
+    svg.appendChild(el('path', { d: area(sim.map(T.x), sim.map(t => T.y(ft[String(t)].q10)), sim.map(t => T.y(ft[String(t)].q90))), fill: 'var(--rule)', 'fill-opacity': 0.45 }));
+    const med = [[m.anchor, temp(m.anchor)], [m.base, t26.mean], [m.base + 1, t27.mean]].concat(sim.map(t => [t, ft[String(t)].q50]));
+    svg.appendChild(el('path', { d: path(med.map(([t, v]) => [T.x(t), T.y(v)])), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.6, 'stroke-dasharray': '4 3' }));
+    svg.appendChild(el('path', { d: path(obs.map(t => [T.x(t), T.y(temp(t))])), fill: 'none', stroke: 'var(--muted)', 'stroke-width': 1.9 }));
+    obs.forEach(t => {
+      const c = el('circle', { cx: T.x(t), cy: T.y(temp(t)), r: 3.1, fill: 'var(--muted)' });
+      hover(c, () => tip.rows(String(t), [['NOAA', minus(temp(t).toFixed(2)) + ' °C']], 'annual global land and ocean temperature'));
+      svg.appendChild(c);
+    });
+    [[m.base, t26, 'estimate'], [m.base + 1, t27, 'forecast']].forEach(([t, e, what]) => {
+      svg.appendChild(el('line', { x1: T.x(t), x2: T.x(t), y1: T.y(e.mean - 1.645 * e.sd), y2: T.y(e.mean + 1.645 * e.sd), stroke: 'var(--muted)', 'stroke-width': 1.4 }));
+      const c = el('circle', { cx: T.x(t), cy: T.y(e.mean), r: 4.2, fill: 'var(--panel)', stroke: 'var(--muted)', 'stroke-width': 1.8 });
+      hover(c, () => tip.rows(t + ', ' + what, [['Mean', e.mean.toFixed(2) + ' °C'], ['90% range', (e.mean - 1.645 * e.sd).toFixed(2) + ' to ' + (e.mean + 1.645 * e.sd).toFixed(2) + ' °C']], 'until NOAA publishes the annual value'));
+      svg.appendChild(c);
+    });
+    svg.appendChild(txt((m.base + 1) + ' forecast', { x: T.x(m.base + 1) - 9, y: T.y(t27.mean + 1.645 * t27.sd) + 4, 'text-anchor': 'end', class: 'ax' }));
+    svg.appendChild(txt('simulated, 80% range', { x: T.x(E) + 10, y: T.y(ft[String(E)].q50) + 4, class: 'ax' }));
+    const q = (v, t, i) => P.levels[String(t)][v][i] / 1000, lev = t => m.wdi.levels[String(t)] / 1000;
+    const yv = obs.map(lev).concat(fut.map(t => q('h0', t, 2)), fut.map(t => q('h1', t, 0)));
+    const G = frame({ W, H: 560, L, R: Rm, T: 212, B: 34, x0: first - 0.5, x1: E + 0.5, y0: Math.floor(Math.min(...yv)) - 0.5, y1: Math.ceil(Math.max(...yv)) + 0.5 });
+    svg.appendChild(txt('World GDP per person (World Bank), thousand 2021 international dollars', { x: L, y: 198, class: 'axl', 'font-weight': 700 }));
+    yGrid(svg, G, ticksFor(G.y0, G.y1, 5), v => String(v));
+    xTicks(svg, G, [first, 2015, 2020, m.anchor, E].filter((v, i, a) => a.indexOf(v) === i), String);
+    const fx = [m.anchor].concat(fut);
+    const at = (v, i) => fx.map(t => (t === m.anchor ? lev(t) : q(v, t, i)));
+    [['h0', NULL, 0.13], ['h1', PAPER, 0.15]].forEach(([v, c, op]) => svg.appendChild(el('path', { d: area(fx.map(G.x), at(v, 0).map(G.y), at(v, 2).map(G.y)), fill: c, 'fill-opacity': op })));
+    [['h0', NULL], ['h1', PAPER]].forEach(([v, c]) => svg.appendChild(el('path', { d: path(fx.map((t, i) => [G.x(t), G.y(at(v, 1)[i])])), fill: 'none', stroke: c, 'stroke-width': 2.4 })));
+    svg.appendChild(el('path', { d: path(obs.map(t => [G.x(t), G.y(lev(t))])), fill: 'none', stroke: INK, 'stroke-width': 2 }));
+    obs.forEach(t => svg.appendChild(el('circle', { cx: G.x(t), cy: G.y(lev(t)), r: 3.2, fill: INK })));
+    endLabels(svg, [{ y: G.y(q('h0', E, 1)), col: NULL, lines: ['No temperature effect', money(q('h0', E, 1)) + ' in ' + E] },
+                    { y: G.y(q('h1', E, 1)), col: PAPER, lines: ['The paper’s estimate', money(q('h1', E, 1)) + ' in ' + E] }], G.x(E) + 12, 34);
+    hoverBand(svg, G, obs.concat(fut), t => (t <= m.anchor
+      ? { title: String(t), rows: [['World Bank', money(lev(t))]], foot: 'WDI NY.GDP.PCAP.PP.KD, world' }
+      : { title: String(t), rows: [[sw(NULL) + 'No temperature effect', money(q('h0', t, 1)) + ' (' + money(q('h0', t, 0)) + '–' + money(q('h0', t, 2)) + ')'],
+                                   [sw(PAPER) + 'The paper’s estimate', money(q('h1', t, 1)) + ' (' + money(q('h1', t, 0)) + '–' + money(q('h1', t, 2)) + ')']],
+          foot: 'medians of ' + M.n.toLocaleString() + ' paths at the article’s settings, 80% ranges in brackets' }));
+  }
+
+  // Fig. 2a: each year's global temperature shock, with the authors' published shocks and the 2026-27 estimates
+  function drawShocks(svg) {
+    clear(svg);
+    const m = M.meta, sh = m.families.PWT.shocks, P = m.published.shocks || { authors: {}, events: {} };
+    const yrs = Object.keys(sh).map(Number).filter(t => t <= m.anchor);
+    const F = frame({ W: 960, H: 330, L: 58, R: 150, T: 30, B: 34, x0: yrs[0] - 1, x1: m.base + 2, y0: -0.36, y1: 0.5 });
+    svg.appendChild(txt('Global temperature shock (°C), NOAA measured with the paper’s filter', { x: F.L, y: 14, class: 'axl', 'font-weight': 700 }));
+    yGrid(svg, F, [-0.2, 0, 0.2, 0.4], v => minus(v.toFixed(1)));
+    xTicks(svg, F, [1960, 1970, 1980, 1990, 2000, 2010, 2020], String);
+    const bw = (F.x(1) - F.x(0)) * 0.74;
+    yrs.forEach(t => {
+      const v = sh[String(t)], a = P.authors[String(t)];
+      const r = el('rect', { x: F.x(t) - bw / 2, y: Math.min(F.y(v), F.y(0)), width: bw, height: Math.abs(F.y(v) - F.y(0)), fill: t >= 2023 ? INK : 'var(--rule)', 'fill-opacity': t >= 2023 ? 0.72 : 1 });
+      hover(r, () => tip.rows(String(t), [['Shock, NOAA', signed2(v) + ' °C'], a != null ? ['The authors’ published shock', signed2(a) + ' °C'] : null], 'the year’s temperature less what the two and three years before it predict'));
+      svg.appendChild(r);
+    });
+    Object.keys(P.authors).forEach(t => svg.appendChild(el('circle', { cx: F.x(+t), cy: F.y(P.authors[t]), r: 2.6, fill: 'var(--panel)', stroke: INK, 'stroke-width': 1, 'pointer-events': 'none' })));
+    Object.keys(P.events).forEach(t => {
+      const e = P.events[t], x = F.x(+t);
+      const r = el('rect', { x: x - bw / 2, y: Math.min(F.y(e.shock), F.y(0)), width: bw, height: Math.max(1, Math.abs(F.y(e.shock) - F.y(0))), fill: 'var(--shade)', stroke: 'var(--muted)', 'stroke-width': 0.9 });
+      hover(r, () => tip.rows(t + ', estimate', [['Shock', signed2(e.shock) + ' °C'], ['90% range', signed2(e.shock - 1.645 * e.sd) + ' to ' + signed2(e.shock + 1.645 * e.sd) + ' °C']], 'until NOAA publishes the annual value'));
+      svg.appendChild(r);
+      svg.appendChild(el('line', { x1: x, x2: x, y1: F.y(e.shock - 1.645 * e.sd), y2: F.y(e.shock + 1.645 * e.sd), stroke: 'var(--muted)', 'stroke-width': 1.3, 'pointer-events': 'none' }));
+    });
+    svg.appendChild(el('line', { x1: F.L, x2: F.W - F.R, y1: F.y(0), y2: F.y(0), stroke: 'var(--rule)' }));
+    const e27 = P.events[String(m.base + 1)];
+    if (e27) svg.appendChild(txt((m.base + 1) + ' estimate, ' + signed2(e27.shock) + ' °C', { x: F.x(m.base + 1) + 6, y: F.y(e27.shock + 1.645 * e27.sd) - 6, 'text-anchor': 'end', class: 'lbl', fill: INK }));
+    svg.appendChild(txt('2024, ' + signed2(sh['2024']) + ' °C', { x: F.x(2024) - 10, y: F.y(sh['2024']) + 4, 'text-anchor': 'end', class: 'lbl', fill: INK }));
+    svg.appendChild(txt('Open circles, the authors’ published shocks', { x: F.L + 6, y: F.T + 6, class: 'ax' }));
+  }
+
+  // Fig. 3b: each range of NOAA's 2027 value, each view's chance of Yes at the range's own strike
+  function drawBins(svg) {
+    clear(svg);
+    const bins = M.meta.published.bins;
+    const F = frame({ W: 960, H: 250, L: 250, R: 210, T: 26, B: 40, x0: 0, x1: 100, y0: 0, y1: 1 });
+    svg.appendChild(txt('Chance of Yes at the range’s strike (%)', { x: F.L, y: 14, class: 'axl', 'font-weight': 700 }));
+    [0, 20, 40, 60, 80, 100].forEach(p => {
+      svg.appendChild(el('line', { x1: F.x(p), x2: F.x(p), y1: F.T, y2: F.H - F.B, class: 'grid' }));
+      svg.appendChild(txt(String(p), { x: F.x(p), y: F.H - F.B + 16, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    bins.forEach((b, i) => {
+      const yy = F.T + (i + 0.5) * (F.H - F.T - F.B) / bins.length;
+      const p0 = 100 * b.p_yes_no_effect_at_strike, p1 = 100 * b.p_yes_paper_at_strike;
+      svg.appendChild(txt(b.bin[0].toUpperCase() + b.bin.slice(1) + ', ' + condition(b.bin), { x: F.L - 14, y: yy + 4, 'text-anchor': 'end', class: 'ax', fill: INK }));
+      svg.appendChild(el('line', { x1: F.x(p1), x2: F.x(p0), y1: yy, y2: yy, stroke: 'var(--rule)', 'stroke-width': 3 }));
+      [[p1, PAPER, -1], [p0, NULL, 1]].forEach(([p, c, side]) => {
+        svg.appendChild(el('circle', { cx: F.x(p), cy: yy, r: 6, fill: c, stroke: 'var(--panel)', 'stroke-width': 1.4 }));
+        svg.appendChild(txt(Math.round(p) + '%', { x: F.x(p) + side * 12, y: yy + 4, 'text-anchor': side < 0 ? 'end' : 'start', class: 'lbl', fill: c, 'font-weight': 700 }));
+      });
+      svg.appendChild(txt('strike ' + b.strike.toFixed(1) + '%, J ' + b.youden_j.toFixed(2) + ',', { x: F.W - F.R + 14, y: yy - 3, class: 'ax' }));
+      svg.appendChild(txt(pct(b.prob_now) + ' likely today', { x: F.W - F.R + 14, y: yy + 11, class: 'ax' }));
+    });
+  }
+
+  // Fig. 4: the sensitivity rows; a row with settings of its own draws the whole page at them when clicked
+  function applySettings(set) {
+    S = Object.assign({}, D, set);
+    schedule(0);
+    syncControls();
+    const c = $('#contract');
+    if (c) c.scrollIntoView({ behavior: 'smooth' });
+  }
+  function sensRows() {
+    const out = [];
+    let g = null;
+    M.meta.published.sensitivity.rows.forEach(r => {
+      if (r.group !== g && r.group !== 'Published') out.push({ head: r.group });
+      g = r.group;
+      out.push(r);
+    });
+    return out;
+  }
+  const sensHeight = () => 52 + 22 * sensRows().length + 44;
+  function drawSens(svg) {
+    clear(svg);
+    const P = M.meta.published.sensitivity, rows = sensRows(), RH = 22, top = 52, H = sensHeight();
+    svg.setAttribute('viewBox', '0 0 960 ' + H);
+    const ax0 = 400, ax1 = 720, bx0 = 760, bx1 = 940;
+    const thr = P.rows.map(r => r.threshold_growth_pp);
+    const tlo = Math.floor(Math.min(...thr) * 10) / 10 - 0.1, thi = Math.ceil(Math.max(...thr) * 10) / 10 + 0.1;
+    const xa = p => ax0 + (ax1 - ax0) * p, xb = v => bx0 + (bx1 - bx0) * (v - tlo) / (thi - tlo);
+    const yb = H - 44;
+    letterIn(svg, 'a', 16); svg.appendChild(txt('b', { x: bx0 - 18, y: 16, 'font-size': 15, 'font-weight': 800, fill: INK }));
+    svg.appendChild(txt('Paper’s estimate', { x: ax0 + 4, y: top - 10, class: 'lbl', fill: PAPER, 'font-weight': 700 }));
+    svg.appendChild(txt('No temperature effect', { x: ax1, y: top - 10, 'text-anchor': 'end', class: 'lbl', fill: NULL, 'font-weight': 700 }));
+    [0, 0.2, 0.4, 0.6, 0.8, 1].forEach(p => {
+      svg.appendChild(el('line', { x1: xa(p), x2: xa(p), y1: top - 4, y2: yb, class: 'grid' }));
+      svg.appendChild(txt(String(Math.round(100 * p)), { x: xa(p), y: yb + 16, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    ticksFor(tlo, thi, 3).forEach(v => {
+      svg.appendChild(el('line', { x1: xb(v), x2: xb(v), y1: top - 4, y2: yb, class: 'grid' }));
+      svg.appendChild(txt(v.toFixed(1), { x: xb(v), y: yb + 16, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    svg.appendChild(txt('Chance of Yes at ' + P.strike.toFixed(1) + '% a year (%)', { x: (ax0 + ax1) / 2, y: yb + 34, 'text-anchor': 'middle', class: 'axl' }));
+    svg.appendChild(txt('Best threshold (% a year)', { x: (bx0 + bx1) / 2, y: yb + 34, 'text-anchor': 'middle', class: 'axl' }));
+    rows.forEach((r, i) => {
+      const yy = top + (i + 0.5) * RH;
+      if (r.head) { svg.appendChild(txt(r.head, { x: ax0 - 12, y: yy + 4, 'text-anchor': 'end', class: 'axl', 'font-weight': 700 })); return; }
+      if (r.group === 'Published') svg.appendChild(el('rect', { x: 0, y: yy - RH / 2, width: 960, height: RH, fill: 'var(--shade)' }));
+      svg.appendChild(txt(r.label, { x: ax0 - 12, y: yy + 4, 'text-anchor': 'end', class: 'ax', fill: INK }));
+      const p0 = r.p_yes_no_effect_at_strike, p1 = r.p_yes_paper_at_strike;
+      svg.appendChild(el('line', { x1: xa(p1), x2: xa(p0), y1: yy, y2: yy, stroke: 'var(--rule)', 'stroke-width': 2.6 }));
+      [[p1, PAPER], [p0, NULL]].forEach(([p, c]) => svg.appendChild(el('circle', { cx: xa(p), cy: yy, r: 4.6, fill: c, stroke: 'var(--panel)', 'stroke-width': 1.2 })));
+      svg.appendChild(el('rect', { x: xb(r.threshold_growth_pp) - 4.5, y: yy - 4.5, width: 9, height: 9, fill: INK, transform: 'rotate(45 ' + xb(r.threshold_growth_pp) + ' ' + yy + ')' }));
+      svg.appendChild(txt('J ' + r.youden_j.toFixed(2), { x: xb(r.threshold_growth_pp) + 10, y: yy + 4, class: 'ax' }));
+      const hit = el('rect', { x: 0, y: yy - RH / 2, width: 960, height: RH, fill: 'transparent', style: r.settings ? 'cursor:pointer' : null });
+      hover(hit, () => tip.rows(r.label, [[sw(NULL) + 'Chance of Yes, no temperature effect', pct1(p0)], [sw(PAPER) + 'Chance of Yes, the paper is right', pct1(p1)],
+        ['Best threshold', f2(r.threshold_growth_pp) + '% a year'], ['Youden’s J', r.youden_j.toFixed(2)]],
+        r.settings ? 'published run; click to draw the page at this row’s settings' : 'published run; the controls do not offer this row'));
+      if (r.settings) hit.addEventListener('click', () => { tip.hide(); applySettings(r.settings); });
+      svg.appendChild(hit);
+    });
+  }
+
+  // Extended Data Fig. 5: the trend baseline by the first year of its average
+  function drawStartYears(svg) {
+    clear(svg);
+    const P = M.meta.published, rows = P.trendStartScan.rows, xs = rows.map(r => r.start);
+    const imf = P.contract.threshold_growth_equivalent_pp;
+    const opt = { W: 960, L: 70, R: 210, x0: xs[0] - 0.5, x1: xs[xs.length - 1] + 0.5 };
+    const A1 = frame(Object.assign({ H: 250, T: 30, B: 8, y0: 0.9, y1: 2.0 }, opt));
+    const B1 = frame(Object.assign({ H: 520, T: 290, B: 40, y0: 0, y1: 100 }, opt));
+    letterIn(svg, 'a', 16); letterIn(svg, 'b', 276);
+    svg.appendChild(txt('Best threshold (% a year)', { x: opt.L, y: 16, class: 'axl', 'font-weight': 700 }));
+    svg.appendChild(txt('Chance of Yes at ' + P.trendStartScan.strike.toFixed(1) + '% a year (%)', { x: opt.L, y: 276, class: 'axl', 'font-weight': 700 }));
+    yGrid(svg, A1, [1.0, 1.2, 1.4, 1.6, 1.8, 2.0], v => v.toFixed(1));
+    yGrid(svg, B1, [0, 20, 40, 60, 80, 100], String);
+    xTicks(svg, B1, xs.filter(x => x % 2 === 1), String);
+    svg.appendChild(txt('First year of the average (the window ends in ' + P.trendStartScan.window_end + ')', { x: (opt.L + 960 - opt.R) / 2, y: 514, 'text-anchor': 'middle', class: 'axl' }));
+    svg.appendChild(el('line', { x1: opt.L, x2: 960 - opt.R, y1: A1.y(imf), y2: A1.y(imf), stroke: NULL, 'stroke-width': 1.6, 'stroke-dasharray': '6 4' }));
+    svg.appendChild(txt('IMF baseline, ' + imf.toFixed(2) + '%', { x: A1.x(xs[0]), y: A1.y(imf) - 7, class: 'lbl', fill: NULL }));
+    svg.appendChild(el('path', { d: path(rows.map(r => [A1.x(r.start), A1.y(r.threshold_growth_pp)])), fill: 'none', stroke: INK, 'stroke-width': 2.2 }));
+    rows.forEach((r, i) => {
+      svg.appendChild(el('circle', { cx: A1.x(r.start), cy: A1.y(r.threshold_growth_pp), r: 3.8, fill: INK }));
+      if (i % 2 === 0) svg.appendChild(txt('J ' + r.youden_j.toFixed(2), { x: A1.x(r.start), y: A1.y(r.threshold_growth_pp) - 10, 'text-anchor': 'middle', class: 'ax' }));
+    });
+    [['p_yes_no_effect_at_strike', NULL, 'No temperature effect'], ['p_yes_paper_at_strike', PAPER, 'The paper’s estimate']].forEach(([k, c, name]) => {
+      svg.appendChild(el('path', { d: path(rows.map(r => [B1.x(r.start), B1.y(100 * r[k])])), fill: 'none', stroke: c, 'stroke-width': 2.2 }));
+      rows.forEach(r => svg.appendChild(el('circle', { cx: B1.x(r.start), cy: B1.y(100 * r[k]), r: 3.6, fill: c })));
+      svg.appendChild(txt(name, { x: B1.x(xs[xs.length - 1]) + 14, y: B1.y(100 * rows[rows.length - 1][k]) + 4, class: 'lbl', fill: c, 'font-weight': 700 }));
+    });
+    if (S.baseline === 'frozen' && S.trendStart != null) {
+      svg.appendChild(el('line', { x1: A1.x(S.trendStart), x2: A1.x(S.trendStart), y1: A1.T, y2: B1.H - B1.B, stroke: 'var(--warn)', 'stroke-dasharray': '3 3' }));
+    }
+    hoverBand(svg, B1, xs, x => {
+      const r = rows[xs.indexOf(x)];
+      return { title: 'Average from ' + x + ' through ' + P.trendStartScan.window_end, rows: [['Average growth', f2(r.drift_pp) + '% a year'], ['Best threshold', f2(r.threshold_growth_pp) + '% a year'],
+        [sw(NULL) + 'Chance of Yes, no effect', pct1(r.p_yes_no_effect_at_strike)], [sw(PAPER) + 'Chance of Yes, paper right', pct1(r.p_yes_paper_at_strike)], ['Youden’s J', r.youden_j.toFixed(2)]],
+        foot: 'published run, 2027 drawn from today’s forecast' };
+    });
+  }
+
+  // Extended Data Fig. 8: the best threshold and its separation if NOAA's 2027 value were known
+  function drawKnown27(svg) {
+    clear(svg);
+    const m = M.meta, G = m.published.t27Grid, rows = G.rows, xs = rows.map(r => r.T2027);
+    const thr = rows.map(r => r.threshold_growth_pp), J = rows.map(r => r.youden_j);
+    const opt = { W: 960, L: 70, R: 60, x0: xs[0] - 0.02, x1: xs[xs.length - 1] + 0.02 };
+    const A1 = frame(Object.assign({ H: 250, T: 30, B: 8, y0: Math.floor(Math.min(...thr) * 20) / 20, y1: Math.ceil(Math.max(...thr) * 20) / 20 }, opt));
+    const B1 = frame(Object.assign({ H: 500, T: 290, B: 40, y0: Math.floor(Math.min(...J) * 20) / 20, y1: Math.ceil(Math.max(...J) * 20) / 20 }, opt));
+    const cen = m.temps.bins.find(b => b.lower != null && b.upper != null);
+    [A1, B1].forEach(F => {
+      if (cen) {
+        svg.appendChild(el('rect', { x: F.L, y: F.T, width: F.x(cen.lower) - F.L, height: F.H - F.T - F.B, fill: 'var(--cool)', 'fill-opacity': 0.12 }));
+        svg.appendChild(el('rect', { x: F.x(cen.upper), y: F.T, width: F.W - F.R - F.x(cen.upper), height: F.H - F.T - F.B, fill: 'var(--warm)', 'fill-opacity': 0.12 }));
+      }
+    });
+    letterIn(svg, 'a', 16); letterIn(svg, 'b', 276);
+    svg.appendChild(txt('Best threshold (% a year)', { x: opt.L, y: 16, class: 'axl', 'font-weight': 700 }));
+    svg.appendChild(txt('Youden’s J', { x: opt.L, y: 276, class: 'axl', 'font-weight': 700 }));
+    yGrid(svg, A1, ticksFor(A1.y0, A1.y1, 4), v => v.toFixed(1));
+    yGrid(svg, B1, ticksFor(B1.y0, B1.y1, 4), v => v.toFixed(1));
+    xTicks(svg, B1, ticksFor(xs[0], xs[xs.length - 1], 6), v => v.toFixed(1));
+    svg.appendChild(txt('NOAA’s ' + (m.base + 1) + ' value (°C above 1901–2000), with ' + m.base + ' at ' + G.T2026.toFixed(2) + ' °C', { x: (opt.L + 960 - opt.R) / 2, y: 494, 'text-anchor': 'middle', class: 'axl' }));
+    if (cen) {
+      svg.appendChild(txt('Cool range', { x: A1.L + 8, y: A1.H - A1.B - 10, class: 'ax' }));
+      svg.appendChild(txt('Warm range', { x: A1.W - A1.R - 8, y: A1.T + 14, 'text-anchor': 'end', class: 'ax' }));
+    }
+    [[A1, thr], [B1, J]].forEach(([F, v]) => {
+      svg.appendChild(el('path', { d: path(xs.map((x, i) => [F.x(x), F.y(v[i])])), fill: 'none', stroke: INK, 'stroke-width': 2.2 }));
+      xs.forEach((x, i) => svg.appendChild(el('circle', { cx: F.x(x), cy: F.y(v[i]), r: 3.4, fill: INK })));
+    });
+    hoverBand(svg, B1, xs, x => {
+      const r = rows[xs.indexOf(x)];
+      return { title: 'NOAA’s ' + (m.base + 1) + ' value ' + x.toFixed(2) + ' °C', rows: [['Best threshold', f2(r.threshold_growth_pp) + '% a year'], ['Youden’s J', r.youden_j.toFixed(3)]], foot: 'published run’s threshold grid' };
+    });
+  }
+
   // ---------------------------------------------------------------- figure registry
   const FIG = { 1: [drawTemp, 420], 2: [drawIrf, 400], 3: [drawGrowth, 420], 5: [drawAfter, 400], 6: [drawEndYear, 400], 7: [drawDist, 400], 8: [drawTimeline, 300] };
+  // the Letter's figures by the id of their legend: each panel's drawing, its height and whether it follows the controls
+  const LFIG = {
+    fig2: [[drawShocks, 330, false], [drawIrf, 400, true]],
+    fig3: [[drawDist, 400, true], [drawBins, 250, false]],
+    fig4: [[drawSens, 0, false]],
+    ed2: [[drawTimeline, 300, true]],
+    ed3: [[drawTemp, 420, true]],
+    ed4: [[drawGrowth, 420, true]],
+    ed5: [[drawStartYears, 520, false]],
+    ed6: [[drawAfter, 400, true]],
+    ed7: [[drawEndYear, 400, true]],
+    ed8: [[drawKnown27, 500, false]],
+  };
+  // and the method note each one opens
+  const LNOTE = { fig1: 'main', fig2: 2, fig3: 'fig3', fig4: 'sens', ed2: 8, ed3: 1, ed4: 3, ed5: 'starts', ed6: 5, ed7: 6, ed8: 'known27' };
+
+  function figState(f) {
+    const live = f.panels.map(p => p.live), letters = (want) => f.panels.map((p, i) => (p.live === want ? 'ab'[i] : null)).filter(Boolean).join(' and ');
+    const mine = !atArticle(S) && live.some(Boolean);
+    f.state.className = 'gdp-figstate' + (mine ? ' mine' : '');
+    f.state.innerHTML = '';
+    let s;
+    if (!live.some(Boolean)) s = 'Drawn from the published run, at the article’s settings.';
+    else if (live.every(Boolean)) s = atArticle(S) ? 'Drawn live at the article’s settings.' : 'Drawn at your settings (' + changed(S).length + ' changed).';
+    else s = 'Panel ' + letters(false) + ' is drawn from the published run. Panel ' + letters(true) + (atArticle(S) ? ' is drawn live at the article’s settings.' : ' is drawn at your settings (' + changed(S).length + ' changed).');
+    f.state.appendChild(document.createTextNode(s));
+    if (mine) f.state.appendChild(h('button', { type: 'button', text: 'Reset', onclick: reset }));
+  }
 
   function drawAll() {
     drawReadout();
     drawMain($('#gdpMain'));
+    const lv = $('#gdpLevels');
+    if (lv) { try { drawLevels(lv); } catch (err) { console.error('figure 1a', err); } }
     const N = notes();
     const main = N.main;
     methodNote($('#gdpMainMethod'), Object.assign({}, main, { body: main.body.concat([{ table: main.table }]) }));
     figs.forEach(f => {
-      try { FIG[f.n][0](f.svg); } catch (err) { console.error('figure ' + f.n, err); }
-      f.state.className = 'gdp-figstate' + (atArticle(S) ? '' : ' mine');
-      f.state.innerHTML = '';
-      f.state.appendChild(document.createTextNode(atArticle(S) ? 'Drawn live at the article’s settings.' : 'Drawn at your settings (' + changed(S).length + ' changed).'));
-      if (!atArticle(S)) f.state.appendChild(h('button', { type: 'button', text: 'Reset', onclick: reset }));
-      if (N[f.n]) methodNote(f.note, N[f.n]);
+      f.panels.forEach(p => { try { p.draw(p.svg); } catch (err) { console.error('figure ' + f.key, err); } });
+      figState(f);
+      if (N[f.key]) methodNote(f.note, N[f.key]);
     });
     floatBar();
   }
@@ -804,7 +1109,11 @@ window.WXGdp = (() => {
     control('The paper’s estimate', { key: 'uncertainty', type: 'select', label: 'The paper’s statistical uncertainty',
       options: [['boot', 'As estimated (bootstrap)'], ['wide', 'Widened by half'], ['nw', 'Newey–West widths (time series only)'], ['point', 'None: the central estimate only']] });
     control('Background growth', { key: 'baseline', type: 'select', label: 'Growth with no temperature effect',
-      options: [['imf', 'IMF October 2026 projection'], ['frozen', '2000–2019 average growth, extended']] });
+      options: [['imf', 'IMF October 2026 projection'], ['frozen', m.trend ? 'Average growth to ' + m.trend.windowEnd + ', extended' : '2000–2019 average growth, extended']] });
+    if (m.trend) {
+      const st = Object.keys(m.trend.starts).map(Number);
+      control('Background growth', { key: 'trendStart', type: 'range', label: 'First year of the average', min: st[0], max: st[st.length - 1], step: 1, fmt: String, show: s => s.baseline === 'frozen' });
+    }
     control('Background growth', { key: 'missShare', type: 'range', label: 'Share of the IMF’s average past miss kept', min: 0, max: 1.5, step: 0.05, fmt: pct, off: s => s.baseline === 'frozen' });
     control('Background growth', { key: 'spread', type: 'range', label: 'Spread of background growth', min: 0.5, max: 1.5, step: 0.05, fmt: pct });
     control('Background growth', { key: 'netting', type: 'check', label: 'Net the paper’s part out of the IMF’s past misses', off: s => s.baseline === 'frozen' });
@@ -949,7 +1258,7 @@ window.WXGdp = (() => {
         fig.appendChild(runsTo(h('figcaption'), b.caption, true));
         const state = h('div', { class: 'gdp-figstate' }), note = h('div');
         fig.appendChild(state); fig.appendChild(note);
-        figs.push({ n: b.n, svg, state, note });
+        figs.push({ key: b.n, panels: [{ svg, draw: FIG[b.n][0], live: true }], state, note });
         art.appendChild(fig);
         return;
       }
@@ -962,6 +1271,153 @@ window.WXGdp = (() => {
       }
       const p = h('p', { class: b.indent ? (allBI ? 'callout' : 'ind') : '' });
       art.appendChild(runsTo(p, b.runs));
+    });
+  }
+
+  // ---------------------------------------------------------------- the Letter (letter.json, schema 2)
+  // References to figures, tables and sections link to them; the main figures sit where the text first cites them.
+  const XREF = /(Extended Data Fig\.|Extended Data Table|Supplementary Table|Supplementary Section|Figs?\.)\s(\d+)/;
+  const XKIND = { 'Fig.': 'fig', 'Figs.': 'fig', 'Extended Data Fig.': 'ed', 'Extended Data Table': 'edt', 'Supplementary Table': 'st', 'Supplementary Section': 'ss' };
+  // a legend's own label ("Fig. 2 |") is not a link to the figure it sits under
+  function textWithLinks(node, t, self) {
+    const re = new RegExp('(https?://[^\\s]+[^\\s.,;:)])|' + XREF.source, 'g');
+    let last = 0, mm;
+    while ((mm = re.exec(t))) {
+      if (mm.index > last) node.appendChild(document.createTextNode(t.slice(last, mm.index)));
+      const id = mm[1] ? null : XKIND[mm[2]] + mm[3];
+      if (mm[1]) node.appendChild(h('a', { href: mm[1], text: mm[1] }));
+      else if (id === self) node.appendChild(document.createTextNode(mm[0]));
+      else node.appendChild(h('a', { href: '#' + id, class: 'figref', text: mm[0] }));
+      last = re.lastIndex;
+    }
+    if (last < t.length) node.appendChild(document.createTextNode(t.slice(last)));
+  }
+  function runs2(node, runs, self) {
+    (runs || []).forEach(r => {
+      if (r.math != null) { node.appendChild(tex(h('span', { class: 'mi' }), r.math, false)); return; }
+      let w;
+      if (r.cite) {
+        w = h('sup', { class: 'cite' });
+        String(r.t).split(/(\d+)/).forEach(part => {
+          if (/^\d+$/.test(part)) w.appendChild(h('a', { href: '#ref-' + part, text: part }));
+          else if (part) w.appendChild(document.createTextNode(part));
+        });
+      } else if (r.href) w = h('a', { href: r.href, text: r.t });
+      else { w = document.createDocumentFragment(); textWithLinks(w, r.t, self); }
+      if (r.sup) w = h('sup', {}, [w]);
+      if (r.sub) w = h('sub', {}, [w]);
+      if (r.i) w = h('i', {}, [w]);
+      if (r.b) w = h('b', {}, [w]);
+      node.appendChild(w);
+    });
+    return node;
+  }
+  // the main figures a paragraph cites, in order ("Fig. 4", "Figs. 2–4", "Fig. 3a")
+  function firstCited(runs) {
+    const out = [], re = /Figs?\.\s(\d+)[a-z]?(?:\s?[–-]\s?(\d+))?/g;
+    const t = (runs || []).map(r => r.t || '').join('');
+    let mm;
+    while ((mm = re.exec(t))) for (let k = +mm[1]; k <= +(mm[2] || mm[1]); k++) out.push('fig' + k);
+    return out;
+  }
+  function figureEl(id) {
+    const f = A.figures[id], spec = LFIG[id];
+    const fig = h('figure', { class: 'gdp-fig', id });
+    if (spec) {
+      const card = h('div', { class: 'card' });
+      const panels = spec.map(([draw, H, live], i) => {
+        if (spec.length > 1) card.appendChild(h('div', { class: 'gdp-pl', text: 'ab'[i] }));
+        const svg = el('svg', { viewBox: '0 0 960 ' + (H || sensHeight()), role: 'img', 'aria-label': f.label + (spec.length > 1 ? 'ab'[i] : '') });
+        card.appendChild(svg);
+        return { svg, draw, live };
+      });
+      fig.appendChild(card);
+      fig.appendChild(runs2(h('figcaption'), f.legend, id));
+      const state = h('div', { class: 'gdp-figstate' }), note = h('div');
+      fig.appendChild(state); fig.appendChild(note);
+      figs.push({ key: LNOTE[id], panels, state, note });
+    } else {
+      if (f.image) fig.appendChild(h('div', { class: 'card gdp-img' }, [h('img', { src: BASE + f.image.file, alt: f.label, loading: 'lazy', width: f.image.w, height: f.image.h })]));
+      fig.appendChild(runs2(h('figcaption'), f.legend, id));
+    }
+    return fig;
+  }
+  function tableRows(rows) {
+    const t = h('table', { class: 'gdp-tbl' });
+    rows.forEach((row, i) => {
+      const tr = h('tr');
+      row.forEach(cell => tr.appendChild(runs2(h(i === 0 ? 'th' : 'td'), cell)));
+      t.appendChild(i === 0 ? h('thead', {}, [tr]) : tr);
+    });
+    return h('div', { class: 'gdp-tblwrap' }, [t]);
+  }
+  function tableEl(id) {
+    const t = A.tables[id];
+    return h('div', { class: 'gdp-ltbl', id }, [runs2(h('p', { class: 'gdp-tblcap' }), t.legend, id), tableRows(t.rows)]);
+  }
+  function blocksTo(node, blocks) {
+    (blocks || []).forEach(b => {
+      if (b.type === 'h3') {
+        const hd = h('h3', { id: b.id, text: b.text });
+        hd.appendChild(h('a', { class: 'anchor', href: '#' + b.id, 'aria-label': 'link to ' + b.text, text: '#' }));
+        node.appendChild(hd);
+      } else if (b.type === 'p') node.appendChild(runs2(h('p'), b.runs));
+      else if (b.type === 'eq') node.appendChild(tex(h('div', { class: 'gdp-eq' }), b.tex + (b.n ? '\\tag{' + b.n + '}' : ''), true));
+      else if (b.type === 'figure' && A.figures[b.id]) node.appendChild(figureEl(b.id));
+      else if (b.type === 'table') node.appendChild(b.id ? tableEl(b.id) : tableRows(b.rows));
+      else if (b.type === 'list') { const l = h(b.ordered ? 'ol' : 'ul'); b.items.forEach(it => l.appendChild(runs2(h('li'), it))); node.appendChild(l); }
+    });
+    return node;
+  }
+  function renderLetter() {
+    const m = M.meta, src = A.source || {};
+    const sec = id => A.sections.find(s => s.id === id);
+    $('#gdpTitle').textContent = A.title;
+    const by = $('#gdpByline');
+    by.innerHTML = '';
+    runs2(by, A.byline);
+    by.appendChild(h('span', { html: ' · Draft for comment · <a href="#reproduce">Data and code</a> · <a href="' + esc(m.code.paper) + '">The paper</a>' }));
+    by.after(runs2(h('p', { class: 'gdp-aff' }), A.affiliations));
+    $('#contract').before(runs2(h('p', { class: 'gdp-summary' }), A.summary));
+    // Fig. 1 is the contract's figure: its levels panel above the ladder, and its legend under them
+    const mainCard = $('#gdpMain').parentNode;
+    const levels = el('svg', { id: 'gdpLevels', viewBox: '0 0 960 560', role: 'img', 'aria-label': 'Fig. 1a' });
+    const f1wrap = h('div', { id: 'fig1' }, [h('div', { class: 'gdp-pl', text: 'a' }), h('div', { class: 'card' }, [levels]),
+      h('div', { class: 'gdp-figstate', text: 'Panel a is drawn from the published run, at the article’s settings. Panel b, the readout and the ladder follow the controls.' }),
+      h('div', { class: 'gdp-pl', text: 'b' })]);
+    mainCard.before(f1wrap);
+    if (A.figures.fig1) $('#gdpMainMethod').before(runs2(h('p', { class: 'cap gdp-cap1' }), A.figures.fig1.legend, 'fig1'));
+    // the main text, each main figure after the paragraph that first cites it
+    const art = $('#gdpArticle');
+    art.innerHTML = '';
+    art.appendChild(h('p', { class: 'cap', style: 'margin:0 0 16px', text: 'The text is the draft as written, last edited ' + dateOf(src.modified) + '; its numbers are those of the published run of '
+      + dateOf(m.refreshedUtc) + '. Most figures are drawn live from the model, at the article’s settings unless you change them.' }));
+    const placed = new Set(['fig1']);
+    const place = ids => ids.forEach(id => { if (!placed.has(id) && A.figures[id]) { placed.add(id); art.appendChild(figureEl(id)); } });
+    A.main.forEach(p => { art.appendChild(runs2(h('p'), p.runs)); place(firstCited(p.runs)); });
+    place(Object.keys(A.figures).filter(id => /^fig\d+$/.test(id)));
+    // then the Methods, the Extended Data, the references, the end notes and the Supplementary Information
+    const anchor = $('#reproduce');
+    const part = (id, title, fill) => {
+      anchor.before(h('div', { class: 'secttl', id, text: title }));
+      const body = h('div', { class: 'gdp-article' });
+      fill(body);
+      anchor.before(body);
+    };
+    if (sec('methods')) part('methods', 'METHODS', b => blocksTo(b, sec('methods').blocks));
+    if (sec('extended-data')) part('extended-data', 'EXTENDED DATA', b => blocksTo(b, sec('extended-data').blocks));
+    if (sec('references')) part('references', 'REFERENCES', b => {
+      const refs = sec('references').refs || [];
+      const ol = h('ol', { class: 'gdp-refs', start: refs.length ? refs[0].n : 1 });
+      refs.forEach(r => ol.appendChild(runs2(h('li', { id: 'ref-' + r.n }), r.runs)));
+      b.appendChild(ol);
+    });
+    const ends = ['acknowledgements', 'author-contributions', 'competing-interests', 'additional-information'].map(sec).filter(Boolean);
+    if (ends.length) part('notes', 'NOTES', b => ends.forEach(s => { b.appendChild(h('h3', { text: s.title })); blocksTo(b, s.blocks); }));
+    if (sec('supplementary-information')) part('supplementary', 'SUPPLEMENTARY INFORMATION', b => {
+      const d = h('details', { class: 'gdp-si' }, [h('summary', { text: 'Show the Supplementary Information (two tables and the computational details)' })]);
+      blocksTo(d, sec('supplementary-information').blocks);
+      b.appendChild(d);
     });
   }
 
@@ -995,8 +1451,10 @@ window.WXGdp = (() => {
     tip = WXC.tooltip();
     const product = ((window.WX && WX.gdpContract) || {}).product;
     try {
+      // the Letter's text when it is published, the cover article's until then
+      const article = () => fetch(BASE + 'article.json').then(r => { if (!r.ok) throw new Error('article ' + r.status); return r.json(); });
       const [art, model, book] = await Promise.all([
-        fetch(BASE + 'article.json').then(r => { if (!r.ok) throw new Error('article ' + r.status); return r.json(); }),
+        fetch(BASE + 'letter.json').then(r => (r.ok ? r.json() : null)).catch(() => null).then(l => (l && l.schema === 2 ? l : article())),
         ElNinoModel.load(BASE),
         product ? WXM.productBook(product) : null,
       ]);
@@ -1015,7 +1473,7 @@ window.WXGdp = (() => {
       ? 'Listed on ForecastEx as ' + BOOK.name + '. The bars carry the exchange’s prices for the ' + M.meta.base + '–' + D.endYear
         + ' contract, Yes green and No red. The two marks on each bar are the views’ chances of Yes from the model on this page, not prices.'
       : 'Not listed yet. The contract is proposed to list ' + M.meta.ladder.lists + ', after NOAA publishes its 2026 annual value. Until then the ladder shows the proposed ' + (M.meta.ladder.strikes.length > 1 ? 'strikes' : 'strike') + ', hatched, with each view’s chance of Yes; once it lists, the bars carry the exchange’s prices and each opens the contract on IBKR.';
-    renderArticle();
+    if (A.schema === 2) renderLetter(); else renderArticle();
     renderRepro();
     buildControls();
     mainKey();
@@ -1026,7 +1484,15 @@ window.WXGdp = (() => {
     drawAll();
     status('Run in ' + Math.round(performance.now() - t0) + ' ms on ' + M.n.toLocaleString() + ' paths.');
     window.addEventListener('scroll', () => requestAnimationFrame(floatBar), { passive: true });
-    window.addEventListener('hashchange', () => { S = readHash(); schedule(0); syncControls(); });
+    // a link to a figure or a section moves the page; only an address with settings changes them
+    window.addEventListener('hashchange', () => { if (!location.hash.includes('=')) return; S = readHash(); schedule(0); syncControls(); });
+    // a link into the closed Supplementary Information opens it
+    document.addEventListener('click', e => {
+      const a = e.target.closest && e.target.closest('a[href^="#"]');
+      const t = a && document.getElementById(a.getAttribute('href').slice(1));
+      const d = t && t.closest('details');
+      if (d) d.open = true;
+    });
     if (location.hash.length > 1) { const id = location.hash.slice(1); const t = document.getElementById(id); if (t) t.scrollIntoView(); }
   }
 

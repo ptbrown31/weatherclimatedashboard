@@ -145,19 +145,23 @@ missing or malformed feed is an absence, never a failed pass. When off, the layo
 for market elements.
 
 The world GDP contract's page is the one page that computes a probability (owner's decisions of
-2026-11-02). It carries Patrick Brown's article and re-runs the contract's model in the browser
+2026-11-02). It carries Patrick Brown's Letter, "A prediction market test of the macroeconomic impact of
+global temperature shocks" (`letter.json`, owner's decision 2026-11-05; the cover article, `article.json`,
+where no Letter is published), and re-runs the contract's model in the browser
 (`site/js/elnino-model.js`, a port of the published run that the reproduction repository's tests check
 path by path), so the chance of Yes under each of two views, no temperature effect and Bilal and
-Känzig's (2026) estimate, follows the reader's controls. The two are never blended into one number,
-never called a price or a fair value, and are marked as not prices wherever they are drawn. Until the
+Känzig's (2026) estimate, follows the reader's controls. The two are never blended into one number and
+never called a price or a fair value. Since the owner's decision of 2026-11-05 they carry no "not a price"
+mark, except beside a listed contract's prices. Until the
 exchange lists the contract, its ladder draws the strike `model.json` proposes (one since 2026-11-03, the
 article's 1.1% a year) hatched, with the listing date and no link. Once `gdp_contract.product` in `config/site.json` names the listed product, the ladder draws the
 exchange's prices through the market layer (`WXM.productBook`, the catalogue's terms and quotes), each
 opening the contract on IBKR, with the two views' marks kept on each bar; the prices belong to the
 listed contract's period, so they are drawn only at its end year. The model's files are the El Niño
 refresh's, written monthly to `snapshots/elnino/` from outside this repo (DEPLOY.md section 12b); the
-pipeline never writes them, and `samples/snapshots/elnino/` is a frozen copy for local mode. The article
-is the owner's own copy and the house prose rules do not touch it; the page's own notes follow them.
+pipeline never writes them, and `samples/snapshots/elnino/` is a frozen copy for local mode. The Letter
+and the article are the owner's own copy and the house prose rules do not touch them; the page's own notes
+follow them.
 
 ## Decisions taken 2026-08-21
 
@@ -227,7 +231,7 @@ parameters: `station`, `theme`, `market`.
                      run.py (command line), handler.py (the only vendor-specific file)
     site/            the static frontend; js/market.js is the market seam; js/storm.js is a live storm's
                      wind contracts, delivery by delivery; js/climate-gdp.js and js/elnino-model.js are the
-                     world GDP contract's article and its model; embed/ is the iframe target
+                     world GDP contract's page and its model; embed/ is the iframe target
     site/assets/     small projected geometry the pages load (generated)
     site/vendor/     third-party code shipped as it is (KaTeX; see NOTICE)
     geo/             vendored inputs, not served: public-domain TopoJSON, the exchange's wind reference-location list and the
