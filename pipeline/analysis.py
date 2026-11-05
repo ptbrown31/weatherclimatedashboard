@@ -81,9 +81,10 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     before rounding and the day so far before rounding as exact strings, both
     files' publication times on each server, and the hourly temperature
     contract of its hour (Patrick's ruling of 4 November), whose own cut-off
-    is three hours after the hour. It is final once NOMADS's copy published
-    by then is in, otherwise at the first ten-minute pass after that cut-off
-    on NOAA Open Data's copy published by then, and under review with neither.
+    is 1 hour 30 minutes after the hour (his ruling of 5 November; three
+    hours until then). It is final once NOMADS's copy published by then is
+    in, otherwise at the first ten-minute pass after that cut-off on NOAA
+    Open Data's copy published by then, and under review with neither.
 
 Reads   noaa-rtma-pds and NOMADS, every file from both, through
         pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
@@ -289,18 +290,26 @@ PRODUCTS = {
 # shows it and the day's values so far, for the settlement display; then the
 # raw CSV file gained each server's copy of each file, and on 2026-11-04 each
 # row the pass at which its copies became final, then the exact strings, both
-# files' times on each server and the hourly contract of rowShape 3)
-LAYOUT = "v3-2026-11-04"
+# files' times on each server and the hourly contract of rowShape 3; on
+# 2026-11-05 the hourly contract's cut-off moved to 1 hour 30 minutes after
+# the hour, so every listed day's hourly states are worked out again)
+LAYOUT = "v3-2026-11-05"
 # the shape of a place file's rows, stamped on the file as `rowShape` so the
 # page can tell a file whose rows carry `show`, `run` and the publication
 # times (2) and the exact strings, the files and the hourly contract (3) from
 # one written before them, which it still draws, with no running figures
 ROW_SHAPE = 3
 # the hourly temperature contract's own cut-off (Patrick's ruling of 4
-# November, the draft specification's section 6) is three hours after its
-# hour, the same in every zone, and the daily 12:45 AM cut-off does not apply
-# to it. One analysis file serves the hourly contracts of its hour at every place
-HOURLY_CUT_AFTER = dt.timedelta(hours=3)
+# November, the draft specification's section 6) is 1 hour 30 minutes after
+# its hour, the same in every zone, and the daily 12:45 AM cut-off does not
+# apply to it. It was three hours until his ruling of 5 November, which
+# shortened it to the draft terms' Resolution Time, since on the engine's
+# count over the record from September 2024 a file later than about 80
+# minutes is nearly always part of a long outage that a longer wait would not
+# have covered. Every hour is worked out under the cut-off in force when it is
+# written, so a rewrite carries the change back. One analysis file serves the
+# hourly contracts of its hour at every place
+HOURLY_CUT_AFTER = dt.timedelta(hours=1, minutes=30)
 # the three messages read from the analysis file, by the .idx sidecar's names
 MESSAGES = (("temp", "TMP", "2 m above ground"), ("wind", "WIND", "10 m above ground"),
             ("gust", "GUST", "10 m above ground"))
@@ -469,8 +478,9 @@ CONVENTIONS = {
               "the hour, specials, the tenths group) have no analogue here.",
     "hourlyContract": "Each hour's temperature is also the hourly temperature contract's value, whole degrees "
                       "Fahrenheit rounded once, half up, away from zero (owner's ruling 2026-11-04). Its cut-off is "
-                      "three hours after the hour in every zone, and the daily 12:45 AM cut-off does not apply to "
-                      "it. It is final once NOMADS's copy of the analysis is in, if published by that cut-off; "
+                      "1 hour 30 minutes after the hour in every zone (owner's ruling 2026-11-05; three hours until "
+                      "then), and the daily 12:45 AM cut-off does not apply to it. It is final once NOMADS's copy of "
+                      "the analysis is in, if published by that cut-off; "
                       "otherwise at the first ten-minute pass after the cut-off, on NOAA Open Data's copy if "
                       "published by then; with neither, there is no value and the hour is marked for review. A copy "
                       "read after that pass is recorded and never used. An hour read before the lane kept each "
@@ -1708,11 +1718,12 @@ def settle_cuts(store: Storage, product: str, kind: str, t: dt.datetime, slots: 
     whose hourly cut passed before then. Once every cut-off and, for an
     analysis, the hourly cut have settled, the file's settled record is
     written, once, the archive hour or the precipitation key, even with no
-    copy at all. At 10 and 11 PM in a zone the hourly cut is later than the
-    day's, so where no zone's cut-off is later still (never with the
-    sixty-seven places) the record waits for it, and the file stays open till
-    then. The daily cut-offs settle as they did. Returns True when a cut-off
-    settled."""
+    copy at all. While the hourly cut was three hours after the hour (until
+    2026-11-05), at 10 and 11 PM in a zone it came later than the day's, and
+    where no zone's cut-off was later still (never with the sixty-seven
+    places) the record waited for it; at 1 hour 30 minutes it never comes
+    after the day's own cut-off. The daily cut-offs settle as they did.
+    Returns True when a cut-off settled."""
     copies = copies_of(store, product, kind, t, cache)
     held = [s for s in SERVERS if copies.get(s) is not None]
     by_place = place_cuts(kind, t, locs)

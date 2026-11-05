@@ -86,3 +86,12 @@ after a cut-off of its day. Every hour's hourly contract is final at its cut, th
 hour, on the copy read (basis `norecord`, since no NOMADS copy is on record for these files), except the
 hours of 18 and 19 UTC on 2026-09-29, whose cut came after the run's time and which are provisional. The
 precipitation file of 2026-09-29's 19 UTC row was not read by the run and has no times.
+
+On 2026-11-05 the owner moved the hourly contract's cut-off from three hours after the hour to 1 hour 30
+minutes. The tree was rebuilt the same way, by the lane's own `rebuild_days` at the run's time with the
+table, and only the rows' `hourly` changed: every cut, and every final moment of basis `norecord`, moved
+to 1 hour 30 minutes after its hour, and the 18 UTC hour of 2026-09-29, whose new cut came before the
+run's time, turned final; the 19 UTC hour stays provisional. No hour of these six days had its NOAA Open
+Data copy later than 1 hour 30 minutes after the hour, so none went to review, and every final hour
+keeps its value. The day files and both CSV files are byte for byte as they were, and a second rebuild
+changes no file. `index.json` changed only in its `hourlyContract` convention, which gives the new cut-off.

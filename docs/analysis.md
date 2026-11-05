@@ -35,8 +35,9 @@ a download whose message fails the check is a server's copy only when a second d
 the same bytes. Later on 2026-11-04 (owner's approval of display v3): **each row of a place file
 carries its figures as exact strings, both files' publication times on each server and the hourly
 temperature contract of its hour** (`rowShape` 3, section 4), so the settlement display computes
-nothing, and **the hourly contract has its own cut-off, three hours after its hour**, by Patrick's
-ruling of 4 November (section 1). 2026-09-30: **URMA is dropped from the lane and the page**, since
+nothing, and **the hourly contract has its own cut-off**, three hours after its hour by Patrick's
+ruling of 4 November and **1 hour 30 minutes after it by his ruling of 5 November**, which every
+listed day was rewritten under (section 1). 2026-09-30: **URMA is dropped from the lane and the page**, since
 it does not resolve. The lane read it for comparison until then; it reads RTMA only now, the
 published days, place files and CSV files were rewritten without it (`LAYOUT`, section 5),
 and its archive and frames under `archive/analysis2/{hours,precip}/urma/` and
@@ -133,8 +134,16 @@ two copies.
 
 **The hourly contract (Patrick's ruling of 4 November).** Each hour's temperature is also the value
 of an hourly temperature contract on that hour, whole °F rounded once, half up, away from zero.
-Its cut-off is three hours after the hour (`HOURLY_CUT_AFTER`), the same in every zone, and the
-day's 12:45 AM cut-off does not apply to it. One analysis file serves the hourly contracts of its
+Its cut-off is 1 hour 30 minutes after the hour (`HOURLY_CUT_AFTER`, Patrick's ruling of 5
+November, the draft terms' Resolution Time; three hours from his ruling of 4 November until then),
+the same in every zone, and the day's 12:45 AM cut-off does not apply to it. He shortened it on the
+engine's count over the record since September 2024, by which a file later than about 80 minutes is
+nearly always part of a long outage that a longer wait would not have covered. Each hour's state is
+worked out from its copies and their times under the cut-off in force when its place file is
+written, so the change came back over every listed day with `LAYOUT` (section 5): the hours before
+NOMADS's times were kept turned final at 1 hour 30 minutes on NOAA Open Data's copy, and those whose
+NOAA Open Data copy came between 1 hour 30 minutes and three hours after the hour went to review. One
+analysis file serves the hourly contracts of its
 hour at every place, and the file settles for the hourly cut apart from the days' cut-offs
 (`settle_cuts`, under `hourly` beside `cutoffs`) by the same rules: at the pass at which both
 servers' copies are in, or at the first ten-minute pass after the cut, on the copies in hand. The
@@ -149,13 +158,14 @@ contract is:
 - provisional until then, on the copy in hand.
 
 A copy read after the hourly cut settled, whatever its Last-Modified, is recorded and flagged
-(`late`) and never used. Since the two cut-offs differ, an hour can count for its hourly contract
-and not for its day, or the reverse. New York's 23:00 has its day's cut-off at 12:45 AM and its
-hourly cut at 2:00 AM, so a file published at 1:10 AM counts only for the hourly contract, and a
-file published four hours after an afternoon hour counts only for the day. Where both count the
-value is the same, unless NOMADS's copy first appears between the two cut-offs and differs from
-NOAA Open Data's. A place the copy that counts has no temperature for is under review at the cut,
-the choice being per file. The settled record waits for the hourly cut as well as the days'
+(`late`) and never used. Since the two cut-offs differ, an hour can count for its day and not for its
+hourly contract: a file published two hours after an afternoon hour counts only for the day, and New
+York's 23:00, with its hourly cut at 12:30 AM and its day's cut-off at 12:45 AM, counts a file
+published at 12:40 AM for the day alone. The reverse, which the three hours allowed at 10 and 11 PM,
+no longer happens, since the hourly cut now always comes before the day's own cut-off. Where both
+count the value is the same, unless NOMADS's copy first appears between the two cut-offs and differs
+from NOAA Open Data's. A place the copy that counts has no temperature for is under review at the
+cut, the choice being per file. The settled record waits for the hourly cut as well as the days'
 cut-offs; with the sixty-seven places some zone's cut-off is always the later, at least 4 h 45 min
 after the hour, so the record is written when it was before, and a test holds a day's figures,
 states and CSV files byte-identical to the lane's before the change. A record settled before this
@@ -572,7 +582,8 @@ none. Every time is ISO UTC with Z, and a missing figure is `null`.
   string; and `late`, a copy read after its cut settled.
 
 A row with no value for the day whose hourly contract has a state (a file on neither server by
-the hourly cut, or one too late for the day and in time for the hourly contract) carries `hourly`,
+the hourly cut, or, under the three hours, one too late for the day and in time for the hourly
+contract) carries `hourly`,
 `anlFile` and `pcpFile` and no value fields, and a row of which nothing is known stays `null`. A
 place with no value yet for its day has no place file to carry them until its first value or its
 cut-off. The day files, both CSV files and every field of before are unchanged.
@@ -1010,12 +1021,15 @@ the position, with the position itself and any ruling.
   Final with the hours it resolved on, Under review when no hour was published by the cut-off
   (event review until 2026-11-04), and Closed on a file written before 2026-10-14;
 - two countdowns, to the next analysis and to the next hour's precipitation, each in one of four
-  states: counting down, due now, late, and missed once the cut-off has passed. They run to NOAA's
-  own publication times over the two weeks to 2026-11-03, the analysis a median 49 minutes after its
-  hour and usually by 52, the precipitation a median 17 minutes after the hour ends and usually by
-  18 (`LAG` in the script). Late means the file is not in yet past the time it is usually out by,
-  and its note gives that time and says the file counts if published by the cut-off. They are the
-  page's only expected times, and only for files not in yet;
+  states: counting down, expected now, late, and missed once the cut-off has passed. They run to the
+  file's first copy, NOMADS's, which from 10:00 UTC on 3 November to 08:00 UTC on 5 November came
+  first in every file both servers had a time for, a median 46 minutes after the hour for an analysis
+  and 16 minutes after the hour ends for a precipitation file. NOAA Open Data's medians over the two
+  weeks to 2026-11-03 were 49 and 17 minutes, and the first copy is usually in by 52 and 18 (`LAG` in
+  the script). Late means the file is not in yet past the time it is usually out by, and its note
+  gives that time and says the file counts if published by the cut-off. These usual times are the
+  page's only expected times, and only for files not in yet. The page says "expected", never "due"
+  (owner, 2026-11-05);
 - five value cards, High, Low, Peak gust, Mean wind and Precipitation, each the lane's running value
   at the last counted hour in (`run`), with the hour of the extreme or the hours counted and "so
   far" until the day is final. A place under review shows no value and says no hour was published by
@@ -1024,13 +1038,20 @@ the position, with the position itself and any ruling.
 - three charts on one time axis, local midnight to midnight: temperature with the High and Low
   marked, sustained wind and gust with the running mean as a dashed line and the peak gust marked,
   and hourly precipitation bars with the running total as a step line. Each shades the hours still
-  to come and draws a now line at the clock and a dashed line at the next hour due, and under each
-  is a CSV file for each value on it;
+  to come and draws a now line at the clock and a dashed line at the next hour to come, labelled
+  "next, expected" with its usual time, left of the line where the plot ends too soon for it, and
+  under each is a CSV file for each value on it;
 - every hour in a table: local and UTC time, each value as the contract shows it, the hour's hourly
-  contract in a few words with its full wording on hover, the running precipitation total, and the
-  analysis file's publication time and server or "not on record", with a footnote that the rounded
-  hours can add up to a different figure than the total, which is the column the contract resolves
-  on;
+  contract in a few words with its full wording on hover, the running precipitation total, and under
+  one header, "Analysis published", a column for NOMADS and one for NOAA Open Data (owner,
+  2026-11-05). Each gives that server's own Last-Modified time for the hour's analysis once the moment
+  shown reaches it, marked ", after the cut-off" when it came after the day's cut-off; before then
+  "expected" with the time that server usually publishes (46 minutes after the hour for NOMADS, 49
+  for NOAA Open Data), while the file can still come; "not on record" where no time was kept for it,
+  NOMADS before 10:00 UTC on 3 November or a server the record has no time for on a file that is in;
+  and "not published" past the cut-off. A footnote says the rounded hours can add up to a different
+  figure than the total, which is the column the contract resolves on, explains the two servers and
+  the hourly contract, and gives the hourly cut-off as the day's file has it;
 - the replay, last: the time the day is shown as of, local and UTC, a slider, Play the day (a minute
   every 30 ms) and Latest. It is held at the foot of the screen while the day is on it, so the
   charts it moves stay in view.
@@ -1043,7 +1064,9 @@ temperature the hourly contract's value and state; the day so far after that hou
 and before rounding (`runX`); and the file: its name, each server's Last-Modified time
 ("published") and the lane's first find ("found"), or "not on record" ("not on record before 10:00
 UTC on 3 Nov" for NOMADS before the timing probe's earliest file), the copy used and whether the
-hour counts. A
+hour counts. In a replay a server's time after the moment shown is not given: its copy is "expected
+about" that server's usual time, or past the cut-off "not published by the cut-off", and a first find
+after the moment is left out. A
 file published after the cut-off and counted under the rule before 14 October 2026 (`counts` and
 `afterCut` both true; one real case, the precipitation hour ending 2026-09-30T07:00Z for western
 places on 29 September) says "published after the cut-off, counted under the rule before 14
@@ -1051,9 +1074,20 @@ October 2026", never not counted.
 
 **Hourly contract.** Each hour's temperature has its own state, from the row's `hourly`, in the
 owner's wording of 2026-11-04, put plainly the same evening at his request so that a reader who has
-never heard of either server can follow it, with times on the place's clock to the second. The
-every-hour table's cell says whose copy the value is, "final (NOMADS)" or "final (Open Data)", and its
-title, the hover and the temperature CSV give the sentence. The note under the table explains the two
+never heard of either server can follow it, with times on the place's clock to the second, and since
+2026-11-05 saying when an hour not final yet will be. Its cut-off is worded from the file's own
+`hourly.cut`, "1 hour 30 minutes after the hour", so a day the lane wrote under the three hours reads
+"three hours after the hour" until it is rewritten. The every-hour table's cell gives a final hour's
+time and whose file made it final, "final 10:46 AM (NOMADS)" for NOMADS's publication or "final 11:30
+AM (Open Data)" for NOAA Open Data's copy at the cut, the hours read before both servers were, final
+at NOMADS's publication with NOAA Open Data's value, reading "(NOMADS)" with the value's copy in the
+hover. An hour not final yet reads "provisional, final expected 10:46 AM, cut-off 11:30 AM", NOMADS's
+usual time while it is ahead and the cut-off, which decides the hour either way, then "provisional,
+cut-off 11:30 AM", and an hour to come the same without "provisional"; an hour before NOMADS's times
+were kept gives the cut-off alone. "At the latest" is said only of NOAA Open Data's copy, since with
+neither copy by the cut-off the hour goes to review (owner's rulings of 2026-11-05). On a live
+day an hour the lane has not written yet reads the same until its cut-off. The cell's title, the
+hover and the temperature CSV give the sentence. The note under the table explains the two
 servers: NOAA publishes every file on NOAA Open Data and on NOMADS, the page reads both, the copies
 are normally identical, the NOMADS copy counts where they differ if it was published in time, and
 NOMADS's publication times are on record only from 10:00 UTC on 3 November.
@@ -1061,18 +1095,23 @@ NOMADS's publication times are on record only from 10:00 UTC on 3 November.
 - Basis `nomads` reads "final at {at}, when NOMADS published the file. The value is NOMADS's copy.",
   `at` being NOMADS's Last-Modified time, or "The value is NOAA Open Data's copy." when that is the
   copy used, as for some hours of 3 and 4 November read before both servers were.
-- Basis `cutoff` reads "final at {cut}, three hours after the hour, from NOAA Open Data's copy,
+- Basis `cutoff` reads "final at {cut}, 1 hour 30 minutes after the hour, from NOAA Open Data's copy,
   because NOMADS had not published the file by then."
-- Basis `norecord` reads "final at {cut}, three hours after the hour, from NOAA Open Data's copy.
-  NOMADS's publication time for this hour is not on record."
-- State `review` reads "no value: neither server had published the file by {cut}, three hours after
-  the hour. Under review." With basis `norecord`, a file read before both servers were, it reads "no
-  value: NOAA Open Data published the file after {cut}, three hours after the hour, and NOMADS's time
-  is not on record. Under review." when NOAA Open Data has a copy on record, as for 2026-09-23 at
-  23Z, and "no value: neither server is on record with the file by {cut}, three hours after the hour.
-  Under review." when it has none.
-- State `provisional` reads "provisional, until NOMADS publishes the file, or until {cut}, three hours
-  after the hour, when NOAA Open Data's copy counts."
+- Basis `norecord` reads "final at {cut}, 1 hour 30 minutes after the hour, from NOAA Open Data's
+  copy. NOMADS's publication time for this hour is not on record."
+- State `review` reads "no value: neither server had published the file by {cut}, 1 hour 30 minutes
+  after the hour. Under review." With basis `norecord`, a file read before both servers were, it reads
+  "no value: NOAA Open Data published the file after {cut}, 1 hour 30 minutes after the hour, and
+  NOMADS's time is not on record. Under review." when NOAA Open Data has a copy on record, as for
+  2026-09-23 at 23Z, and "no value: neither server is on record with the file by {cut}, 1 hour 30
+  minutes after the hour. Under review." when it has none.
+- State `provisional` reads "provisional. It becomes final when NOMADS publishes the file, expected
+  about {NOMADS's usual time}, or at the latest at its cut-off, {cut}, 1 hour 30 minutes after the
+  hour, from NOAA Open Data's copy. With neither copy by then, it goes to review.", without the
+  expected time once NOMADS's usual time has passed, and for an hour before NOMADS's times were kept
+  "provisional. NOMADS's publication time for this hour is not on record, so it becomes final at its
+  cut-off, {cut}, 1 hour 30 minutes after the hour, from NOAA Open Data's copy. With no copy by then,
+  it goes to review." An hour to come reads the same without "provisional."
 
 In a replay an hour shows final only from `at` on and provisional before it, and an hour under
 review shows provisional until its cut-off. A row with an hourly state and no daily value is no data
@@ -1095,9 +1134,11 @@ saves it through a Blob link. The day's two files at every place, raw and proces
 top bar.
 
 **Publication times.** The page never estimates one. An hour comes in, for the replay and the table,
-at its file's first publication on either server (`pub`, `pcpPub`), or failing that at the earliest
-Last-Modified time in its file record (`anlFile`, `pcpFile`), which the lane fills for old days from
-NOAA's records, and a time not on record is said to be. The replay runs from the day's local
+at its file's first publication on either server that is on record: the lane's (`pub`, `pcpPub`), or
+an earlier Last-Modified time in its file record (`anlFile`, `pcpFile`), which the lane fills for old
+days from NOAA's records. So an hour of 3 or 4 November read before both servers were, whose `pub`
+is NOAA Open Data's, comes in at NOMADS's earlier publication, as its hourly contract turns final
+then. A time not on record is said to be. The replay runs from the day's local
 midnight to the clock on a live day. On a day past its cut-off it runs to a quarter hour past the
 latest of the cut-off, the last hour's hourly cut-off (`hourly.cut`) and any file the old rule
 counted late, so the 11 PM hour shows final. A day whose counted files have no time on record is
@@ -1212,11 +1253,12 @@ no analogue here.
   from the first ten-minute pass on NOAA Open Data's copy alone, and provisional until then; under
   review with neither copy, the row with no value carrying the contract and its files alone; a
   NOMADS copy read after the hourly cut settled flagged and never used, though published before the
-  cut, while the day takes it by its own rules; a file between New York's cut-off and the hourly cut
-  counting for the hourly contract and for Chicago's day and not New York's, and one after the
-  hourly cut counting for the day and not the contract; the hourly cut settling apart from the
-  days', on no copy for a carried-over file, never on a windowed pass with one copy and never for a
-  precipitation file, the record waiting for it at Los Angeles alone and not with the three zones,
+  cut, while the day takes it by its own rules; at New York's 23:00 the hourly cut at 12:30 AM coming
+  before the day's 12:45 AM cut-off, and a file between them counting for New York's and Chicago's
+  days and not the contract, and one after an afternoon hour's cut counting for the day and not the
+  contract; the hourly cut settling apart from the days', on its own ten-minute pass, on no copy for
+  a carried-over file, never on a windowed pass with one copy and never for a precipitation file, the
+  record waiting for the day's cut-off at Los Angeles alone and for the later zones with three,
   and the file leaving the open list as before; the exact strings from the stored values, the three
   half ties and a precipitation figure whose cut differs from its rounding among them, finer stored
   values written exactly, and `runX` on the hours `run` counts, a late hour adding nothing; files read
@@ -1268,24 +1310,29 @@ no analogue here.
   no price; a short day reads provisional with its count, a place under review says so on every card,
   an unreadable file is reported as unreadable, and the 503 degradation shows "No data". For the
   settlement display, on the samples' final New York day: the five cards carry the summary's values;
-  the hour table gives each hour's publication time and hourly contract and ends its running total on
-  the day's; each chart's hover gives the lane's stored, converted and rounded values, the day so far
-  and both servers' times or "not on record"; each of the four CSV files has its header, 24 rows and
-  every value and time the place file's own string; the replay ends a quarter hour past the last
-  hour's hourly cut-off with the 11 PM hour final, moves the cards to the lane's running values for a
-  minute at the files' own times, shows each hourly contract as it stood, and Latest and Play the day
-  work; `var=` opens its chart; and a `rowShape` 2 file with no times and a file without `rowShape`
+  the hour table gives each hour's publication time on each server under one header and its hourly
+  contract, and ends its running total on the day's; each chart's hover gives the lane's stored,
+  converted and rounded values, the day so far and both servers' times or "not on record"; each of the
+  four CSV files has its header, 24 rows and every value and time the place file's own string; the
+  replay ends a quarter hour past the later of the cut-off and the last hour's hourly cut-off with
+  the 11 PM hour final and provisional before its own cut, moves the cards to the lane's running values
+  for a minute at the files' own times, shows each hourly contract as it stood and when each hour to
+  come will be final, and Latest and Play the day work; `var=` opens its chart; and a `rowShape` 2 file with no times and a file without `rowShape`
   still draw, with no replay. On a `rowShape` 3 file made by hand from the samples
   (`ana_row_shape3`): each basis's wording of the hourly contract, both servers' found and published
   times, a file counted under the rule before 14 October, an hour under review before and after its
   cut-off, and an hour NOAA Open Data published after its hourly cut-off with no NOMADS copy on
-  record, in the table, the hover and the CSV. With the clock fixed on the samples' live day:
+  record, in the table, the hover and the CSV; in a replay each server's column filling at its own
+  time, and an hour read before both servers were coming in at NOMADS's time; and, through the
+  script's own functions, an hour of 5 November with NOMADS's usual time ahead, past and final, and a
+  file written under the three hours. With the clock fixed on the samples' live day:
   the three charts share one axis and one now line, with the hours to come shaded; the countdowns pass
-  through counting down, due now, late and missed; a refetch inside an arrival window carries `?b=`
+  through counting down, expected now, late and missed; a refetch inside an arrival window carries `?b=`
   and fills the day in; a late accumulation's note gives NOAA's usual time and the cut-off and
   nothing of the next analysis; outside the windows a late countdown keeps the place file fetched
   each minute and the day fills in, and past half an hour late nothing is fetched. No ≈ or estimated
   time appears anywhere and the page raises no script error. Fixtures under
   `samples/snapshots/analysis2/` come from a real local run of the job, rebuilt in `rowShape` 3 on
-  2026-11-04 by the lane's own code (their README says how).
+  2026-11-04 and under the hourly cut-off of 2026-11-05 by the lane's own code (their README says
+  how).
 - `scripts/scrub.py` before push; the page's `<meta name="description">` under 200 characters.

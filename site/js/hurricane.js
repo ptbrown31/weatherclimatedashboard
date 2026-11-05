@@ -388,7 +388,7 @@ window.WXHur = (() => {
   }
   function cdText(t) {
     const left = t - Date.now();
-    if (left <= 0) return 'due now';
+    if (left <= 0) return 'expected now';
     const hrs = Math.floor(left / 3600000), min = Math.round((left % 3600000) / 60000);
     return 'in ' + (hrs ? hrs + 'h ' : '') + String(min).padStart(2, '0') + 'm';
   }

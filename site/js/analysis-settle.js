@@ -3,10 +3,10 @@
    Version 3 of the owner's approved design (2026-11-04).
 
    In order: the day's state, when the next analysis and the next hour's
-   precipitation are due, the five values a contract would resolve on, three
-   charts of the hours on one time axis with a CSV file for each value under
-   them, every hour in a table, and a replay that shows the day as of any
-   minute at the files' own publication times. While the day is live it
+   precipitation are expected, the five values a contract would resolve on,
+   three charts of the hours on one time axis with a CSV file for each value
+   under them, every hour in a table, and a replay that shows the day as of
+   any minute at the files' own publication times. While the day is live it
    follows the clock, and inside the minutes the files usually land, or while a
    countdown reads late, it fetches the place file again, so the day fills in
    without a reload.
@@ -20,21 +20,27 @@
    2026-09-28, 0.83 in from its rounded hours against the 0.84 it resolved
    on), so the page never adds, averages or rounds a value; it compares times,
    for the replay and the countdowns, and places pixels. A publication time is
-   never estimated. An hour comes in at its file's first publication (`pub`,
-   `pcpPub`) or, failing that, the earliest Last-Modified time on record, and a
-   time not on record is said to be. A file written before 2026-11-04
-   (`rowShape` 2) has no stored or converted values and no file records, which
-   the display leaves blank, and one written before 2026-11-03 (no `rowShape`)
-   is drawn as the file stands, with no running figures and no replay. */
+   never estimated. An hour comes in at its file's first publication on either
+   server that is on record, the lane's own (`pub`, `pcpPub`) or an earlier
+   Last-Modified time it kept, and a time not on record is said to be. A file
+   written before 2026-11-04 (`rowShape` 2) has no stored or converted values
+   and no file records, which the display leaves blank, and one written before
+   2026-11-03 (no `rowShape`) is drawn as the file stands, with no running
+   figures and no replay. */
 window.WXSettle = (() => {
   const { h } = WXC;
   const MIN = 60000, HOUR = 3600000;
-  /* When the files land, from NOAA's own publication times over the two
-     weeks to 2026-11-03: an analysis a median 49 minutes after its hour and
-     usually by 52, an hour's precipitation a median 17 minutes after the hour
-     ends and usually by 18. The countdowns run to these, for a file not in
-     yet; they are never shown as a file's publication time. */
-  const LAG = { anl: { due: 49 * MIN, by: 52 * MIN }, pcp: { due: 17 * MIN, by: 18 * MIN } };
+  /* When the files land, from NOAA's own publication times. On NOAA Open
+     Data, over the two weeks to 2026-11-03, an analysis a median 49 minutes
+     after its hour and an hour's precipitation a median 17 minutes after the
+     hour ends, usually in by 52 and 18. NOMADS, on record from
+     2026-11-03T10:00Z, published first in every file both servers have a time
+     for, 47 analyses and 46 precipitation files to 2026-11-05T08:00Z, a median
+     46 and 16 minutes after. For a file not in yet the every-hour table gives
+     each server's time and the countdowns the first, NOMADS's (`due`); none is
+     ever shown as a file's publication time. */
+  const LAG = { anl: { nomads: 46 * MIN, nodd: 49 * MIN, by: 52 * MIN }, pcp: { nomads: 16 * MIN, nodd: 17 * MIN, by: 18 * MIN } };
+  LAG.anl.due = LAG.anl.nomads; LAG.pcp.due = LAG.pcp.nomads;
   // the draft terms' cut-off, 12:45 AM local on the day after (clocks never
   // change between midnight and then in the lane's zones), and how far past
   // the last cut-off a final day's replay runs
@@ -124,12 +130,14 @@ window.WXSettle = (() => {
     return hh ? hh + ':' + pad2(mm) + ':' + pad2(s % 60) : pad2(mm) + ':' + pad2(s % 60);
   };
   const when = s => { const t = s ? Date.parse(s) : NaN; return isNaN(t) ? null : t; };
-  // when a file came in: its first publication on either server, as the lane
-  // judges the cut-off on, or the earliest Last-Modified time on record
-  function arrival(pub, F) {
+  // when a file came in: its first publication on either server that is on
+  // record, the lane's (`pub`, the first among the copies it held when the
+  // hour settled) or an earlier Last-Modified time it kept, as for the hours
+  // read before both servers were, whose `pub` is NOAA Open Data's though
+  // NOMADS published first
+  function arrival(pub, by, F) {
     const t = when(pub);
-    if (t != null) return { at: t, src: null };
-    let best = null;
+    let best = t != null ? { at: t, src: by || null } : null;
     ['nodd', 'nomads'].forEach(s => {
       const lm = F && F[s] ? when(F[s].lm) : null;
       if (lm != null && (!best || lm < best.at)) best = { at: lm, src: s };
@@ -159,9 +167,10 @@ window.WXSettle = (() => {
       o.pcpLate = !!(v && v.pcpLate);
       o.anlFile = (v && v.anlFile) || null;
       o.pcpFile = (v && v.pcpFile) || null;
-      const a = arrival(v && v.pub, o.anlFile), p = arrival(v && v.pcpPub, o.pcpFile);
-      o.anlAt = a.at; o.anlBy = (v && v.pub ? v.pubSrc || v.src : a.src) || null;
-      o.pcpAt = p.at; o.pcpBy = (v && v.pcpPub ? v.pcpPubSrc || v.pcpSrc : p.src) || null;
+      const a = arrival(v && v.pub, v && (v.pubSrc || v.src), o.anlFile);
+      const p = arrival(v && v.pcpPub, v && (v.pcpPubSrc || v.pcpSrc), o.pcpFile);
+      o.anlAt = a.at; o.anlBy = a.src;
+      o.pcpAt = p.at; o.pcpBy = p.src;
       o.show = running && v ? v.show || null : null;
       o.run = running && v ? v.run || null : null;
       o.runX = (v && v.runX) || null;
@@ -181,9 +190,10 @@ window.WXSettle = (() => {
     const start = hours.length ? hours[0].t : NaN, end = hours.length ? hours[hours.length - 1].end : NaN;
     const cutoff = end + CUTOFF;
     /* A final day's replay runs on past its cut-off to the last hour's own
-       hourly cut-off, three hours after it, so the 11 PM hour shows final,
-       and past any file the rule before 14 October counted late; then a
-       quarter hour more, as the prototype does. */
+       hourly cut-off where that is later, as it was at three hours after the
+       hour, so the 11 PM hour shows final, and past any file the rule before
+       14 October counted late; then a quarter hour more, as the prototype
+       does. */
     const lastCut = Math.max(-Infinity, ...hours.map(o => (o.hcut == null ? -Infinity : o.hcut)));
     const replayEnd = Math.max(cutoff, lastCut, timed ? Math.max(a, p) : -Infinity) + AFTER;
     return { doc, tz: (doc && doc.tz) || tz || 'UTC', running, timed, hours, start, end, cutoff, replayEnd, e,
@@ -217,7 +227,7 @@ window.WXSettle = (() => {
   /* An hour's hourly contract as it stood at T, from the lane's state and the
      moment it became final (`at`). It shows final only from that moment on,
      provisional before it, and an hour under review shows provisional until
-     its hourly cut-off, three hours after the hour. */
+     its hourly cut-off. */
   function hourlyAt(o, T) {
     const hr = o && o.hourly;
     if (!hr) return null;
@@ -228,14 +238,31 @@ window.WXSettle = (() => {
     if (hr.state === 'review') return o.hcut != null && T >= o.hcut ? 'review' : 'provisional';
     return 'provisional';
   }
+  // the hourly cut-off, 1 hour 30 minutes after the hour in every zone
+  // (owner's ruling of 2026-11-05; three hours from his ruling of 2026-11-04
+  // until then), as the lane writes it, or for an hour it has not written
+  // yet, from the hour's own time
+  const HOURLY_CUT = 90 * MIN;
+  const hourlyCut = o => (o.hcut != null ? o.hcut : o.t + HOURLY_CUT);
+  // how long after its hour a cut-off is, in words, from the file's own cut,
+  // so a day the lane wrote under the three hours reads as it was written
+  const afterWords = ms => {
+    const m = Math.round(ms / MIN), hh = Math.floor(m / 60), mm = m % 60;
+    if (m === 180) return 'three hours';
+    return (hh ? hh + (hh === 1 ? ' hour' : ' hours') : '') + (hh && mm ? ' ' : '') + (mm ? mm + ' minutes' : '');
+  };
+  // when NOMADS usually publishes the hour's file, while that is still ahead
+  // at T and NOMADS's times are on record for the hour
+  const nomadsDue = (o, T) => (o.t >= NOMADS_FROM && T < o.t + LAG.anl.nomads ? o.t + LAG.anl.nomads : null);
   // the hourly contract's state in words (owner's wording of 2026-11-04, put
-  // so that a reader who has never heard of either server can follow it);
-  // `q` is the apostrophe, typographic on the page and plain in a CSV file
+  // so that a reader who has never heard of either server can follow it, and
+  // from 2026-11-05 saying when an hour not final yet will be); `q` is the
+  // apostrophe, typographic on the page and plain in a CSV file. An hour the
+  // lane has not written yet reads as one to come
   function hourlyText(o, T, tz, q) {
-    const st = hourlyAt(o, T);
-    if (!st) return '';
-    const hr = o.hourly, ap = q || '’';
-    const three = (o.hcut != null ? clockS(tz, o.hcut) : 'a time not on record') + ', three hours after the hour';
+    const st = o.hourly ? hourlyAt(o, T) : 'provisional';
+    const hr = o.hourly || {}, ap = q || '’';
+    const three = (o.hcut != null ? clockS(tz, o.hcut) : 'a time not on record') + ', ' + afterWords(hourlyCut(o) - o.t) + ' after the hour';
     if (st === 'final') {
       if (hr.basis === 'nomads') {
         return 'final at ' + (o.hat != null ? clockS(tz, o.hat) : 'a time not on record') + ', when NOMADS published the file. The value is '
@@ -255,13 +282,29 @@ window.WXSettle = (() => {
       }
       return 'no value: neither server had published the file by ' + three + '. Under review.';
     }
-    return 'provisional, until NOMADS publishes the file, or until ' + three + ', when NOAA Open Data' + ap + 's copy counts.';
+    // "at the latest" is said of NOAA Open Data's copy, since with neither
+    // copy by the cut-off the hour goes to review (owner's rulings of
+    // 2026-11-05)
+    const cut = clockS(tz, hourlyCut(o)) + ', ' + afterWords(hourlyCut(o) - o.t) + ' after the hour', e = nomadsDue(o, T);
+    const how = o.t < NOMADS_FROM
+      ? 'NOMADS' + ap + 's publication time for this hour is not on record, so it becomes final at its cut-off, ' + cut
+        + ', from NOAA Open Data' + ap + 's copy. With no copy by then, it goes to review.'
+      : 'It becomes final when NOMADS publishes the file' + (e != null ? ', expected about ' + clock(tz, e) : '') + ', or at the latest at its cut-off, '
+        + cut + ', from NOAA Open Data' + ap + 's copy. With neither copy by then, it goes to review.';
+    return (T >= o.t ? 'provisional. ' : '') + how;
   }
-  // the same, in the every-hour table's few words: whose copy the value is
-  function hourlyWord(o, T) {
-    const st = hourlyAt(o, T);
-    if (st === 'final') return o.hourly.src === 'nomads' ? 'final (NOMADS)' : 'final (Open Data)';
-    return st === 'review' ? 'under review' : st || '';
+  // the same, in the every-hour table's few words: when the hour turned final
+  // and on whose file, NOMADS's publication or NOAA Open Data's copy at the
+  // hourly cut-off, or when it is expected to and its cut-off, which decides it
+  // either way. The hours read before both servers were turned final on
+  // NOMADS's publication with NOAA Open Data's value, which the hover says
+  function hourlyWord(o, T, tz) {
+    const st = o.hourly ? hourlyAt(o, T) : 'provisional';
+    if (st === 'final') return 'final ' + clock(tz, o.hat != null ? o.hat : o.hcut) + (o.hourly.basis === 'nomads' ? ' (NOMADS)' : ' (Open Data)');
+    if (st === 'review') return 'under review';
+    const e = nomadsDue(o, T);
+    const fin = (e != null ? 'final expected ' + clock(tz, e) + ', ' : '') + 'cut-off ' + clock(tz, hourlyCut(o));
+    return T >= o.t ? 'provisional, ' + fin : fin;
   }
 
   // whether an hour counts for the day, from the file's record, or from the
@@ -490,7 +533,7 @@ window.WXSettle = (() => {
         ? 'Not published by the 12:45 AM cut-off, so the day resolves on the hours that were.'
         : 'Not published by the 12:45 AM cut-off, so the day’s total leaves this hour out.', 'missed');
       if (T < d.due) return box(w, label, span(d.due - T), '', 'Expected about ' + clock(tz, d.due) + ', usually by ' + clock(tz, d.by) + '.', 'counting');
-      if (T <= d.by) return box(w, label, 'due now', '', 'Usually published by ' + clock(tz, d.by) + '.', 'due');
+      if (T <= d.by) return box(w, label, 'expected now', '', 'Usually published by ' + clock(tz, d.by) + '.', 'due');
       // late means the file is not in yet, past the time it is usually out
       // by. The lane reads each file within about two minutes of NOAA
       // publishing it inside the arrival windows, the precipitation as soon
@@ -574,12 +617,16 @@ window.WXSettle = (() => {
       }
       return { x, y, g, pre, post, H };
     }
-    // the next hour due, as a dashed line at its time with its expected arrival
-    function dueMark(f, H, d, top) {
+    // the next hour to come, as a dashed line at its time with when it is
+    // expected, the label left of the line where the plot ends too soon for it
+    function dueMark(f, W, H, d, top) {
       if (!d) return '';
-      const xx = f.x(d.t);
+      const xx = f.x(d.t), lab = 'next, expected ' + clock(P.tz, d.due);
+      // about six pixels a character at the labels' size
+      const left = xx + 4 + lab.length * 6 > W - M.r;
       return '<line class="duemark" x1="' + xx.toFixed(1) + '" x2="' + xx.toFixed(1) + '" y1="' + M.t + '" y2="' + (H - M.b) + '"/>'
-        + '<text class="duelab" x="' + (xx + 4).toFixed(1) + '" y="' + (top ? M.t + 12 : H - M.b - 6) + '">next, due ' + esc(clock(P.tz, d.due)) + '</text>';
+        + '<text class="duelab" x="' + (left ? xx - 4 : xx + 4).toFixed(1) + '" y="' + (top ? M.t + 12 : H - M.b - 6) + '"'
+        + (left ? ' text-anchor="end"' : '') + '>' + esc(lab) + '</text>';
     }
     // how far right a label may run before it meets the next-due line, the
     // now line or the plot's edge
@@ -627,7 +674,7 @@ window.WXSettle = (() => {
       const oh = hiV && hourAt(hiV.at), ol = loV && hourAt(loV.at);
       if (oh && shown(oh, 'temp') != null) s += mark(f, W, oh, shown(oh, 'temp'), 'High ' + hiV.value + '°F', 'var(--warm)', true, 'mkhi');
       if (ol && ol !== oh && shown(ol, 'temp') != null) s += mark(f, W, ol, shown(ol, 'temp'), 'Low ' + loV.value + '°F', 'var(--cool)', false, 'mklo');
-      s += dueMark(f, H, nextDue(S, 'anl')) + f.post;
+      s += dueMark(f, W, H, nextDue(S, 'anl')) + f.post;
       return { H, s, f };
     }
 
@@ -659,7 +706,7 @@ window.WXSettle = (() => {
       }
       const pk = P.running ? S.runA && S.runA.gust : (P.e || {}).gust, op = pk && hourAt(pk.at);
       if (op && shown(op, 'gust') != null) s += mark(f, W, op, shown(op, 'gust'), 'Peak gust ' + pk.value + ' mph', 'var(--vbar)', true, 'mkpk');
-      s += dueMark(f, H, nextDue(S, 'anl')) + f.post;
+      s += dueMark(f, W, H, nextDue(S, 'anl')) + f.post;
       return { H, s, f };
     }
 
@@ -689,7 +736,7 @@ window.WXSettle = (() => {
           + fx(runP.value, 2) + ' in' + (S.final ? '' : ' so far') + '</text>';
         if (Number(runP.exact) === 0 && xe - M.l > 260) s += '<text class="dry" x="' + ((M.l + xe) / 2).toFixed(1) + '" y="' + (f.y(0) - 12).toFixed(1) + '" text-anchor="middle">dry so far</text>';
       }
-      s += dueMark(f, H, nextDue(S, 'pcp'), true) + f.post;
+      s += dueMark(f, W, H, nextDue(S, 'pcp'), true) + f.post;
       return { H, s, f };
     }
 
@@ -722,13 +769,20 @@ window.WXSettle = (() => {
     const kv = (k, v, cls) => (v == null || v === '' ? '' : '<span class="tk">' + esc(k) + '</span><span class="tv' + (cls ? ' ' + cls : '') + '">' + v + '</span>');
     const sec = rows => { const b = rows.filter(Boolean).join(''); return b ? '<div class="tg anatg">' + b + '</div>' : ''; };
     const muted = s => (s == null || s === '' ? '' : ' <span class="tm">' + esc(s) + '</span>');
-    function fileRows(F, by, at, validMs, src, late, has, pubSrcOnly) {
+    function fileRows(F, by, at, validMs, src, late, has, pubSrcOnly, lag) {
       const tz = P.tz, rows = [];
       ['nodd', 'nomads'].forEach(s => {
         let v = F ? F[s] : null;
         // a file written before the records names only its first publication and its server
         if (!F && pubSrcOnly && by === s && at != null) v = { lm: isoZ(at) };
-        const lm = v ? when(v.lm) : null, seen = v ? when(v.seen) : null;
+        const lm = v ? when(v.lm) : null;
+        // a replay knows no time after the moment it shows: a copy published
+        // later is still expected, or past the cut-off not published yet
+        if (lm != null && lm > T) {
+          rows.push(kv(SRC[s], esc(T >= P.cutoff ? 'not published by the cut-off' : 'expected about ' + clock(tz, validMs + lag[s]))));
+          return;
+        }
+        const seen = v && when(v.seen) != null && when(v.seen) <= T ? when(v.seen) : null;
         let txt;
         if (lm == null && seen == null) txt = s === 'nomads' && validMs < NOMADS_FROM ? 'not on record before 10:00 UTC on 3 Nov' : 'not on record';
         else txt = [lm != null ? 'published ' + clockS(tz, lm) : '', seen != null ? 'found ' + clockS(tz, seen) : ''].filter(Boolean).join(', ');
@@ -760,8 +814,8 @@ window.WXSettle = (() => {
       if (!inn && !lt) {
         const note = S.atCut ? 'Not published by the cut-off.' : 'Not published yet. Expected about ' + clock(tz, pc ? o.end + LAG.pcp.due : o.t + LAG.anl.due) + '.';
         body += '<div class="tf anagap">' + esc(note) + '</div>';
-        if (k === 'temp' && o.hourly) body += sec([kv('Hourly contract', esc(hourlyText(o, T, tz)))]);
-        if (F) body += sec(fileRows(F, null, null, pc ? o.end : o.t, null, false, false));
+        if (k === 'temp' && (o.hourly || (B().live && P.running && T < hourlyCut(o)))) body += sec([kv('Hourly contract', esc(hourlyText(o, T, tz)))]);
+        if (F) body += sec(fileRows(F, null, null, pc ? o.end : o.t, null, false, false, false, pc ? LAG.pcp : LAG.anl));
         return html + body;
       }
       if (k === 'temp') {
@@ -781,7 +835,8 @@ window.WXSettle = (() => {
         body += sec([soFar('Total so far', rp, (o.runX || {}).precip, 'in', 2), kv('Hours in it', rp && rp.hours != null ? esc(rp.hours) : '')]);
       }
       const has = true, src = (F && F.src) || (pc ? v.pcpSrc : v.src);
-      body += sec(fileRows(F, pc ? o.pcpBy : o.anlBy, pc ? o.pcpAt : o.anlAt, pc ? o.end : o.t, src, pc ? o.pcpLate : o.anlLate, has, true));
+      body += sec(fileRows(F, pc ? o.pcpBy : o.anlBy, pc ? o.pcpAt : o.anlAt, pc ? o.end : o.t, src, pc ? o.pcpLate : o.anlLate, has, true,
+                           pc ? LAG.pcp : LAG.anl));
       return html + body;
     }
     // the hour under the pointer: the nearest (temperature, wind) or the hour band (precipitation)
@@ -893,28 +948,51 @@ window.WXSettle = (() => {
         return '<td class="num' + (cls || '') + (isLate ? ' dim late' : '') + '"' + (isLate ? ' title="published after the cut-off, not counted"' : '') + '>'
           + fx(ex ? o.v[k] : shown(o, k), DEC[k][ex ? 1 : 0]) + '</td>';
       };
-      const arrived = (at, by) => (at == null ? 'not on record' : clock(tz, at) + (SRC[by] ? ' on ' + SRC[by] : ''));
+      // a live day's file can still gain a server's time; a past day's cannot
+      const liveDay = B().live;
+      /* One server's publication of the hour's analysis as it stood at T: the
+         server's own time once T reaches it, marked when it came after the
+         cut-off, and before then the time that server usually publishes; "not
+         on record" where the record has no time for it, NOMADS before its
+         times were kept or a server with no time for a file that is in, and
+         "not published" past the cut-off. */
+      const pubCell = (o, s) => {
+        const F = o.anlFile;
+        let lm = F && F[s] ? when(F[s].lm) : null;
+        // a file written before the records names only its first publication and its server
+        if (!F && o.anlBy === s) lm = o.anlAt;
+        const due = S.atCut ? 'not published' : 'expected ' + clock(tz, o.t + LAG.anl[s]);
+        let txt;
+        if (lm != null) txt = T >= lm ? clock(tz, lm) + (lm > P.cutoff ? ', after the cut-off' : '') : due;
+        else if ((s === 'nomads' && o.t < NOMADS_FROM) || ((o.anl || o.anlLate) && (!liveDay || S.atCut))) txt = 'not on record';
+        else txt = due;
+        return '<td class="arr" data-server="' + s + '">' + esc(txt) + '</td>';
+      };
       let body = '';
       P.hours.forEach(o => {
         const a = S.inA(o), la = S.lateA(o), p = S.inP(o), lp = S.lateP(o);
-        let arr;
-        if (a) arr = arrived(o.anlAt, o.anlBy);
-        else if (la) arr = arrived(o.anlAt, o.anlBy) + ', after the cut-off';
-        else arr = S.atCut ? 'not published' : 'due ' + clock(tz, o.t + LAG.anl.due);
         const rp = p && o.run && o.run.precip;
         const total = rp ? fx(rp.value, 2) : '·';
-        // the hourly contract once its hour has begun, as it stood at T
-        const hw = o.hourly && T >= o.t ? hourlyWord(o, T) : '';
-        const hcell = hw ? '<td class="hst" data-state="' + esc(hourlyAt(o, T)) + '" title="' + esc(hourlyText(o, T, tz)) + '">' + esc(hw) + '</td>' : '<td class="hst"></td>';
+        // the hourly contract as it stood at T, with when it became final or
+        // is expected to; on a live day, an hour the lane has not written yet
+        // until its cut-off
+        const hs = !!o.hourly || (liveDay && P.running && T < hourlyCut(o));
+        const st = !hs ? '' : T < o.t ? 'ahead' : o.hourly ? hourlyAt(o, T) : 'provisional';
+        const hcell = hs ? '<td class="hst" data-state="' + esc(st) + '" title="' + esc(hourlyText(o, T, tz)) + '">' + esc(hourlyWord(o, T, tz)) + '</td>'
+          : '<td class="hst"></td>';
         body += '<tr class="' + (a || la ? '' : 'pending') + '" data-t="' + esc(new Date(o.t).toISOString()) + '"><td>' + esc(hourZ(tz, o.t)) + (o.repeat ? ' (second)' : '') + '</td><td>' + esc(utc(o.t)) + '</td>'
           + cell(o, 'temp', a, la, o === oh && a ? ' hi' : o === ol && a ? ' lo' : '') + hcell
           + cell(o, 'wind', a, la) + cell(o, 'gust', a, la, o === op && a ? ' pk' : '')
           + cell(o, 'precip', p, lp) + '<td class="num ptotal">' + (run ? total : '·') + '</td>'
-          + '<td class="arr">' + esc(arr) + '</td></tr>';
+          + pubCell(o, 'nomads') + pubCell(o, 'nodd') + '</tr>';
       });
-      table.innerHTML = '<thead><tr><th>Local time</th><th>UTC</th><th class="num">Temp °F</th><th>Hourly contract</th><th class="num">Wind mph</th><th class="num">Gust mph</th>'
-        + '<th class="num">Precip that hour, in</th><th class="num">Precip total, in</th><th>Analysis published</th></tr></thead><tbody>' + body + '</tbody>';
+      table.innerHTML = '<thead><tr><th rowspan="2">Local time</th><th rowspan="2">UTC</th><th class="num" rowspan="2">Temp °F</th><th rowspan="2">Hourly contract</th>'
+        + '<th class="num" rowspan="2">Wind mph</th><th class="num" rowspan="2">Gust mph</th><th class="num" rowspan="2">Precip that hour, in</th>'
+        + '<th class="num" rowspan="2">Precip total, in</th><th class="pubg" colspan="2">Analysis published</th></tr>'
+        + '<tr><th class="pubs">NOMADS</th><th class="pubs">NOAA Open Data</th></tr></thead><tbody>' + body + '</tbody>';
       const anyLate = P.hours.some(o => S.lateA(o) || S.lateP(o));
+      // the hourly cut-off as this day's file has it
+      const h0 = P.hours.find(o => o.hcut != null), aw = afterWords(h0 ? h0.hcut - h0.t : HOURLY_CUT);
       foot.textContent = (run
         ? 'Values are shown the way the contracts round them, temperature to a whole degree, wind and gust to a whole mile per hour and precipitation to a hundredth of an inch. '
           + 'Point at an hour on a chart, or tap it, for the value as stored, converted before rounding and rounded. '
@@ -923,10 +1001,12 @@ window.WXSettle = (() => {
         + 'Each row is the ' + NAME + ' analysis at the top of the hour in ' + tz + ' and the precipitation over the hour that starts then, which NOAA files under the hour it ends. '
         + 'NOAA publishes every file on two servers, NOAA Open Data (on Amazon’s cloud) and NOMADS (the National Centers for Environmental Prediction’s own server), and this page reads both. '
         + 'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time. '
-        + 'The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file. '
-        + 'If NOMADS has not published it three hours after the hour, NOAA Open Data’s copy becomes final then, and with neither copy the hour has no value and goes to review. '
-        + 'NOMADS’s publication times are on record only from 10:00 UTC on 3 November, so earlier hours show as final three hours after the hour, from NOAA Open Data’s copy. '
-        + 'The publication time shown is the earlier of the two servers’ own times, and the table says so where neither is on record.'
+        + 'The last two columns give the time each server published the hour’s analysis, as the server reports it. '
+        + 'Until a server has published the file, its column gives the time it usually does, and “not on record” means no time was kept for that server. '
+        + 'The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file, if that is by the hour’s cut-off, ' + aw + ' after the hour. '
+        + 'If NOMADS has not published it by then, NOAA Open Data’s copy becomes final at the cut-off, and with neither copy the hour has no value and goes to review. '
+        + 'For an hour not final yet, the table gives the time NOMADS usually publishes its file and the hour’s cut-off. '
+        + 'NOMADS’s publication times are on record only from 10:00 UTC on 3 November, so earlier hours are final at their cut-off on NOAA Open Data’s copy, or under review where it came later.'
         + (anyLate ? ' A dimmed value was published after the cut-off and is not counted.' : '');
     }
 
@@ -942,5 +1022,6 @@ window.WXSettle = (() => {
              state: () => (P ? { T, live, timed: P.timed, end: P.replayEnd } : null), csv: k => (P ? csvFor(k) : null) };
   }
 
-  return { create, CHART, LAG, CHASE, inWindow, _model: model, _stateAt: stateAt, _bounds: bounds, _lateAt: lateAt, _hourlyAt: hourlyAt, zone };
+  return { create, CHART, LAG, CHASE, inWindow, _model: model, _stateAt: stateAt, _bounds: bounds, _lateAt: lateAt, _hourlyAt: hourlyAt,
+           _hourlyText: hourlyText, _hourlyWord: hourlyWord, zone };
 })();

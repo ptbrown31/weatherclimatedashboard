@@ -450,7 +450,9 @@ def golden_scenario(case):
     NOMADS copy, other bytes, lands after every cut-off of its day (15Z), and
     New York's 23:00 (03Z on the 27th), whose NOMADS copy, other bytes, lands
     after New York's cut-off and before Chicago's and the hourly cut. Returns
-    the day's files as text by store key. GOLDEN holds these files as the lane
+    the day's files as text by store key (since the hourly cut moved to 1 hour
+    30 minutes on 2026-11-05, that NOMADS copy lands after the hourly cut
+    too). GOLDEN holds these files as the lane
     at 9893f97 wrote them, before rowShape 3, from this same function."""
     fx = case.fx
     keep = analysis.load_lattice
@@ -2750,8 +2752,9 @@ class Job(unittest.TestCase):
         self.assertEqual(sorted(state["relayout"]), list(days))
 
     # ---- rowShape 3 and the hourly contract (owner's approval of display v3
-    #      and Patrick's ruling of 4 November): each hour's temperature is the
-    #      hourly contract's value, with its own cut three hours after the hour
+    #      and Patrick's rulings of 4 and 5 November): each hour's temperature
+    #      is the hourly contract's value, with its own cut 1 hour 30 minutes
+    #      after the hour (three hours until 5 November)
     def row_of(self, lid, day, t):
         """One place file's rtma cell for the hour t."""
         return next(r for r in self.read(analysis.LOC_KEY.format(loc=lid, day=day))["hours"] if r["t"] == iso(t))["rtma"]
@@ -2766,7 +2769,7 @@ class Job(unittest.TestCase):
         self.fx.add_hour("rtma", t, servers=("nomads",))
         self.fx.values[("rtma", "temp", iso(t))] = lambda c: 280.65 if c == NY_K else 293.15
         self.assertEqual(self.run_pass(), 0)
-        want = {"cut": "2026-09-26T22:00:00Z", "state": "final", "at": "2026-09-26T19:46:10Z", "basis": "nomads",
+        want = {"cut": "2026-09-26T20:30:00Z", "state": "final", "at": "2026-09-26T19:46:10Z", "basis": "nomads",
                 "src": "nomads", "value": 46, "x": "45.500", "late": False}
         self.assertEqual(self.row_of("new-york-ny", "2026-09-26", t)["hourly"], want)
         self.assertEqual(self.row_of("chicago-il", "2026-09-26", t)["hourly"], dict(want, value=68, x="68.000"))
@@ -2788,7 +2791,7 @@ class Job(unittest.TestCase):
 
     def test_the_hourly_contract_on_noaa_open_data_alone_is_final_at_its_cut_from_the_first_ten_minute_pass(self):
         t = hour(2026, 9, 26, 19)
-        cut = hour(2026, 9, 26, 22)
+        cut = hour(2026, 9, 26, 20) + dt.timedelta(minutes=30)
         self.caught_up(t - dt.timedelta(hours=1))
         self.fx.add_hour("rtma", t, servers=("nodd",))
         self.assertEqual(self.run_pass(), 0)
@@ -2814,7 +2817,7 @@ class Job(unittest.TestCase):
         # for the day, and once the hourly cut settles it carries the review
         # and its files and nothing else
         t = hour(2026, 9, 26, 19)
-        cut = hour(2026, 9, 26, 22)
+        cut = hour(2026, 9, 26, 20) + dt.timedelta(minutes=30)
         self.caught_up(t - dt.timedelta(hours=2))
         self.fx.add_hour("rtma", t - dt.timedelta(hours=1))             # 18Z, so New York's day has a value
         self.assertEqual(self.run_pass(t + dt.timedelta(minutes=55)), 0)
@@ -2841,14 +2844,14 @@ class Job(unittest.TestCase):
         # and never used for the hourly contract. The day, still before its
         # cut-offs, takes it by its own rules, so the two can differ
         t = hour(2026, 9, 26, 19)
-        cut = hour(2026, 9, 26, 22)
+        cut = hour(2026, 9, 26, 20) + dt.timedelta(minutes=30)
         self.caught_up(t - dt.timedelta(hours=1))
         self.fx.add_hour("rtma", t, servers=("nodd",))
         self.assertEqual(self.run_pass(), 0)
         self.assertEqual(self.run_pass(cut + dt.timedelta(minutes=8)), 0)
         before = self.row_of("new-york-ny", "2026-09-26", t)["hourly"]
         self.assertEqual((before["state"], before["basis"], before["src"], before["late"]), ("final", "cutoff", "nodd", False))
-        self.fx.published[analysis.anl_url("rtma", t, nomads=True)] = "2026-09-26T21:30:00Z"
+        self.fx.published[analysis.anl_url("rtma", t, nomads=True)] = "2026-09-26T20:20:00Z"
         self.fx.add_hour("rtma", t, servers=("nomads",), precip=False, variant="b")
         self.fx.values[("rtma", "temp", iso(t), "b")] = 300.0
         seen = cut + dt.timedelta(minutes=68)
@@ -2856,49 +2859,43 @@ class Job(unittest.TestCase):
         cell = self.row_of("new-york-ny", "2026-09-26", t)
         self.assertEqual(cell["hourly"], dict(before, late=True))
         self.assertEqual(self.read(analysis.hour_key("rtma", t))["hourly"]["with"], ["nodd"])
-        self.assertEqual(cell["anlFile"]["nomads"], {"lm": "2026-09-26T21:30:00Z", "seen": iso(seen)})
+        self.assertEqual(cell["anlFile"]["nomads"], {"lm": "2026-09-26T20:20:00Z", "seen": iso(seen)})
         self.assertEqual((cell["src"], cell["show"]["temp"], cell["hourly"]["value"]), ("nomads", 80, 68))
 
-    def test_a_file_between_the_days_cut_off_and_the_hourly_cut_counts_for_the_hourly_contract_and_not_the_day(self):
-        # New York's 23:00 (03Z) has its day's cut-off at 04:45Z and the
-        # hourly cut at 06:00Z. The analysis lands on both servers at 05:10,
-        # after New York's rows settled on no copy and before Chicago's
-        # cut-off, so the hourly contract counts it at every place, Chicago's
-        # day counts it, and New York's day does not, its row carrying the
-        # hourly contract alone
+    def test_at_11_pm_the_hourly_cut_comes_before_the_days_cut_off_and_a_file_between_them_counts_for_the_day_alone(self):
+        # New York's 23:00 (03Z) has its hourly cut at 04:30Z and its day's
+        # cut-off at 04:45Z (owner's ruling 2026-11-05; at three hours the
+        # hourly cut came after it). The analysis lands on both servers at
+        # 04:40, after the hourly cut settled on no copy and before New York's
+        # cut-off, so New York's day and Chicago's count it and the hourly
+        # contract is under review at every place, its copies flagged late
         t = hour(2026, 9, 27, 3)
+        hc, cut = analysis.hourly_cut(t), analysis.day_cutoff("2026-09-26", "America/New_York")
+        self.assertEqual((iso(hc), iso(cut)), ("2026-09-27T04:30:00Z", "2026-09-27T04:45:00Z"))
         self.caught_up(t - dt.timedelta(hours=2))
         self.fx.add_hour("rtma", t - dt.timedelta(hours=1))             # New York's 22:00, so its day has a value
         self.assertEqual(self.run_pass(t + dt.timedelta(minutes=55)), 0)
-        cut = analysis.day_cutoff("2026-09-26", "America/New_York")
-        self.assertEqual(self.run_pass(cut + dt.timedelta(minutes=3)), 0)
-        day_key = analysis.DAY_KEY.format(day="2026-09-26")
-        ny_day = self.read(day_key)["locations"]["new-york-ny"]
-        self.assertTrue(ny_day["rtma"]["final"])
+        self.assertEqual(self.run_pass(hc + dt.timedelta(minutes=8)), 0)
         for nomads in (False, True):
-            self.fx.published[analysis.anl_url("rtma", t, nomads=nomads)] = "2026-09-27T05:10:00Z"
+            self.fx.published[analysis.anl_url("rtma", t, nomads=nomads)] = "2026-09-27T04:40:00Z"
         self.fx.add_hour("rtma", t, precip=False)
         self.fx.values[("rtma", "temp", iso(t))] = 280.65
-        read_at = hour(2026, 9, 27, 5) + dt.timedelta(minutes=18)
-        self.assertEqual(self.run_pass(read_at), 0)
-        hourly = {"cut": "2026-09-27T06:00:00Z", "state": "final", "at": "2026-09-27T05:10:00Z", "basis": "nomads",
-                  "src": "nomads", "value": 46, "x": "45.500", "late": False}
-        ny = self.row_of("new-york-ny", "2026-09-26", t)
-        self.assertEqual(sorted(ny), HOURLY_ONLY)
-        self.assertEqual(ny["hourly"], hourly)
-        self.assertEqual((ny["anlFile"]["src"], ny["anlFile"]["counts"], ny["anlFile"]["afterCut"]), (None, False, True))
-        self.assertEqual(self.read(day_key)["locations"]["new-york-ny"], ny_day)
-        chi = self.row_of("chicago-il", "2026-09-26", t)
-        self.assertEqual((chi["temp"], chi["src"], chi["hourly"]), (45.5, "nomads", hourly))
-        self.assertEqual((chi["anlFile"]["counts"], chi["anlFile"]["afterCut"]), (True, False))
+        self.assertEqual(self.run_pass(hour(2026, 9, 27, 4) + dt.timedelta(minutes=44)), 0)
+        review = {"cut": iso(hc), "state": "review", "at": iso(hc), "basis": "cutoff", "src": None, "value": None,
+                  "x": None, "late": True}
+        for lid in ("new-york-ny", "chicago-il"):
+            cell = self.row_of(lid, "2026-09-26", t)
+            self.assertEqual((cell["temp"], cell["show"]["temp"], cell["src"]), (45.5, 46, "nomads"), lid)
+            self.assertEqual((cell["anlFile"]["counts"], cell["anlFile"]["afterCut"]), (True, False), lid)
+            self.assertEqual(cell["hourly"], review, lid)
 
     def test_a_file_after_the_hourly_cut_and_before_the_days_cut_off_counts_for_the_day_and_not_the_hourly_contract(self):
-        # New York's 06:00 (10Z) has its hourly cut at 13Z and its day's
+        # New York's 06:00 (10Z) has its hourly cut at 11:30Z and its day's
         # cut-off at 04:45Z the next day. The analysis lands at 14:00 on both
         # servers, after the hourly cut settled on no copy, so the day counts
         # it and the hourly contract stays under review, the copies flagged late
         t = hour(2026, 9, 26, 10)
-        hc = hour(2026, 9, 26, 13)
+        hc = hour(2026, 9, 26, 11) + dt.timedelta(minutes=30)
         self.caught_up(t - dt.timedelta(hours=1))
         self.assertEqual(self.run_pass(t + dt.timedelta(minutes=55)), 0)
         self.assertEqual(self.run_pass(hc + dt.timedelta(minutes=8)), 0)
@@ -2913,30 +2910,34 @@ class Job(unittest.TestCase):
                                           "value": None, "x": None, "late": True})
         self.assertEqual(self.read(analysis.DAY_KEY.format(day="2026-09-26"))["locations"]["new-york-ny"]["rtma"]["hours"], 1)
 
-    def test_the_hourly_cut_settles_apart_from_the_days_and_the_record_waits_for_it(self):
-        # Los Angeles alone, at its 23:00 (06Z), has the day's cut-off at
-        # 07:45Z and the hourly cut at 09:00Z, so the record waits past the day's
+    def test_the_hourly_cut_settles_apart_from_the_days_and_the_record_waits_for_the_days(self):
+        # Los Angeles alone, at its 23:00 (06Z), has the hourly cut at 07:30Z
+        # and the day's cut-off at 07:45Z, so the hourly cut settles first, on
+        # its own ten-minute pass, and the record waits for the day's (at three
+        # hours, until 2026-11-05, it was the record that waited for the hourly cut)
         t = hour(2026, 9, 27, 6)
-        cut, hc = "2026-09-27T07:45:00Z", "2026-09-27T09:00:00Z"
+        cut, hc = "2026-09-27T07:45:00Z", "2026-09-27T07:30:00Z"
+        self.assertEqual(iso(analysis.hourly_cut(t)), hc)
         values = {LA["id"]: {"temp": 290.0, "wind": 5.0, "gust": 8.0}}
         analysis.write_copy(self.st, "rtma", "anl", "nodd", t,
                             {"server": "nodd", "seen": "2026-09-27T06:50:00Z", "published": "2026-09-27T06:48:00Z",
                              "sha256": {"temp": "a"}, "values": values}, {})
         slots: dict = {}
-        p1 = analysis._parse_iso(cut) + dt.timedelta(minutes=3)
+        # a windowed pass after the hourly cut settles nothing on one copy
+        self.assertFalse(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, [LA],
+                                              analysis._parse_iso(hc) + dt.timedelta(minutes=4), {}, False))
+        p1 = analysis._parse_iso(hc) + dt.timedelta(minutes=8)
         self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, [LA], p1, {}, True))
-        self.assertEqual(list(slots), ["cutoffs"])
+        self.assertEqual(slots, {"hourly": {"at": iso(p1), "with": ["nodd"], "src": "nodd",
+                                            "published": "2026-09-27T06:48:00Z", "pubSrc": "nodd"}})
         self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
         entry, state = {"anl": slots}, analysis.new_state()
         analysis.settle_file(self.st, "rtma", "anl", t, entry, [LA], p1, {}, state, True)
         self.assertIn("anl", entry)
-        # a windowed pass after the hourly cut settles nothing on one copy
-        self.assertFalse(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, [LA],
-                                              analysis._parse_iso(hc) + dt.timedelta(minutes=14), {}, False))
-        p3 = analysis._parse_iso(hc) + dt.timedelta(minutes=18)
+        p3 = analysis._parse_iso(cut) + dt.timedelta(minutes=3)
         self.assertTrue(analysis.settle_cuts(self.st, "rtma", "anl", t, slots, [LA], p3, {}, True))
-        self.assertEqual(slots["hourly"], {"at": iso(p3), "with": ["nodd"], "src": "nodd",
-                                           "published": "2026-09-27T06:48:00Z", "pubSrc": "nodd"})
+        self.assertEqual(slots["cutoffs"], {cut: {"at": iso(p3), "with": ["nodd"], "src": "nodd",
+                                                  "published": "2026-09-27T06:48:00Z", "pubSrc": "nodd"}})
         arc = self.read(analysis.hour_key("rtma", t))
         self.assertEqual((arc["hourly"], arc["cutoffs"], arc["settled"]), (slots["hourly"], slots["cutoffs"], iso(p3)))
         # it stays open for NOMADS's copy until a day after its hour
@@ -2989,14 +2990,14 @@ class Job(unittest.TestCase):
         table = {"anl": {iso(hs[1]): {"nodd": {"lm": m(hs[1], 48), "seen": None}},
                          iso(hs[2]): {"nodd": {"lm": m(hs[2], 49), "seen": None},
                                       "nomads": {"lm": m(hs[2], 46), "seen": m(hs[2], 47)}},
-                         iso(hs[3]): {"nodd": {"lm": m(hs[3], 186), "seen": None}},
+                         iso(hs[3]): {"nodd": {"lm": m(hs[3], 100), "seen": None}},
                          iso(hs[4]): {"nodd": {"lm": m(hs[4], 40), "seen": None}}},
                  "pcp": {iso(hs[1] + dt.timedelta(hours=1)): {"nodd": {"lm": m(hs[1], 77), "seen": None}}}}
         now = hour(2026, 9, 28, 12)
         day0, docs0 = analysis.build_day(self.st, day, LOCS, {}, now, analysis.new_state(), times={})
         day1, docs1 = analysis.build_day(self.st, day, LOCS, {}, now, analysis.new_state(), times=table)
         rows = {r["t"]: r["rtma"] for r in docs1["new-york-ny"]["hours"]}
-        hc = lambda h: iso(h + dt.timedelta(hours=3))                       # noqa: E731
+        hc = lambda h: iso(h + dt.timedelta(hours=1, minutes=30))           # noqa: E731
         final = {"state": "final", "basis": "norecord", "src": "nodd", "value": 68, "x": "68.000", "late": False}
         # with no time on record none is shown, and it is final at the cut on the copy read
         r0 = rows[iso(hs[0])]
@@ -3013,8 +3014,9 @@ class Job(unittest.TestCase):
         r2 = rows[iso(hs[2])]
         self.assertEqual(r2["anlFile"]["nomads"], {"lm": m(hs[2], 46), "seen": m(hs[2], 47)})
         self.assertEqual(r2["hourly"], dict(final, cut=hc(hs[2]), at=m(hs[2], 46), basis="nomads"))
-        # NOAA Open Data's time after the hourly cut puts it under review,
-        # while the day, which never reads the table, still counts the hour
+        # NOAA Open Data's time after the hourly cut, 1 hour 40 minutes after
+        # the hour, puts it under review, while the day, which never reads the
+        # table, still counts the hour
         r3 = rows[iso(hs[3])]
         self.assertEqual(r3["hourly"], {"cut": hc(hs[3]), "state": "review", "at": hc(hs[3]), "basis": "norecord",
                                         "src": None, "value": None, "x": None, "late": False})
@@ -3036,8 +3038,10 @@ class Job(unittest.TestCase):
         # Data at 08:01:44Z, after the 07:45Z cut-off of Los Angeles's 29
         # September, and the lane counted it under the rule before 14 October.
         # So here it stays counted, and only its time and afterCut say so. An
-        # analysis whose time falls between the day's cut-off and its hourly
-        # cut moves its times alone too
+        # analysis whose time falls after the day's cut-off moves its times
+        # too, and since 2026-11-05 it is past its hourly cut as well, 1 hour
+        # 30 minutes after the 23:00 hour, so its hourly contract goes to
+        # review, the one thing the table can change
         day, tz = "2026-09-26", "America/Los_Angeles"
         hs = analysis.local_day_hours(day, tz)
         for h in hs:
@@ -3046,7 +3050,7 @@ class Job(unittest.TestCase):
         late_pcp, late_anl = iso(cut + dt.timedelta(minutes=16, seconds=44)), iso(cut + dt.timedelta(minutes=30))
         table = {"pcp": {iso(last + dt.timedelta(hours=1)): {"nodd": {"lm": late_pcp, "seen": None}}},
                  "anl": {iso(last): {"nodd": {"lm": late_anl, "seen": None}}}}
-        self.assertLess(late_anl, iso(analysis.hourly_cut(last)))
+        self.assertGreater(late_anl, iso(analysis.hourly_cut(last)))
         now = hour(2026, 9, 28, 12)
         runs = []
         for times in ({}, table):
@@ -3060,9 +3064,12 @@ class Job(unittest.TestCase):
         self.assertEqual(r1["pcpFile"], dict(r0["pcpFile"], nodd={"lm": late_pcp, "seen": None}, afterCut=True))
         self.assertEqual(r1["anlFile"], dict(r0["anlFile"], nodd={"lm": late_anl, "seen": None}, afterCut=True))
         self.assertEqual((r1["pcpFile"]["counts"], r1["anlFile"]["counts"]), (True, True))
-        rest = lambda r: {k: v for k, v in r.items() if k not in ("anlFile", "pcpFile")}     # noqa: E731
+        rest = lambda r: {k: v for k, v in r.items() if k not in ("anlFile", "pcpFile", "hourly")}     # noqa: E731
         self.assertEqual(rest(r1), rest(r0))
-        self.assertEqual(r1["hourly"]["basis"], "norecord")
+        hc = iso(analysis.hourly_cut(last))
+        self.assertEqual((r0["hourly"]["state"], r0["hourly"]["at"], r0["hourly"]["basis"]), ("final", hc, "norecord"))
+        self.assertEqual(r1["hourly"], {"cut": hc, "state": "review", "at": hc, "basis": "norecord", "src": None,
+                                        "value": None, "x": None, "late": False})
         self.assertEqual(l1["hours"][:-1], l0["hours"][:-1])
         self.assertEqual({k: v for k, v in l1.items() if k != "hours"}, {k: v for k, v in l0.items() if k != "hours"})
 
@@ -3412,7 +3419,7 @@ class FullDay(unittest.TestCase):
     def test_the_days_figures_states_and_csv_files_are_byte_identical_to_before(self):
         # the hourly cut settles beside the daily cut-offs in this day (an
         # analysis on one server, one on neither, a late NOMADS copy, and
-        # New York's 23:00 counting for the hourly contract and not the day),
+        # New York's 23:00, whose NOMADS copy counts for Chicago's day alone),
         # and the day file, both CSV files and every place file's figures and
         # states are the bytes the lane wrote before rowShape 3
         with gzip.open(GOLDEN, "rt", encoding="utf-8") as fh:
@@ -3443,19 +3450,23 @@ class FullDay(unittest.TestCase):
             h = rows[iso(t)]["hourly"]
             return h["state"], h["at"], h["basis"], h["src"], h["late"]
         self.assertEqual(states(hour(2026, 9, 26, 4)), ("final", "2026-09-26T04:48:00Z", "nomads", "nomads", False))
-        self.assertEqual(states(hour(2026, 9, 26, 9)), ("final", "2026-09-26T12:00:00Z", "cutoff", "nodd", False))
-        self.assertEqual(states(hour(2026, 9, 26, 12)), ("review", "2026-09-26T15:00:00Z", "cutoff", None, False))
-        self.assertEqual(states(hour(2026, 9, 26, 15)), ("final", "2026-09-26T18:00:00Z", "cutoff", "nodd", True))
+        self.assertEqual(states(hour(2026, 9, 26, 9)), ("final", "2026-09-26T10:30:00Z", "cutoff", "nodd", False))
+        self.assertEqual(states(hour(2026, 9, 26, 12)), ("review", "2026-09-26T13:30:00Z", "cutoff", None, False))
+        self.assertEqual(states(hour(2026, 9, 26, 15)), ("final", "2026-09-26T16:30:00Z", "cutoff", "nodd", True))
         # at New York's 23:00 the day keeps NOAA Open Data's copy, read by its
-        # cut-off, and the hourly contract takes NOMADS's, in by the hourly cut
+        # cut-off, and so does the hourly contract, final at its cut at 04:30;
+        # NOMADS's copy, published at 05:10, is late for both and counts for
+        # Chicago's day, whose cut-off is 05:45
         between = rows[iso(hour(2026, 9, 27, 3))]
-        self.assertEqual(states(hour(2026, 9, 27, 3)), ("final", "2026-09-27T05:10:00Z", "nomads", "nomads", False))
+        self.assertEqual(states(hour(2026, 9, 27, 3)), ("final", "2026-09-27T04:30:00Z", "cutoff", "nodd", True))
         self.assertEqual((between["src"], between["raw"]["temp"], between["hourly"]["value"], between["hourly"]["x"]),
-                         ("nodd", "289.09", 80, "80.330"))
+                         ("nodd", "289.09", 61, "60.692"))
         self.assertEqual((between["anlFile"]["counts"], between["anlFile"]["afterCut"], between["anlFile"]["nomads"]),
                          (True, False, {"lm": "2026-09-27T05:10:00Z", "seen": "2026-09-27T05:50:00Z"}))
         chi = next(r["rtma"] for r in docs["chicago-il"]["hours"] if r["t"] == iso(hour(2026, 9, 27, 3)))
-        self.assertEqual((chi["src"], chi["show"]["temp"], chi["hourly"]["value"]), ("nomads", 80, 80))
+        self.assertEqual((chi["src"], chi["show"]["temp"], chi["hourly"]["src"], chi["hourly"]["basis"]),
+                         ("nomads", 80, "nodd", "cutoff"))
+        self.assertNotEqual(chi["hourly"]["value"], 80)
 
 
 class RangeFetch(unittest.TestCase):

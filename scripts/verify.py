@@ -151,7 +151,8 @@ def ana_row_shape3(doc: dict, raw: list, review_row=None, review_late_row=None) 
     lane works them. The times are invented, a NOMADS copy for most analysis files
     and none for the rest, so every wording the page has for a file and for each
     basis of an hourly state is reached: hours 0 to 5 final from NOMADS, hour 6 from
-    NOMADS with NOAA Open Data's value shown, hours 7 to 9 and the last at the
+    NOMADS with NOAA Open Data's value shown and NOAA Open Data's time as its `pub`, as
+    for an hour read before both servers were, hours 7 to 9 and the last at the
     hourly cut-off, hours 10 to 12 with NOMADS not on record, hour 14 with NOAA Open
     Data not on record, and the day's last accumulation published after the cut-off
     and counted under the rule before 14 October. `review_row` turns that row into
@@ -203,8 +204,8 @@ def ana_row_shape3(doc: dict, raw: list, review_row=None, review_late_row=None) 
         stamp = row["t"][:10].replace("-", "")
         v["anlFile"] = {"name": f"rtma2p5.{stamp}/rtma2p5.t{row['t'][11:13]}z.2dvaranl_ndfd.grb2_wexp",
                         "nodd": nodd, "nomads": nomads, "src": src, "counts": True, "afterCut": False}
-        v["pub"] = (nomads or nodd)["lm"]
-        v["pubSrc"] = "nomads" if nomads else "nodd"
+        v["pub"] = nodd["lm"] if i == 6 else (nomads or nodd)["lm"]
+        v["pubSrc"] = "nodd" if i == 6 or not nomads else "nomads"
         v["src"] = src
         end = t + dt.timedelta(hours=1)
         plm = end + dt.timedelta(minutes=16, seconds=40)
@@ -216,14 +217,15 @@ def ana_row_shape3(doc: dict, raw: list, review_row=None, review_late_row=None) 
                         "src": "nodd", "counts": True, "afterCut": late_ok}
         v["pcpPub"] = iso(plm)
         v["pcpPubSrc"] = "nodd"
-        cut = t + dt.timedelta(hours=3)
+        cut = t + dt.timedelta(hours=1, minutes=30)
         basis = "nomads" if nomads else "cutoff" if (7 <= i <= 9 or i == last) else "norecord"
         v["hourly"] = {"cut": iso(cut), "state": "final", "at": nomads["lm"] if basis == "nomads" else iso(cut) if basis == "cutoff" else None,
                        "basis": basis, "src": src, "value": v["show"]["temp"], "x": v["x"]["temp"], "late": False}
     if review_row is not None:
         row = rows[review_row]
         t = at(row["t"])
-        row["rtma"] = {"hourly": {"cut": iso(t + dt.timedelta(hours=3)), "state": "review", "at": iso(t + dt.timedelta(hours=3)),
+        row["rtma"] = {"hourly": {"cut": iso(t + dt.timedelta(hours=1, minutes=30)), "state": "review",
+                                  "at": iso(t + dt.timedelta(hours=1, minutes=30)),
                                   "basis": "cutoff", "src": None, "value": None, "x": None, "late": False},
                        "anlFile": {"name": row["rtma"]["anlFile"]["name"], "nodd": None, "nomads": None, "src": None,
                                    "counts": False, "afterCut": False},
@@ -1842,9 +1844,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
 
                 # the hourly contract in words, as the owner set them on 2026-11-04 and
                 # put plainly that evening, worked out here from the lane's state, basis,
-                # moment and cut-off
-                def sd_htext(hr, F_=None):
-                    three_ = sd_clock(sd_at(hr["cut"]), True) + ", three hours after the hour"
+                # moment and cut-off, 1 hour 30 minutes after the hour since 2026-11-05;
+                # an hour not final at the moment shown (`at_`) says when it will be
+                SD_CUT = dt.timedelta(hours=1, minutes=30)
+                SD_NOMADS_FROM = dt.datetime(2026, 11, 3, 10, tzinfo=dt.timezone.utc)
+
+                def sd_htext(hr, F_=None, at_=None):
+                    three_ = sd_clock(sd_at(hr["cut"]), True) + ", 1 hour 30 minutes after the hour"
                     if hr["state"] == "final" and hr["basis"] == "nomads":
                         return ("final at " + sd_clock(sd_at(hr["at"]), True) + ", when NOMADS published the file. The value is "
                                 + ("NOAA Open Data" if hr.get("src") == "nodd" else "NOMADS") + "’s copy.")
@@ -1858,10 +1864,26 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                                 if od_ else "neither server is on record with the file by " + three_ + ".") + " Under review.")
                     if hr["state"] == "review":
                         return "no value: neither server had published the file by " + three_ + ". Under review."
-                    return "provisional, until NOMADS publishes the file, or until " + three_ + ", when NOAA Open Data’s copy counts."
+                    t_ = sd_at(hr["cut"]) - SD_CUT
+                    if t_ < SD_NOMADS_FROM:
+                        how_ = ("NOMADS’s publication time for this hour is not on record, so it becomes final at its cut-off, " + three_
+                                + ", from NOAA Open Data’s copy. With no copy by then, it goes to review.")
+                    else:
+                        e_ = t_ + dt.timedelta(minutes=46)
+                        how_ = ("It becomes final when NOMADS publishes the file" + (", expected about " + sd_clock(e_) if at_ < e_ else "")
+                                + ", or at the latest at its cut-off, " + three_ + ", from NOAA Open Data’s copy. With neither copy by then, it goes to review.")
+                    return ("provisional. " if at_ >= t_ else "") + how_
 
-                # the every-hour table's few words for a final hour: whose copy the value is
-                sd_word = lambda hr: "final (NOMADS)" if hr.get("src") == "nomads" else "final (Open Data)"
+                # the every-hour table's few words: a final hour's time and whose file
+                # made it final, and for one not final yet, NOMADS's usual time while it
+                # is ahead and its cut-off
+                sd_word = lambda hr: ("final " + sd_clock(sd_at(hr["at"] or hr["cut"])) + (" (NOMADS)" if hr["basis"] == "nomads" else " (Open Data)")
+                                      if hr["state"] == "final" else "under review" if hr["state"] == "review" else "")
+
+                def sd_pword(t_, at_):
+                    e_ = t_ + dt.timedelta(minutes=46)
+                    fin_ = ("final expected " + sd_clock(e_) + ", " if t_ >= SD_NOMADS_FROM and at_ < e_ else "") + "cut-off " + sd_clock(t_ + SD_CUT)
+                    return ("provisional, " if at_ >= t_ else "") + fin_
                 SD_SRV = {"nodd": "NOAA Open Data", "nomads": "NOMADS"}
                 # the file's first publication on either server, as the replay and the table take it
                 sd_pub = lambda F_: min(sd_at(F_[s_]["lm"]) for s_ in ("nodd", "nomads") if F_.get(s_) and F_[s_].get("lm"))
@@ -1871,7 +1893,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                   return { n: rows.length, last: rows.length ? rows[rows.length - 1].querySelector('td.ptotal').textContent : '',
                            hi: (document.querySelector('#anaHours td.hi') || {}).textContent || '',
                            hst: rows.map(r => [r.querySelector('td.hst').textContent, r.querySelector('td.hst').title]),
-                           arr: rows.map(r => r.querySelector('td.arr').textContent),
+                           arr: rows.map(r => [...r.querySelectorAll('td.arr')].map(c => c.textContent)),
+                           head: [...document.querySelectorAll('#anaHours thead tr')].map(tr => [...tr.children].map(th => th.textContent + (th.colSpan > 1 ? ' x' + th.colSpan : ''))),
                            foot: (document.querySelector('#anaFoot') || {}).textContent || '' }; }"""
                 ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
                 sd = page.evaluate("""(js) => ({ cards: eval(js)(),
@@ -1893,32 +1916,43 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         sd["order"].index("anaPickers") < sd["order"].index("anaHead") < sd["order"].index("locPanel") and sd["y"] < 40,
                         str([sd["order"], sd["y"]]))
                 # the hour table: a row per hour, the running total ending on the
-                # day's, each analysis's publication time on record, and each hour's
-                # hourly contract in the lane's words
+                # day's, each analysis's publication time on each server, its own
+                # column under one header, and each hour's hourly contract in the
+                # lane's words
                 tb = page.evaluate(sd_tab_js)
-                tb_arr = [sd_clock(sd_pub(r_["rtma"]["anlFile"])) + " on " + SD_SRV[min(("nodd", "nomads"), key=lambda s_: (
-                          sd_at(r_["rtma"]["anlFile"][s_]["lm"]) if (r_["rtma"]["anlFile"].get(s_) or {}).get("lm") else dt.datetime.max.replace(tzinfo=dt.timezone.utc)))]
-                          for r_ in sd_rows]
-                chk.add(f"{scheme} settlement display: the hour table has a row per hour, its running total ends on the day's, and it gives each analysis's publication time and hourly contract",
+                sd_day_cut = sd_at(sd_rows[-1]["t"]) + dt.timedelta(hours=1, minutes=45)
+
+                def sd_cell(F_, s_):
+                    lm_ = ((F_ or {}).get(s_) or {}).get("lm")
+                    if not lm_:
+                        return "not on record"
+                    return sd_clock(sd_at(lm_)) + (", after the cut-off" if sd_at(lm_) > sd_day_cut else "")
+                tb_arr = [[sd_cell(r_["rtma"]["anlFile"], s_) for s_ in ("nomads", "nodd")] for r_ in sd_rows]
+                chk.add(f"{scheme} settlement display: the hour table has a row per hour, its running total ends on the day's, and it gives each analysis's publication time on each server and the hourly contract",
                         tb["n"] == sd_sum["of"] == len(sd_rows) and tb["last"] == f"{sd_sum['precip']['value']:.2f}" and tb["hi"] == str(sd_sum["high"]["value"])
-                        and [sd_n2(a_) for a_ in tb["arr"]] == tb_arr and "resolves on" in tb["foot"] and "two servers" in tb["foot"]
+                        and [[sd_n2(a_) for a_ in p_] for p_ in tb["arr"]] == tb_arr and "resolves on" in tb["foot"] and "two servers" in tb["foot"]
+                        and tb["head"][0][-1] == "Analysis published x2" and tb["head"][1] == ["NOMADS", "NOAA Open Data"]
+                        and "1 hour 30 minutes after the hour" in tb["foot"] and "three hours" not in tb["foot"]
                         and [[w_, sd_n2(t_)] for w_, t_ in tb["hst"]] == [[sd_word(r_["rtma"]["hourly"]), sd_htext(r_["rtma"]["hourly"], r_["rtma"].get("anlFile"))] for r_ in sd_rows],
                         str([tb["n"], tb["last"], tb["arr"][:2], tb["hst"][:1]])[:300])
-                # a final day's replay runs to a quarter hour past the last hour's
-                # hourly cut-off, so the 11 PM hour shows final; at the old end, a
-                # quarter hour past the daily cut-off, it was still provisional
+                # a final day's replay runs to a quarter hour past the later of its
+                # cut-off and the last hour's hourly cut-off, the cut-off since the
+                # hourly cut moved to 1 hour 30 minutes, so the 11 PM hour shows
+                # final, and before its own cut it is provisional
                 sd_cut = sd_at(sd_rows[-1]["t"]) + dt.timedelta(hours=1, minutes=45)
                 sd_lastcut = sd_at(sd_rows[-1]["rtma"]["hourly"]["cut"])
                 sd_end = page.evaluate("""() => ({ max: +document.querySelector('#anaT').max, slider: document.querySelector('#anaT').hidden,
                   when: document.querySelector('#anaWhen b').textContent, last: (r => [r.textContent, r.dataset.state])([...document.querySelectorAll('#anaHours td.hst')].pop()) })""")
+                sd_tmid = sd_lastcut - dt.timedelta(minutes=15)
                 page.evaluate("(ms) => { const r = document.querySelector('#anaT'); r.value = String(ms); r.dispatchEvent(new Event('input')); }",
-                              int((sd_cut + dt.timedelta(minutes=15)).timestamp() * 1000))
+                              int(sd_tmid.timestamp() * 1000))
                 sd_mid = ana_until(page, "() => { const t = [...document.querySelectorAll('#anaHours td.hst')].pop(); return t.dataset.state === 'provisional' && [t.textContent, document.querySelector('#anaStatus .anapill').textContent]; }") or ["", ""]
-                sd_e15 = sd_lastcut + dt.timedelta(minutes=15)
-                chk.add(f"{scheme} settlement display: a final day's replay runs to a quarter hour past the last hour's hourly cut-off, where the 11 PM hour is final",
-                        not sd_end["slider"] and sd_end["max"] == int(sd_e15.timestamp() * 1000) and sd_lastcut > sd_cut
+                sd_e15 = max(sd_cut, sd_lastcut) + dt.timedelta(minutes=15)
+                chk.add(f"{scheme} settlement display: a final day's replay runs to a quarter hour past the later of its cut-off and the last hour's hourly cut-off, where the 11 PM hour is final, and provisional before its own cut",
+                        not sd_end["slider"] and sd_end["max"] == int(sd_e15.timestamp() * 1000) and sd_lastcut < sd_cut
                         and sd_n2(sd_end["when"]) == sd_clock(sd_e15) + " " + sd_e15.astimezone(sd_tz).tzname()
-                        and sd_end["last"] == [sd_word(sd_rows[-1]["rtma"]["hourly"]), "final"] and sd_mid == ["provisional", "Final"],
+                        and sd_end["last"] == [sd_word(sd_rows[-1]["rtma"]["hourly"]), "final"]
+                        and [sd_n2(x_) for x_ in sd_mid] == [sd_pword(sd_at(sd_rows[-1]["t"]), sd_tmid), "Provisional"],
                         str([sd_end["max"], sd_end["when"], sd_end["last"], sd_mid]))
                 # the replay: half past the hour after the 11 AM analysis, when the
                 # hours from midnight to 11 AM are in at their files' own times; the
@@ -1944,12 +1978,15 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         and rp["future"] == 3 and rp["now"] == 3 and sd_n2(rp["when"]).startswith(sd_clock(sd_t)),
                         str([rp["cards"], rp_want, rp["status"][:60], rp["future"], rp["now"], rp["when"]])[:260])
                 # the hourly contract as it stood then: final from the moment it
-                # became final, provisional before, nothing for an hour to come
+                # became final, provisional before, and an hour to come says when it
+                # will be final
                 sd_h0, sd_p0 = sd_rows[0]["rtma"]["hourly"], sd_rows[sd_k + 1]["rtma"]["hourly"]
-                chk.add(f"{scheme} settlement display: in a replay each hour's hourly contract shows as it stood, provisional until it became final",
-                        len(rp["hst"]) == len(sd_rows) and rp["hst"][0][0] == sd_word(sd_h0) and rp["hst"][sd_k + 1][0] == "provisional"
-                        and sd_n2(rp["hst"][sd_k + 1][1]) == sd_htext(dict(sd_p0, state="provisional"))
-                        and all(h_[0] == "" for h_ in rp["hst"][sd_k + 2:]), str(rp["hst"][sd_k:sd_k + 3]))
+                chk.add(f"{scheme} settlement display: in a replay each hour's hourly contract shows as it stood, provisional until it became final, and each hour says when it will be",
+                        len(rp["hst"]) == len(sd_rows) and sd_n2(rp["hst"][0][0]) == sd_word(sd_h0)
+                        and sd_n2(rp["hst"][sd_k + 1][0]) == sd_pword(sd_at(sd_rows[sd_k + 1]["t"]), sd_t)
+                        and sd_n2(rp["hst"][sd_k + 1][1]) == sd_htext(dict(sd_p0, state="provisional"), at_=sd_t)
+                        and [sd_n2(h_[0]) for h_ in rp["hst"][sd_k + 2:]] == [sd_pword(sd_at(r_["t"]), sd_t) for r_ in sd_rows[sd_k + 2:]],
+                        str(rp["hst"][sd_k:sd_k + 3]))
                 page.click("#anaLatest")
                 sd_l = ana_until(page, "() => document.querySelector('#anaStatus .anapill').textContent === 'Final' && [document.querySelector('#anaStatus .anapill').textContent, +document.querySelector('#anaT').value]") or ["", 0]
                 page.click("#anaPlayDay")
@@ -2112,7 +2149,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 page.unroute(f"**/analysis2/loc/new-york-ny/{ana_day}.json*")
                 sd_html.append(t2x["html"])
                 chk.add(f"{scheme} settlement display: a rowShape 2 file with no publication times still draws the day as it stands, every time not on record and no replay",
-                        t2x["cards"] == sd_want and t2["n"] == sd_sum["of"] and all(a_ == "not on record" for a_ in t2["arr"])
+                        t2x["cards"] == sd_want and t2["n"] == sd_sum["of"] and all(a_ == ["not on record", "not on record"] for a_ in t2["arr"])
                         and all(h_[0] == "" for h_ in t2["hst"]) and t2x["slider"] and bool(t2x["old"]) and "no publication time on record" in t2x["old"],
                         str([t2x["cards"][:1], t2["arr"][:2], t2x["slider"], t2x["old"]])[:240])
                 chk.add(f"{scheme} settlement display: the hover on a rowShape 2 file gives the rounded value, leaves the stored value out and says no file time is on record",
@@ -2154,7 +2191,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
                 sd_html.append(page.evaluate("() => document.documentElement.outerHTML"))
                 fx_rows = sd_v3["hours"]
-                fx_hw = [[w_, sd_n2(t_)] for w_, t_ in page.evaluate("() => [...document.querySelectorAll('#anaHours td.hst')].map(t => [t.textContent, t.title])")]
+                fx_hw = [[sd_n2(w_), sd_n2(t_)] for w_, t_ in page.evaluate("() => [...document.querySelectorAll('#anaHours td.hst')].map(t => [t.textContent, t.title])")]
                 fx_want = [[sd_word(r_["rtma"]["hourly"]), sd_htext(r_["rtma"]["hourly"], r_["rtma"]["anlFile"])] for r_ in fx_rows]
                 fx_b = {i_: fx_rows[i_]["rtma"]["hourly"] for i_ in (0, 6, 7, 10)}
                 chk.add(f"{scheme} settlement display: the hourly contract reads as each basis words it, NOMADS, NOMADS with Open Data's value, the hourly cut-off and NOMADS not on record",
@@ -2174,6 +2211,41 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         all(w_ in fx_p for w_ in fx_p_want) and "Copy used\nNOAA Open Data, published after the cut-off, counted under the rule before 14 October 2026" in fx_p
                         and "not counted" not in fx_p and fx_rows[-1]["rtma"]["pcpFile"]["afterCut"] and not fx_c[1]["bad"] and not fx_c[0]["bad"]
                         and fx_c[0]["n"] == fx_c[1]["n"] == 24, str([[w_ for w_ in fx_p_want if w_ not in fx_p][:2], fx_c[0]["bad"][:1], fx_c[1]["bad"][:1]])[:300])
+                # each server's publication as it stood in a replay: hour 6, read as
+                # before both servers were with NOAA Open Data's time as its `pub`,
+                # comes in at NOMADS's earlier time, NOMADS's cell filled and NOAA Open
+                # Data's still expected, and the next hour's NOMADS cell, with no time
+                # kept, says so
+                r6_ = fx_rows[6]["rtma"]
+                t6_, n6_ = sd_at(fx_rows[6]["t"]), sd_at(fx_rows[6]["rtma"]["anlFile"]["nomads"]["lm"])
+                page.evaluate("(ms) => { const r = document.querySelector('#anaT'); r.value = String(ms); r.dispatchEvent(new Event('input')); }",
+                              int((n6_ + dt.timedelta(seconds=30)).timestamp() * 1000))
+                c6_ = ana_until(page, "(i) => { const r = [...document.querySelectorAll('#anaHours tbody tr')][i]; const c = [...r.querySelectorAll('td')].map(x => x.textContent); return c[2] !== '·' && c; }", arg=6) or []
+                c7_ = page.evaluate("(i) => [...[...document.querySelectorAll('#anaHours tbody tr')][i].querySelectorAll('td')].map(x => x.textContent)", 7)
+                chk.add(f"{scheme} settlement display: in a replay each server's column fills at its own time, and an hour read before both servers were comes in at NOMADS's",
+                        r6_["pub"] == r6_["anlFile"]["nodd"]["lm"] and sd_at(r6_["pub"]) > n6_ and len(c6_) == 10
+                        and [sd_n2(x_) for x_ in c6_[-2:]] == [sd_clock(n6_), "expected " + sd_clock(t6_ + dt.timedelta(minutes=49))]
+                        and c6_[2] == str(r6_["show"]["temp"]) and sd_n2(c6_[3]) == sd_word(r6_["hourly"])
+                        and [sd_n2(x_) for x_ in c7_[-2:]] == ["not on record", "expected " + sd_clock(sd_at(fx_rows[7]["t"]) + dt.timedelta(minutes=49))],
+                        str([c6_, c7_])[:300])
+                # what the samples, all from before NOMADS's times were kept, cannot
+                # show: an hour of 5 November with NOMADS's usual time ahead, then
+                # past it, then final, and a file the lane wrote under the three hours
+                hw_ = page.evaluate("""() => { const S = window.WXSettle, tz = 'America/Los_Angeles', t = Date.parse('2026-11-05T18:00:00Z'), M = 60000;
+                  const o = { t, hcut: t + 90 * M, hourly: { state: 'provisional' } };
+                  const f = { t, hcut: t + 90 * M, hat: t + 46 * M + 17000, hourly: { state: 'final', basis: 'nomads', src: 'nomads' } };
+                  const old = { t, hcut: t + 180 * M, hat: t + 180 * M, hourly: { state: 'final', basis: 'cutoff', src: 'nodd' } };
+                  return [S._hourlyWord(o, t - 30 * M, tz), S._hourlyWord(o, t + 20 * M, tz), S._hourlyWord(o, t + 50 * M, tz),
+                          S._hourlyText(o, t + 20 * M, tz), S._hourlyWord(f, t + 50 * M, tz), S._hourlyText(old, t + 200 * M, tz)]; }""")
+                chk.add(f"{scheme} settlement display: an hour not final yet says when NOMADS usually publishes and its cut-off, and a file written under the three hours reads so",
+                        [sd_n2(x_) for x_ in hw_] == ["final expected 10:46 AM, cut-off 11:30 AM", "provisional, final expected 10:46 AM, cut-off 11:30 AM",
+                                                      "provisional, cut-off 11:30 AM",
+                                                      "provisional. It becomes final when NOMADS publishes the file, expected about 10:46 AM, or at the latest at "
+                                                      "its cut-off, 11:30:00 AM, 1 hour 30 minutes after the hour, from NOAA Open Data’s copy. With neither copy by "
+                                                      "then, it goes to review.",
+                                                      "final 10:46 AM (NOMADS)",
+                                                      "final at 1:00:00 PM, three hours after the hour, from NOAA Open Data’s copy, because NOMADS had not published the file by then."],
+                        str(hw_)[:400])
                 # an hour with no file by its hourly cut-off: provisional before
                 # the cut, under review from it, in the table, the hover and the CSV
                 sd_serve["doc"] = sd_v3r
@@ -2200,7 +2272,8 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} settlement display: an hour with no file by its hourly cut-off is under review from the cut, provisional before it, in the table, the hover and the CSV",
                         fx_rv[0] == "under review" and sd_n2(fx_rv[1]) == fx_rv_txt and fx_rv[2] == "·" and ("Hourly contract\n" + fx_rv_txt) in tip_r
                         and "Not published by the cut-off." in tip_r and "For the day\nnot counted" in tip_r
-                        and fx_rv0[0] == "provisional" and sd_n2(fx_rv0[1]) == sd_htext(dict(fx_h13, state="provisional"))
+                        and sd_n2(fx_rv0[0]) == sd_pword(sd_at(sd_v3r["hours"][13]["t"]), sd_at(fx_h13["cut"]) - dt.timedelta(minutes=30))
+                        and sd_n2(fx_rv0[1]) == sd_htext(dict(fx_h13, state="provisional"), at_=sd_at(fx_h13["cut"]) - dt.timedelta(minutes=30))
                         and not c_r["bad"] and c_r["n"] == 24, str([fx_rv, fx_rv0, tip_r[-160:], c_r["bad"][:1]])[:300])
                 chk.add(f"{scheme} settlement display: an hour NOAA Open Data published after its hourly cut-off, with NOMADS's copy not on record, says so under review in the table, the hover and the CSV",
                         fx_h16["hourly"]["basis"] == "norecord" and fx_h16["hourly"]["state"] == "review"
@@ -2225,13 +2298,14 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                     t_a = dt.datetime.fromisoformat(lv_rows[lv_ka]["t"].replace("Z", "+00:00"))
                     lv_cut = dt.datetime.fromisoformat(lv_rows[-1]["t"].replace("Z", "+00:00")) + dt.timedelta(hours=1, minutes=45)
                     lv_url = f"{srv.url}/{ANA}?day={ana_live}&loc=new-york-ny"
-                    # the analysis is due 49 minutes after its hour and usually in
-                    # by 52, the accumulation 17 minutes after its hour ends and
-                    # usually in by 18; the cut-off is 12:45 AM the next day
-                    moments = [(t_a + dt.timedelta(minutes=10), ("counting", "39:00"), ("counting", "07:00")),
-                               (t_a + dt.timedelta(minutes=17, seconds=30), ("counting", "31:30"), ("due", "due now")),
-                               (t_a + dt.timedelta(minutes=30), ("counting", "19:00"), ("late", "late")),
-                               (t_a + dt.timedelta(minutes=50), ("due", "due now"), ("late", "late")),
+                    # the analysis is expected 46 minutes after its hour, when NOMADS
+                    # usually has it, and is usually in by 52, the accumulation 16
+                    # minutes after its hour ends and usually in by 18; the cut-off
+                    # is 12:45 AM the next day
+                    moments = [(t_a + dt.timedelta(minutes=10), ("counting", "36:00"), ("counting", "06:00")),
+                               (t_a + dt.timedelta(minutes=17, seconds=30), ("counting", "28:30"), ("due", "expected now")),
+                               (t_a + dt.timedelta(minutes=30), ("counting", "16:00"), ("late", "late")),
+                               (t_a + dt.timedelta(minutes=50), ("due", "expected now"), ("late", "late")),
                                (t_a + dt.timedelta(minutes=55), ("late", "late"), ("late", "late")),
                                (lv_cut + dt.timedelta(minutes=15), ("missed", "missed"), ("missed", "missed"))]
                     lv_due = """() => Object.fromEntries([...document.querySelectorAll('#anaNext .anadue')].map(d =>
@@ -2259,7 +2333,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                               marks: ['circle.mkhi', 'circle.mklo', 'line.meanline', 'circle.mkpk', 'path.runline'].filter(q => s.querySelector(q)) }))""")
                             lv_cards = lv.evaluate(sd_cards_js)
                     sd_html.append(lv.evaluate("() => document.documentElement.outerHTML"))
-                    chk.add(f"{scheme} settlement display: the countdowns pass through counting down, due now, late and missed",
+                    chk.add(f"{scheme} settlement display: the countdowns pass through counting down, expected now, late and missed",
                             all(a_ == wa_ and p_ == wp_ for _, a_, p_, wa_, wp_ in seen_states), str(seen_states)[:300])
                     ax_ok = bool(ax) and [a_["id"] for a_ in ax] == ["anaTemp", "anaWind", "anaPcp"] \
                         and len({a_["x0"] for a_ in ax}) == 1 and len({a_["x1"] for a_ in ax}) == 1 \
@@ -5449,7 +5523,7 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         bool(clocks and clocks["rowBoth"] and clocks["gone"]), str(clocks))
                 chk.add(f"{scheme} hurricane: the LiveCyc countdown aims at the file, not the cycle stamp",
                         bool(cd and cd["onLagMark"] and 0 < cd["left"] <= 6 * 3600000
-                             and ("in " in cd["text"] or cd["text"] == "due now")
+                             and ("in " in cd["text"] or cd["text"] == "expected now")
                              and "file expected" in cd["line"]
                              and "4 to 6 hours after their cycle" in cd["line"]),
                         str(cd))
