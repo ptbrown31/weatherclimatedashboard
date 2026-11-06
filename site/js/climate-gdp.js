@@ -1355,17 +1355,23 @@ window.WXGdp = (() => {
     const t = A.tables[id];
     return h('div', { class: 'gdp-ltbl', id }, [runs2(h('p', { class: 'gdp-tblcap' }), t.legend, id), tableRows(t.rows)]);
   }
-  function blocksTo(node, blocks) {
-    (blocks || []).forEach(b => {
+  // an indented paragraph is a quotation, or the contract question when it is bold and italic throughout
+  function paraEl(b) {
+    if (!b.indent) return h('p');
+    return h('p', { class: b.runs.every(r => !(r.t || '').trim() || (r.b && r.i)) ? 'callout' : 'ind' });
+  }
+  function blocksTo(node, blocks, after) {
+    (blocks || []).forEach((b, j) => {
       if (b.type === 'h3') {
         const hd = h('h3', { id: b.id, text: b.text });
         hd.appendChild(h('a', { class: 'anchor', href: '#' + b.id, 'aria-label': 'link to ' + b.text, text: '#' }));
         node.appendChild(hd);
-      } else if (b.type === 'p') node.appendChild(runs2(h('p'), b.runs));
+      } else if (b.type === 'p') node.appendChild(runs2(paraEl(b), b.runs));
       else if (b.type === 'eq') node.appendChild(tex(h('div', { class: 'gdp-eq' }), b.tex + (b.n ? '\\tag{' + b.n + '}' : ''), true));
       else if (b.type === 'figure' && A.figures[b.id]) node.appendChild(figureEl(b.id));
       else if (b.type === 'table') node.appendChild(b.id ? tableEl(b.id) : tableRows(b.rows));
       else if (b.type === 'list') { const l = h(b.ordered ? 'ol' : 'ul'); b.items.forEach(it => l.appendChild(runs2(h('li'), it))); node.appendChild(l); }
+      if (after) after(node, j);
     });
     return node;
   }
@@ -1373,12 +1379,15 @@ window.WXGdp = (() => {
     const m = M.meta, src = A.source || {};
     const sec = id => A.sections.find(s => s.id === id);
     $('#gdpTitle').textContent = A.title;
+    if (A.subtitle) $('#gdpSub').textContent = A.subtitle;
     const by = $('#gdpByline');
     by.innerHTML = '';
-    runs2(by, A.byline);
-    by.appendChild(h('span', { html: ' · Draft for comment · <a href="#reproduce">Data and code</a> · <a href="' + esc(m.code.paper) + '">The paper</a>' }));
-    by.after(runs2(h('p', { class: 'gdp-aff' }), A.affiliations));
-    $('#contract').before(runs2(h('p', { class: 'gdp-summary' }), A.summary));
+    if (A.byline) {
+      runs2(by, A.byline);
+      by.appendChild(h('span', { html: ' · Draft for comment · <a href="#reproduce">Data and code</a> · <a href="' + esc(m.code.paper) + '">The paper</a>' }));
+      by.after(runs2(h('p', { class: 'gdp-aff' }), A.affiliations));
+    } else by.hidden = true;
+    if (A.summary) $('#contract').before(runs2(h('p', { class: 'gdp-summary' }), A.summary));
     // Fig. 1 is the contract's figure: its levels panel above the ladder, and its legend under them
     const mainCard = $('#gdpMain').parentNode;
     const levels = el('svg', { id: 'gdpLevels', viewBox: '0 0 960 560', role: 'img', 'aria-label': 'Fig. 1a' });
@@ -1387,24 +1396,51 @@ window.WXGdp = (() => {
       h('div', { class: 'gdp-pl', text: 'b' })]);
     mainCard.before(f1wrap);
     if (A.figures.fig1) $('#gdpMainMethod').before(runs2(h('p', { class: 'cap gdp-cap1' }), A.figures.fig1.legend, 'fig1'));
-    // the main text, each main figure after the paragraph that first cites it
+    // the main text, each main figure after the paragraph that first cites it. The Letter's main text follows the
+    // contract card. An introduction in the article's form starts above the card, and the card follows the
+    // contract question and the list of its two outcomes.
     const art = $('#gdpArticle');
     art.innerHTML = '';
-    art.appendChild(h('p', { class: 'cap', style: 'margin:0 0 16px', text: 'The text is the draft as written, last edited ' + dateOf(src.modified) + '; its numbers are those of the published run of '
-      + dateOf(m.refreshedUtc) + '. Most figures are drawn live from the model, at the article’s settings unless you change them.' }));
     const placed = new Set(['fig1']);
-    const place = ids => ids.forEach(id => { if (!placed.has(id) && A.figures[id]) { placed.add(id); art.appendChild(figureEl(id)); } });
-    A.main.forEach(p => { art.appendChild(runs2(h('p'), p.runs)); place(firstCited(p.runs)); });
-    place(Object.keys(A.figures).filter(id => /^fig\d+$/.test(id)));
-    // then the Methods, the Extended Data, the references, the end notes and the Supplementary Information
+    const place = (node, ids) => ids.forEach(id => { if (!placed.has(id) && A.figures[id]) { placed.add(id); node.appendChild(figureEl(id)); } });
+    const cited = b => b.type === 'list' ? b.items.flatMap(firstCited) : b.type === 'p' ? firstCited(b.runs) : [];
+    let into = art, split = -1;
+    if (!A.summary) {
+      const qi = A.main.findIndex(b => b.type === 'p' && /^Will world GDP per (capita|person) grow/.test((b.runs || []).map(r => r.t || '').join('')));
+      split = qi < 0 ? A.main.length - 1 : qi;
+      for (let k = qi + 1; qi >= 0 && k <= qi + 2 && k < A.main.length; k++) if (A.main[k].type === 'list') { split = k; break; }
+      into = h('article', { class: 'gdp-article', id: 'gdpIntro' });
+      $('#contract').before(into);
+      $('#proposal').hidden = true;
+    }
+    into.appendChild(h('p', { class: 'cap', style: 'margin:0 0 16px', text: 'The text is the draft as written, last edited ' + dateOf(src.modified) + '; its numbers are those of the published run of '
+      + dateOf(m.refreshedUtc) + '. Most figures are drawn live from the model, at the article’s settings unless you change them.' }));
+    A.main.forEach((b, k) => {
+      blocksTo(into, [b]);
+      place(into, cited(b));
+      if (k === split) into = art;
+    });
+    if (A.summary) place(art, Object.keys(A.figures).filter(id => /^fig\d+$/.test(id)));
+    // then the detail sections (the Letter's Methods), the Extended Data, the references, the end notes and the
+    // Supplementary Information
     const anchor = $('#reproduce');
     const part = (id, title, fill) => {
       anchor.before(h('div', { class: 'secttl', id, text: title }));
       const body = h('div', { class: 'gdp-article' });
       fill(body);
       anchor.before(body);
+      return body;
     };
-    if (sec('methods')) part('methods', 'METHODS', b => blocksTo(b, sec('methods').blocks));
+    const ends = ['acknowledgements', 'author-contributions', 'competing-interests', 'additional-information'].map(sec).filter(Boolean);
+    const known = new Set(['figures', 'extended-data', 'references', 'supplementary-information'].concat(ends.map(s => s.id)));
+    let lastBody = art;
+    A.sections.filter(s => !known.has(s.id)).forEach(s => {
+      // a main figure the text above has not shown follows the last paragraph here that cites it
+      const last = {};
+      s.blocks.forEach((x, j) => { if (x.type === 'p') firstCited(x.runs).forEach(id => { if (!placed.has(id)) last[id] = j; }); });
+      lastBody = part(s.id, s.title.toUpperCase(), b => blocksTo(b, s.blocks, (node, j) => place(node, Object.keys(last).filter(id => last[id] === j))));
+    });
+    place(lastBody, Object.keys(A.figures).filter(id => /^fig\d+$/.test(id)));
     if (sec('extended-data')) part('extended-data', 'EXTENDED DATA', b => blocksTo(b, sec('extended-data').blocks));
     if (sec('references')) part('references', 'REFERENCES', b => {
       const refs = sec('references').refs || [];
@@ -1412,10 +1448,10 @@ window.WXGdp = (() => {
       refs.forEach(r => ol.appendChild(runs2(h('li', { id: 'ref-' + r.n }), r.runs)));
       b.appendChild(ol);
     });
-    const ends = ['acknowledgements', 'author-contributions', 'competing-interests', 'additional-information'].map(sec).filter(Boolean);
     if (ends.length) part('notes', 'NOTES', b => ends.forEach(s => { b.appendChild(h('h3', { text: s.title })); blocksTo(b, s.blocks); }));
     if (sec('supplementary-information')) part('supplementary', 'SUPPLEMENTARY INFORMATION', b => {
-      const d = h('details', { class: 'gdp-si' }, [h('summary', { text: 'Show the Supplementary Information (two tables and the computational details)' })]);
+      const n = sec('supplementary-information').blocks.filter(x => x.type === 'table').length;
+      const d = h('details', { class: 'gdp-si' }, [h('summary', { text: 'Show the Supplementary Information (' + (n === 1 ? 'a table' : n === 2 ? 'two tables' : n + ' tables') + ' and the computational details)' })]);
       blocksTo(d, sec('supplementary-information').blocks);
       b.appendChild(d);
     });
