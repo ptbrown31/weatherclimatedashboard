@@ -6264,6 +6264,18 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 gdp_model = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/elnino/model.json").read().decode())
                 gdp_pub = gdp_model["published"]["contract"]
                 gdp_letter = json.loads(urllib.request.urlopen(f"{srv.url}/data/snapshots/elnino/letter.json").read().decode())
+                # the page finds each figure by what it draws, which letter.json names; a text from before 6 November
+                # 2026 goes by the figure's id. Two drawings have two panels each
+                GDP_LKEY = {"fig1": "main", "fig2": "shocksResponse", "fig3": "distributions", "fig4": "sensitivity",
+                            "ed2": "timeline", "ed3": "temperature", "ed4": "growth", "ed5": "trendStarts",
+                            "ed6": "afterElNino", "ed7": "endYear", "ed8": "known2027"}
+                gdp_draw = {k_: (v_["draw"] if "draw" in v_ else GDP_LKEY.get(k_)) for k_, v_ in gdp_letter["figures"].items()}
+                gdp_fig = lambda key: next((k_ for k_, d_ in gdp_draw.items() if d_ == key), None)
+                gdp_card = gdp_fig("main") or "fig1"
+                gdp_drawn = [k_ for k_, d_ in gdp_draw.items() if d_ and d_ != "main"]
+                gdp_panels = sum(2 if gdp_draw[k_] in ("shocksResponse", "distributions") else 1 for k_ in gdp_drawn)
+                # Fig. 1a carries the shocks as a strip when no figure draws them (owner, 2026-11-06)
+                gdp_levels_box = "0 0 960 560" if gdp_fig("shocksResponse") else "0 0 960 704"
 
                 def _gdp_state():
                     return page.evaluate("""() => ({
@@ -6282,10 +6294,13 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                           && /^(UL|OL)$/.test((i.lastElementChild || {}).tagName || ''); })(),
                       proposalHidden: !!(document.querySelector('#proposal') || {}).hidden,
                       partFigs: [...document.querySelectorAll('.secttl + .gdp-article figure.gdp-fig')].map(f => f.id),
+                      partTabs: [...document.querySelectorAll('.secttl + .gdp-article .gdp-ltbl')].map(t => t.id),
                       siSummary: (document.querySelector('.gdp-si summary') || {}).textContent || '',
                       sections: [...document.querySelectorAll('.secttl')].map(e => e.id),
                       refs: document.querySelectorAll('ol.gdp-refs li[id^="ref-"]').length,
-                      levels: (document.querySelector('#fig1 #gdpLevels') || { childElementCount: 0 }).childElementCount,
+                      levels: (document.querySelector('#gdpLevels') || { childElementCount: 0 }).childElementCount,
+                      levelsBox: (document.querySelector('#gdpLevels') || { getAttribute: () => '' }).getAttribute('viewBox'),
+                      levelsIn: ((document.querySelector('#gdpLevels') || { closest: () => null }).closest('[id^="fig"]') || {}).id || '',
                       figids: [...document.querySelectorAll('figure.gdp-fig')].map(f => f.id),
                       nav: [...document.querySelectorAll('header.site nav a.on')].map(a => a.textContent),
                       figs: [...document.querySelectorAll('figure.gdp-fig > .card > svg')].map(s => s.childElementCount),
@@ -6317,9 +6332,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # Fig. 1 is the contract's figure, its levels panel above the ladder; the others sit in the text,
                 # the quadrant schematic an image and the rest drawn, two of them in two panels
                 chk.add(f"{scheme} gdp: the Letter's figures are drawn, each with its details of calculation",
-                        g0["figids"] == [k_ for k_ in gdp_letter["figures"] if k_ != "fig1"] and len(g0["figs"]) == 12
-                        and min(g0["figs"] or [0]) > 10 and g0["levels"] > 10 and g0["notes"] == 11,
-                        f"figs={g0['figids']} {g0['figs']} levels={g0['levels']} notes={g0['notes']}")
+                        g0["figids"] == [k_ for k_ in gdp_letter["figures"] if k_ != gdp_card] and len(g0["figs"]) == gdp_panels
+                        and min(g0["figs"] or [0]) > 10 and g0["levels"] > 10 and g0["levelsIn"] == gdp_card
+                        and g0["levelsBox"] == gdp_levels_box and g0["notes"] == len(gdp_drawn) + 1,
+                        f"figs={g0['figids']} {g0['figs']} levels={g0['levels']} in {g0['levelsIn']} {g0['levelsBox']} "
+                        f"notes={g0['notes']}")
                 gdp_refs = len(next(s_ for s_ in gdp_letter["sections"] if s_["id"] == "references")["refs"])
                 if gdp_letter.get("summary"):
                     chk.add(f"{scheme} gdp: the page carries the Letter, its summary above the contract, then its Methods, "
@@ -6335,21 +6352,32 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         "figures", "extended-data", "references", "supplementary-information", "acknowledgements",
                         "author-contributions", "competing-interests", "additional-information")]
                     gdp_si = next((s_ for s_ in gdp_letter["sections"] if s_["id"] == "supplementary-information"), {"blocks": []})
+                    gdp_in_parts = [b_ for s_ in gdp_letter["sections"] if s_["id"] in gdp_parts for b_ in s_["blocks"]]
+                    # the figures the text puts in its second half are drawn there; a text that places none had Fig. 3
+                    # and Fig. 4 follow the paragraph that cites them (owner, 2026-11-06)
+                    gdp_part_figs = {b_["id"] for b_ in gdp_in_parts if b_.get("type") == "figure"} or {"fig3", "fig4"}
+                    gdp_part_tabs = {b_["id"] for b_ in gdp_in_parts if b_.get("type") == "table" and b_.get("id")}
+                    gdp_ends = ["references", "notes", "supplementary"] + (
+                        ["extended-data"] if any(s_["id"] == "extended-data" for s_ in gdp_letter["sections"]) else [])
                     gdp_si_n = sum(1 for b_ in gdp_si["blocks"] if b_.get("type") == "table")
                     gdp_si_words = {1: "a table", 2: "two tables"}.get(gdp_si_n, "%d tables" % gdp_si_n)
                     chk.add(f"{scheme} gdp: the page carries the article, its introduction above the contract, then its second "
-                            "half, Extended Data, references, notes and Supplementary Information",
+                            "half, references, notes and Supplementary Information, and Extended Data where the text has it",
                             g0["h1"] == gdp_letter["title"] and g0["sub"] == gdp_letter.get("subtitle") and g0["bylineHidden"]
                             and not g0["aff"] and not g0["summary"] and g0["introBeforeCard"] and g0["proposalHidden"]
                             and g0["refs"] == gdp_refs and "methods" not in g0["sections"] and bool(gdp_parts)
-                            and all(s_ in g0["sections"] for s_ in gdp_parts + ["extended-data", "references", "notes", "supplementary"])
-                            and {"fig3", "fig4"} <= set(g0["partFigs"]) and "(" + gdp_si_words + " " in g0["siSummary"],
+                            and all(s_ in g0["sections"] for s_ in gdp_parts + gdp_ends)
+                            and ("extended-data" in g0["sections"]) == ("extended-data" in gdp_ends)
+                            and gdp_part_figs <= set(g0["partFigs"]) and gdp_part_tabs <= set(g0["partTabs"])
+                            and "(" + gdp_si_words + " " in g0["siSummary"],
                             f"{g0['h1'][:40]} sub={bool(g0['sub'])} byline-hidden={g0['bylineHidden']} intro={g0['introBeforeCard']} "
-                            f"proposal-hidden={g0['proposalHidden']} refs={g0['refs']} parts-figs={g0['partFigs']} {g0['sections']} "
+                            f"proposal-hidden={g0['proposalHidden']} refs={g0['refs']} parts-figs={g0['partFigs']} "
+                            f"parts-tables={g0['partTabs']} {g0['sections']} "
                             f"si={g0['siSummary'][:60]}")
-                page.locator("figure#ed1 img").scroll_into_view_if_needed()
-                GDP_IMG = "() => { const i = document.querySelector('figure#ed1 img'); return !!i && i.complete && i.naturalWidth > 0; }"
-                chk.add(f"{scheme} gdp: the quadrant schematic's image loads", until(page, GDP_IMG), "")
+                gdp_pic = next((k_ for k_, v_ in gdp_letter["figures"].items() if v_.get("image") and not gdp_draw.get(k_)), None)
+                page.locator(f"figure#{gdp_pic} img").scroll_into_view_if_needed()
+                GDP_IMG = "() => { const i = document.querySelector('figure#%s img'); return !!i && i.complete && i.naturalWidth > 0; }" % gdp_pic
+                chk.add(f"{scheme} gdp: a figure the text gives as a picture loads", until(page, GDP_IMG), str(gdp_pic))
                 page.evaluate("() => window.scrollTo(0, 0)")
                 chk.add(f"{scheme} gdp: until it lists, the ladder is the proposed strikes, hatched, with two marks and no link",
                         g0["hatched"] == len(gdp_model["ladder"]["strikes"]) and g0["marks"] == 2 * g0["hatched"]
@@ -6404,16 +6432,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} gdp: the trend's first year goes in the address, sets its control and moves the view",
                         g7c == ["1995", gdp_starts[0], gdp_starts[-1], True] and g7["tiles"] != g6["tiles"]
                         and g7["hash"] == "#baseline=frozen&trendStart=1995", f"{g7c} {g6['tiles']} -> {g7['tiles']} {g7['hash']}")
-                # a Fig. 4 row with settings of its own draws the whole page at them
+                # a sensitivity row with settings of its own draws the whole page at them
                 gdp_set = [r_ for r_ in gdp_model["published"]["sensitivity"]["rows"] if r_.get("settings")]
                 gdp_row = next((r_ for r_ in gdp_set if "trendStart" in r_["settings"]), gdp_set[0])
                 page.goto(f"{srv.url}/climate-gdp.html"); until(page, GDP_RAN, cap_ms=20000)
                 page.evaluate(GDP_MARK)
-                page.locator("#fig4 svg rect[style*='cursor']").nth(gdp_set.index(gdp_row)).click(force=True)
+                page.locator(f"#{gdp_fig('sensitivity')} svg rect[style*='cursor']").nth(gdp_set.index(gdp_row)).click(force=True)
                 until(page, GDP_RERUN, cap_ms=20000)
                 g8 = _gdp_state()
                 gdp_want = {k_: ("1" if v_ is True else "0" if v_ is False else str(v_)) for k_, v_ in gdp_row["settings"].items()}
-                chk.add(f"{scheme} gdp: a Fig. 4 row draws the whole page at its settings",
+                chk.add(f"{scheme} gdp: a sensitivity row draws the whole page at its settings",
                         dict(urllib.parse.parse_qsl(g8["hash"][1:])) == gdp_want and page.locator(".gdp-figstate.mine").count() == 7,
                         f"{gdp_row['label']}: {g8['hash']} want {gdp_want}")
                 # a link to a figure moves the page and leaves the reader's settings as they were
