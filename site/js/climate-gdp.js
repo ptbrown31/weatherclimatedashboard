@@ -677,7 +677,7 @@ window.WXGdp = (() => {
           'Each line is the average of ' + n + ' simulated paths of world GDP per person, as a level with ' + m.base + ' = 100; the shading spans the 10th to 90th percentile of the paths in each year. A path is one possible ' + m.base + '–2035 for the world economy and for global temperature, built from the record of each, as the other figures’ notes describe.',
           'With no temperature effect, GDP per person follows the IMF’s projection plus the path’s own forecast miss:',
           { tex: '\\ln y^{0}_{t} = \\ln y_{' + m.base + '} + \\sum_{s=' + (m.base + 1) + '}^{t} g^{\\mathrm{IMF}}_{s} + D_{t}' },
-          'where $g^{\\mathrm{IMF}}_s$ is the IMF’s October 2026 projection of world growth per person, put in World Bank units, and $D_t$ is the miss from ' + m.base + ' to $t$, drawn from the IMF’s own record of misses (' + (A.schema === 2 ? 'Extended Data Fig. 4' : 'Figure 3') + '’s note).',
+          'where $g^{\\mathrm{IMF}}_s$ is the IMF’s October 2026 projection of world growth per person, put in World Bank units, and $D_t$ is the miss from ' + m.base + ' to $t$, drawn from the IMF’s own record of misses (' + (A.schema === 2 ? labelOf('growth', 'Extended Data Fig. 4') : 'Figure 3') + '’s note).',
           'If the paper is right, the same path also carries the paper’s effect of every temperature shock since 2015, and of the simulated shocks after 2027:',
           { tex: '\\ln y^{1}_{t} = \\ln y^{0}_{t} + \\lambda \\left[ \\sum_{\\tau} u_{\\tau} \\left( \\theta_{t-\\tau} - \\theta_{' + m.base + '-\\tau} \\right) - N_{t} \\right]' },
           '$u_\\tau$ is the part of year $\\tau$’s shock that the two shocks before it do not predict (the paper’s projection controls for them), $\\theta_h$ is the paper’s estimated response after $h$ years, held at its year-10 value after that, and the path draws its own $\\theta$ from the estimate’s bootstrap. $N_t$ removes the part of the IMF’s past misses that the paper’s estimates attribute to past temperature shocks, so a temperature effect is not counted twice. $\\lambda$ is the share of the paper’s effect, 1 at the article’s settings.',
@@ -766,11 +766,13 @@ window.WXGdp = (() => {
     if (A.schema !== 2) return N;
     // the Letter's figures: Fig. 1 adds its levels panel, Fig. 3 its ranges panel, and three figures are new
     const P = m.published;
-    N.main = Object.assign({}, N.main, { body: ['Panel a shows world GDP per person in 2021 international dollars, the World Bank’s series from 2010, with each view’s median and 80% range from the published run. NOAA’s temperature sits above it on the same years, with the record, the ' + m.base + ' estimate and the ' + (m.base + 1) + ' forecast with their 90% ranges, and the simulated years’ median and 80% range. Panel a stays at the article’s settings. Panel b and the readout follow the controls.'].concat(N.main.body) });
+    N.main = Object.assign({}, N.main, { body: ['Panel a shows world GDP per person in 2021 international dollars, the World Bank’s series from 2010, with each view’s median and 80% range from the published run. NOAA’s temperature sits above it on the same years, with the record, the ' + m.base + ' estimate and the ' + (m.base + 1) + ' forecast with their 90% ranges, and the simulated years’ median and 80% range.'
+      + (shockStrip() ? ' Between them is each year’s global temperature shock, NOAA’s temperature less what the paper’s filter predicts from the two and three years before, with the authors’ published shocks and the ' + m.base + ' and ' + (m.base + 1) + ' estimates’ 90% ranges.' : '')
+      + ' Panel a stays at the article’s settings. Panel b and the readout follow the controls.'].concat(N.main.body) });
     N.fig3 = Object.assign({}, N[7], { body: N[7].body.concat(['Panel b gives, for each range of NOAA’s ' + (m.base + 1) + ' value, each view’s chance of Yes at that range’s own strike, the strike’s Youden’s J and the range’s chance today, all from the published run.']) });
     N.sens = {
       title: 'The sensitivity rows',
-      body: ['Each row changes one setting of the published design and gives each view’s chance of Yes at ' + P.sensitivity.strike.toFixed(1) + '% a year, the row’s own best threshold and its Youden’s J, from the published run. Extended Data Table 2 lists the same numbers. The cool and warm rows restrict NOAA’s ' + (m.base + 1) + ' value to that range, and the trend rows replace the IMF baseline with average growth from the stated year through 2019.',
+      body: ['Each row changes one setting of the published design and gives each view’s chance of Yes at ' + P.sensitivity.strike.toFixed(1) + '% a year, the row’s own best threshold and its Youden’s J, from the published run. ' + tableLabel('sensitivity', 'Extended Data Table 2') + ' lists the same numbers. The cool and warm rows restrict NOAA’s ' + (m.base + 1) + ' value to that range, and the trend rows replace the IMF baseline with average growth from the stated year through 2019.',
              'A row with a setting on the controls draws the whole page at that setting when clicked. The page’s model reproduces those rows, and the repository’s test checks each one. Measuring growth from ' + (m.base + 1) + ' is not on the controls, so that row is drawn from the run only.'],
       code: [['the rows', 'bk_elnino/analysis.py'], ['the check against the page', 'tests/test_site_model.py']],
       n: n + ' simulated paths per row, the ' + ref + '.',
@@ -811,9 +813,12 @@ window.WXGdp = (() => {
   const money = v => '$' + Math.round(v * 1000).toLocaleString('en-US');
   const letterIn = (svg, s, y) => svg.appendChild(txt(s, { x: 4, y, 'font-size': 15, 'font-weight': 800, fill: INK }));
 
-  // Fig. 1a: world GDP per person and global temperature as levels, the record and each view
+  // Fig. 1a: world GDP per person and global temperature as levels, the record and each view, and since 6 Nov 2026
+  // the global temperature shocks between them on the same years
+  const LEVELS_H = () => (shockStrip() ? 704 : 560);
   function drawLevels(svg) {
     clear(svg);
+    const top = shockStrip() ? 144 : 0;
     const m = M.meta, P = m.published, E = D.endYear, ft = P.futureTemperatures, t26 = m.temps.T26, t27 = m.temps.T27;
     const first = 2010, obs = [], fut = [];
     for (let t = first; t <= m.anchor; t++) obs.push(t);
@@ -843,8 +848,19 @@ window.WXGdp = (() => {
     svg.appendChild(txt('simulated, 80% range', { x: T.x(E) + 10, y: T.y(ft[String(E)].q50) + 4, class: 'ax' }));
     const q = (v, t, i) => P.levels[String(t)][v][i] / 1000, lev = t => m.wdi.levels[String(t)] / 1000;
     const yv = obs.map(lev).concat(fut.map(t => q('h0', t, 2)), fut.map(t => q('h1', t, 0)));
-    const G = frame({ W, H: 560, L, R: Rm, T: 212, B: 34, x0: first - 0.5, x1: E + 0.5, y0: Math.floor(Math.min(...yv)) - 0.5, y1: Math.ceil(Math.max(...yv)) + 0.5 });
-    svg.appendChild(txt('World GDP per person (World Bank), thousand 2021 international dollars', { x: L, y: 198, class: 'axl', 'font-weight': 700 }));
+    if (top) {
+      const ev = Object.values((P.shocks || {}).events || {});
+      const sv = obs.map(t => m.families.PWT.shocks[String(t)]).concat(ev.map(e => e.shock + 1.645 * e.sd), ev.map(e => e.shock - 1.645 * e.sd));
+      const Sf = frame({ W, H: 322, L, R: Rm, T: 204, B: 6, x0: first - 0.5, x1: E + 0.5, y0: Math.floor((Math.min(...sv) - 0.04) * 10) / 10, y1: Math.ceil((Math.max(...sv) + 0.04) * 10) / 10 });
+      svg.appendChild(txt('Global temperature shock (°C), NOAA measured with the paper’s filter', { x: L, y: 190, class: 'axl', 'font-weight': 700 }));
+      yGrid(svg, Sf, [-0.2, 0, 0.2, 0.4].filter(v => v >= Sf.y0 && v <= Sf.y1), v => minus(v.toFixed(1)));
+      const { sh, e27 } = shockBars(svg, Sf, first);
+      svg.appendChild(txt('2024, ' + signed2(sh['2024']) + ' °C', { x: Sf.x(2024) - 9, y: Sf.y(sh['2024']) + 4, 'text-anchor': 'end', class: 'ax', fill: INK }));
+      if (e27) svg.appendChild(txt((m.base + 1) + ' estimate, ' + signed2(e27.shock) + ' °C', { x: Sf.x(m.base + 1) + 12, y: Sf.y(e27.shock) + 4, class: 'ax', fill: INK }));
+      svg.appendChild(txt('Open circles, the authors’ published shocks', { x: L + 6, y: Sf.T + 10, class: 'ax' }));
+    }
+    const G = frame({ W, H: 560 + top, L, R: Rm, T: 212 + top, B: 34, x0: first - 0.5, x1: E + 0.5, y0: Math.floor(Math.min(...yv)) - 0.5, y1: Math.ceil(Math.max(...yv)) + 0.5 });
+    svg.appendChild(txt('World GDP per person (World Bank), thousand 2021 international dollars', { x: L, y: 198 + top, class: 'axl', 'font-weight': 700 }));
     yGrid(svg, G, ticksFor(G.y0, G.y1, 5), v => String(v));
     xTicks(svg, G, [first, 2015, 2020, m.anchor, E].filter((v, i, a) => a.indexOf(v) === i), String);
     const fx = [m.anchor].concat(fut);
@@ -862,15 +878,11 @@ window.WXGdp = (() => {
           foot: 'medians of ' + M.n.toLocaleString() + ' paths at the article’s settings, 80% ranges in brackets' }));
   }
 
-  // Fig. 2a: each year's global temperature shock, with the authors' published shocks and the 2026-27 estimates
-  function drawShocks(svg) {
-    clear(svg);
+  // the shocks from a first year: each year's bar (2023 on darker), the authors' published shocks as open circles
+  // and the 2026-27 estimates with their 90% ranges
+  function shockBars(svg, F, first) {
     const m = M.meta, sh = m.families.PWT.shocks, P = m.published.shocks || { authors: {}, events: {} };
-    const yrs = Object.keys(sh).map(Number).filter(t => t <= m.anchor);
-    const F = frame({ W: 960, H: 330, L: 58, R: 150, T: 30, B: 34, x0: yrs[0] - 1, x1: m.base + 2, y0: -0.36, y1: 0.5 });
-    svg.appendChild(txt('Global temperature shock (°C), NOAA measured with the paper’s filter', { x: F.L, y: 14, class: 'axl', 'font-weight': 700 }));
-    yGrid(svg, F, [-0.2, 0, 0.2, 0.4], v => minus(v.toFixed(1)));
-    xTicks(svg, F, [1960, 1970, 1980, 1990, 2000, 2010, 2020], String);
+    const yrs = Object.keys(sh).map(Number).filter(t => t >= first && t <= m.anchor);
     const bw = (F.x(1) - F.x(0)) * 0.74;
     yrs.forEach(t => {
       const v = sh[String(t)], a = P.authors[String(t)];
@@ -878,7 +890,7 @@ window.WXGdp = (() => {
       hover(r, () => tip.rows(String(t), [['Shock, NOAA', signed2(v) + ' °C'], a != null ? ['The authors’ published shock', signed2(a) + ' °C'] : null], 'the year’s temperature less what the two and three years before it predict'));
       svg.appendChild(r);
     });
-    Object.keys(P.authors).forEach(t => svg.appendChild(el('circle', { cx: F.x(+t), cy: F.y(P.authors[t]), r: 2.6, fill: 'var(--panel)', stroke: INK, 'stroke-width': 1, 'pointer-events': 'none' })));
+    Object.keys(P.authors).filter(t => +t >= first).forEach(t => svg.appendChild(el('circle', { cx: F.x(+t), cy: F.y(P.authors[t]), r: 2.6, fill: 'var(--panel)', stroke: INK, 'stroke-width': 1, 'pointer-events': 'none' })));
     Object.keys(P.events).forEach(t => {
       const e = P.events[t], x = F.x(+t);
       const r = el('rect', { x: x - bw / 2, y: Math.min(F.y(e.shock), F.y(0)), width: bw, height: Math.max(1, Math.abs(F.y(e.shock) - F.y(0))), fill: 'var(--shade)', stroke: 'var(--muted)', 'stroke-width': 0.9 });
@@ -887,7 +899,19 @@ window.WXGdp = (() => {
       svg.appendChild(el('line', { x1: x, x2: x, y1: F.y(e.shock - 1.645 * e.sd), y2: F.y(e.shock + 1.645 * e.sd), stroke: 'var(--muted)', 'stroke-width': 1.3, 'pointer-events': 'none' }));
     });
     svg.appendChild(el('line', { x1: F.L, x2: F.W - F.R, y1: F.y(0), y2: F.y(0), stroke: 'var(--rule)' }));
-    const e27 = P.events[String(m.base + 1)];
+    return { sh, e27: P.events[String(m.base + 1)] };
+  }
+
+  // the first Fig. 2a: each year's global temperature shock since 1953 (a letter.json from before 6 Nov 2026)
+  function drawShocks(svg) {
+    clear(svg);
+    const m = M.meta, sh = m.families.PWT.shocks;
+    const yrs = Object.keys(sh).map(Number).filter(t => t <= m.anchor);
+    const F = frame({ W: 960, H: 330, L: 58, R: 150, T: 30, B: 34, x0: yrs[0] - 1, x1: m.base + 2, y0: -0.36, y1: 0.5 });
+    svg.appendChild(txt('Global temperature shock (°C), NOAA measured with the paper’s filter', { x: F.L, y: 14, class: 'axl', 'font-weight': 700 }));
+    yGrid(svg, F, [-0.2, 0, 0.2, 0.4], v => minus(v.toFixed(1)));
+    xTicks(svg, F, [1960, 1970, 1980, 1990, 2000, 2010, 2020], String);
+    const { e27 } = shockBars(svg, F, yrs[0]);
     if (e27) svg.appendChild(txt((m.base + 1) + ' estimate, ' + signed2(e27.shock) + ' °C', { x: F.x(m.base + 1) + 6, y: F.y(e27.shock + 1.645 * e27.sd) - 6, 'text-anchor': 'end', class: 'lbl', fill: INK }));
     svg.appendChild(txt('2024, ' + signed2(sh['2024']) + ' °C', { x: F.x(2024) - 10, y: F.y(sh['2024']) + 4, 'text-anchor': 'end', class: 'lbl', fill: INK }));
     svg.appendChild(txt('Open circles, the authors’ published shocks', { x: F.L + 6, y: F.T + 6, class: 'ax' }));
@@ -1053,21 +1077,35 @@ window.WXGdp = (() => {
 
   // ---------------------------------------------------------------- figure registry
   const FIG = { 1: [drawTemp, 420], 2: [drawIrf, 400], 3: [drawGrowth, 420], 5: [drawAfter, 400], 6: [drawEndYear, 400], 7: [drawDist, 400], 8: [drawTimeline, 300] };
-  // the Letter's figures by the id of their legend: each panel's drawing, its height and whether it follows the controls
-  const LFIG = {
-    fig2: [[drawShocks, 330, false], [drawIrf, 400, true]],
-    fig3: [[drawDist, 400, true], [drawBins, 250, false]],
-    fig4: [[drawSens, 0, false]],
-    ed2: [[drawTimeline, 300, true]],
-    ed3: [[drawTemp, 420, true]],
-    ed4: [[drawGrowth, 420, true]],
-    ed5: [[drawStartYears, 520, false]],
-    ed6: [[drawAfter, 400, true]],
-    ed7: [[drawEndYear, 400, true]],
-    ed8: [[drawKnown27, 500, false]],
+  // the Letter's figures by what they draw (letter.json names it for each figure; a letter.json from before 6 Nov 2026
+  // goes by the figure's id): each panel's drawing, its height and whether it follows the controls
+  const LDRAW = {
+    response: [[drawIrf, 400, true]],
+    shocksResponse: [[drawShocks, 330, false], [drawIrf, 400, true]],
+    distributions: [[drawDist, 400, true], [drawBins, 250, false]],
+    sensitivity: [[drawSens, 0, false]],
+    timeline: [[drawTimeline, 300, true]],
+    temperature: [[drawTemp, 420, true]],
+    growth: [[drawGrowth, 420, true]],
+    trendStarts: [[drawStartYears, 520, false]],
+    afterElNino: [[drawAfter, 400, true]],
+    endYear: [[drawEndYear, 400, true]],
+    known2027: [[drawKnown27, 500, false]],
   };
+  const LKEY = { fig1: 'main', fig2: 'shocksResponse', fig3: 'distributions', fig4: 'sensitivity', ed2: 'timeline', ed3: 'temperature',
+                 ed4: 'growth', ed5: 'trendStarts', ed6: 'afterElNino', ed7: 'endYear', ed8: 'known2027' };
   // and the method note each one opens
-  const LNOTE = { fig1: 'main', fig2: 2, fig3: 'fig3', fig4: 'sens', ed2: 8, ed3: 1, ed4: 3, ed5: 'starts', ed6: 5, ed7: 6, ed8: 'known27' };
+  const LNOTE = { main: 'main', response: 2, shocksResponse: 2, distributions: 'fig3', sensitivity: 'sens', timeline: 8, temperature: 1,
+                  growth: 3, trendStarts: 'starts', afterElNino: 5, endYear: 6, known2027: 'known27' };
+  function drawOf(id) {
+    const f = A.figures[id];
+    return f ? ('draw' in f ? f.draw : LKEY[id]) : undefined;
+  }
+  const figWith = key => Object.keys(A.figures || {}).find(id => drawOf(id) === key);
+  const labelOf = (key, old) => (figWith(key) ? A.figures[figWith(key)].label : old);
+  const tableLabel = (role, old) => { const id = Object.keys(A.tables || {}).find(k => A.tables[k].role === role); return id ? A.tables[id].label : old; };
+  // the shocks are Fig. 1a's middle strip, unless the letter.json still draws them in a figure of their own
+  const shockStrip = () => A.schema === 2 && !figWith('shocksResponse');
 
   function figState(f) {
     const live = f.panels.map(p => p.live), letters = (want) => f.panels.map((p, i) => (p.live === want ? 'ab'[i] : null)).filter(Boolean).join(' and ');
@@ -1223,9 +1261,6 @@ window.WXGdp = (() => {
     const art = $('#gdpArticle');
     art.innerHTML = '';
     let list = null;
-    const src = A.source || {};
-    art.appendChild(h('p', { class: 'cap', style: 'margin:0 0 16px', text: 'The text is the draft as written, last edited ' + dateOf(src.modified) + '; its numbers are those of the published run of '
-      + dateOf(M.meta.refreshedUtc) + '. The figures are drawn live from the model, at the article’s settings unless you change them.' }));
     A.blocks.forEach(b => {
       if (b.type !== 'p' || !b.list) list = null;
       if (b.type === 'title') { $('#gdpTitle').textContent = b.text; return; }
@@ -1276,8 +1311,8 @@ window.WXGdp = (() => {
 
   // ---------------------------------------------------------------- the Letter (letter.json, schema 2)
   // References to figures, tables and sections link to them; the main figures sit where the text first cites them.
-  const XREF = /(Extended Data Fig\.|Extended Data Table|Supplementary Table|Supplementary Section|Figs?\.)\s(\d+)/;
-  const XKIND = { 'Fig.': 'fig', 'Figs.': 'fig', 'Extended Data Fig.': 'ed', 'Extended Data Table': 'edt', 'Supplementary Table': 'st', 'Supplementary Section': 'ss' };
+  const XREF = /(Extended Data Fig\.|Extended Data Table|Supplementary Table|Supplementary Section|Figs?\.|Table)\s(\d+)/;
+  const XKIND = { 'Fig.': 'fig', 'Figs.': 'fig', 'Extended Data Fig.': 'ed', 'Extended Data Table': 'edt', 'Supplementary Table': 'st', 'Supplementary Section': 'ss', Table: 'tab' };
   // a legend's own label ("Fig. 2 |") is not a link to the figure it sits under
   function textWithLinks(node, t, self) {
     const re = new RegExp('(https?://[^\\s]+[^\\s.,;:)])|' + XREF.source, 'g');
@@ -1321,7 +1356,7 @@ window.WXGdp = (() => {
     return out;
   }
   function figureEl(id) {
-    const f = A.figures[id], spec = LFIG[id];
+    const f = A.figures[id], key = drawOf(id), spec = LDRAW[key];
     const fig = h('figure', { class: 'gdp-fig', id });
     if (spec) {
       const card = h('div', { class: 'card' });
@@ -1335,7 +1370,7 @@ window.WXGdp = (() => {
       fig.appendChild(runs2(h('figcaption'), f.legend, id));
       const state = h('div', { class: 'gdp-figstate' }), note = h('div');
       fig.appendChild(state); fig.appendChild(note);
-      figs.push({ key: LNOTE[id], panels, state, note });
+      figs.push({ key: LNOTE[key], panels, state, note });
     } else {
       if (f.image) fig.appendChild(h('div', { class: 'card gdp-img' }, [h('img', { src: BASE + f.image.file, alt: f.label, loading: 'lazy', width: f.image.w, height: f.image.h })]));
       fig.appendChild(runs2(h('figcaption'), f.legend, id));
@@ -1368,7 +1403,7 @@ window.WXGdp = (() => {
         node.appendChild(hd);
       } else if (b.type === 'p') node.appendChild(runs2(paraEl(b), b.runs));
       else if (b.type === 'eq') node.appendChild(tex(h('div', { class: 'gdp-eq' }), b.tex + (b.n ? '\\tag{' + b.n + '}' : ''), true));
-      else if (b.type === 'figure' && A.figures[b.id]) node.appendChild(figureEl(b.id));
+      else if (b.type === 'figure' && A.figures[b.id]) { if (drawOf(b.id) !== 'main') node.appendChild(figureEl(b.id)); }
       else if (b.type === 'table') node.appendChild(b.id ? tableEl(b.id) : tableRows(b.rows));
       else if (b.type === 'list') { const l = h(b.ordered ? 'ol' : 'ul'); b.items.forEach(it => l.appendChild(runs2(h('li'), it))); node.appendChild(l); }
       if (after) after(node, j);
@@ -1376,7 +1411,7 @@ window.WXGdp = (() => {
     return node;
   }
   function renderLetter() {
-    const m = M.meta, src = A.source || {};
+    const m = M.meta;
     const sec = id => A.sections.find(s => s.id === id);
     $('#gdpTitle').textContent = A.title;
     if (A.subtitle) $('#gdpSub').textContent = A.subtitle;
@@ -1389,19 +1424,22 @@ window.WXGdp = (() => {
     } else by.hidden = true;
     if (A.summary) $('#contract').before(runs2(h('p', { class: 'gdp-summary' }), A.summary));
     // Fig. 1 is the contract's figure: its levels panel above the ladder, and its legend under them
+    const card = figWith('main') || 'fig1';
     const mainCard = $('#gdpMain').parentNode;
-    const levels = el('svg', { id: 'gdpLevels', viewBox: '0 0 960 560', role: 'img', 'aria-label': 'Fig. 1a' });
-    const f1wrap = h('div', { id: 'fig1' }, [h('div', { class: 'gdp-pl', text: 'a' }), h('div', { class: 'card' }, [levels]),
+    const levels = el('svg', { id: 'gdpLevels', viewBox: '0 0 960 ' + LEVELS_H(), role: 'img', 'aria-label': 'Fig. 1a' });
+    const f1wrap = h('div', { id: card }, [h('div', { class: 'gdp-pl', text: 'a' }), h('div', { class: 'card' }, [levels]),
       h('div', { class: 'gdp-figstate', text: 'Panel a is drawn from the published run, at the article’s settings. Panel b, the readout and the ladder follow the controls.' }),
       h('div', { class: 'gdp-pl', text: 'b' })]);
     mainCard.before(f1wrap);
-    if (A.figures.fig1) $('#gdpMainMethod').before(runs2(h('p', { class: 'cap gdp-cap1' }), A.figures.fig1.legend, 'fig1'));
+    if (A.figures[card]) $('#gdpMainMethod').before(runs2(h('p', { class: 'cap gdp-cap1' }), A.figures[card].legend, card));
     // the main text, each main figure after the paragraph that first cites it. The Letter's main text follows the
     // contract card. An introduction in the article's form starts above the card, and the card follows the
     // contract question and the list of its two outcomes.
     const art = $('#gdpArticle');
     art.innerHTML = '';
-    const placed = new Set(['fig1']);
+    // a figure the draft puts in the text is drawn there; the others follow the paragraph that cites them
+    const inText = A.main.concat(...A.sections.filter(s => s.id !== 'figures').map(s => s.blocks)).filter(b => b.type === 'figure').map(b => b.id);
+    const placed = new Set([card].concat(inText));
     const place = (node, ids) => ids.forEach(id => { if (!placed.has(id) && A.figures[id]) { placed.add(id); node.appendChild(figureEl(id)); } });
     const cited = b => b.type === 'list' ? b.items.flatMap(firstCited) : b.type === 'p' ? firstCited(b.runs) : [];
     let into = art, split = -1;
@@ -1413,8 +1451,6 @@ window.WXGdp = (() => {
       $('#contract').before(into);
       $('#proposal').hidden = true;
     }
-    into.appendChild(h('p', { class: 'cap', style: 'margin:0 0 16px', text: 'The text is the draft as written, last edited ' + dateOf(src.modified) + '; its numbers are those of the published run of '
-      + dateOf(m.refreshedUtc) + '. Most figures are drawn live from the model, at the article’s settings unless you change them.' }));
     A.main.forEach((b, k) => {
       blocksTo(into, [b]);
       place(into, cited(b));
