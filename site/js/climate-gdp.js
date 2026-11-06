@@ -300,6 +300,28 @@ window.WXGdp = (() => {
     });
     svg.appendChild(txt(priced ? 'Yes green, No red, ¢ · marks, chance of Yes, %' : 'Chance of Yes under each view, %',
                         { x: (RL + RR) / 2, y: F.H - F.B + 32, 'text-anchor': 'middle', class: 'axl' }));
+    // behind the bars, each view's chance of Yes at every strike on the axis, as Fig. 1b's legend has it, with a
+    // readout of both at the level under the pointer
+    const strikeAt = lv => 100 * Math.log(lv / 100) / k;
+    const sx = [], xa = strikeAt(F.y0), xb = strikeAt(F.y1);
+    for (let i = 0; i <= 120; i++) sx.push(xa + (xb - xa) * i / 120);
+    const who1 = S.share === 1 ? 'the paper is right' : pct(S.share) + ' of the paper';
+    const guide = el('line', { x1: px(0), x2: px(100), stroke: 'var(--rule)', 'stroke-dasharray': '3 3', 'pointer-events': 'none', opacity: 0 });
+    const zone = el('rect', { x: px(0), y: F.T, width: px(100) - px(0), height: F.H - F.T - F.B, fill: 'transparent' });
+    zone.addEventListener('mousemove', e => {
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+      const yv = pt.matrixTransform(svg.getScreenCTM().inverse()).y;
+      const x = strikeAt(F.y0 + (1 - (yv - F.T) / (F.H - F.T - F.B)) * (F.y1 - F.y0));
+      guide.setAttribute('y1', yv); guide.setAttribute('y2', yv); guide.setAttribute('opacity', 1);
+      tip.show(e, tip.rows('More than ' + x.toFixed(2) + '% a year, ' + m.base + '–' + E,
+        [[sw(NULL) + 'Chance of Yes, no temperature effect', pct1(R.pYes(0, E, x))], [sw(PAPER) + 'Chance of Yes, ' + who1, pct1(R.pYes(1, E, x))]],
+        'Each view’s share of ' + M.n.toLocaleString() + ' simulated paths.'));
+    });
+    zone.addEventListener('mouseleave', () => { guide.setAttribute('opacity', 0); tip.hide(); });
+    svg.appendChild(zone);
+    [[0, NULL], [1, PAPER]].forEach(([v, c]) => svg.appendChild(el('path', {
+      d: path(sx.map(x => [px(100 * R.pYes(v, E, x)), F.y(strikeLevel(x, E))])), fill: 'none', stroke: c, 'stroke-width': 2, 'pointer-events': 'none', class: 'gdp-pcurve' })));
+    svg.appendChild(guide);
     const strikes = ladder.slice();
     if (!strikes.some(x => Math.abs(x - S.strike) < 1e-9)) strikes.push(S.strike);
     strikes.forEach(x => {
@@ -372,7 +394,7 @@ window.WXGdp = (() => {
     k.appendChild(item(NULL, 'No temperature effect: the IMF’s projection less its average past miss'));
     k.appendChild(item(PAPER, 'The paper’s estimate applied to every temperature shock since 2015'));
     k.appendChild(item(INK, 'Growth at exactly the strike', true));
-    k.appendChild(h('span', { text: 'Shading spans the 80% ranges. The marks on the ladder are each view’s chance of Yes at that strike.' }));
+    k.appendChild(h('span', { text: 'Shading spans the 80% ranges. Beside the ladder, each view’s curve gives its chance of Yes at every strike, and the marks give it at the ladder’s own strikes.' }));
   }
 
   // ---------------------------------------------------------------- readout and question
@@ -684,7 +706,7 @@ window.WXGdp = (() => {
           'The contract resolves Yes when average growth beats the strike $X$:',
           { tex: '\\bar g = \\frac{100}{T-' + m.base + '} \\ln \\frac{y_{T}}{y_{' + m.base + '}} > X' },
           'Each view’s chance of Yes is the share of the ' + n + ' paths for which that holds. The cutoff that best separates the views maximises Youden’s $J(c) = P_{1}(\\bar g \\le c) - P_{0}(\\bar g \\le c)$, the chance of No if the paper is right plus the chance of Yes if it is not, less one; it is the median of the candidate cutoffs whose J is within 0.0025 of the best, which keeps Monte Carlo noise out of it.',
-          'Until the contract lists, ' + (m.ladder.strikes.length > 1 ? 'each proposed strike' : 'the proposed strike') + ' on the ladder sits at the level that growth of exactly that much reaches by ' + E + ', hatched, with two marks for the two views’ chances of Yes. Where the market’s price settles between the two marks, once it trades, is a running public measure of how much credence its participants give the paper. Once the exchange lists the contract, its prices replace the hatching and each bar opens the contract on IBKR.',
+          'Until the contract lists, ' + (m.ladder.strikes.length > 1 ? 'each proposed strike' : 'the proposed strike') + ' on the ladder sits at the level that growth of exactly that much reaches by ' + E + ', hatched, with two marks for the two views’ chances of Yes. Behind the ladder, a curve for each view gives its chance of Yes at every strike on the same axis. Where the market’s price settles between the two marks, once it trades, is a running public measure of how much credence its participants give the paper. Once the exchange lists the contract, its prices replace the hatching and each bar opens the contract on IBKR.',
           'This page re-runs the model in your browser on the same paths as the published analysis. The IMF misses, the bootstrap draw each path uses, the 2026–27 temperatures and the simulated shocks after 2027 are read from that run, not drawn again, and only what a control names is changed. At the article’s settings it reproduces the run within 0.002 points of GDP on every path; the repository’s test checks this on twelve designs.',
         ],
         table: variantsTable(),

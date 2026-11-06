@@ -6379,6 +6379,23 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 GDP_IMG = "() => { const i = document.querySelector('figure#%s img'); return !!i && i.complete && i.naturalWidth > 0; }" % gdp_pic
                 chk.add(f"{scheme} gdp: a figure the text gives as a picture loads", until(page, GDP_IMG), str(gdp_pic))
                 page.evaluate("() => window.scrollTo(0, 0)")
+                # behind the ladder, each view's chance of Yes at every strike, as Fig. 1b's legend has it (owner,
+                # 2026-11-06): two curves of 121 points, each crossing every strike's level at that view's mark
+                gdp_curves = page.evaluate("""() => {
+                  const pts = p => (p.getAttribute('d').match(/-?[0-9.]+/g) || []).map(Number)
+                    .reduce((a, v, i) => (i % 2 ? a[a.length - 1].push(v) : a.push([v]), a), []);
+                  const cs = [...document.querySelectorAll('#gdpMain path.gdp-pcurve')].map(pts);
+                  const ms = [...document.querySelectorAll('#gdpMain line.gdp-mark')]
+                    .map(l => [+l.getAttribute('x1'), (+l.getAttribute('y1') + +l.getAttribute('y2')) / 2]);
+                  const xAt = (c, y) => { for (let i = 1; i < c.length; i++) { const [x0, y0] = c[i - 1], [x1, y1] = c[i];
+                      if ((y0 - y) * (y1 - y) <= 0 && y0 !== y1) return x0 + (x1 - x0) * (y - y0) / (y1 - y0); } return null; };
+                  // each strike's two marks come no temperature effect first, then the paper's
+                  const gaps = ms.map(([x, y], i) => { const v = xAt(cs[i % 2] || [], y); return v == null ? null : +Math.abs(v - x).toFixed(2); });
+                  return { n: cs.length, points: cs.map(c => c.length), gaps };
+                }""")
+                chk.add(f"{scheme} gdp: each view's curve gives its chance of Yes at every strike and crosses each strike at its mark",
+                        gdp_curves["n"] == 2 and all(p_ == 121 for p_ in gdp_curves["points"]) and bool(gdp_curves["gaps"])
+                        and all(g_ is not None and g_ <= 3 for g_ in gdp_curves["gaps"]), str(gdp_curves))
                 chk.add(f"{scheme} gdp: until it lists, the ladder is the proposed strikes, hatched, with two marks and no link",
                         g0["hatched"] == len(gdp_model["ladder"]["strikes"]) and g0["marks"] == 2 * g0["hatched"]
                         and not g0["links"] and not g0["note"] and "Not listed yet" in g0["listing"],
