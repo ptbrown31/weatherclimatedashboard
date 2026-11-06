@@ -6350,7 +6350,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 g2 = _gdp_state()
                 chk.add(f"{scheme} gdp: reset returns to the article's settings", g2["tiles"] == g0["tiles"] and g2["hash"] == "",
                         f"{g2['tiles']} {g2['hash']}")
-                page.goto(f"{srv.url}/climate-gdp.html#baseline=frozen&irf=PWT_panel"); until(page, GDP_RAN, cap_ms=20000)
+                # Reset leaves the address at the bare path, so this goto changes only the hash and the page
+                # takes it in place, loading what the settings need and then running again. The read waits for
+                # that run, not for the status Reset's run left, which a full run once read mid-load
+                page.evaluate(GDP_MARK)
+                page.goto(f"{srv.url}/climate-gdp.html#baseline=frozen&irf=PWT_panel"); until(page, GDP_RERUN, cap_ms=20000)
                 g3 = _gdp_state()
                 chk.add(f"{scheme} gdp: a shared address loads its settings, fetching what they need",
                         "50,000 paths" in g3["status"] and g3["tiles"][:2] != g0["tiles"][:2]
