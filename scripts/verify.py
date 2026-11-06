@@ -6274,6 +6274,15 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         .every(e => /^chance of Yes\\./.test(e.textContent) && !/price|fair value/i.test(e.textContent)),
                       h1: (document.querySelector('#gdpTitle') || {}).textContent || '',
                       summary: !!document.querySelector('p.gdp-summary + #contract'),
+                      sub: (document.querySelector('#gdpSub') || {}).textContent || '',
+                      bylineHidden: !!(document.querySelector('#gdpByline') || {}).hidden,
+                      aff: !!document.querySelector('.gdp-aff'),
+                      introBeforeCard: (() => { const i = document.querySelector('#gdpIntro');
+                        return !!i && i.nextElementSibling === document.querySelector('#contract')
+                          && /^(UL|OL)$/.test((i.lastElementChild || {}).tagName || ''); })(),
+                      proposalHidden: !!(document.querySelector('#proposal') || {}).hidden,
+                      partFigs: [...document.querySelectorAll('.secttl + .gdp-article figure.gdp-fig')].map(f => f.id),
+                      siSummary: (document.querySelector('.gdp-si summary') || {}).textContent || '',
                       sections: [...document.querySelectorAll('.secttl')].map(e => e.id),
                       refs: document.querySelectorAll('ol.gdp-refs li[id^="ref-"]').length,
                       levels: (document.querySelector('#fig1 #gdpLevels') || { childElementCount: 0 }).childElementCount,
@@ -6312,11 +6321,32 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         and min(g0["figs"] or [0]) > 10 and g0["levels"] > 10 and g0["notes"] == 11,
                         f"figs={g0['figids']} {g0['figs']} levels={g0['levels']} notes={g0['notes']}")
                 gdp_refs = len(next(s_ for s_ in gdp_letter["sections"] if s_["id"] == "references")["refs"])
-                chk.add(f"{scheme} gdp: the page carries the Letter, its summary above the contract, then its Methods, "
-                        "Extended Data, references, notes and Supplementary Information",
-                        g0["h1"] == gdp_letter["title"] and g0["summary"] and g0["refs"] == gdp_refs
-                        and all(s_ in g0["sections"] for s_ in ("methods", "extended-data", "references", "notes", "supplementary")),
-                        f"{g0['h1'][:40]} summary={g0['summary']} refs={g0['refs']} {g0['sections']}")
+                if gdp_letter.get("summary"):
+                    chk.add(f"{scheme} gdp: the page carries the Letter, its summary above the contract, then its Methods, "
+                            "Extended Data, references, notes and Supplementary Information",
+                            g0["h1"] == gdp_letter["title"] and g0["summary"] and g0["refs"] == gdp_refs
+                            and all(s_ in g0["sections"] for s_ in ("methods", "extended-data", "references", "notes", "supplementary")),
+                            f"{g0['h1'][:40]} summary={g0['summary']} refs={g0['refs']} {g0['sections']}")
+                else:
+                    # the article's form (owner, 2026-11-06): the title and subtitle with no byline, the introduction above
+                    # the contract card, which follows the contract question's two outcomes, and the second half as its own
+                    # part, Fig. 3 and Fig. 4 in it after the last paragraph that cites them
+                    gdp_parts = [s_["id"] for s_ in gdp_letter["sections"] if s_["id"] not in (
+                        "figures", "extended-data", "references", "supplementary-information", "acknowledgements",
+                        "author-contributions", "competing-interests", "additional-information")]
+                    gdp_si = next((s_ for s_ in gdp_letter["sections"] if s_["id"] == "supplementary-information"), {"blocks": []})
+                    gdp_si_n = sum(1 for b_ in gdp_si["blocks"] if b_.get("type") == "table")
+                    gdp_si_words = {1: "a table", 2: "two tables"}.get(gdp_si_n, "%d tables" % gdp_si_n)
+                    chk.add(f"{scheme} gdp: the page carries the article, its introduction above the contract, then its second "
+                            "half, Extended Data, references, notes and Supplementary Information",
+                            g0["h1"] == gdp_letter["title"] and g0["sub"] == gdp_letter.get("subtitle") and g0["bylineHidden"]
+                            and not g0["aff"] and not g0["summary"] and g0["introBeforeCard"] and g0["proposalHidden"]
+                            and g0["refs"] == gdp_refs and "methods" not in g0["sections"] and bool(gdp_parts)
+                            and all(s_ in g0["sections"] for s_ in gdp_parts + ["extended-data", "references", "notes", "supplementary"])
+                            and {"fig3", "fig4"} <= set(g0["partFigs"]) and "(" + gdp_si_words + " " in g0["siSummary"],
+                            f"{g0['h1'][:40]} sub={bool(g0['sub'])} byline-hidden={g0['bylineHidden']} intro={g0['introBeforeCard']} "
+                            f"proposal-hidden={g0['proposalHidden']} refs={g0['refs']} parts-figs={g0['partFigs']} {g0['sections']} "
+                            f"si={g0['siSummary'][:60]}")
                 page.locator("figure#ed1 img").scroll_into_view_if_needed()
                 GDP_IMG = "() => { const i = document.querySelector('figure#ed1 img'); return !!i && i.complete && i.naturalWidth > 0; }"
                 chk.add(f"{scheme} gdp: the quadrant schematic's image loads", until(page, GDP_IMG), "")
