@@ -95,3 +95,8 @@ run's time, turned final; the 19 UTC hour stays provisional. No hour of these si
 Data copy later than 1 hour 30 minutes after the hour, so none went to review, and every final hour
 keeps its value. The day files and both CSV files are byte for byte as they were, and a second rebuild
 changes no file. `index.json` changed only in its `hourlyContract` convention, which gives the new cut-off.
+
+On 2026-11-06 the conventions gave their dates in words, "decided 28 September 2026" in place of the
+owner's decision or ruling and its date, and `resolvedDay` says the settlement display opens on the
+newest fully resolved day. `index.json` changed only in those conventions, which take the lane's current
+text, and no other file changed.

@@ -43,6 +43,18 @@ window.WXC = (() => {
   const clockFull = (ms, tz) => { const p = parts(ms, tz); const h12 = p.hour % 12 || 12;
     return h12 + ':' + String(p.minute).padStart(2, '0') + (p.hour < 12 ? ' AM' : ' PM'); };
   const dateShort = (ms, tz) => { const p = parts(ms, tz); return p.month + ' ' + p.day; };
+  // the zone's short name at that instant, "EST", or "GMT+1" for a zone the
+  // language has no name for, so a time in the reader's own zone says which
+  const zoneCache = {};
+  function zoneShort(ms, tz) {
+    const key = tz || 'UTC';
+    try {
+      if (!zoneCache[key]) zoneCache[key] = new Intl.DateTimeFormat('en-US', { timeZone: key, hour: 'numeric', timeZoneName: 'short' });
+      const z = zoneCache[key].formatToParts(new Date(ms)).find(p => p.type === 'timeZoneName');
+      return z ? z.value : '';
+    } catch (e) { return ''; }
+  }
+  const clockZone = (ms, tz) => (clockFull(ms, tz) + ' ' + zoneShort(ms, tz)).trim();
   const hourOf = (ms, tz) => parts(ms, tz).hour;
   const minuteOf = (ms, tz) => parts(ms, tz).minute;
   // ticks on local 6-hour marks between two instants
@@ -181,7 +193,8 @@ window.WXC = (() => {
   }
   function statusText(r, cadenceMin) {
     if (r.source === 'none') return 'No data available. The data feed could not be reached and nothing is cached.';
-    const when = r.asof ? clockFull(r.asof, Intl.DateTimeFormat().resolvedOptions().timeZone) : 'unknown time';
+    // the reader's own clock, with its zone named
+    const when = r.asof ? clockZone(r.asof, Intl.DateTimeFormat().resolvedOptions().timeZone) : 'unknown time';
     const age = r.ageMin == null ? '' : (r.ageMin < 1 ? 'just now' : spanText(r.ageMin) + ' ago');
     const every = cadenceMin >= 48 * 60 ? 'every ' + spanText(cadenceMin)
                 : cadenceMin >= 24 * 60 ? 'daily' : 'every ' + spanText(cadenceMin);
@@ -474,6 +487,6 @@ window.WXC = (() => {
   }
 
   return {
-    asset, compass, el, txt, h, $, clock, clockFull, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref, tempCities, weekdayOf, vendorPct,
+    asset, compass, el, txt, h, $, clock, clockFull, clockZone, zoneShort, dateShort, hourOf, minuteOf, hourTicks, P, chrome, statusEl, tooltip, param, deg, expander, cityHref, tempCities, weekdayOf, vendorPct,
     settleMph, satLoop, loopFresh, loopSub, lineSwatch, parseStamp, issuedTag };
 })();

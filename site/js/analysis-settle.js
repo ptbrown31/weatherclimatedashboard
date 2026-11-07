@@ -112,6 +112,7 @@ window.WXSettle = (() => {
   const localHour = (tz, ms) => Number(fmt(tz, { hour: 'numeric', hourCycle: 'h23' }).format(ms)) % 24;
   const utc = ms => fmt('UTC', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(ms);
   const dayName = (tz, ms) => fmt(tz, { weekday: 'long', month: 'long', day: 'numeric' }).format(ms);
+  const weekday = (tz, ms) => fmt(tz, { weekday: 'short' }).format(ms);
   const isoZ = ms => new Date(ms).toISOString().replace('.000Z', 'Z');
   // a local time with its UTC offset and zone, "2026-09-28 16:00 -04:00 (EDT)", for the CSV files
   function localStamp(tz, ms) {
@@ -373,7 +374,12 @@ window.WXSettle = (() => {
         + 'Each bar is one hour’s accumulation, which NOAA files under the hour it ends.', 'pcp'),
     };
     const table = h('table', { class: 'anahours', id: 'anaHours' });
-    const foot = h('p', { class: 'cap anafoot', id: 'anaFoot' });
+    // under the table, a sentence or two kept in view, and how each hour is
+    // read and which copy counts in points under a summary
+    const footLead = h('p'), footList = h('ul');
+    const foot = h('div', { class: 'cap anafoot', id: 'anaFoot' }, [footLead,
+      h('details', { class: 'anamore' }, [h('summary', { text: 'How each hour is read and which copy counts' }), footList])]);
+    let footKey = '';
     const hoursSec = h('section', { class: 'anahrs' }, [h('h3', { text: 'Every hour' }), h('div', { class: 'anatab' }, [table]), foot]);
     // the replay, last on the page as the specification orders it, and held
     // at the foot of the screen while the day is on it, so the charts it moves
@@ -507,10 +513,15 @@ window.WXSettle = (() => {
       status.innerHTML = '<span class="anapill ' + cls + '">' + esc(word) + '</span><span class="anastxt">' + esc(text) + '</span>';
     }
 
-    // ---- the replay's clock and the two countdowns
+    // ---- the replay's clock and the two countdowns. Past the day's end the
+    //      clock would read the next day, so the bar says the day has ended
+    //      and gives its cut-off, as the day's final moment once it is final
     function renderTop(S) {
-      const tz = P.tz;
-      whenEl.innerHTML = '<b>' + esc(clockZ(tz, T)) + '</b><span>' + esc(utc(T)) + ' UTC · ' + esc(dayName(tz, T)) + '</span>';
+      const tz = P.tz, ended = T >= P.end;
+      whenEl.classList.toggle('ended', ended);
+      whenEl.innerHTML = ended
+        ? '<b>End of day</b><span>, ' + esc((S.final ? 'final ' : 'cut-off ') + clock(tz, P.cutoff) + ' ' + weekday(tz, P.cutoff)) + '</span>'
+        : '<b>' + esc(clockZ(tz, T)) + '</b><span>' + esc(utc(T)) + ' UTC · ' + esc(dayName(tz, T)) + '</span>';
       if (!P.running) { next.innerHTML = ''; return; }
       const a = P.hours.find(o => !S.inA(o)), r = P.hours.find(o => !S.inP(o));
       next.innerHTML = due('anl', a && { h: a, due: a.t + LAG.anl.due, by: a.t + LAG.anl.by }, S)
@@ -590,52 +601,179 @@ window.WXSettle = (() => {
     const path = pts => pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('');
     let geo = {};
     const focusHour = {};          // the hour the keyboard is on, per chart
-    function frame(W, H, yMin, yMax, yStep, yFmt, S) {
+
+    /* The text on a chart keeps clear of everything else on it: the other
+       labels, the axis labels among them, the now line, the next-due line and
+       the day's end, the series lines and their dots, and the chart's edges.
+       A label is a box at the size the browser gives its type, ascent to
+       descent, and it takes the first of its places, in order, that touches
+       nothing placed before it, or the one that touches least when none is
+       clear. A label's first place is where it always went, so a chart with
+       room for it looks as it did. */
+    const GAP = 1;                 // the clearance a label keeps, in px
+    const sizes = {};              // each label's measure, by weight and text
+    function measure(svg, s, bold) {
+      const k = (bold ? 'b' : 'n') + s;
+      if (sizes[k]) return sizes[k];
+      const t = WXC.el('text', bold ? { class: 'lab' } : {});
+      t.textContent = s;
+      svg.appendChild(t);
+      let b = null;
+      try { b = t.getBBox(); } catch (e) { /* a chart not laid out yet */ }
+      t.remove();
+      // about the labels' size for a chart not laid out yet, and not kept
+      if (!b || !b.width) return { w: s.length * 6.5, up: 11, down: 2 };
+      return (sizes[k] = { w: b.width, up: -b.y, down: b.y + b.height });
+    }
+    // whether a segment meets a box, by Liang and Barsky's clip
+    function crosses(b, x1, y1, x2, y2) {
+      let t0 = 0, t1 = 1;
+      const clip = (p, q) => {
+        if (!p) return q >= 0;
+        const r = q / p;
+        if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
+        return true;
+      };
+      return clip(x1 - x2, x1 - b.x0) && clip(x2 - x1, b.x1 - x1) && clip(y1 - y2, y1 - b.y0) && clip(y2 - y1, b.y1 - y1);
+    }
+    const toBox = (b, x, y) => Math.hypot(Math.max(b.x0 - x, 0, x - b.x1), Math.max(b.y0 - y, 0, y - b.y1));
+    const toSeg = (x, y, q) => {
+      const dx = q[2] - q[0], dy = q[3] - q[1], n = dx * dx + dy * dy;
+      const u = n ? Math.max(0, Math.min(1, ((x - q[0]) * dx + (y - q[1]) * dy) / n)) : 0;
+      return Math.hypot(q[0] + u * dx - x, q[1] + u * dy - y);
+    };
+    function layout(svg, W, H) {
+      const boxes = [], lines = [], segs = [], dots = [], bars = [];
+      const grow = (b, d) => ({ x0: b.x0 - d, x1: b.x1 + d, y0: b.y0 - d, y1: b.y1 + d });
+      const meet = (a, b) => Math.min(a.x1, b.x1) > Math.max(a.x0, b.x0) && Math.min(a.y1, b.y1) > Math.max(a.y0, b.y0);
+      const box = (s, x, y, a, bold) => {
+        const m = measure(svg, s, bold), x0 = a === 'end' ? x - m.w : a === 'middle' ? x - m.w / 2 : x;
+        return { x0, x1: x0 + m.w, y0: y - m.up, y1: y + m.down };
+      };
+      // how much a box touches, 0 when clear; a label's own ring and line do not count
+      function cost(b, own) {
+        let c = b.x0 < 1 || b.x1 > W - 1 || b.y0 < 1 || b.y1 > H - 1 ? 1000 : 0;
+        const g = grow(b, GAP), s = grow(b, GAP + 1.2);        // a series line's half width
+        const mine = k => own != null && k === own;
+        boxes.forEach(o => { if (meet(g, o)) c += 100; });
+        lines.forEach(l => { if (l[0] > g.x0 - 0.75 && l[0] < g.x1 + 0.75 && l[2] > g.y0 && l[1] < g.y1) c += 100; });
+        segs.forEach(q => { if (!mine(q[4]) && crosses(s, q[0], q[1], q[2], q[3])) c += 10; });
+        dots.forEach(d => { if (!mine(d[3]) && toBox(g, d[0], d[1]) < d[2]) c += 10; });
+        bars.forEach(o => { if (meet(g, o)) c += 1; });
+        return c;
+      }
+      // how far a box lies from the nearest series line or dot not its own
+      function room(b, own) {
+        let r = Infinity;
+        segs.forEach(q => {
+          if (own != null && q[4] === own) return;
+          r = Math.min(r, crosses(b, q[0], q[1], q[2], q[3]) ? 0 : Math.min(toBox(b, q[0], q[1]), toBox(b, q[2], q[3]),
+            toSeg(b.x0, b.y0, q), toSeg(b.x1, b.y0, q), toSeg(b.x0, b.y1, q), toSeg(b.x1, b.y1, q)));
+        });
+        dots.forEach(d => { if (own == null || d[3] !== own) r = Math.min(r, Math.max(0, toBox(b, d[0], d[1]) - d[2])); });
+        return r;
+      }
+      return {
+        box,
+        keep: b => { boxes.push(b); },
+        line: (x, y0, y1) => { lines.push([x, Math.min(y0, y1), Math.max(y0, y1)]); },
+        // where the lines are, for a label that has to go past one
+        xs: () => lines.map(l => l[0]),
+        series: (pts, own) => { for (let i = 1; i < pts.length; i++) segs.push([pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], own]); },
+        dot: (x, y, r, own) => { dots.push([x, y, r, own]); },
+        bar: (x0, y0, x1, y1) => { bars.push({ x0, y0, x1, y1 }); },
+        room: (s, p, bold, own) => room(box(s, p[0], p[1], p[2], bold), own),
+        clear: b => !cost(b),
+        // the first of the places [x, y, anchor] that touches nothing, else the
+        // one that touches least, or none for a label that can be left out;
+        // `texts` may be a label's wordings, longest first, each tried at every
+        // place before the next shorter one
+        place(texts, places, bold, own, optional) {
+          let best = null;
+          // a list made as it is walked serves one wording; several walk it again
+          if (!Array.isArray(places) && [].concat(texts).length > 1) places = Array.from(places);
+          for (const s of [].concat(texts)) {
+            for (const p of places) {
+              const b = box(s, p[0], p[1], p[2], bold), c = cost(b, own);
+              if (!best || c < best.c) best = { s, x: p[0], y: p[1], a: p[2], b, c };
+              if (!c) break;
+            }
+            if (!best.c) break;
+          }
+          if (optional && best.c) return null;
+          boxes.push(best.b);
+          return best;
+        },
+      };
+    }
+
+    function frame(W, H, yMin, yMax, yStep, yFmt, S, L) {
       const x = t => M.l + (t - P.start) / (P.end - P.start) * (W - M.l - M.r);
       const y = v => H - M.b - (v - yMin) / (yMax - yMin) * (H - M.t - M.b);
+      // the values on the axis end nine pixels short of the plot, clear of the
+      // ring of a mark at the day's first hour
       let g = '';
       for (let k = Math.ceil(yMin / yStep - 1e-9); k * yStep <= yMax + 1e-9; k++) {
-        const v = k * yStep;
+        const v = k * yStep, t = yFmt(v);
         g += '<line class="grid" x1="' + M.l + '" x2="' + (W - M.r) + '" y1="' + y(v).toFixed(1) + '" y2="' + y(v).toFixed(1) + '"/>'
-          + '<text x="' + (M.l - 6) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + esc(yFmt(v)) + '</text>';
+          + '<text x="' + (M.l - 9) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end">' + esc(t) + '</text>';
+        L.keep(L.box(t, M.l - 9, y(v) + 4, 'end'));
       }
       const every = W < 560 ? 6 : 3;
       P.hours.forEach(o => {
         if (o.repeat || localHour(P.tz, o.t) % every) return;
+        const t = hourOnly(P.tz, o.t);
         g += '<line class="axis" x1="' + x(o.t).toFixed(1) + '" x2="' + x(o.t).toFixed(1) + '" y1="' + (H - M.b) + '" y2="' + (H - M.b + 4) + '"/>'
-          + '<text x="' + x(o.t).toFixed(1) + '" y="' + (H - M.b + 17) + '" text-anchor="middle">' + esc(hourOnly(P.tz, o.t)) + '</text>';
+          + '<text x="' + x(o.t).toFixed(1) + '" y="' + (H - M.b + 17) + '" text-anchor="middle">' + esc(t) + '</text>';
+        L.keep(L.box(t, x(o.t), H - M.b + 17, 'middle'));
       });
       g += '<line class="axis" x1="' + M.l + '" x2="' + (W - M.r) + '" y1="' + (H - M.b) + '" y2="' + (H - M.b) + '"/>'
         + '<line class="axis dayend" x1="' + x(P.end).toFixed(1) + '" x2="' + x(P.end).toFixed(1) + '" y1="' + M.t + '" y2="' + (H - M.b) + '"/>';
+      L.line(x(P.end), M.t, H - M.b);
       let pre = '', post = '';
       if (T < P.end) {
         const xn = Math.max(M.l, x(T));
         pre = '<rect class="future" x="' + xn.toFixed(1) + '" y="' + M.t + '" width="' + (x(P.end) - xn).toFixed(1) + '" height="' + (H - M.t - M.b) + '"/>';
-        if (x(P.end) - xn > 150) pre += '<text class="tocome" x="' + (x(P.end) - 8).toFixed(1) + '" y="' + (M.t + 14) + '" text-anchor="end">to come</text>';
-        if (T > P.start) post = '<line class="now" x1="' + xn.toFixed(1) + '" x2="' + xn.toFixed(1) + '" y1="' + (M.t - 6) + '" y2="' + (H - M.b) + '"/>'
-          + '<text class="lab nowlab" x="' + xn.toFixed(1) + '" y="' + (M.t - 9) + '" text-anchor="middle">' + esc(clock(P.tz, T)) + '</text>';
+        if (x(P.end) - xn > 150) {
+          pre += '<text class="tocome" x="' + (x(P.end) - 8).toFixed(1) + '" y="' + (M.t + 14) + '" text-anchor="end">to come</text>';
+          L.keep(L.box('to come', x(P.end) - 8, M.t + 14, 'end'));
+        }
+        if (T > P.start) {
+          // the time, centred over the now line and kept inside the chart
+          const lab = clock(P.tz, T), hw = L.box(lab, 0, 0, 'middle', true).x1;
+          const lx = Math.max(M.l - 2 + hw, Math.min(W - 2 - hw, xn));
+          post = '<line class="now" x1="' + xn.toFixed(1) + '" x2="' + xn.toFixed(1) + '" y1="' + (M.t - 6) + '" y2="' + (H - M.b) + '"/>'
+            + '<text class="lab nowlab" x="' + lx.toFixed(1) + '" y="' + (M.t - 9) + '" text-anchor="middle">' + esc(lab) + '</text>';
+          L.line(xn, M.t - 6, H - M.b);
+          L.keep(L.box(lab, lx, M.t - 9, 'middle', true));
+        }
       }
       return { x, y, g, pre, post, H };
     }
-    // the next hour to come, as a dashed line at its time with when it is
-    // expected, the label left of the line where the plot ends too soon for it
-    function dueMark(f, W, H, d, top) {
+    // where a label may go past the lines to the right of x, the day's end aside
+    const pastLines = (f, L, x) => L.xs().filter(v => v > x && v < f.x(P.end) - 1);
+    /* The next hour to come, as a dashed line at its time with when it is
+       expected. The label goes right of the line in its usual slot, at the
+       top of the precipitation chart and the foot of the others, else in the
+       other slot, so it never sits on a mark's label; then just past the now
+       line, then left of the line, where the plot ends too soon for it or the
+       right is taken; then at a height between the two slots. A phone's chart
+       can be too narrow for it anywhere clear, and then it says less,
+       "expected 2:46 PM", or the time alone, and with no room even for that
+       the line is drawn alone, the countdown above the cards giving the time. */
+    function dueMark(f, L, W, H, d, top) {
       if (!d) return '';
-      const xx = f.x(d.t), lab = 'next, expected ' + clock(P.tz, d.due);
-      // about six pixels a character at the labels' size
-      const left = xx + 4 + lab.length * 6 > W - M.r;
+      const xx = f.x(d.t), at = clock(P.tz, d.due);
+      const ys = top ? [M.t + 12, H - M.b - 6] : [H - M.b - 6, M.t + 12];
+      const xs = L.xs().filter(v => v < f.x(P.end) - 1);
+      const order = [[xx + 4, 'start']].concat(xs.filter(v => v > xx && v - xx <= 24).map(v => [v + 4, 'start']),
+        [[xx - 4, 'end'], [Math.min(xx, ...xs) - 4, 'end'], [Math.max(xx, ...xs) + 4, 'start']]);
+      const places = [];
+      order.forEach(([x, a]) => ys.forEach(y => places.push([x, y, a])));
+      for (let y = M.t + 25; y < H - M.b - 12; y += 13) order.forEach(([x, a]) => places.push([x, y, a]));
+      const p = L.place(['next, expected ' + at, 'expected ' + at, at], places, false, null, true);
       return '<line class="duemark" x1="' + xx.toFixed(1) + '" x2="' + xx.toFixed(1) + '" y1="' + M.t + '" y2="' + (H - M.b) + '"/>'
-        + '<text class="duelab" x="' + (left ? xx - 4 : xx + 4).toFixed(1) + '" y="' + (top ? M.t + 12 : H - M.b - 6) + '"'
-        + (left ? ' text-anchor="end"' : '') + '>' + esc(lab) + '</text>';
-    }
-    // how far right a label may run before it meets the next-due line, the
-    // now line or the plot's edge
-    function roomTo(f, W, S, kind) {
-      const d = nextDue(S, kind);
-      let lim = W - M.r;
-      if (d) lim = Math.min(lim, f.x(d.t) - 4);
-      if (T < P.end && T > P.start) lim = Math.min(lim, f.x(T) - 4);
-      return lim;
+        + (p ? '<text class="duelab" x="' + p.x.toFixed(1) + '" y="' + p.y.toFixed(1) + '"' + (p.a === 'end' ? ' text-anchor="end"' : '') + '>' + esc(p.s) + '</text>' : '');
     }
     function nextDue(S, kind) {
       if (S.atCut) return null;
@@ -651,66 +789,136 @@ window.WXSettle = (() => {
       if (cur.length) segs.push(cur);
       return segs;
     }
-    function mark(f, W, o, v, txtv, color, above, cls) {
-      const cx = f.x(o.t), cy = f.y(v), ty = above ? cy - 12 : cy + 20;
+    // a mark's ring, seven pixels and its stroke, put in the layout before any
+    // mark's label is placed so no label sits on another's ring
+    const ring = (L, f, o, v, cls) => L.dot(f.x(o.t), f.y(v), 8, cls);
+    /* An hour's ring and its label, above or below the point as it always
+       was where that is clear; else moved along beside it, left first, which
+       keeps it clear of the now line and the next-due line, both to its
+       right, until it ends left of the point or starts right of it; then the
+       other side of the point, then a line farther off on each side, level
+       with the point, and last past the lines. */
+    function mark(f, L, W, o, v, txtv, color, above, cls) {
+      const cx = f.x(o.t), cy = f.y(v), ys = above ? [cy - 12, cy + 20, cy - 24, cy + 32] : [cy + 20, cy - 12, cy + 32, cy - 24];
       const anchor = cx < M.l + 60 ? 'start' : cx > W - M.r - 60 ? 'end' : 'middle';
+      const w = L.box(txtv, 0, 0, 'start', true).x1, places = [];
+      ys.forEach(y => {
+        places.push([cx, y, anchor]);
+        for (let d = 6; d <= w / 2 + 6; d += 6) places.push([cx - w / 2 - d, y, 'start'], [cx - w / 2 + d, y, 'start']);
+        [8, 16, 24, 36, 48].forEach(d => places.push([cx - d, y, 'end']));
+        [8, 16, 24, 36].forEach(d => places.push([cx + d, y, 'start']));
+      });
+      places.push([cx - 11, cy + 4, 'end'], [cx + 11, cy + 4, 'start']);
+      pastLines(f, L, cx).forEach(x => ys.slice(0, 2).forEach(y => places.push([x + 4, y, 'start'], [f.x(P.end) - 2, y, 'end'])));
+      const p = L.place(txtv, places, true, cls);
       return '<circle class="' + cls + '" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="7" fill="none" stroke="' + color + '" stroke-width="2"/>'
-        + '<text class="lab ' + cls + 'lab" x="' + cx.toFixed(1) + '" y="' + ty.toFixed(1) + '" text-anchor="' + anchor + '" style="fill:' + color + '">' + esc(txtv) + '</text>';
+        + '<text class="lab ' + cls + 'lab" x="' + p.x.toFixed(1) + '" y="' + p.y.toFixed(1) + '" text-anchor="' + p.a + '" style="fill:' + color + '">' + esc(txtv) + '</text>';
     }
 
-    function drawTemp(W, S) {
+    function drawTemp(W, S, svg) {
       const H = 250, got = P.hours.filter(o => S.inA(o) && shown(o, 'temp') != null), late = P.hours.filter(o => S.lateA(o) && shown(o, 'temp') != null);
       const vals = got.concat(late).map(o => Number(shown(o, 'temp')));
       let lo = vals.length ? Math.min(...vals) - 2 : 40, hi = vals.length ? Math.max(...vals) + 2 : 60;
       if (hi - lo < 6) { const m = (hi + lo) / 2; lo = Math.floor(m - 3); hi = Math.ceil(m + 3); }
       const step = nice(hi - lo, [1, 2, 5, 10, 20]);
       lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
-      const f = frame(W, H, lo, hi, step, v => v + '°', S);
+      const L = layout(svg, W, H);
+      const f = frame(W, H, lo, hi, step, v => v + '°', S, L);
       let s = f.pre + f.g;
-      segments(got).forEach(seg => { s += '<path class="series" d="' + path(seg.map(o => [f.x(o.t), f.y(shown(o, 'temp'))])) + '" fill="none" stroke="var(--ana-rtma)" stroke-width="2"/>'; });
-      got.forEach(o => { s += '<circle class="hr" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'temp')).toFixed(1) + '" r="3.6" fill="var(--ana-rtma)"/>'; });
-      late.forEach(o => { s += '<circle class="hr late" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'temp')).toFixed(1) + '" r="3.6" fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>'; });
+      segments(got).forEach(seg => {
+        const pts = seg.map(o => [f.x(o.t), f.y(shown(o, 'temp'))]);
+        L.series(pts);
+        s += '<path class="series" d="' + path(pts) + '" fill="none" stroke="var(--ana-rtma)" stroke-width="2"/>';
+      });
+      got.forEach(o => { L.dot(f.x(o.t), f.y(shown(o, 'temp')), 3.6); s += '<circle class="hr" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'temp')).toFixed(1) + '" r="3.6" fill="var(--ana-rtma)"/>'; });
+      late.forEach(o => { L.dot(f.x(o.t), f.y(shown(o, 'temp')), 3.6); s += '<circle class="hr late" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'temp')).toFixed(1) + '" r="3.6" fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>'; });
       const hiV = P.running ? S.runA && S.runA.high : (P.e || {}).high, loV = P.running ? S.runA && S.runA.low : (P.e || {}).low;
       const oh = hiV && hourAt(hiV.at), ol = loV && hourAt(loV.at);
-      if (oh && shown(oh, 'temp') != null) s += mark(f, W, oh, shown(oh, 'temp'), 'High ' + hiV.value + '°F', 'var(--warm)', true, 'mkhi');
-      if (ol && ol !== oh && shown(ol, 'temp') != null) s += mark(f, W, ol, shown(ol, 'temp'), 'Low ' + loV.value + '°F', 'var(--cool)', false, 'mklo');
-      s += dueMark(f, W, H, nextDue(S, 'anl')) + f.post;
+      const mh = oh && shown(oh, 'temp') != null, ml = ol && ol !== oh && shown(ol, 'temp') != null;
+      const d = nextDue(S, 'anl');
+      if (d) L.line(f.x(d.t), M.t, H - M.b);
+      // both rings first, so neither label sits on the other's ring
+      if (mh) ring(L, f, oh, shown(oh, 'temp'), 'mkhi');
+      if (ml) ring(L, f, ol, shown(ol, 'temp'), 'mklo');
+      if (mh) s += mark(f, L, W, oh, shown(oh, 'temp'), 'High ' + hiV.value + '°F', 'var(--warm)', true, 'mkhi');
+      if (ml) s += mark(f, L, W, ol, shown(ol, 'temp'), 'Low ' + loV.value + '°F', 'var(--cool)', false, 'mklo');
+      s += dueMark(f, L, W, H, d) + f.post;
       return { H, s, f };
     }
 
-    function drawWind(W, S) {
+    function drawWind(W, S, svg) {
       const H = 230, got = P.hours.filter(o => S.inA(o) && shown(o, 'wind') != null), late = P.hours.filter(o => S.lateA(o) && shown(o, 'wind') != null);
       const top = Math.max(10, ...got.concat(late).map(o => Number(shown(o, 'gust') != null ? shown(o, 'gust') : shown(o, 'wind'))));
       const step = nice(top, [2, 5, 10, 20]);
-      const f = frame(W, H, 0, Math.ceil((top + 2) / step) * step, step, v => String(v), S);
+      const L = layout(svg, W, H);
+      const f = frame(W, H, 0, Math.ceil((top + 2) / step) * step, step, v => String(v), S, L);
       let s = f.pre + f.g;
       segments(got).forEach(seg => {
-        const gs = seg.filter(o => shown(o, 'gust') != null);
-        if (gs.length) s += '<path class="series gustline" d="' + path(gs.map(o => [f.x(o.t), f.y(shown(o, 'gust'))])) + '" fill="none" stroke="var(--vbar)" stroke-width="2"/>';
-        s += '<path class="series windline" d="' + path(seg.map(o => [f.x(o.t), f.y(shown(o, 'wind'))])) + '" fill="none" stroke="var(--accent)" stroke-width="2"/>';
+        const gs = seg.filter(o => shown(o, 'gust') != null).map(o => [f.x(o.t), f.y(shown(o, 'gust'))]);
+        const ws = seg.map(o => [f.x(o.t), f.y(shown(o, 'wind'))]);
+        L.series(gs); L.series(ws);
+        if (gs.length) s += '<path class="series gustline" d="' + path(gs) + '" fill="none" stroke="var(--vbar)" stroke-width="2"/>';
+        s += '<path class="series windline" d="' + path(ws) + '" fill="none" stroke="var(--accent)" stroke-width="2"/>';
       });
       got.forEach(o => {
-        if (shown(o, 'gust') != null) s += '<circle class="hr" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'gust')).toFixed(1) + '" r="3" fill="var(--vbar)"/>';
+        if (shown(o, 'gust') != null) { L.dot(f.x(o.t), f.y(shown(o, 'gust')), 3); s += '<circle class="hr" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'gust')).toFixed(1) + '" r="3" fill="var(--vbar)"/>'; }
+        L.dot(f.x(o.t), f.y(shown(o, 'wind')), 3);
         s += '<circle class="hr" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'wind')).toFixed(1) + '" r="3" fill="var(--accent)"/>';
       });
-      late.forEach(o => { s += '<circle class="hr late" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'wind')).toFixed(1) + '" r="3" fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>'; });
+      late.forEach(o => { L.dot(f.x(o.t), f.y(shown(o, 'wind')), 3); s += '<circle class="hr late" cx="' + f.x(o.t).toFixed(1) + '" cy="' + f.y(shown(o, 'wind')).toFixed(1) + '" r="3" fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>'; });
+      const d = nextDue(S, 'anl');
+      if (d) L.line(f.x(d.t), M.t, H - M.b);
       const mean = P.running ? S.runA && S.runA.wind : (P.e || {}).wind;
-      const last = got[got.length - 1];
-      if (mean && mean.value != null && last) {
-        const yy = f.y(mean.value), xe = f.x(last.t);
-        // the label sits past the line's end while there is room before the
-        // next marker, and above the line's start once there is not
-        const room = xe + 92 < roomTo(f, W, S, 'anl');
-        s += '<line class="meanline" x1="' + f.x(P.start).toFixed(1) + '" x2="' + xe.toFixed(1) + '" y1="' + yy.toFixed(1) + '" y2="' + yy.toFixed(1) + '" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 4"/>'
-          + '<text class="lab meanlab" x="' + (room ? xe + 6 : M.l + 4).toFixed(1) + '" y="' + (room ? yy + 4 : yy - 6).toFixed(1) + '" style="fill:var(--accent)">Mean ' + mean.value + ' mph</text>';
+      const last = got[got.length - 1], hasMean = !!(mean && mean.value != null && last);
+      const yy = hasMean ? f.y(mean.value) : 0, xe = hasMean ? f.x(last.t) : 0;
+      if (hasMean) {
+        L.series([[f.x(P.start), yy], [xe, yy]], 'mean');
+        s += '<line class="meanline" x1="' + f.x(P.start).toFixed(1) + '" x2="' + xe.toFixed(1) + '" y1="' + yy.toFixed(1) + '" y2="' + yy.toFixed(1) + '" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 4"/>';
       }
       const pk = P.running ? S.runA && S.runA.gust : (P.e || {}).gust, op = pk && hourAt(pk.at);
-      if (op && shown(op, 'gust') != null) s += mark(f, W, op, shown(op, 'gust'), 'Peak gust ' + pk.value + ' mph', 'var(--vbar)', true, 'mkpk');
-      s += dueMark(f, W, H, nextDue(S, 'anl')) + f.post;
+      if (op && shown(op, 'gust') != null) {
+        ring(L, f, op, shown(op, 'gust'), 'mkpk');
+        s += mark(f, L, W, op, shown(op, 'gust'), 'Peak gust ' + pk.value + ' mph', 'var(--vbar)', true, 'mkpk');
+      }
+      if (hasMean) {
+        // past the line's end while there is room before the next marker, as
+        // it always went; else above or below the line, on whichever side the
+        // series lie farther from across the label's span, from the line's
+        // start rightward until a place is clear; else at its height past the
+        // now line or the next-due line, where nothing is drawn yet; else a
+        // little farther off the line. The places are made one at a time, so
+        // the sides are weighed only as far as the first clear one. With none
+        // clear, as on a crowded phone chart, it drops the unit the caption
+        // gives, "Mean 3"
+        const labs = ['Mean ' + mean.value + ' mph', 'Mean ' + mean.value];
+        let lab = labs[0], w = 0;
+        function* along(k) {
+          for (let x = M.l + 4; x === M.l + 4 || x + w <= xe; x += 6) {
+            const up = [x, yy - 6 - k, 'start'], dn = [x, yy + 15 + k, 'start'];
+            const upFirst = L.room(lab, up, true, 'mean') >= L.room(lab, dn, true, 'mean');
+            yield upFirst ? up : dn;
+            yield upFirst ? dn : up;
+          }
+        }
+        function* places() {
+          yield [xe + 6, yy + 4, 'start'];
+          yield* along(0);
+          for (const x of pastLines(f, L, xe)) for (const y of [yy + 4, yy - 6, yy + 15]) { yield [x + 4, y, 'start']; yield [f.x(P.end) - 2, y, 'end']; }
+          for (let k = 5; k <= 30; k += 5) yield* along(k);
+        }
+        let p = null;
+        for (lab of labs) {
+          w = L.box(lab, 0, 0, 'start', true).x1;
+          p = L.place(lab, places(), true, 'mean', lab !== labs[labs.length - 1]);
+          if (p) break;
+        }
+        s += '<text class="lab meanlab" x="' + p.x.toFixed(1) + '" y="' + p.y.toFixed(1) + '" style="fill:var(--accent)">' + esc(p.s) + '</text>';
+      }
+      s += dueMark(f, L, W, H, d) + f.post;
       return { H, s, f };
     }
 
-    function drawPcp(W, S) {
+    function drawPcp(W, S, svg) {
       const H = 210, wet = P.hours.filter(o => S.inP(o)), late = P.hours.filter(o => S.lateP(o));
       // the bars stand at each hour's exact accumulation and the line at the
       // lane's running total, exact; both only place pixels
@@ -719,24 +927,43 @@ window.WXSettle = (() => {
       const peak = Math.max(0, ...wet.concat(late).map(amt), ...totals);
       const top = [0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 6].find(v => v >= peak * 1.15) || 8;
       const step = nice(top, [0.02, 0.05, 0.1, 0.25, 0.5, 1]);
-      const f = frame(W, H, 0, top, step, v => v.toFixed(2), S);
+      const L = layout(svg, W, H);
+      const f = frame(W, H, 0, top, step, v => v.toFixed(2), S, L);
       let s = f.pre + f.g;
-      wet.forEach(o => { s += '<rect class="pbar" x="' + (f.x(o.t) + 1).toFixed(1) + '" y="' + f.y(amt(o)).toFixed(1) + '" width="' + Math.max(1, f.x(o.end) - f.x(o.t) - 2).toFixed(1) + '" height="' + Math.max(0, f.y(0) - f.y(amt(o))).toFixed(1) + '" fill="var(--ana-rain-soft)"/>'; });
-      late.forEach(o => { s += '<rect class="pbar late" x="' + (f.x(o.t) + 1).toFixed(1) + '" y="' + f.y(amt(o)).toFixed(1) + '" width="' + Math.max(1, f.x(o.end) - f.x(o.t) - 2).toFixed(1) + '" height="' + Math.max(0, f.y(0) - f.y(amt(o))).toFixed(1) + '" fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>'; });
+      // a bar's place, which the labels keep clear of where they can
+      const barAt = o => {
+        const x0 = f.x(o.t) + 1, bw = Math.max(1, f.x(o.end) - f.x(o.t) - 2), y0 = f.y(amt(o)), bh = Math.max(0, f.y(0) - f.y(amt(o)));
+        L.bar(x0, y0, x0 + bw, y0 + bh);
+        return 'x="' + x0.toFixed(1) + '" y="' + y0.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bh.toFixed(1) + '"';
+      };
+      wet.forEach(o => { s += '<rect class="pbar" ' + barAt(o) + ' fill="var(--ana-rain-soft)"/>'; });
+      late.forEach(o => { s += '<rect class="pbar late" ' + barAt(o) + ' fill="none" stroke="var(--muted)" stroke-dasharray="2 2"/>'; });
+      const d = nextDue(S, 'pcp');
+      if (d) L.line(f.x(d.t), M.t, H - M.b);
       const runP = P.running ? S.runP && S.runP.precip : null;
       if (P.running && wet.length && runP) {
         const pts = [[f.x(P.start), f.y(0)]];
         let prev = 0;
         wet.forEach((o, k) => { pts.push([f.x(o.end), f.y(prev)]); prev = totals[k]; pts.push([f.x(o.end), f.y(prev)]); });
         const lastEnd = wet[wet.length - 1].end, xe = f.x(lastEnd), ye = f.y(prev);
-        const anchor = xe + 100 > roomTo(f, W, S, 'pcp') ? 'end' : 'start';
+        L.series(pts);
+        L.dot(xe, ye, 3.6, 'run');
+        // right of the line's end while there is room before the next marker,
+        // else left of it, as it always went; then higher, then past the lines
+        const lab = fx(runP.value, 2) + ' in' + (S.final ? '' : ' so far');
+        const places = [[xe + 8, ye - 8, 'start'], [xe - 8, ye - 8, 'end'], [xe - 8, ye - 20, 'end'], [xe + 8, ye - 20, 'start']];
+        pastLines(f, L, xe).forEach(x => places.push([x + 4, ye - 8, 'start'], [f.x(P.end) - 2, ye - 8, 'end']));
+        const p = L.place(lab, places, true, 'run');
         s += '<path class="runline" d="' + path(pts) + '" fill="none" stroke="var(--cool)" stroke-width="2.2"/>'
           + '<circle cx="' + xe.toFixed(1) + '" cy="' + ye.toFixed(1) + '" r="3.6" fill="var(--cool)"/>'
-          + '<text class="lab runlab" x="' + (xe + (anchor === 'end' ? -8 : 8)).toFixed(1) + '" y="' + (ye - 8).toFixed(1) + '" text-anchor="' + anchor + '" style="fill:var(--cool)">'
-          + fx(runP.value, 2) + ' in' + (S.final ? '' : ' so far') + '</text>';
-        if (Number(runP.exact) === 0 && xe - M.l > 260) s += '<text class="dry" x="' + ((M.l + xe) / 2).toFixed(1) + '" y="' + (f.y(0) - 12).toFixed(1) + '" text-anchor="middle">dry so far</text>';
+          + '<text class="lab runlab" x="' + p.x.toFixed(1) + '" y="' + p.y.toFixed(1) + '" text-anchor="' + p.a + '" style="fill:var(--cool)">' + esc(lab) + '</text>';
+        if (Number(runP.exact) === 0 && xe - M.l > 260) {
+          // a hint, left out where it would touch anything
+          const b = L.box('dry so far', (M.l + xe) / 2, f.y(0) - 12, 'middle');
+          if (L.clear(b)) { L.keep(b); s += '<text class="dry" x="' + ((M.l + xe) / 2).toFixed(1) + '" y="' + (f.y(0) - 12).toFixed(1) + '" text-anchor="middle">dry so far</text>'; }
+        }
       }
-      s += dueMark(f, W, H, nextDue(S, 'pcp'), true) + f.post;
+      s += dueMark(f, L, W, H, d, true) + f.post;
       return { H, s, f };
     }
 
@@ -745,7 +972,7 @@ window.WXSettle = (() => {
       if (!(P.end > P.start)) return;
       Object.keys(DRAW).forEach(k => {
         const svg = C[k].svg, W = Math.max(300, Math.round((svg.parentNode && svg.parentNode.clientWidth) || 900));
-        const r = DRAW[k](W, S);
+        const r = DRAW[k](W, S, svg);
         svg.setAttribute('viewBox', '0 0 ' + W + ' ' + r.H);
         svg.setAttribute('width', W); svg.setAttribute('height', r.H);
         // the shared axis, in pixels, for anyone checking the three line up
@@ -993,21 +1220,28 @@ window.WXSettle = (() => {
       const anyLate = P.hours.some(o => S.lateA(o) || S.lateP(o));
       // the hourly cut-off as this day's file has it
       const h0 = P.hours.find(o => o.hcut != null), aw = afterWords(h0 ? h0.hcut - h0.t : HOURLY_CUT);
-      foot.textContent = (run
+      const lead = (run
         ? 'Values are shown the way the contracts round them, temperature to a whole degree, wind and gust to a whole mile per hour and precipitation to a hundredth of an inch. '
-          + 'Point at an hour on a chart, or tap it, for the value as stored, converted before rounding and rounded. '
-          + 'The hourly amounts are rounded for display, so they can add up to a slightly different figure than the total. The running total is summed from NOAA’s own numbers before rounding and rounded once, and it is the column the contract resolves on. '
-        : 'This file carries each hour as stored, temperature, wind and gust to a thousandth and precipitation to a ten-thousandth of an inch, cut rather than rounded, and no running total. ')
-        + 'Each row is the ' + NAME + ' analysis at the top of the hour in ' + tz + ' and the precipitation over the hour that starts then, which NOAA files under the hour it ends. '
-        + 'NOAA publishes every file on two servers, NOAA Open Data (on Amazon’s cloud) and NOMADS (the National Centers for Environmental Prediction’s own server), and this page reads both. '
-        + 'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time. '
-        + 'The last two columns give the time each server published the hour’s analysis, as the server reports it. '
-        + 'Until a server has published the file, its column gives the time it usually does, and “not on record” means no time was kept for that server. '
-        + 'The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file, if that is by the hour’s cut-off, ' + aw + ' after the hour. '
-        + 'If NOMADS has not published it by then, NOAA Open Data’s copy becomes final at the cut-off, and with neither copy the hour has no value and goes to review. '
-        + 'For an hour not final yet, the table gives the time NOMADS usually publishes its file and the hour’s cut-off. '
-        + 'NOMADS’s publication times are on record only from 10:00 UTC on 3 November, so earlier hours are final at their cut-off on NOAA Open Data’s copy, or under review where it came later.'
+          + 'The precipitation total, summed from NOAA’s own numbers before rounding and rounded once, is the column the contract resolves on, and the hourly amounts, rounded for display, can add up to a slightly different figure.'
+        : 'This file carries each hour as stored, temperature, wind and gust to a thousandth and precipitation to a ten-thousandth of an inch, cut rather than rounded, and no running total.')
         + (anyLate ? ' A dimmed value was published after the cut-off and is not counted.' : '');
+      const pts = (run ? ['Point at an hour on a chart, or tap it, for the value as stored, converted before rounding and rounded.'] : []).concat([
+        'Each row is the ' + NAME + ' analysis at the top of the hour in ' + tz + ' and the precipitation over the hour that starts then, which NOAA files under the hour it ends.',
+        'NOAA publishes every file on two servers, NOAA Open Data (on Amazon’s cloud) and NOMADS (the National Centers for Environmental Prediction’s own server), and this page reads both.',
+        'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time.',
+        'The last two columns give the time each server published the hour’s analysis, as the server reports it. Until a server has published the file, its column gives the time it usually does, and “not on record” means no time was kept for that server.',
+        'The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file, if that is by the hour’s cut-off, ' + aw + ' after the hour.',
+        'If NOMADS has not published the file by then, NOAA Open Data’s copy becomes final at the cut-off. With neither copy, the hour has no value and goes to review.',
+        'For an hour not final yet, the table gives the time NOMADS usually publishes its file and the hour’s cut-off.',
+        'NOMADS’s publication times are on record only from 10:00 UTC on 3 November, so earlier hours are final at their cut-off on NOAA Open Data’s copy, or under review where that copy came later.']);
+      // written again only when the words change, so points a reader opened stay open through a replay
+      const key = lead + '\n' + pts.join('\n');
+      if (key !== footKey) {
+        footKey = key;
+        footLead.textContent = lead;
+        footList.textContent = '';
+        pts.forEach(t => footList.appendChild(h('li', { text: t })));
+      }
     }
 
     function destroy() {

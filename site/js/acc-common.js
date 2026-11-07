@@ -148,7 +148,8 @@ window.WXAcc = (() => {
   }
   /* The status strip. WXC.statusEl reads a top-level asof and these files
      keep theirs under meta, so the strip is built here in the same shape:
-     the dot, the as-of time in the reader's zone, the age, the cadence. */
+     the dot, the as-of time in the reader's zone with the zone named, the
+     age, the cadence. */
   function statusEl(D) {
     const meta = newestMeta(D);
     const n = Object.keys(FILES).filter(k => D[k]).length;
@@ -161,7 +162,7 @@ window.WXAcc = (() => {
     const mins = isNaN(built) ? null : (Date.now() - built) / 6e4;
     const cached = Object.keys(FILES).some(k => D.results[k] && D.results[k].source === 'cache');
     const stale = mins == null || mins > 2 * CADENCE;
-    const when = isNaN(built) ? 'unknown time' : WXC.clockFull(built, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const when = isNaN(built) ? 'unknown time' : WXC.clockZone(built, Intl.DateTimeFormat().resolvedOptions().timeZone);
     // the days the ForecastEx record is scored on, which is the span the
     // working paper quotes, rather than the wider window the builder reads
     const fx = (INFO.FX || {}).scored || {};

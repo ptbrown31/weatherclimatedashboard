@@ -455,14 +455,14 @@ CONVENTIONS = {
                 "that aggregate cut, not rounded, to a thousandth (precipitation to a ten-thousandth of an inch), "
                 "so it never looks as if it rounds the other way.",
     "strike": "A value equal to the strike resolves Yes, at or above it for the high, gust, mean wind and "
-              "precipitation and at or below it for the low (owner's decision 2026-09-28). The exchange's "
+              "precipitation and at or below it for the low (decided 28 September 2026). The exchange's "
               "current daily temperature and wind contracts resolve a value equal to the strike No.",
-    "provisional": "RTMA resolves, precipitation included (owner's decision 2026-09-29). A place-day is final at "
-                   "its cut-off, 12:45 AM local time on the day after (owner's ruling 2026-10-14), on the files "
+    "provisional": "RTMA resolves, precipitation included (decided 29 September 2026). A place-day is final at "
+                   "its cut-off, 12:45 AM local time on the day after (decided 14 October 2026), on the files "
                    "published on NOAA Open Data or NOMADS by then, and provisional until then. Each hour's copy is "
                    "fixed once both servers' copies are in, or at the first ten-minute pass after the cut-off on "
                    "the copies read by then, and the day turns final once every hour's copy is fixed, so a final "
-                   "day never changes (owner's ruling 2026-11-04). A file published after the cut-off is shown and "
+                   "day never changes (decided 4 November 2026). A file published after the cut-off is shown and "
                    "never counted, a copy read after its hour was fixed is recorded and never used, and an hour "
                    "missing at the cut-off leaves the value on the hours available.",
     "review": "A place-day with no hour published by its cut-off has no value and is marked for event review, "
@@ -471,14 +471,14 @@ CONVENTIONS = {
                "as published, from the first time it was on either, its Last-Modified time there. A file missing "
                "from one server counts from the other. Where the two copies differ, NOMADS's counts when it was "
                "published by the cut-off, and otherwise NOAA Open Data's. A place the copy that counts has no "
-               "value for has no value that hour (owner's ruling 2026-11-04). A download whose message fails the "
+               "value for has no value that hour (decided 4 November 2026). A download whose message fails the "
                "check counts only once a second download returns the same bytes.",
     "hourly": "Each row is the analysis at the top of the hour and the precipitation over the hour that starts "
               "then, which NOAA files under the hour it ends. Station report conventions (the last report in "
               "the hour, specials, the tenths group) have no analogue here.",
     "hourlyContract": "Each hour's temperature is also the hourly temperature contract's value, whole degrees "
-                      "Fahrenheit rounded once, half up, away from zero (owner's ruling 2026-11-04). Its cut-off is "
-                      "1 hour 30 minutes after the hour in every zone (owner's ruling 2026-11-05; three hours until "
+                      "Fahrenheit rounded once, half up, away from zero (decided 4 November 2026). Its cut-off is "
+                      "1 hour 30 minutes after the hour in every zone (decided 5 November 2026; three hours until "
                       "then), and the daily 12:45 AM cut-off does not apply to it. It is final once NOMADS's copy of "
                       "the analysis is in, if published by that cut-off; "
                       "otherwise at the first ten-minute pass after the cut-off, on NOAA Open Data's copy if "
@@ -500,8 +500,8 @@ CONVENTIONS = {
               "those cells at their own resolution in place of the lattice and outlines the resolving cell; the "
               "place value is that cell's own.",
     "resolvedDay": "A day is fully resolved when every one of the sixty-seven places has its RTMA day final and "
-                   "its precipitation total resolved. The page opens on the newest such day, and the day "
-                   "select marks the days after it as provisional.",
+                   "its precipitation total resolved. The settlement display opens on the newest such day, and "
+                   "its calendar marks each day final, provisional, under review or closed.",
     "units": "Kelvin to Fahrenheit as (K - 273.15) x 9/5 + 32, metres per second to miles per hour by "
              "2.2369362921, millimetres to inches by 1/25.4, all in decimal arithmetic.",
 }

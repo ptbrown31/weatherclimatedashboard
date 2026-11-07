@@ -56,6 +56,18 @@ window.WXAnalysis = (() => {
   const withUnit = (v, dec) => (v == null ? '' : fmt(v, dec) + (V().unit === 'in' ? ' in' : V().unit === 'mph' ? ' mph' : V().unit));
   const longDate = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
   const shortDate = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' });
+  // a date on a button, "Wed, Nov 4"
+  const btnDate = d => new Date(d + 'T12:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+  // an analysis valid time on the reader's own clock with the zone named, its
+  // weekday and then the hour in UTC, as the files keep it, "3:00 PM EST
+  // Thursday (20:00 UTC)"; null for none
+  function validText(iso) {
+    const t = iso ? Date.parse(iso) : NaN;
+    if (isNaN(t)) return null;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return WXC.clockZone(t, tz) + ' ' + new Date(t).toLocaleDateString('en-US', { weekday: 'long', timeZone: tz })
+      + ' (' + new Date(t).toISOString().slice(11, 16) + ' UTC)';
+  }
 
   // a link that names a place and a variable opens on that variable's chart.
   // An address from before 2026-11-04 may carry hour= and the map's view
@@ -136,9 +148,9 @@ window.WXAnalysis = (() => {
       return;
     }
     const src = S.index.sources || {};
-    const validAt = s => (s && s.latest ? String(s.latest).replace('T', ' ').replace(/:00Z$/, ' UTC') : 'none read');
+    const validAt = s => { const v = validText(s && s.latest); return v ? 'valid ' + v : 'none read'; };
     const bar = $('#anaBar');
-    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', id: 'anaNewest', text: 'newest ' + PRODUCT_NAME + ' analysis ' + validAt(src[PRODUCT]) }));
+    bar.appendChild(h('span', { class: 'cap', style: 'margin:0', id: 'anaNewest', text: 'newest ' + PRODUCT_NAME + ' analysis, ' + validAt(src[PRODUCT]) }));
     const days = (S.index.days || []).slice();
     if (!days.length) {
       pickers.appendChild(h('p', { class: 'cap' }, 'No days have been read yet. ' + STATEMENT));
@@ -555,10 +567,37 @@ window.WXAnalysis = (() => {
     const onSize = () => { const w = Math.round(svg.getBoundingClientRect().width); if (w && w !== lastW) { lastW = w; drawDots(); } };
     if (window.ResizeObserver) new ResizeObserver(onSize).observe(svg); else window.addEventListener('resize', onSize);
 
-    // ---- the open place's header (spec section 8): its name and code, its
-    //      analysis grid point and Grid 184 point, the centre of its grid
-    //      square and its zone, from the index's location list
+    // ---- the open place's header (spec section 8): its name and code, the
+    //      day and its buttons, then where the place is and its zone, how far
+    //      the centre of its grid square lies from there, the statement, and
+    //      last its analysis grid point, its point on RTMA's precipitation
+    //      grid (Grid 184) and the centre of its grid square, from the index's
+    //      location list
     const head = $('#anaHead');
+    const zoneFmts = {};
+    const zoneFmt = (tz, o, lang) => { const k = (lang || 'en-US') + tz + JSON.stringify(o);
+      return zoneFmts[k] || (zoneFmts[k] = new Intl.DateTimeFormat(lang || 'en-US', Object.assign({ timeZone: tz }, o))); };
+    const zonePart = (tz, o, t) => ((zoneFmt(tz, o).formatToParts(t).find(p => p.type === 'timeZoneName')) || {}).value || '';
+    /* The place's zone in words with its offset on the open day, "Mountain
+       Time (UTC−7)", and both offsets on a day the clocks change, "Mountain
+       Time (UTC−6, then UTC−7)". The offsets are read hour by hour across
+       the local day; a browser without offset names gives the name alone. */
+    function zoneWords(tz, day) {
+      if (!tz) return '';
+      let name = tz;
+      try { name = zonePart(tz, { timeZoneName: 'long' }, Date.parse(day + 'T12:00:00Z')).replace(/ (Standard|Daylight) /, ' ') || tz; } catch (e) { /* the zone's own name */ }
+      const offs = [];
+      try {
+        const t0 = Date.parse(day + 'T00:00:00Z');
+        for (let k = -14; k <= 38; k++) {
+          const t = t0 + k * 36e5;
+          if (zoneFmt(tz, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-CA').format(t) !== day) continue;
+          const o = zonePart(tz, { timeZoneName: 'shortOffset' }, t).replace('GMT', 'UTC').replace('-', '−');
+          if (o && offs[offs.length - 1] !== o) offs.push(o);
+        }
+      } catch (e) { offs.length = 0; }
+      return name + (offs.length ? ' (' + offs.join(', then ') + ')' : '');
+    }
     function renderHead(L) {
       head.textContent = '';
       const i = days.indexOf(S.day);
@@ -568,8 +607,8 @@ window.WXAnalysis = (() => {
       row.appendChild(h2);
       row.appendChild(h('span', { class: 'anaday', id: 'anaHeadDay', text: longDate(S.day) }));
       const nav = h('span', { class: 'ananav' });
-      const prev = h('button', { type: 'button', text: '◀ ' + (i > 0 ? days[i - 1] : 'earlier'), id: 'anaPrevDay' });
-      const next = h('button', { type: 'button', text: (i < days.length - 1 ? days[i + 1] : 'later') + ' ▶', id: 'anaNextDay' });
+      const prev = h('button', { type: 'button', text: '◀ ' + (i > 0 ? btnDate(days[i - 1]) : 'earlier'), id: 'anaPrevDay' });
+      const next = h('button', { type: 'button', text: (i < days.length - 1 ? btnDate(days[i + 1]) : 'later') + ' ▶', id: 'anaNextDay' });
       prev.disabled = i <= 0; next.disabled = i >= days.length - 1;
       prev.onclick = () => { if (i > 0) { S.day = days[i - 1]; changed('day'); } };
       next.onclick = () => { if (i < days.length - 1) { S.day = days[i + 1]; changed('day'); } };
@@ -580,13 +619,14 @@ window.WXAnalysis = (() => {
       head.appendChild(row);
       const c = L.cell || {}, ij = a => (a && a.length >= 2 ? '(' + a[0] + ', ' + a[1] + ')' : 'not on record');
       const ll = (lat, lon) => lat.toFixed(4) + '° N, ' + Math.abs(lon).toFixed(4) + '° ' + (lon < 0 ? 'W' : 'E');
-      head.appendChild(h('p', { class: 'anafacts', id: 'anaFacts', text: 'Analysis grid point ' + ij(c.wexp) + ' · Grid 184 point ' + ij(c.g184)
-        + ' · grid square centred at ' + (c.centre && c.centre.length >= 2 ? ll(c.centre[0], c.centre[1]) : 'a point not on record') + ' · ' + L.tz }));
-      let note = (c.distanceKm != null && L.lat != null ? 'The centre is ' + c.distanceKm + ' km from the position at ' + ll(L.lat, L.lon) + '.' : '')
-        + (L.position ? ' The position is ' + L.position + '.' : '') + (L.note ? ' ' + L.note : '');
-      head.appendChild(h('p', { class: 'cap anastmt', text: STATEMENT + ' The values below are what the framework would have resolved for '
-        + L.name + ' on ' + S.day + ' from the ' + PRODUCT_NAME + ' analysis.' }));
+      head.appendChild(h('p', { class: 'anawhere', id: 'anaWhere', text: [L.position, zoneWords(L.tz, S.day)].filter(Boolean).join(' · ') }));
+      const note = (c.distanceKm != null && L.lat != null ? 'The centre of its 2.5 km grid square is ' + c.distanceKm + ' km from the position, which is at '
+        + ll(L.lat, L.lon) + '.' : '') + (L.note ? ' ' + L.note : '');
       if (note.trim()) head.appendChild(h('p', { class: 'cap', id: 'anaCell', text: note.trim() }));
+      head.appendChild(h('p', { class: 'cap anastmt', text: STATEMENT + ' The values below are what the framework would have resolved for '
+        + L.name + ' on ' + longDate(S.day) + ', from the ' + PRODUCT_NAME + ' analysis.' }));
+      head.appendChild(h('p', { class: 'anafacts', id: 'anaFacts', text: 'Analysis grid point ' + ij(c.wexp) + ' · precipitation grid (Grid 184) point ' + ij(c.g184)
+        + ' · grid square centred at ' + (c.centre && c.centre.length >= 2 ? ll(c.centre[0], c.centre[1]) : 'a point not on record') }));
     }
 
     // ---- the place-day: the settlement display, under the calendar and the map
@@ -643,8 +683,8 @@ window.WXAnalysis = (() => {
         panel.appendChild(settle.node);
       }
       const noneText = locRes && locRes.source === 'none'
-        ? 'The hourly file for ' + L.name + ' on ' + S.day + ' could not be read. The hourly charts and table appear once it can be.'
-        : 'No hours read yet for ' + L.name + ' on ' + S.day + '. The hourly charts and table appear once the first analysis of the day is read.';
+        ? 'The hourly file for ' + L.name + ' on ' + longDate(S.day) + ' could not be read. The hourly charts and table appear once it can be.'
+        : 'No hours read yet for ' + L.name + ' on ' + longDate(S.day) + '. The hourly charts and table appear once the first analysis of the day is read.';
       settle.show({ key: L.id + '/' + S.day, doc: doc || null, entry, unread, tz: L.tz, varKey: S.var, noneText,
                     place: { id: L.id, name: L.name, state: L.state, code: L.code || '' } });
     }
@@ -704,7 +744,7 @@ window.WXAnalysis = (() => {
     host.appendChild(dl);
     const src = S.index.sources || {};
     const lag = m => (m == null ? 'an unmeasured lag' : m < 90 ? 'about ' + Math.round(m) + ' minutes' : 'about ' + Math.floor(m / 60) + ' hours ' + (m % 60) + ' minutes');
-    const latest = s => (s && s.latest ? ', newest hour read ' + s.latest.replace('T', ' ').replace(':00:00Z', ' UTC') : '');
+    const latest = s => { const v = validText(s && s.latest); return v ? ', newest hour read ' + v : ''; };
     const s0 = src[PRODUCT] || {};
     host.appendChild(h('p', { text: 'Sources. RTMA is read from NOAA Open Data (' + (s0.bucket || 'noaa-rtma-pds') + '), '
       + lag(s0.lagMinutes) + ' after each hour' + latest(s0) + '; its precipitation is NOAA’s radar-only estimate. '

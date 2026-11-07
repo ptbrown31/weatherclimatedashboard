@@ -853,7 +853,9 @@ table.lad th{font-weight:600;border-bottom:1px solid var(--line)}
 .anaheadrow .anaday{color:var(--muted);font-size:13.5px}
 .anaheadrow .ananav{margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap}
 .anaheadrow .ananav button{padding:4px 9px;font-size:12.5px}
-.anafacts{margin:5px 2px 0;font-size:13px;max-width:none}
+/* the place's header leads with where it is and its zone, and ends with its grid points in small type */
+.anawhere{margin:5px 2px 0;font-size:13.5px;color:var(--ink)}
+.anafacts{margin:6px 2px 0;font-size:11.5px;color:var(--muted);max-width:none}
 .anastmt{margin:6px 2px 0;font-weight:600;color:var(--ink)}
 .anapick{margin:2px 2px 12px}
 /* the calendar and the map, always on the page */
@@ -997,6 +999,19 @@ table.anahours td.hst{font-size:11.5px;color:var(--muted)}
 table.anahours td.hst[data-state="final"]{color:var(--ok)}
 table.anahours td.hst[data-state="review"]{color:var(--bad)}
 table.anahours th.num,table.anahours td.num{text-align:right}
+/* the local time stays in view while a phone scrolls the hours sideways: an opaque cell of the
+   panel's colour, the zebra's tint laid over it in its rows, and a rule along its edge. It holds
+   a pixel past the box's edge, where the table's collapsed border leaves the cell unpainted */
+table.anahours thead tr:first-child th:first-child,table.anahours tbody td:first-child{position:sticky;left:-1px;z-index:1;
+  background:var(--panel);box-shadow:inset -1px 0 0 var(--rule)}
+table.anahours tbody tr:nth-child(odd) td:first-child{box-shadow:inset -1px 0 0 var(--rule),inset 0 0 0 9999px rgba(127,127,127,.035)}
+/* the note under the table, a sentence or two and the rest in points under a summary */
+.anafoot p{margin:0;max-width:none}
+.anafoot details{margin-top:6px}
+.anafoot summary{cursor:pointer;color:var(--ink)}
+.anafoot summary:hover{color:var(--accent)}
+.anafoot ul{margin:4px 0 0;padding-left:18px}
+.anafoot li{margin:2px 0}
 /* the replay comes last, as the specification orders it, and is held at the
    foot of the screen while the day is on it, so the charts it moves stay in
    view; a day that cannot be replayed has only its note there */
@@ -1009,6 +1024,7 @@ table.anahours th.num,table.anahours td.num{text-align:right}
 .anawhen{white-space:nowrap;font-variant-numeric:tabular-nums}
 .anawhen b{font-size:16px}
 .anawhen span{color:var(--muted);margin-left:6px;font-size:12.5px}
+.anawhen.ended span{margin-left:0}     /* "End of day, final 12:45 AM Fri" reads as one phrase */
 #anaT{width:100%;min-width:0;accent-color:var(--accent)}
 /* on a phone the replay is two rows, the time and then the buttons beside the slider, so the bar
    held at the foot of the screen stays short */

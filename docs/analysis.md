@@ -954,7 +954,8 @@ uploaded, so the live lane started with its backfill done.
 `REF`), shows version 3 of the settlement display, the prototype the owner approved on
 2026-11-04. It is built from the same skeleton as
 `wind-markets.html`: title, `p.sub` carrying the statement, a `.bar` with the day's CSV links,
-`#pageStatus` and the newest analysis hour, the calendar and the map (`#anaPickers`), the open
+`#pageStatus`, whose time names the reader's zone, and the newest analysis hour on the reader's
+clock with the zone, the weekday and the hour in UTC after it, the calendar and the map (`#anaPickers`), the open
 place's header (`#anaHead`), `p#anaPick` (a line asking for a place, shown while none is open),
 the place-day (`#locPanel`), the method prose and `p.cap#foot`. Scripts: common, data,
 `js/analysis-settle.js` (the place-day, `WXSettle`), then `js/analysis.js` (the rest,
@@ -1011,9 +1012,12 @@ place files, and no longer the grid index or the frames, which the lane still wr
 
 **Header** (`#anaHead`, shown once a place is open). The place's name, with its code in brackets
 when the index carries one (`code`, ForecastEx's three-character code), the date, previous and next
-day buttons and Close; its analysis grid point and Grid 184 point (i, j), the centre of its grid
-square and its zone, from the index's location list; the statement; and how far the centre is from
-the position, with the position itself and any ruling.
+day buttons, which name their days in short words ("◀ Wed, Nov 4"), and Close; then the position and
+the place's zone in words with its offset on the open day, "Mountain Time (UTC−7)", both offsets on a
+day the clocks change; how far the centre of its 2.5 km grid square is from the position, with any
+ruling; the statement, which names the day in full; and last, in small type, its analysis grid point
+and its point on RTMA's precipitation grid (Grid 184) (i, j) and the centre of its grid square, from
+the index's location list.
 
 **The place-day** (`#anaSettle`, `js/analysis-settle.js`), in the specification's order:
 
@@ -1039,9 +1043,13 @@ the position, with the position itself and any ruling.
   marked, sustained wind and gust with the running mean as a dashed line and the peak gust marked,
   and hourly precipitation bars with the running total as a step line. Each shades the hours still
   to come and draws a now line at the clock and a dashed line at the next hour to come, labelled
-  "next, expected" with its usual time, left of the line where the plot ends too soon for it, and
-  under each is a CSV file for each value on it;
-- every hour in a table: local and UTC time, each value as the contract shows it, the hour's hourly
+  "next, expected" with its usual time. No label overlaps another label, the axis's included, the now
+  line, the next-due line or a series line: each takes the first clear place in a fixed order that
+  starts where it always went (`layout` in the script), and only where nothing is clear, as on a
+  crowded phone chart, does the next-due label say less ("expected 2:46 PM", then the time alone,
+  then nothing) and the mean label drop its unit. Under each chart is a CSV file for each value on it;
+- every hour in a table, its local time held at the left while a phone scrolls the hours sideways:
+  local and UTC time, each value as the contract shows it, the hour's hourly
   contract in a few words with its full wording on hover, the running precipitation total, and under
   one header, "Analysis published", a column for NOMADS and one for NOAA Open Data (owner,
   2026-11-05). Each gives that server's own Last-Modified time for the hour's analysis once the moment
@@ -1049,11 +1057,14 @@ the position, with the position itself and any ruling.
   "expected" with the time that server usually publishes (46 minutes after the hour for NOMADS, 49
   for NOAA Open Data), while the file can still come; "not on record" where no time was kept for it,
   NOMADS before 10:00 UTC on 3 November or a server the record has no time for on a file that is in;
-  and "not published" past the cut-off. A footnote says the rounded hours can add up to a different
-  figure than the total, which is the column the contract resolves on, explains the two servers and
-  the hourly contract, and gives the hourly cut-off as the day's file has it;
-- the replay, last: the time the day is shown as of, local and UTC, a slider, Play the day (a minute
-  every 30 ms) and Latest. It is held at the foot of the screen while the day is on it, so the
+  and "not published" past the cut-off. Under it two sentences say how the values are rounded and
+  that the precipitation total, which the rounded hours can add up to a different figure than, is the
+  column the contract resolves on; how each hour is read, the two servers, which copy counts and the
+  hourly contract, with its cut-off as the day's file has it, are points under a summary, closed at
+  first, which stay open through a replay;
+- the replay, last: the time the day is shown as of, local and UTC, and past the day's end "End of
+  day" with the cut-off, "final 12:45 AM Fri" once the day is final and "cut-off 12:45 AM Fri"
+  before, never the next day's clock; a slider, Play the day (a minute every 30 ms) and Latest. It is held at the foot of the screen while the day is on it, so the
   charts it moves stay in view.
 
 **Hover.** Pointing at an hour, or tapping it on a phone, opens a box for that hour. A tap or a
@@ -1299,25 +1310,34 @@ no analogue here.
   provisional, or on the newest day when the index lacks the field; the day's CSV links fetch the
   raw and processed files; the calendar and the map are on the page with no day or place button,
   popover, second map, ladder or exact box, side by side at 1280 px and stacked at 375 px with a
-  16 px gutter, above the place's header and its day, with no sideways scroll; the map labels every
+  16 px gutter, above the place's header and its day, with no sideways scroll, and at 375 px the hour
+  table's local time stays in view, opaque and edged, as the hours scroll under it; the map labels every
   place with the day file's value for the chosen variable in the scheme's own colours, and a day with
   no file draws every place hollow; the calendar marks each listed day's state, greys the rest, steps
   only through months with listed days, walks by keyboard and opens a date for the same place; a
   place chosen on the map or in the box opens on the same date, and the box's list narrows, steps
   and closes on Escape or when the focus leaves; the switch, a value card and a link's `var=` set the
-  map's variable and the card; the header gives both grid points, the centre and the zone; the page
+  map's variable and the card; the header leads with the position and the zone in words with the
+  day's offset, both offsets on 1 November, then the cell sentence, and ends with both grid points and
+  the centre; the day buttons name the days they open in short words and the statement names the day
+  in full; the status strip and the newest analysis name the reader's zone and follow it from Denver
+  to Honolulu, as the accuracy page's strip does; the method notes give their dates in words; the page
   offers no product choice, never says URMA (an old `product=urma` address opens on RTMA) and shows
   no price; a short day reads provisional with its count, a place under review says so on every card,
   an unreadable file is reported as unreadable, and the 503 degradation shows "No data". For the
   settlement display, on the samples' final New York day: the five cards carry the summary's values;
   the hour table gives each hour's publication time on each server under one header and its hourly
-  contract, and ends its running total on the day's; each chart's hover gives the lane's stored,
+  contract, and ends its running total on the day's, with two sentences under it and the rest in
+  points under a summary that stay open through a replay; each chart's hover gives the lane's stored,
   converted and rounded values, the day so far and both servers' times or "not on record"; each of the
   four CSV files has its header, 24 rows and every value and time the place file's own string; the
   replay ends a quarter hour past the later of the cut-off and the last hour's hourly cut-off with
-  the 11 PM hour final and provisional before its own cut, moves the cards to the lane's running values
+  the 11 PM hour final and provisional before its own cut, its bar saying from midnight that the day
+  has ended and giving its cut-off, moves the cards to the lane's running values
   for a minute at the files' own times, shows each hourly contract as it stood and when each hour to
-  come will be final, and Latest and Play the day work; `var=` opens its chart; and a `rowShape` 2 file with no times and a file without `rowShape`
+  come will be final, and Latest and Play the day work; through a replay of Billings's and New York's
+  day, sampled every twenty minutes at 375 px and at 1280 px, no chart label's box overlaps another
+  label, the now line, the next-due line or a series line; `var=` opens its chart; and a `rowShape` 2 file with no times and a file without `rowShape`
   still draw, with no replay. On a `rowShape` 3 file made by hand from the samples
   (`ana_row_shape3`): each basis's wording of the hourly contract, both servers' found and published
   times, a file counted under the rule before 14 October, an hour under review before and after its
