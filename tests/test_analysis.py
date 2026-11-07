@@ -1653,7 +1653,7 @@ class Job(unittest.TestCase):
         # would be a read of its own (test_a_precipitation_read_is_a_read)
         self.fx.add_hour("rtma", t, precip=False)
         self.fx.grids[("rtma", "TMP", iso(t))] = "other"
-        self.assertEqual(self.run_pass(), 1)                   # the only reads this pass failed
+        self.assertEqual(self.run_pass(), 0)                   # a failed read alone does not fail the pass
         self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
         self.assertEqual(archive.LAST_STATUS["failed"], 2)     # refused on each server
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
@@ -1669,7 +1669,7 @@ class Job(unittest.TestCase):
         t = hour(2026, 9, 26, 19)
         self.fx.add_hour("rtma", t)
         self.fx.raise_for = lambda url: "rtma2p5" in url and not url.endswith(".idx")
-        self.assertEqual(self.run_pass(), 1)                   # nothing was read
+        self.assertEqual(self.run_pass(), 0)                   # nothing was read, but only reads failed
         self.assertIsNone(self.read(analysis.hour_key("rtma", t)))
         self.assertIsNotNone(self.state())
         self.assertIsNotNone(self.read(analysis.GRID_INDEX_KEY))
@@ -1697,6 +1697,26 @@ class Job(unittest.TestCase):
         self.assertEqual((self.health()["rtma"]["fail_streak"], archive.LAST_STATUS["alarms"]), (0, []))
         self.assertEqual(self.read(analysis.INDEX_KEY)["sources"]["rtma"]["latest"], iso(t))
 
+    def test_only_the_lanes_own_failure_fails_a_pass_that_read_nothing(self):
+        # A failed read is the streak's to page on once it lasts (owner, 2026-11-07): NOMADS's .idx goes up before
+        # its file is whole, so a read in that moment fails and the next pass takes it. A failure no product is to
+        # blame for is the lane's own, and with nothing read it still fails the pass
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        self.fx.raise_for = lambda url: "rtma2p5" in url and not url.endswith(".idx")
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual((self.status["failed"] > 0, self.status["laneFailed"]), (True, 0))
+        self.fx.raise_for = None
+        keep = analysis._run
+
+        def broken(*a, **k):
+            raise RuntimeError("the state could not be written")
+        analysis._run = broken
+        self.addCleanup(lambda: setattr(analysis, "_run", keep))
+        self.assertEqual(self.run_pass(NOW + dt.timedelta(minutes=10)), 1)
+        self.assertEqual(self.status["laneFailed"], 1)
+        self.assertIn("pass: RuntimeError: the state could not be written", self.errors)
+
     def test_a_product_the_lane_no_longer_reads_raises_no_alarm(self):
         # the health file keeps URMA's last streak after 2026-09-30; it is
         # never advanced again and must not alarm
@@ -1718,7 +1738,7 @@ class Job(unittest.TestCase):
                 raise ValueError("data representation template 5.40 is not supported")
             return keep(msg, ks)
         analysis.grib2.decode_cells = refuse
-        self.assertEqual(self.run_pass(), 1)
+        self.assertEqual(self.run_pass(), 0)                   # a refused message is a read failure, the streak's
         self.assertIsNotNone(self.state())
         self.assertIsNotNone(self.read(analysis.INDEX_KEY))
         self.assertIsNotNone(self.read(analysis.GRID_INDEX_KEY))
@@ -3291,7 +3311,7 @@ class Job(unittest.TestCase):
         self.fx.add_hour("rtma", t21, precip=False)
         bad = {analysis.anl_url("rtma", t21, nomads=n) for n in (False, True)}
         self.fx.raise_for = lambda url: url in bad                         # every message read fails, on both
-        self.assertEqual(self.run_window(t21 + dt.timedelta(minutes=50)), 1)
+        self.assertEqual(self.run_window(t21 + dt.timedelta(minutes=50)), 0)   # a failed read alone, the streak's
         self.assertEqual(self.health()["rtma"]["fail_streak"], 0)
         self.run_pass(t21 + dt.timedelta(minutes=58))
         self.assertEqual(self.health()["rtma"]["fail_streak"], 1)

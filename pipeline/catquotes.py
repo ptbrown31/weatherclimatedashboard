@@ -52,8 +52,22 @@ EMPTY_RUN_LIMIT = 250
 # and annual contracts is far more freshness than they need, and no pass ever
 # publishes a throttle as an absence of bids.
 BUDGET_PER_PASS = 900
+# A pass within this many minutes of the last one has nothing to add worth its quote calls: these contracts move
+# slowly, and a failed half-hourly chain is run again whole by Lambda a minute or two later, which repeated about
+# 1,200 quote calls each time (owner, 2026-11-07). The half-hourly schedule itself is never this close.
+MIN_GAP_MINUTES = 20
 # the same four the fast lane measured as safe against this exchange; serially
 # this pass took ten minutes to reach forty products, which is not a lane
+
+
+def last_pass(store: Storage) -> Optional[dt.datetime]:
+    """When the last pass wrote its index, or None for none or one that cannot be read."""
+    raw = store.get(INDEX_KEY)
+    try:
+        t = dt.datetime.fromisoformat(str(json.loads(raw)["asof"]).replace("Z", "+00:00")) if raw else None
+    except (ValueError, KeyError, TypeError):
+        return None
+    return t if t is None or t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
 
 
 def _iso(t: dt.datetime) -> str:
@@ -102,6 +116,13 @@ def catquotes_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) 
                           "hint": "config/contracts.json is not on the path"}))
         arch.LAST_STATUS = {"job": "catquotes", "errors": 1, "alarms": ["catquotes: no contract registry"]}
         return 1
+    last = last_pass(store)
+    if last is not None and dt.datetime.now(dt.timezone.utc) - last < dt.timedelta(minutes=MIN_GAP_MINUTES):
+        ago = (dt.datetime.now(dt.timezone.utc) - last).total_seconds() / 60
+        print(json.dumps({"kind": "catquotes", "written": False, "skipped": "the last pass was %.0f minutes ago" % ago,
+                          "seconds": round(time.time() - t0, 1)}))
+        arch.LAST_STATUS = {"job": "catquotes", "errors": 0, "alarms": []}
+        return 0
 
     deadline = arch.Deadline(arch.remaining_budget(cfg))
     workers = int(((cfg.get("exchange") or {}).get("quote_workers")) or 4)

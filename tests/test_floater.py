@@ -2,7 +2,9 @@
 this site's bucket and an index the page plays, a later pass copies only the
 new frames and deletes the ones that fall out of the loop, and a storm that
 leaves NHC's roster takes its frames with it. No network."""
+import contextlib
 import datetime as dt
+import io
 import json
 import math
 import os
@@ -221,6 +223,38 @@ _GIF = wpc_gif()
 
 def gif(w=900, h=675):
     return _GIF if (w, h) == (900, 675) else gif_bytes(w, h, bytes(w * h))
+
+
+class Pass(unittest.TestCase):
+    """What the pass tells the half-hourly chain (owner, 2026-11-07): a storm STAR has no frames for is reported and
+    keeps its last loop without failing the pass, since a failed pass has Lambda run the whole chain again; a part
+    that fails as a whole still fails it."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.st = storage.LocalStorage(self.tmp.name)
+        keep_job, keep_wpc = floater.floater_job, floater.wpc_job
+        self.addCleanup(lambda: (setattr(floater, "floater_job", keep_job), setattr(floater, "wpc_job", keep_wpc)))
+        floater.wpc_job = lambda store, now, deadline=None: {"written": True, "frames": 8, "copied": 0}
+
+    def run_pass(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return floater.floater_pass({}, self.st)
+
+    def test_a_storm_with_no_frames_is_reported_and_does_not_fail_the_pass(self):
+        floater.floater_job = lambda cfg, store, now, deadline=None: {
+            "written": True, "storms": 1, "copied": 0, "errors": ["cp042026: HTTPError: HTTP Error 404: Not Found"]}
+        self.assertEqual(self.run_pass(), 0)
+        self.assertEqual(floater.arch.LAST_STATUS["errors"], 1)
+
+    def test_a_part_that_fails_as_a_whole_fails_the_pass(self):
+        def unreachable(*a, **k):
+            raise OSError("STAR unreachable")
+        floater.floater_job = unreachable
+        self.assertEqual(self.run_pass(), 1)
+        floater.floater_job = lambda cfg, store, now, deadline=None: {"written": True, "storms": 0, "copied": 0, "errors": []}
+        floater.wpc_job = unreachable
+        self.assertEqual(self.run_pass(), 1)
 
 
 class WpcOnMap(unittest.TestCase):

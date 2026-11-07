@@ -708,9 +708,13 @@ def _gz(doc) -> bytes:
 def _fail(status: dict, text: str) -> None:
     """Record one failure the pass continues past. Texts start with the
     product's name where one is to blame, which is how health_results counts
-    them toward that product's streak."""
+    them toward that product's streak. A failure no product is to blame for
+    (the lease, the state, a write) is the lane's own, and only that kind can
+    fail the pass (analysis_pass)."""
     status["errors"].append(text)
     status["failed"] += 1
+    if not text.startswith(tuple(p + " " for p in PRODUCTS)):
+        status["laneFailed"] = status.get("laneFailed", 0) + 1
 
 
 def load_locations(path: str = LOCATIONS_PATH) -> list:
@@ -3328,9 +3332,12 @@ def _health(store: Storage, state: dict, status: dict, now: dt.datetime) -> list
 # ------------------------------------------------------------------ the pass
 def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None, window: bool = False) -> int:
     """Entry point of both passes, the ten-minute pass and, with `window`,
-    the windowed pass (window_pass). Returns 1 only when every read this pass
-    failed, so the scheduler flags an outage; a missing object is an
-    absence, reported and never a failure. A pass that finds the lease held
+    the windowed pass (window_pass). Returns 1 only when the lane itself
+    failed (a failure no product is to blame for) and nothing was read, so
+    the scheduler flags an outage. A failed read alone returns 0: it is in
+    the status line, and the failure streak raises the lane's alarm once
+    reads keep failing. A missing object is an absence, reported and never a
+    failure. A pass that finds the lease held
     writes nothing and returns 0 with the status "lease held", which is not
     a failure and raises no alarm. Each lane is guarded on its own so one
     lane's trouble never costs the day rebuild, the state or the indexes."""
@@ -3340,7 +3347,7 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None, 
     gw.set_user_agent(cfg.get("user_agent", ""))
     budget = arch.remaining_budget(cfg)
     status: dict = {"kind": "analysis", "mode": mode, "read": [], "pcpRead": [], "copies": [], "absent": [], "waiting": [],
-                    "errors": [], "failed": 0, "backfilled": 0, "backfilledBy": {p: 0 for p in PRODUCTS}, "days": 0,
+                    "errors": [], "failed": 0, "laneFailed": 0, "backfilled": 0, "backfilledBy": {p: 0 for p in PRODUCTS}, "days": 0,
                     "pruned": 0}
     if grib2 is None:
         status["errors"].append("pipeline.grib2 is not available; nothing read")
@@ -3371,7 +3378,13 @@ def analysis_pass(cfg: dict, store: Storage, now: Optional[dt.datetime] = None, 
         except Exception as e:  # noqa: BLE001 - a lease not released expires on its own
             status["errors"].append(f"lease release: {type(e).__name__}: {e}")
     reads = len(status["read"]) + len(status["pcpRead"]) + status["backfilled"]
-    errors = 1 if (status["failed"] and reads == 0) else 0
+    # A failed read alone does not fail the pass (owner, 2026-11-07). NOMADS puts up a file's .idx before the file is
+    # whole, so a read in that moment fails and a pass a minute or two later takes it, and a server's 503 clears as
+    # fast; failing the pass for it paged the owner several times a day for hours the lane read minutes later. Each
+    # failure stays in the status line, and the failure streak raises the lane's alarm once reads keep failing (an
+    # hour of ten-minute passes, inside the hourly contracts' 90-minute cut-off). The lane's own failure still fails
+    # a pass that read nothing, as any failure did before.
+    errors = 1 if (status["laneFailed"] and reads == 0) else 0
     return _close(status, t0, mode, errors, alarms=alarms, state=state, lease="released")
 
 

@@ -419,18 +419,23 @@ def floater_pass(cfg: dict, store: Storage) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     t0 = time.time()
     deadline = arch.Deadline(arch.remaining_budget(cfg))
+    # A storm STAR has no frames for is reported and keeps its last loop, and does not fail the pass: a failed pass
+    # fails the half-hourly chain, and Lambda then runs the whole chain again, the catalogue's quotes included, for a
+    # storm whose frames will still be missing (owner, 2026-11-07). Only a part that fails as a whole fails the pass.
+    failed = 0
     try:
         out = floater_job(cfg, store, now, deadline=deadline)
         errors = len(out.get("errors") or [])
     except Exception as e:  # noqa: BLE001 - a missed pass leaves the last loops standing
         out = {"written": False, "error": f"{type(e).__name__}: {e}"}
-        errors = 1
+        errors = failed = 1
     try:
         out["wpc"] = wpc_job(store, now, deadline=deadline)
     except Exception as e:  # noqa: BLE001 - the storms' loops do not wait on the analysis loop
         out["wpc"] = {"written": False, "error": f"{type(e).__name__}: {e}"}
         errors += 1
+        failed = 1
     out.update({"kind": "floater", "seconds": round(time.time() - t0, 1)})
     arch.LAST_STATUS = {"job": "floater", "errors": errors, "alarms": []}
     print(json.dumps(out))
-    return errors
+    return failed
