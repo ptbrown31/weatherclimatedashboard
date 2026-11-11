@@ -29,6 +29,7 @@ import gzip
 import json
 import os
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
@@ -48,6 +49,12 @@ RULES_KEY = "archive/_meta/contract_rules.json"   # conid -> the hour its contra
 HISTORY_HOURS = 48          # per-strike quote history carried in a station snapshot
 QUOTE_WORKERS = 4           # measured 2026-08-23: no throttling at four concurrent requests
 PREFIX = "snapshots/market/"
+
+
+class ExchangeUnreachable(RuntimeError):
+    """The exchange answered nothing this pass would use: its tree, or every
+    quote. The previous snapshots stand, and quotes_pass counts it toward the
+    exchange's failure streak instead of failing the pass."""
 
 
 def _cents(v: Optional[float]) -> Optional[int]:
@@ -479,7 +486,10 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             desk_mg = {}
     t0 = time.time()
 
-    tree = ex.fetch_tree()                      # raises: the pass fails as a whole, snapshots untouched
+    try:
+        tree = ex.fetch_tree()                  # the pass ends here, snapshots untouched
+    except Exception as e:  # noqa: BLE001 - the exchange's failure, counted toward its streak
+        raise ExchangeUnreachable(f"tree: {type(e).__name__}: {e}") from e
     bysym = ex.markets_by_symbol(tree)
     # a symbol node with no name is the thing that would wake the nameless
     # branch of the storm matcher, which is dead against the API as it stands.
@@ -542,6 +552,7 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
     rules_cache = _load_rules(store)
     quoted = 0
     failed = 0
+    kinds: Counter = Counter()                  # what the failed requests got, for the pass's log line
     archive_rows: List[dict] = []
     by_station: Dict[str, dict] = {}
     for kind, key, side, m, mkt, err in listed:
@@ -561,6 +572,8 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
                     for r in rs:
                         quoted += r.get("error") is None
                         failed += r.get("error") is not None
+                        if r.get("error"):
+                            kinds[str(r["error"])[:120]] += 1
                         archive_rows.append({"station": key, "day": day, "hour": hour, "side": side,
                                              **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
             continue
@@ -575,6 +588,8 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             for r in rs:
                 quoted += r.get("error") is None
                 failed += r.get("error") is not None
+                if r.get("error"):
+                    kinds[str(r["error"])[:120]] += 1
                 if _cut_short(r):
                     st["partial"] = True
                 archive_rows.append({"station": key, "day": day, "side": side, **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
@@ -608,6 +623,8 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
             for r in rs:
                 quoted += r.get("error") is None
                 failed += r.get("error") is not None
+                if r.get("error"):
+                    kinds[str(r["error"])[:120]] += 1
                 meta = spec_groups[spec][r["strike"]]
                 contracts.append({"spec": spec, "expiryLabel": meta.get("expiryLabel"), "numeric": meta.get("numeric"), **r})
                 archive_rows.append({"market": m["symbol"], "spec": spec, **{k: r.get(k) for k in ("strike", "conid", "bid", "ask", "bidSize", "askSize", "from")}})
@@ -616,10 +633,10 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
                              "category": m.get("category"), "seriesKey": ex.CLIMATE_SYMBOLS.get(m["symbol"]),
                              "contracts": contracts})
     log(kind="market", step="quotes", quoted=quoted, failed=failed, seconds=round(time.time() - t0, 1),
-        deadline=deadline.over(0))
+        deadline=deadline.over(0), **({"errorKinds": dict(kinds.most_common(5))} if kinds else {}))
 
     if quoted == 0:
-        raise RuntimeError(f"no quote succeeded ({failed} failed, {len(list_errors)} contract lists failed)")
+        raise ExchangeUnreachable(f"no quote succeeded ({failed} failed, {len(list_errors)} contract lists failed)")
 
     # ---- write: per station, summary, groups, archive
     summary_rows = []
@@ -736,7 +753,9 @@ def quotes_job(cfg: dict, store: Storage, log: Callable, now: dt.datetime, deadl
 
 
 def quotes_pass(cfg: dict, store: Storage) -> int:
-    """Entry point: one pass, status 0 unless nothing at all succeeded."""
+    """Entry point: one pass. Status 1 only when the pass failed on its own
+    account; the exchange answering nothing is counted toward its failure
+    streak, which raises the alarm after FAIL_STREAK_ALARM passes."""
     gw.set_user_agent(cfg.get("user_agent", ""))
     now = dt.datetime.now(dt.timezone.utc)
     t0 = time.time()
@@ -755,7 +774,12 @@ def quotes_pass(cfg: dict, store: Storage) -> int:
         # streaks, not from whether this one raised
         alarms = arch.alarms_in(res.get("health"))
     except Exception as e:  # noqa: BLE001 - recorded, counted toward the streak
-        errors = 1
+        # The exchange answering nothing does not fail the pass (owner, 2026-11-11). Its quote service stalls on
+        # weekdays in a band from a few minutes after the 09:30 ET equity open, and failing the pass for it paged
+        # the owner on mornings the prices were back within about twenty minutes, and had Lambda run the pass
+        # again into the stall. The streak raises the alarm once the exchange has failed for six passes in a row,
+        # an hour at this job's ten-minute cadence. This job's own failure still fails the pass, as before.
+        errors = 0 if isinstance(e, ExchangeUnreachable) else 1
         log(kind="market", error=f"{type(e).__name__}: {e}")
         health = arch.update_health(store, {"exchange": {"ok": False, "error": f"{type(e).__name__}: {e}"}}, now, key=arch.MARKET_HEALTH_KEY)
         if (health.get("exchange") or {}).get("fail_streak", 0) >= arch.FAIL_STREAK_ALARM:

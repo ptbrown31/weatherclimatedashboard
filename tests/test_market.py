@@ -1583,3 +1583,82 @@ class EndPrices(unittest.TestCase):
         self.assertEqual(reask.newest_delivery(steps)["id"], "2026100706")
         steps.insert(2, {"id": "INT", "kind": "interim", "ts": "2026-10-08T03:00:00Z"})
         self.assertEqual(reask.newest_delivery(steps)["id"], "INT")
+
+
+class ExchangeUnanswered(unittest.TestCase):
+    """The exchange answering nothing is the exchange's failure, counted toward
+    its streak: the pass returns 0, and the alarm waits for FAIL_STREAK_ALARM
+    passes in a row (owner, 2026-11-11). The job's own failure still fails it."""
+
+    CFG = {"sources": {"exchange": True}, "exchange": {"quote_workers": 1}}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.orig = (ex.fetch_tree, ex.fetch_market, ex.fetch_quote, market.QUOTE_WORKERS)
+        ex.fetch_tree = lambda: {"categories": {"g": {"name": "San Francisco", "parent_id": None,
+                                                      "markets": [{"symbol": "UHSFO", "conid": 1}]}}}
+        ex.fetch_market = lambda conid: MARKET
+
+    def tearDown(self):
+        ex.fetch_tree, ex.fetch_market, ex.fetch_quote, market.QUOTE_WORKERS = self.orig
+        self.tmp.cleanup()
+
+    def health(self):
+        from pipeline import archive as arch
+        return json.loads(self.st.get(arch.MARKET_HEALTH_KEY))["exchange"]
+
+    @staticmethod
+    def timed_out(conid):
+        raise TimeoutError("The read operation timed out")
+
+    def test_the_pass_names_what_the_failed_requests_got(self):
+        from pipeline import archive as arch
+        ex.fetch_quote = self.timed_out
+        logs = []
+        with self.assertRaises(market.ExchangeUnreachable):
+            market.quotes_job(self.CFG, self.st, lambda **k: logs.append(k), dt.datetime(2026, 8, 23, 18, 0, tzinfo=U),
+                              deadline=arch.Deadline(None))
+        line = next(k for k in logs if k.get("step") == "quotes")
+        self.assertEqual(line["quoted"], 0)
+        self.assertGreater(line["failed"], 0)
+        self.assertEqual(line["errorKinds"], {"TimeoutError: The read operation timed out": line["failed"]})
+
+    def test_a_healthy_pass_logs_no_error_kinds(self):
+        from pipeline import archive as arch
+        ex.fetch_quote = lambda conid: {"bid": 0.4, "ask": 0.6}
+        logs = []
+        market.quotes_job(self.CFG, self.st, lambda **k: logs.append(k), dt.datetime(2026, 8, 23, 18, 0, tzinfo=U),
+                          deadline=arch.Deadline(None))
+        line = next(k for k in logs if k.get("step") == "quotes")
+        self.assertGreater(line["quoted"], 0)
+        self.assertNotIn("errorKinds", line)
+
+    def test_no_quote_answered_is_counted_not_failed(self):
+        from pipeline import archive as arch
+        ex.fetch_quote = self.timed_out
+        self.assertEqual(market.quotes_pass(self.CFG, self.st), 0)
+        self.assertEqual(self.health()["fail_streak"], 1)
+        self.assertTrue(self.health()["last_error"].startswith("ExchangeUnreachable: no quote succeeded"))
+        self.assertEqual(arch.LAST_STATUS["alarms"], [])
+
+    def test_an_unanswered_tree_is_counted_and_an_hour_of_them_pages(self):
+        from pipeline import archive as arch
+
+        def no_tree():
+            raise OSError("timed out")
+        ex.fetch_tree = no_tree
+        for n in range(1, arch.FAIL_STREAK_ALARM + 1):
+            self.assertEqual(market.quotes_pass(self.CFG, self.st), 0)
+            self.assertEqual(self.health()["fail_streak"], n)
+            # the handler raises on the alarm, which is what pages
+            self.assertEqual(arch.LAST_STATUS["alarms"], [] if n < arch.FAIL_STREAK_ALARM else ["exchange"])
+        self.assertTrue(self.health()["last_error"].startswith("ExchangeUnreachable: tree: OSError: timed out"))
+
+    def test_the_jobs_own_failure_still_fails_the_pass(self):
+        from pipeline import archive as arch
+        ex.fetch_quote = lambda conid: {"bid": 0.4, "ask": 0.6}
+        with mock.patch.object(market.basemap, "load_roster", side_effect=OSError("roster unreadable")):
+            self.assertEqual(market.quotes_pass(self.CFG, self.st), 1)
+        self.assertEqual(self.health()["fail_streak"], 1)
+        self.assertEqual(arch.LAST_STATUS["errors"], 1)
