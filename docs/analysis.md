@@ -665,6 +665,17 @@ the rest); fifty such windows added about 50 to 90 KB to a frame on real files (
 precipitation and 91 KB for temperature), at a cost of about 0.1 s per product-hour, and the
 sixty-seven add about a third more.
 
+Each frame also carries `own` (owner's decision 2026-11-12), keyed by location id:
+`{"value": 76, "exact": 76.499}`, the place's value at its own cell in the contract's unit as
+its hourly row in the place file gives it. `value` is rounded once, half up and away from zero,
+from the stored value (a whole degree or mile per hour, precipitation to a hundredth of an
+inch), and `exact` is cut toward zero to a thousandth (precipitation a ten-thousandth). The
+window's centre is the same cell in tenths, rounded, so a tenth ending in .5 can sit either
+side of the contract's half: 76.4996 °F is 765 there and 76 here. A page showing an hour as the
+contract takes it reads `own`. It comes from the stored values of the copy the frame was drawn
+from, which is the copy that counts while no cut-off has settled, and the place file stays the
+record. A frame written before `own` has none, and the page falls back to the window.
+
 The row of an hour whose analysis file never landed has `temp`, `wind` and `gust` null and
 its `precip` set.
 

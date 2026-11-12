@@ -1120,7 +1120,7 @@ class Job(unittest.TestCase):
         temp = self.read(analysis.FRAME_KEY.format(product="rtma", var="temp", stamp="20260926T19Z"))
         # the frame is otherwise the shape it was
         self.assertEqual(sorted(temp), sorted(["schema", "product", "var", "valid", "asof", "written", "unit", "scale",
-                                               "cols", "rows", "pitch", "values", "windows"]))
+                                               "cols", "rows", "pitch", "values", "windows", "own"]))
         self.assertEqual(len(temp["values"]), 64000)
         self.assertEqual(set(temp["windows"]), {"new-york-ny", "chicago-il", "los-angeles-ca", "edge-xx"})
         w = temp["windows"]["new-york-ny"]
@@ -1156,6 +1156,31 @@ class Job(unittest.TestCase):
             fr = self.read(analysis.FRAME_KEY.format(product="rtma", var=var, stamp="20260926T19Z"))
             self.assertEqual(fr["windows"]["los-angeles-ca"]["grid"], "wexp", var)
             self.assertEqual(len(fr["windows"]["los-angeles-ca"]["values"]), 441, var)
+        # each place's own value is its place file's row: as the contract takes it and cut beside it, the
+        # precipitation file's in the row of the hour it starts
+        rows = {r["t"]: r["rtma"] for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]}
+        for var, t_row in (("temp", t_r), ("wind", t_r), ("gust", t_r), ("precip", t_r - dt.timedelta(hours=1))):
+            own = self.read(analysis.FRAME_KEY.format(product="rtma", var=var, stamp="20260926T19Z"))["own"]
+            self.assertEqual(set(own), {"new-york-ny", "chicago-il", "los-angeles-ca", "edge-xx"}, var)
+            self.assertEqual(own["new-york-ny"], {"value": rows[iso(t_row)]["show"][var],
+                                                  "exact": values_of(rows[iso(t_row)])[var]}, var)
+        self.assertEqual(self.read(analysis.FRAME_KEY.format(product="rtma", var="gust", stamp="20260926T19Z"))
+                         ["own"]["new-york-ny"], {"value": 22, "exact": 22.369})     # 10 m/s
+
+    def test_own_gives_the_contracts_value_where_the_windows_tenth_sits_on_the_half(self):
+        # owner, 2026-11-12: 297.872 K is 76.4996 F, 765 in the window's tenths and 76 as the contract takes it;
+        # 252.3169 K is -5.49958 F, -55 there and -5 here, the half rounding away from zero
+        t = hour(2026, 9, 26, 19)
+        self.fx.add_hour("rtma", t)
+        self.fx.values[("rtma", "temp", iso(t))] = lambda k: 297.872 if k == NY_K else 252.3169
+        self.assertEqual(self.run_pass(), 0)
+        fr = self.read(analysis.FRAME_KEY.format(product="rtma", var="temp", stamp="20260926T19Z"))
+        self.assertEqual(fr["windows"]["new-york-ny"]["values"][220], 765)
+        self.assertEqual(fr["own"]["new-york-ny"], {"value": 76, "exact": 76.499})
+        self.assertEqual(fr["windows"]["chicago-il"]["values"][220], -55)
+        self.assertEqual(fr["own"]["chicago-il"], {"value": -5, "exact": -5.499})
+        rows = {r["t"]: r["rtma"] for r in self.read(analysis.LOC_KEY.format(loc="new-york-ny", day="2026-09-26"))["hours"]}
+        self.assertEqual((values_of(rows[iso(t)])["temp"], rows[iso(t)]["show"]["temp"]), (76.499, 76))
 
     def test_a_precipitation_file_read_after_its_analysis_writes_its_frame_with_its_window(self):
         t = hour(2026, 9, 26, 19)

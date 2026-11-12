@@ -1046,6 +1046,23 @@ def window_doc(grid_name: str, vals: list) -> dict:
     return {"grid": grid_name, "half": WINDOW_HALF, "values": vals}
 
 
+def own_doc(var: str, values: Optional[dict]) -> dict:
+    """Each place's value of `var` at its own cell as its hourly row in the
+    place file gives it, from the stored values the frame was drawn from: an
+    analysis's {var: raw} or a precipitation file's millimetres, by place.
+    `value` is the contract's, rounded once, and `exact` is cut beside it. The
+    window's centre holds the same cell rounded to a tenth, and a tenth ending
+    in .5 can sit either side of the contract's half (76.4996 F is 76.5 there
+    and 76 here), so a page showing an hour as the contract takes it reads
+    this (owner, 2026-11-12; docs/analysis.md section 4)."""
+    out = {}
+    for lid, v in (values or {}).items():
+        x = exact(var, v.get(var) if isinstance(v, dict) else (v if var == "precip" else None))
+        if x is not None:
+            out[lid] = {"value": half_up(x, HOUR_UNIT[var]), "exact": cut(x, HOUR_SHOW[var])}
+    return out
+
+
 # ------------------------------------------------------------------ NOAA objects
 def _bucket(product: str) -> str:
     # gov_weather owns the bucket constants; the default is the same string,
@@ -2035,7 +2052,8 @@ def write_hour(store: Storage, product: str, t: dt.datetime, res: HourResult, gr
     if res.precip is not None:
         write_precip(store, product, t, res.precip, cache)
     if res.frames:
-        write_frames(store, product, t, res.frames, grid_index, now, res.windows)
+        write_frames(store, product, t, res.frames, grid_index, now, res.windows,
+                     values=(res.doc or {}).get("values"), pcp=(res.precip or {}).get("values"))
         write_grid_index(store, grid_index, now)
 
 
@@ -2049,16 +2067,19 @@ def write_precip_only(store: Storage, product: str, t: dt.datetime, res: HourRes
         return False
     changed = write_precip(store, product, t, res.precip, cache)
     if changed and res.frames and res.frames.get("precip") is not None:
-        write_frames(store, product, t, res.frames, grid_index, now, res.windows)
+        write_frames(store, product, t, res.frames, grid_index, now, res.windows, pcp=res.precip.get("values"))
         write_grid_index(store, grid_index, now)
     return changed
 
 
 def write_frames(store: Storage, product: str, t: dt.datetime, frames: dict, grid_index: dict, now: dt.datetime,
-                 windows: Optional[dict] = None) -> None:
+                 windows: Optional[dict] = None, values: Optional[dict] = None, pcp: Optional[dict] = None) -> None:
     """One frame file per variable sampled, the place windows of that
     variable inside it under `windows` when they were sampled (a frame
-    without them is the older shape and the page accepts it)."""
+    without them is the older shape and the page accepts it), and under
+    `own` each place's value as the contract takes it, from the stored
+    values the frame was drawn from: `values` an analysis's, `pcp` a
+    precipitation file's (own_doc)."""
     stamp = _stamp(t)
     day, hh = f"{t:%Y-%m-%d}", f"{t:%H}"
     for var in HOURLY_VARS:
@@ -2071,6 +2092,9 @@ def write_frames(store: Storage, product: str, t: dt.datetime, frames: dict, gri
         wins = (windows or {}).get(var)
         if wins is not None:
             doc["windows"] = wins
+        own = own_doc(var, pcp if var == "precip" else values)
+        if own:
+            doc["own"] = own
         store.put(FRAME_KEY.format(product=product, var=var, stamp=stamp), _dump(doc), "application/json", CACHE_FINAL)
         hours = grid_index.setdefault(product, {}).setdefault(var, {}).setdefault(day, [])
         if hh not in hours:
@@ -2913,7 +2937,9 @@ def work_file(store: Storage, product: str, kind: str, t: dt.datetime, entry: di
         # NOMADS's where its bytes differ (read_copy samples only those), while
         # no cut-off has settled and when it was published by the first one
         if res.frames and (other is None or (cuts and _pub(res.doc) <= _iso(cuts[0]))):
-            write_frames(store, product, t, res.frames, grid_index, now, res.windows)
+            stored = (res.doc or {}).get("values")
+            write_frames(store, product, t, res.frames, grid_index, now, res.windows,
+                         values=None if kind == "pcp" else stored, pcp=stored if kind == "pcp" else None)
             write_grid_index(store, grid_index, now)
         touched |= touched_by(t, locs)
         if other is not None:
