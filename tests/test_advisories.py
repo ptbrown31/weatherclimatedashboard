@@ -7,6 +7,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -204,6 +205,64 @@ class Lane(unittest.TestCase):
         self.assertEqual(out["added"], 0)
         self.assertIn("asked NHC for advisory 001", out["errors"][0])
 
+
+
+class PassStatus(unittest.TestCase):
+    """A storm NHC does not serve whole is reported and asked for again, and does not fail
+    the pass (owner, 2026-11-13); the lane's streak pages once NHC's reads keep failing."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.st = storage.LocalStorage(self.tmp.name)
+        self.result = {"storms": 1, "added": 0, "held": 8, "deferred": False, "errors": []}
+        p = mock.patch.object(advisories, "advisories_job", self.job)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def job(self, store, now, deadline=None):
+        if isinstance(self.result, Exception):
+            raise self.result
+        return dict(self.result, errors=list(self.result["errors"]))
+
+    def run_pass(self):
+        rc = advisories.advisories_pass({"user_agent": "test"}, self.st)
+        return rc, dict(advisories.arch.LAST_STATUS)
+
+    def test_a_storm_nhc_cuts_short_is_reported_and_does_not_fail_the_pass(self):
+        self.result["errors"] = ["cp042026: IncompleteRead: IncompleteRead(8116 bytes read)"]
+        rc, status = self.run_pass()
+        self.assertEqual(rc, 0)
+        self.assertEqual(status["errors"], 1)
+        self.assertEqual(status["alarms"], [])
+        health = json.loads(self.st.get(advisories.HEALTH_KEY))
+        self.assertEqual(health["nhc"]["fail_streak"], 1)
+        self.assertIn("IncompleteRead", health["nhc"]["last_error"])
+
+    def test_reads_failing_for_an_hour_of_passes_raise_the_alarm(self):
+        self.result["errors"] = ["index 2026: HTTPError: HTTP Error 503: Service Unavailable"]
+        for _ in range(advisories.FAIL_STREAK_ALARM - 1):
+            self.assertEqual(self.run_pass(), (0, mock.ANY))
+            self.assertEqual(advisories.arch.LAST_STATUS["alarms"], [])
+        rc, status = self.run_pass()
+        self.assertEqual(rc, 0)
+        self.assertEqual(status["alarms"], ["advisories"])
+
+    def test_a_clean_pass_ends_the_streak(self):
+        self.result["errors"] = ["cp042026: IncompleteRead: IncompleteRead(8116 bytes read)"]
+        for _ in range(advisories.FAIL_STREAK_ALARM - 1):
+            self.run_pass()
+        self.result["errors"] = []
+        rc, status = self.run_pass()
+        self.assertEqual((rc, status["alarms"]), (0, []))
+        self.assertEqual(json.loads(self.st.get(advisories.HEALTH_KEY))["nhc"]["fail_streak"], 0)
+        self.result["errors"] = ["cp042026: IncompleteRead: IncompleteRead(8116 bytes read)"]
+        self.assertEqual(self.run_pass()[1]["alarms"], [])
+
+    def test_the_jobs_own_failure_still_fails_the_pass(self):
+        self.result = OSError("the index could not be written")
+        rc, status = self.run_pass()
+        self.assertEqual(rc, 1)
+        self.assertIsNone(self.st.get(advisories.HEALTH_KEY))
 
 if __name__ == "__main__":
     unittest.main()

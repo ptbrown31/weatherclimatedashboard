@@ -62,6 +62,9 @@ SOURCE = "NWS National Hurricane Center forecast advisories, from NHC's GIS arch
 CONE_TOL = 0.02             # degrees: how far the thinned cone outline may stray from NHC's, about 2 km
 SEEN_HOURS = 48             # a storm off the roster this recently is still looked for in the archive
 MISS_HOURS = 24             # an advisory the archive has not posted in this long is not asked for again
+HEALTH_KEY = "archive/_meta/health_advisories.json"   # this lane's own failure streak (see archive.update_health)
+# three half-hourly passes in a row: an hour from the first failed pass to the third
+FAIL_STREAK_ALARM = 3
 # the time zones NHC writes its advisory times in, hours from UTC
 ZONES = {"UTC": 0, "GMT": 0, "CVT": -1, "ADT": -3, "AST": -4, "EDT": -4, "EST": -5, "CDT": -5, "CST": -6,
          "MDT": -6, "MST": -7, "PDT": -7, "PST": -8, "HDT": -9, "HST": -10}
@@ -374,13 +377,31 @@ def advisories_pass(cfg: dict, store: Storage) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     t0 = time.time()
     deadline = arch.Deadline(arch.remaining_budget(cfg))
+    # A storm whose package or listing NHC does not serve whole is reported and asked for again on the next pass, and
+    # does not fail the pass (owner, 2026-11-13). NHC's archive cut its listing page for Pena (CP04) short at 8,116
+    # bytes on 4 of 59 passes on the night of 12 November, the passes between read it, and each failure failed the
+    # half-hourly chain, paged the owner and had Lambda run the whole chain twice more. The lane's failure streak raises
+    # the alarm once NHC's reads have failed for FAIL_STREAK_ALARM passes in a row. The job's own failure, which no
+    # read is to blame for, still fails the pass.
+    failed = 0
     try:
         out = advisories_job(store, now, deadline=deadline)
         errors = len(out["errors"])
     except Exception as e:  # noqa: BLE001 - a missed pass leaves the files as they were
         out = {"error": f"{type(e).__name__}: {e}"}
-        errors = 1
+        errors = failed = 1
+    alarms: list = []
+    if not failed:
+        try:
+            health = arch.update_health(store, {"nhc": {"ok": not errors, "error": (out["errors"] or [None])[0]}},
+                                        now, key=HEALTH_KEY)
+            out["failStreak"] = (health.get("nhc") or {}).get("fail_streak", 0)
+            if out["failStreak"] >= FAIL_STREAK_ALARM:
+                alarms = ["advisories"]
+        except Exception as e:  # noqa: BLE001 - a streak that cannot be kept is the job's own failure
+            out["healthError"] = f"{type(e).__name__}: {e}"
+            failed = 1
     out.update({"kind": "advisories", "seconds": round(time.time() - t0, 1)})
-    arch.LAST_STATUS = {"job": "advisories", "errors": errors, "alarms": []}
+    arch.LAST_STATUS = {"job": "advisories", "errors": errors, "alarms": alarms}
     print(json.dumps(out))
-    return errors
+    return failed

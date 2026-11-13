@@ -191,6 +191,13 @@ def traffic_pass(cfg: dict, store: Storage) -> int:
     # Yesterday, in UTC, because a day still running would publish a figure that
     # grows every time the job is run and would never match itself.
     day = (now.date() - dt.timedelta(days=1)).isoformat()
+    # A day the daily pass missed is counted again from the logs the CDN still
+    # keeps (owner, 2026-11-13), by an invocation that names it, never a day
+    # still running.
+    if cfg.get("traffic_day"):
+        day = dt.date.fromisoformat(str(cfg["traffic_day"])).isoformat()
+        if day >= now.date().isoformat():
+            raise ValueError(f"traffic: {day} has not finished yet")
     errors: List[str] = []
     records: List[dict] = []
     files = 0
@@ -241,8 +248,15 @@ def traffic_pass(cfg: dict, store: Storage) -> int:
         errors.append(f"traffic summary: {type(e).__name__}: {e}")
     days = sorted(days, key=lambda d: d.get("day") or "")[-SUMMARY_DAYS:]
     totals = {k: sum(int(d.get(k) or 0) for d in days) for k in ("views", "siteViews", "embedViews", "requests")}
+    # a recounted day is not the latest: the report reads the newest day counted
+    latest = day_doc
+    if days and (days[-1].get("day") or "") > day:
+        try:
+            latest = json.loads(store.get(DAY_KEY.format(day=days[-1]["day"])) or b"null") or day_doc
+        except ValueError:
+            latest = day_doc
     summary = {"schema": SCHEMA, "written": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "days": days,
-               "totals": totals, "latest": day_doc, "note": day_doc["note"]}
+               "totals": totals, "latest": latest, "note": day_doc["note"]}
     store.put(SUMMARY_KEY, json.dumps(summary, separators=(",", ":")).encode(), "application/json")
 
     arch.LAST_STATUS = {"job": "traffic", "errors": len(errors), "alarms": []}

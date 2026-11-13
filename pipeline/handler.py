@@ -142,7 +142,7 @@ def _send_alarm(store, job: str, alarms: list, archive) -> None:
                 return
         except (TypeError, ValueError):
             pass
-    body = (f"{job}: source(s) failing for {archive.FAIL_STREAK_ALARM}+ passes in a row.\n\n"
+    body = (f"{job}: source(s) failed on enough passes in a row to raise an alarm.\n\n"
             + "".join(f"  {a}\n" for a in sorted(alarms))
             + f"\nSeen {now.isoformat(timespec='seconds').replace('+00:00', 'Z')}.\n"
             "The pass itself is logged in CloudWatch under the pipeline function.\n")
@@ -197,6 +197,8 @@ def lambda_handler(event, context):
     if job not in JOBS:
         raise ValueError(f"unknown job {job!r}; known: {', '.join(sorted(JOBS))}")
     cfg = config.load()
+    if job == "traffic" and (event or {}).get("day"):
+        cfg["traffic_day"] = event["day"]          # one missed day counted again (owner, 2026-11-13)
     if context is not None and hasattr(context, "get_remaining_time_in_millis"):
         cfg["pass_budget_seconds"] = max(60, context.get_remaining_time_in_millis() / 1000 - 30)
     store = storage.from_config(cfg)
@@ -208,7 +210,7 @@ def lambda_handler(event, context):
     if status:
         raise RuntimeError(f"{job}: every request in the pass failed")
     if alarms:
-        raise RuntimeError(f"{job}: source(s) failing for {archive.FAIL_STREAK_ALARM}+ passes: {alarms}")
+        raise RuntimeError(f"{job}: source(s) failed on enough passes in a row to raise an alarm: {alarms}")
     return {"job": job, "status": status, "storage": store.kind()}
 
 

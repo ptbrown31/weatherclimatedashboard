@@ -46,7 +46,24 @@ Fahrenheit for US stations). NBM is the guidance forecasters start from
 when editing the NWS grids, so NWS and NBM are related, not independent;
 GFS MOS is a single-model statistical product with no forecaster editing.
 
-Writes snapshots/scorecard.json.
+KEPT ROWS. Each station-day is scored once and its row kept in ROWS_KEY
+(owner, 2026-11-13). Scoring the whole record every morning took 798 s of
+the daily invocation's 900 s by 13 November 2026, about 9 s more each day,
+and the first try ran into Lambda's limit every morning, three tries in a row
+on 4 and 12 November, so the steps after it did not run. A pass scores the
+days with no kept row, scores again each station's RESCORE_DAYS newest, any
+day whose observed high, low or report count has changed since it was scored,
+and any row kept under another SCORE_VERSION, and keeps the rest as they
+are. The forecasts a day is read from all stand before the evening anchor,
+about thirty hours before the day is first scored, so a kept row is the one
+a full pass would score again. A backfill of the forecast archive does change
+old days without their observations changing: bump SCORE_VERSION, or remove
+ROWS_KEY, and the record is scored again over the next passes. A pass inside
+a chain stops scoring LATER_STEPS_S before the chain's end, keeps what it
+scored, and writes the snapshot only once every day it covers is scored, so
+the page keeps the last complete scorecard while the record is scored again.
+
+Writes snapshots/scorecard.json and archive/scorecard/rows.json.gz.
 """
 from __future__ import annotations
 import bisect
@@ -57,6 +74,7 @@ import time
 from typing import Callable, Dict, Optional
 from zoneinfo import ZoneInfo
 
+from . import archive as arch
 from . import gov_weather as gw
 from . import basemap
 from . import exchange as ex
@@ -69,6 +87,16 @@ MAX_LEAD_H = 24          # a cycle older than this AT THE ANCHOR is not scored f
 ANCHOR_LOCAL_HOUR = 18
 RECENT_DAYS = 14         # per-day rows carried in the snapshot, newest first
 SOURCES = ("nws", "nbm", "mav", "lamp")
+KINDS = ("daily", "nbs", "nbh", "mav", "lamp", "mavx", "lampx")   # the archive kinds a day's forecasts come from
+ROWS_KEY = "archive/scorecard/rows.json.gz"
+ROWS_SCHEMA = 1
+# Bump when a change alters what any day scores. Rows kept under another
+# version are scored again before the snapshot is written again.
+SCORE_VERSION = 1
+RESCORE_DAYS = 7         # each station's newest days, scored again on every pass
+# The daily chain's later steps took about two minutes together through
+# November 2026, and the normals step waits on NCEI, which is sometimes slow.
+LATER_STEPS_S = 300.0
 
 
 def _local_midnight(day: dt.date, tz) -> dt.datetime:
@@ -288,10 +316,63 @@ def summarise(scores: list, field: str) -> Optional[dict]:
             "within2": round(sum(1 for e in errs if abs(e) <= 2) / n, 3)}
 
 
+def load_rows(store: Storage) -> Dict[str, dict]:
+    """{station: {local day: {"v": SCORE_VERSION it was scored under, "row": its row}}}
+    as the last pass kept them; empty when there are none or they cannot be read,
+    which scores the whole record again."""
+    raw = store.get(ROWS_KEY)
+    if not raw:
+        return {}
+    try:
+        doc = json.loads(gzip.decompress(raw))
+    except (OSError, ValueError):
+        return {}
+    return (doc.get("stations") or {}) if doc.get("schema") == ROWS_SCHEMA else {}
+
+
+def days_to_score(obs: dict, held: dict, last: dt.date) -> list:
+    """One station's local days this pass scores, oldest first: a day with no
+    kept row, one kept under another SCORE_VERSION, one whose observed high,
+    low or report count differs from its kept row's (a backfill or a late
+    report), and the station's RESCORE_DAYS newest."""
+    recent = (last - dt.timedelta(days=RESCORE_DAYS - 1)).isoformat()
+    out = []
+    for diso, o in sorted(obs.items()):
+        h = held.get(diso)
+        row = (h or {}).get("row") or {}
+        if (h is None or h.get("v") != SCORE_VERSION or diso >= recent
+                or (row.get("obsHigh"), row.get("obsLow"), row.get("n")) != (o["high"], o["low"], o["n"])):
+            out.append(diso)
+    return out
+
+
+def score_day(store: Storage, by_kind: dict, stamps: dict, c: dict, tz, d: dt.date, o: dict,
+              mcache: dict) -> dict:
+    """One station's row for one local day: the observed extremes, each
+    source's forecast and its error, and the exchange's value beside them."""
+    row = {"date": d.isoformat(), "obsHigh": o["high"], "obsLow": o["low"], "n": o["n"]}
+    for s in SOURCES:
+        f = forecast_for_day(store, by_kind, s, c, tz, d, stamps)
+        if f:
+            row[s] = {"high": f["high"], "low": f["low"], "cycle": f["cycle"], "lead": f["lead"],
+                      "errHigh": round(f["high"] - o["high"], 1) if f["high"] is not None else None,
+                      "errLow": round(f["low"] - o["low"], 1) if f["low"] is not None else None}
+            if f.get("backfill"):
+                row[s]["backfill"] = f["backfill"]
+    mk = market_levels(store, c, tz, d, mcache)
+    if mk:
+        row["fx"] = {"high": mk.get("high"), "low": mk.get("low"), "asof": mk.get("asof"),
+                     "errHigh": round(mk["high"] - o["high"], 1) if mk.get("high") is not None else None,
+                     "errLow": round(mk["low"] - o["low"], 1) if mk.get("low") is not None else None}
+    return row
+
+
 def scorecard_pass(cfg: dict, store: Storage) -> int:
     gw.set_user_agent(cfg.get("user_agent", ""))
     t0 = time.time()
     now = dt.datetime.now(dt.timezone.utc)
+    # inside a chain the steps after this one keep LATER_STEPS_S; run alone, the pass has the whole budget
+    deadline = arch.Deadline(arch.remaining_budget(cfg, reserve=LATER_STEPS_S if cfg.get("_deadline_end") else 0.0))
     roster = [c for c in basemap.load_roster() if c["unit"] == "F"]
     obs_days = sorted(k.rsplit("/", 1)[-1][:8] for k in store.list("archive/obs/"))
     if not obs_days:
@@ -301,37 +382,51 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
     # yesterday in the station's own time is the newest day it can be scored on
     lasts = {c["station"]: now.astimezone(ZoneInfo(c["tz"])).date() - dt.timedelta(days=1) for c in roster}
     observed = observed_by_station(store, roster, first, lasts)
-    stations = {}
-    pooled = {s: {"high": [], "low": []} for s in SOURCES}
+    before = load_rows(store)
+    kept = {c["station"]: before.get(c["station"]) or {} for c in roster}    # a station off the roster is dropped
+    changed = set(before) != set(kept)
     mcache = {"list": {}, "body": {}}       # shared across stations: one pass covers every station
+    scored = left = 0
     for c in roster:
         sid, tz = c["station"], ZoneInfo(c["tz"])
-        obs = observed[sid]
-        # the scorecard reaches back to the first observed day, so its listing
-        # window is the record's age, which grows by a day every day; each
-        # scored day searches only its own stretch of it (cycle_window)
-        hours = int((now - dt.datetime.combine(first, dt.time(0), tzinfo=dt.timezone.utc)).total_seconds() / 3600) + 48
-        by_kind = {k: sn.list_recent(store, sid, k, now, hours)
-                   for k in ("daily", "nbs", "nbh", "mav", "lamp", "mavx", "lampx")}
+        obs, held = observed[sid], kept[sid]
+        for diso in [x for x in held if x not in obs]:      # a day the record no longer scores
+            del held[diso]
+            changed = True
+        todo = days_to_score(obs, held, lasts[sid])
+        if not todo:
+            continue
+        if deadline.over(30):
+            left += len(todo)
+            continue
+        # the listing reaches back to the oldest day this pass scores, so a pass
+        # that scores only the newest days lists only their stretch of the
+        # archive; each scored day searches only its own stretch (cycle_window)
+        oldest = dt.date.fromisoformat(todo[0])
+        hours = int((now - dt.datetime.combine(oldest, dt.time(0), tzinfo=dt.timezone.utc)).total_seconds() / 3600) + 48
+        by_kind = {k: sn.list_recent(store, sid, k, now, hours) for k in KINDS}
         stamps = {k: cycle_stamps(v) for k, v in by_kind.items()}
-        days = []
-        for diso, o in sorted(obs.items()):
-            d = dt.date.fromisoformat(diso)
-            row = {"date": diso, "obsHigh": o["high"], "obsLow": o["low"], "n": o["n"]}
-            for s in SOURCES:
-                f = forecast_for_day(store, by_kind, s, c, tz, d, stamps)
-                if f:
-                    row[s] = {"high": f["high"], "low": f["low"], "cycle": f["cycle"], "lead": f["lead"],
-                              "errHigh": round(f["high"] - o["high"], 1) if f["high"] is not None else None,
-                              "errLow": round(f["low"] - o["low"], 1) if f["low"] is not None else None}
-                    if f.get("backfill"):
-                        row[s]["backfill"] = f["backfill"]
-            mk = market_levels(store, c, tz, d, mcache)
-            if mk:
-                row["fx"] = {"high": mk.get("high"), "low": mk.get("low"), "asof": mk.get("asof"),
-                             "errHigh": round(mk["high"] - o["high"], 1) if mk.get("high") is not None else None,
-                             "errLow": round(mk["low"] - o["low"], 1) if mk.get("low") is not None else None}
-            days.append(row)
+        for i, diso in enumerate(todo):
+            if deadline.over(30):
+                left += len(todo) - i
+                break
+            row = score_day(store, by_kind, stamps, c, tz, dt.date.fromisoformat(diso), obs[diso], mcache)
+            held[diso] = {"v": SCORE_VERSION, "row": row}
+            scored += 1
+    if scored or changed:
+        doc = {"schema": ROWS_SCHEMA, "version": SCORE_VERSION, "asof": sn._iso(now), "stations": kept}
+        store.put(ROWS_KEY, gzip.compress(json.dumps(doc, separators=(",", ":")).encode()), "application/gzip")
+    held_days = sum(len(v) for v in kept.values())
+    if left:
+        # the page keeps the last complete scorecard until every day is scored
+        print(json.dumps({"kind": "scorecard", "stations": len(roster), "stationDays": held_days, "scored": scored,
+                          "left": left, "written": False, "seconds": round(time.time() - t0, 1)}))
+        return 0
+    stations = {}
+    pooled = {s: {"high": [], "low": []} for s in SOURCES}
+    for c in roster:
+        sid = c["station"]
+        days = [kept[sid][diso]["row"] for diso in sorted(observed[sid])]
         summary = {}
         for s in SOURCES:
             rows = [r[s] for r in days if s in r]
@@ -358,7 +453,8 @@ def scorecard_pass(cfg: dict, store: Storage) -> int:
             "overall": overall, "stations": stations}
     store.put("snapshots/scorecard.json", json.dumps(snap, separators=(",", ":")).encode(), "application/json",
               "public, max-age=600, stale-while-revalidate=3600, stale-if-error=604800")
-    scored = sum(v["daysScored"] for v in stations.values())
-    print(json.dumps({"kind": "scorecard", "stations": len(stations), "stationDays": scored,
+    total = sum(v["daysScored"] for v in stations.values())
+    print(json.dumps({"kind": "scorecard", "stations": len(stations), "stationDays": total, "scored": scored,
+                      "left": 0, "written": True,
                       "overall": {s: (v["high"] or {}).get("n") for s, v in overall.items()}, "seconds": round(time.time() - t0, 1)}))
     return 0

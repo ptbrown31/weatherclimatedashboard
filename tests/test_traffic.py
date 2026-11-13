@@ -165,6 +165,27 @@ class TheJob(unittest.TestCase):
         self.assertEqual(s["totals"]["views"], 1)
         self.assertEqual(len(s["days"]), 1)
 
+    def test_a_named_day_is_counted_again_and_the_newest_day_stays_the_latest(self):
+        old = (dt.date.fromisoformat(self.day) - dt.timedelta(days=9)).isoformat()
+        self.write_log(line("/index.html"))
+        self.write_log(line("/index.html"), line("/city.html"), line("/hurricane.html"), day=old)
+        self.assertEqual(traffic.traffic_pass(self.cfg(), self.site), 0)
+        cfg = dict(self.cfg(), traffic_day=old)
+        self.assertEqual(traffic.traffic_pass(cfg, self.site), 0)
+        self.assertEqual(json.loads(self.site.get(traffic.DAY_KEY.format(day=old)))["views"], 3)
+        s = json.loads(self.site.get(traffic.SUMMARY_KEY))
+        self.assertEqual([d["day"] for d in s["days"]], [old, self.day])
+        self.assertEqual(s["totals"]["views"], 4)
+        self.assertEqual(s["latest"]["day"], self.day)
+        self.assertEqual(s["latest"]["views"], 1)
+
+    def test_a_day_still_running_is_not_counted(self):
+        today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+        self.write_log(line("/index.html"), day=today)
+        with self.assertRaises(ValueError):
+            traffic.traffic_pass(dict(self.cfg(), traffic_day=today), self.site)
+        self.assertIsNone(self.site.get(traffic.DAY_KEY.format(day=today)))
+
     def test_the_summary_is_written_where_the_cdn_cannot_serve_it(self):
         self.write_log(line("/index.html"))
         traffic.traffic_pass(self.cfg(), self.site)
