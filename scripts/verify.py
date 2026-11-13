@@ -445,10 +445,24 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} accuracy: LAMP is drawn heavier, a system's second series dashed, and the corrected series faint as issued",
                         any(x["w"] == "2.3" for x in solid) and sum(1 for x in solid if x["d"] == "5 3") >= 3 and len(faint) >= 8,
                         f"heavy={sum(1 for x in solid if x['w'] == '2.3')} dashed={sum(1 for x in solid if x['d'] == '5 3')} faint={len(faint)}")
-                chk.add(f"{scheme} accuracy: the convergence chart and the Brier score are gone",
+                # The Brier chart left with the paper's methods (4 October 2026) and the Brier score came back as the
+                # reliability table's summary (owner, 13 November 2026), so the word stands in that table's head and
+                # in its method note and nowhere else. textContent, since a th prints in capitals and the note is hidden.
+                brier_at = page.evaluate("""() => {
+                    const c = (document.querySelector('.wrap') || document.body).cloneNode(true);
+                    const head = c.querySelector('#accDiag table.acc-rel-sum thead');
+                    const heads = head ? [...head.querySelectorAll('th')].map(th => th.textContent).filter(t => /Brier/.test(t)) : [];
+                    if (head) head.remove();
+                    const notes = [...c.querySelectorAll('.accnote')].filter(n => /CRPS and the reliability diagrams/.test(n.textContent));
+                    const inNote = notes.map(n => (n.textContent.match(/Brier/g) || []).length);
+                    notes.forEach(n => n.remove());
+                    return { heads, inNote, elsewhere: (c.textContent.match(/Brier/g) || []).length };
+                }""")
+                chk.add(f"{scheme} accuracy: the convergence chart and the Brier chart are gone, and the Brier score is named only in the reliability table and its note",
                         page.locator("#accConv, #accBrier").count() == 0
                         and page.locator("#accLeadBar button", has_text="Within").count() == 0
-                        and "Brier" not in page.locator(".wrap").inner_text(), "")
+                        and len(brier_at["heads"]) == 2 and len(brier_at["inNote"]) == 1 and brier_at["inNote"][0] >= 2
+                        and brier_at["elsewhere"] == 0, json.dumps(brier_at))
                 # ---- the second axis on the error curve, and lead counted back from the extreme
                 sec_day = page.locator("#accLead path.acc-sec").count()
                 lead_svg = page.locator("#accLead").text_content()
@@ -525,14 +539,31 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 n_calc = page.locator("#accDiag circle").count()
                 sum_rows = page.locator("#accDiag table.acc-rel-sum tbody tr").count()
                 sum_txt = page.locator("#accDiag table.acc-rel-sum").inner_text() if page.locator("#accDiag table.acc-rel-sum").count() else ""
-                chk.add(f"{scheme} accuracy: the reliability diagrams are the paper's two windows, with the gap and the slope of every system",
+                # each system's Brier score as the file gives it, to three decimals as WXAcc.f3 rounds (half up)
+                rel_rows = "() => [...document.querySelectorAll('#accDiag table.acc-rel-sum tbody tr')].map(r => [...r.cells].map(c => c.textContent.trim()))"
+                rel_heads = page.eval_on_selector_all("#accDiag table.acc-rel-sum thead th", "e => e.map(x => x.textContent)")
+                f3 = lambda v: "%.3f" % (int(v * 1000 + 0.5) / 1000)
+                rel_blk = cal_file["metric"]["high"]["reliability"]
+                def brier_cells(rows):
+                    return [[r[1], r[3]] for r in rows if len(r) == 5]
+                def brier_file(tag):
+                    return [[f3(rel_blk[w]["calibrated" if k == "FX" else tag][k]["summary"]["brier"]) for w in ("abs", "rel")]
+                            for k in ("FX", "AIFS", "GEFS", "GEM", "ICON")]
+                brier_cal = brier_cells(page.evaluate(rel_rows))
+                chk.add(f"{scheme} accuracy: the reliability diagrams are the paper's two windows, with the Brier score and the slope of every system",
                         titles == ["Priced 12 to 24 h before the day ends", "Priced 6 to 18 h before the maximum"]
-                        and n_calc >= 10 and sum_rows == 5 and re.search(r"\d\.\d\d \[\d\.\d\d, \d\.\d\d\]", sum_txt) is not None,
-                        f"titles={titles} rows={sum_rows}")
+                        and n_calc >= 10 and sum_rows == 5 and re.search(r"\d\.\d\d \[\d\.\d\d, \d\.\d\d\]", sum_txt) is not None
+                        and rel_heads == ["System", "Brier score, 12 to 24 h", "Slope", "Brier score, 6 to 18 h before the maximum", "Slope"]
+                        and brier_cal == brier_file("calibrated"),
+                        f"titles={titles} rows={sum_rows} heads={rel_heads} brier={brier_cal} want={brier_file('calibrated')}")
                 before = page.locator("#accCrps").inner_html()
                 page.locator("#accProbBar button", has_text="As issued").first.click(); page.wait_for_timeout(500)
                 chk.add(f"{scheme} accuracy: the ensembles' As issued tab redraws CRPS without the faint lines",
                         page.locator("#accCrps").inner_html() != before and page.locator("#accCrps path[stroke-opacity]").count() == 0, "")
+                brier_iss = brier_cells(page.evaluate(rel_rows))
+                chk.add(f"{scheme} accuracy: the As issued tab prints the raw ensembles' Brier scores and keeps the market's",
+                        brier_iss == brier_file("issued") and brier_iss != brier_cal,
+                        f"brier={brier_iss} want={brier_file('issued')}")
                 page.locator("#accProbBar button", has_text="EMOS-calibrated").first.click(); page.wait_for_timeout(300)
                 page.locator("#accCrps rect[fill='transparent']").nth(24).hover(); page.wait_for_timeout(300)
                 crps_tip = page.locator("#tip").inner_text() if page.locator("#tip").count() else ""

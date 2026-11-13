@@ -222,9 +222,14 @@ range. The CRPS figures draw every line on the contracts and city-day hours the
 market and all four ensembles share. The reliability diagrams take each strike's
 last price in its hour on the city-days all four ensembles cover, in two windows,
 lead in (12, 24] before the end of the day and in (6, 18] before the extreme,
-pooled in ten price bins; each system's summary is the count-weighted mean
-absolute difference between price and payout share and the slope of a logistic
-regression of outcomes on the log-odds of the price.
+pooled in ten price bins. Each system's summary is its Brier score, the mean
+squared difference between each contract's price and its outcome, taken contract
+by contract, and the slope of a logistic regression of outcomes on the log-odds
+of the price. The file also carries the paper's summary, the count-weighted mean
+absolute difference between price and payout share over the ten bins (`mad`).
+The page prints the Brier score in its place (owner, 2026-11-13), because the
+mean difference counts calibration alone and the Brier score also counts how
+cleanly the prices separate the contracts that paid from those that did not.
 
 **Which days.** Two bases. `all` scores each series on the city-days its own
 record covers and the market priced, which is the default everywhere, and every
@@ -331,7 +336,8 @@ meta: { schema: "accuracy-figures/2", asof, built, window: {from, to}, roster: [
 series is actually scored over, its warm-up left out, whole and per metric.
 `asof` is the newest resolved target date; `built` the build time. Numbers are
 rounded to four decimals, so a value printed to two rounds once, as in the
-paper's tables; counts are integers; a missing value is `null`.
+paper's tables, and the Brier score, printed to three, to five; counts are
+integers; a missing value is `null`.
 
 A **series block** is `{mae, lo, hi, n}` per bin, and for an alternative also
 `{pi, piLo, piHi, better, worse}`: its mean absolute error (or CRPS) with the 95
@@ -365,7 +371,7 @@ correction, `issued` scores every series without it.
             calibrated: {series: {FX|AIFS|GEFS|GEM|ICON: series block}, beats},
             issued: {...} } } },
     reliability: { abs|rel: { window: [lo, hi],
-            calibrated: {FX|AIFS|...: {summary: {n, mad, slope, slopeLo, slopeHi}, bins: [[price, share, count]]}},
+            calibrated: {FX|AIFS|...: {summary: {n, brier, mad, slope, slopeLo, slopeHi}, bins: [[price, share, count]]}},
             issued: {AIFS|...: {...}} } } } } }
 ```
 
@@ -452,7 +458,7 @@ button, and a status strip naming the window and the build time:
   the market's city-days and the systems it beats (`lead-curve.json`).
 - **Probabilistic skill.** The paper's Fig 9: the CRPS of the market and the
   four EMOS-calibrated ensembles by lead, the raw ensembles faint, then the
-  reliability diagrams of the two windows with each system's mean gap and slope
+  reliability diagrams of the two windows with each system's Brier score and slope
   (`calibration.json`).
 - **City map.** The paper's Fig 8: the market's percent improvement over a
   chosen series at each station at the four single leads, bold where Holm holds,
@@ -462,7 +468,9 @@ button, and a status strip naming the window and the build time:
 
 Highs default, lows a tab on every figure. No commentary. Every chart against
 lead is drawn by one helper (`WXAcc.leadChart`). The convergence chart and the
-Brier score left the page with the paper's methods on 4 October 2026.
+Brier chart left the page with the paper's methods on 4 October 2026. The Brier
+score came back on 13 November 2026 as the reliability table's summary, in place
+of the mean gap (owner's decision).
 
 **The source tables.** The foot of the page lists every series, the market
 first and then the paper's five groups. Each row says whether the system is

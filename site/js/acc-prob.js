@@ -152,15 +152,15 @@ window.WXAccProb = (() => {
   function summaryTable(relb, tag, ext) {
     const wrap = h('div', { class: 'acc-sources-wrap' });
     const t = h('table', { class: 'acc-rel-sum' });
-    t.innerHTML = '<thead><tr><th>System</th><th>Mean gap, ' + relb.abs.window[0] + ' to ' + relb.abs.window[1] + ' h</th><th>Slope</th>'
-      + '<th>Mean gap, ' + relb.rel.window[0] + ' to ' + relb.rel.window[1] + ' h before the ' + ext + '</th><th>Slope</th></tr></thead>';
+    t.innerHTML = '<thead><tr><th>System</th><th>Brier score, ' + relb.abs.window[0] + ' to ' + relb.abs.window[1] + ' h</th><th>Slope</th>'
+      + '<th>Brier score, ' + relb.rel.window[0] + ' to ' + relb.rel.window[1] + ' h before the ' + ext + '</th><th>Slope</th></tr></thead>';
     const tb = h('tbody');
     ['FX'].concat(ENS).forEach(k => {
       const cell = w => {
         const d = (k === 'FX' ? relb[w].calibrated.FX : relb[w][tag][k]) || {};
         const s = d.summary || {};
         const iv = fin(s.slopeLo) && fin(s.slopeHi) ? ' [' + A.f2(s.slopeLo) + ', ' + A.f2(s.slopeHi) + ']' : '';
-        return '<td>' + (fin(s.mad) ? A.f3(s.mad) : A.dash) + '</td><td>' + (fin(s.slope) ? A.f2(s.slope) + iv : A.dash) + '</td>';
+        return '<td>' + (fin(s.brier) ? A.f3(s.brier) : A.dash) + '</td><td>' + (fin(s.slope) ? A.f2(s.slope) + iv : A.dash) + '</td>';
       };
       const tr = h('tr');
       tr.innerHTML = '<td>' + sw(k) + '</td>' + cell('abs') + cell('rel');
@@ -209,7 +209,9 @@ window.WXAccProb = (() => {
         'and with one side bid, the midpoint against the empty side at its limit, a missing Yes bid counting as 1 cent and a missing No bid as a 99-cent ask. A lone side at that limit is an empty book.',
         'For an ensemble the distribution is built from each remaining hour’s ensemble mean and member spread, each hour a normal distribution, with the hourly errors taken as perfectly correlated. A high exceeds a strike when one of the hours left does, so the chance it pays is read from the hour that comes closest, and a low is the mirror. That is the Fréchet bound for the extreme of dependent variables, and it is the more conservative assumption for the market, since independence would make the ensembles look falsely sharp.',
         'The ensembles are calibrated by ensemble model output statistics, EMOS. For each ensemble, station and lead window a normal distribution whose mean is a linear function of the ensemble mean and whose variance is a linear function of the ensemble variance is fitted by minimising CRPS over the preceding 30 days, on the forecast as it is scored, held at the extreme already observed. The fit is applied to every remaining hour. ' + (fin(emos.fits) ? A.int(emos.fits) + ' fits are in this build, ' + A.int(emos.implausible) + ' set aside as implausible.' : ''),
-        'A contract’s price should equal the probability it pays off. A reliability diagram plots the average price in a ten-cent bucket against the share of the bucket’s contracts that paid, and honest prices fall on the diagonal. The table gives two summaries per window. The mean gap is the count-weighted mean absolute difference between price and payout share over the ten buckets, and the slope is that of a logistic regression of outcomes on the log-odds of the price, which equals one for calibrated prices.',
+        'A contract’s price should equal the probability it pays off. A reliability diagram plots the average price in a ten-cent bucket against the share of the bucket’s contracts that paid, and honest prices fall on the diagonal. The table gives two summaries per window, the Brier score and the slope.',
+        { tex: 'BS_s = \\frac{1}{N}\\sum_{j=1}^{N} \\left( p_{s,j} - y_j \\right)^2' },
+        'where $p_{s,j}$ is system $s$’s price for contract $j$ and $y_j$ is one if the contract paid and zero if it did not, so lower is better. The Brier score counts how far prices sit from the diagonal and also how cleanly they separate the contracts that paid from those that did not. The CRPS above adds up the same squared difference over every whole degree of a city-day. The paper gives the mean gap in its place, the count-weighted mean absolute difference between price and payout share over the ten buckets, which counts calibration alone. The slope is that of a logistic regression of outcomes on the log-odds of the price, which equals one for calibrated prices.',
         'The paper scores the daily high. The lows are scored here with the same methods.',
       ],
       rules: [
