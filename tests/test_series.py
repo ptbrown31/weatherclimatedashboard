@@ -175,3 +175,69 @@ class EnergyLane(unittest.TestCase):
         keys = list(energy.product_keys().values())
         self.assertEqual(len(keys), len(set(keys)))
         self.assertEqual(len(keys), len(energy.SPECS) + len(energy.SHARES))
+
+
+class EnergyTime(unittest.TestCase):
+    """EIA held the daily chain past Lambda's limit on 14 November 2026: a slow
+    answer is cut off at its end, and the lane stops when its time is spent,
+    saying how far it got, so the series step and the steps after it finish."""
+
+    def setUp(self):
+        from pipeline import energy
+        self.energy = energy
+        old = os.environ.get("WX_EIA_API_KEY")
+        os.environ["WX_EIA_API_KEY"] = "test-key"
+        self.addCleanup(lambda: os.environ.pop("WX_EIA_API_KEY") if old is None
+                        else os.environ.__setitem__("WX_EIA_API_KEY", old))
+        self.total = len(energy.SPECS) + 1 + len(energy.SHARES)
+
+    def test_an_answer_read_in_pieces_comes_back_whole(self):
+        parts = [b'{"response": ', b'{"data": []}}', b""]
+
+        class Resp:
+            def read1(self, n):
+                return parts.pop(0)
+        self.assertEqual(json.loads(self.energy._read_bounded(Resp(), float("inf"))), {"response": {"data": []}})
+
+    def test_an_answer_that_keeps_trickling_is_cut_off_at_its_end(self):
+        clock = [1000.0]
+
+        class Trickle:
+            def read1(self, n):
+                clock[0] += 7.0                     # a byte every seven seconds, inside any socket timeout
+                return b" "
+        from unittest import mock
+        with mock.patch.object(self.energy, "time") as t:
+            t.time.side_effect = lambda: clock[0]
+            with self.assertRaises(TimeoutError):
+                self.energy._read_bounded(Trickle(), 1000.0 + self.energy.REQUEST_SECONDS)
+        self.assertLessEqual(clock[0], 1000.0 + self.energy.REQUEST_SECONDS + 7.0)
+
+    def test_a_lane_whose_time_is_spent_asks_nothing_and_says_where_it_stopped(self):
+        from pipeline import archive
+        asked = []
+        spent = archive.Deadline(60)
+        spent.end = 0.0
+        with self.assertRaises(RuntimeError) as cm:
+            self.energy.energy_series({}, fetch=lambda url: asked.append(url) or '{"response": {"data": []}}',
+                                      deadline=spent)
+        self.assertEqual(asked, [])
+        self.assertIn("request 1 of %d, TimeoutError" % self.total, str(cm.exception))
+        self.assertNotIn("test-key", str(cm.exception))
+
+    def test_a_request_that_fails_names_its_place_in_the_pass(self):
+        asked = []
+
+        def fetch(url):
+            asked.append(url)
+            if len(asked) == 3:
+                raise OSError("connection reset")
+            return '{"response": {"data": []}}'
+        with self.assertRaises(RuntimeError) as cm:
+            self.energy.energy_series({}, fetch=fetch)
+        self.assertEqual(str(cm.exception), "request 3 of %d, OSError: connection reset" % self.total)
+
+    def test_a_pass_with_time_asks_for_every_series(self):
+        asked = []
+        self.energy.energy_series({}, fetch=lambda url: asked.append(url) or '{"response": {"data": []}}')
+        self.assertEqual(len(asked), self.total)

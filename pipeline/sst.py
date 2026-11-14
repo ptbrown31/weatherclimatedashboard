@@ -46,6 +46,14 @@ MISSING = -128
 # the boxes the hurricane page draws (site/js/hurricane.js BASINS), as
 # (west, south, east, north)
 BOXES = {"AL": (-101.0, 4.0, -40.0, 48.0), "EP": (-180.0, 0.0, -85.0, 40.0)}
+HEALTH_KEY = "archive/_meta/health_sst.json"   # this lane's own failure streak (see archive.update_health)
+# three half-hourly passes in a row: an hour from the first failed pass to the third
+FAIL_STREAK_ALARM = 3
+
+
+class ReadFailed(Exception):
+    """ERDDAP gave the pass nothing to work with: the dataset's newest date did
+    not come, or neither basin's subset did. The lane's streak counts it."""
 
 
 def subset_url(box) -> str:
@@ -130,11 +138,14 @@ def sst_job(cfg: dict, store: Storage, now: dt.datetime, fetch: Optional[Callabl
         except ValueError:
             age_h = CHECK_HOURS
         if age_h < CHECK_HOURS:
-            return {"written": False, "note": "checked %.1f h ago" % age_h}
+            return {"written": False, "note": "checked %.1f h ago" % age_h, "asked": False}
     errors: list = []
-    latest = parse_latest(fetch(latest_url()))
+    try:
+        latest = parse_latest(fetch(latest_url()))
+    except Exception as e:  # noqa: BLE001 - ERDDAP's answer, counted in the lane's streak
+        raise ReadFailed(f"{type(e).__name__}: {e}") from None
     if not latest:
-        raise RuntimeError("the dataset's newest date could not be read")
+        raise ReadFailed("the dataset's newest date could not be read")
     basins = dict(prev.get("basins") or {})
     if latest == prev.get("asof") and all(b in basins for b in BOXES):
         snap = dict(prev, checked=_iso(now))
@@ -152,7 +163,7 @@ def sst_job(cfg: dict, store: Storage, now: dt.datetime, fetch: Optional[Callabl
         except Exception as e:  # noqa: BLE001 - the other basin and the previous grid stand
             errors.append(f"{b}: {type(e).__name__}: {e}")
     if not fetched:
-        raise RuntimeError("; ".join(errors) or "nothing fetched")
+        raise ReadFailed("; ".join(errors) or "nothing fetched")
     days = sorted({g.get("day") for g in basins.values() if g.get("day")})
     snap = {"schema": SCHEMA, "asof": days[-1] if days else latest, "checked": _iso(now), "fetched": _iso(now),
             "source": SOURCE, "units": "degC", "scale": 0.1, "missing": MISSING, "basins": basins}
@@ -165,13 +176,42 @@ def sst_pass(cfg: dict, store: Storage) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     t0 = time.time()
     deadline = arch.Deadline(arch.remaining_budget(cfg))
+    # A pass that ERDDAP gives nothing is reported and asked again on the next pass, and does not fail the pass
+    # (owner, 2026-11-14). A missed check leaves the last grid standing, and the product lands about two days after its date, so one failed
+    # pass costs the map nothing. From 15 October to 14 November 2026 ERDDAP failed the lane on 79 of 1,440 passes,
+    # in ten runs: eight of one or two passes, each cleared by the next pass or a retry, and two outages of 47 and 23
+    # passes. Each failed pass failed the half-hourly chain and had Lambda run the whole chain twice more, and 8 of
+    # the 38 pipeline alarm emails of those 30 days followed one. The lane's failure streak raises the alarm once
+    # ERDDAP has failed FAIL_STREAK_ALARM passes in a row, which only the two outages did. A pass inside CHECK_HOURS
+    # asks nothing and leaves the streak as it is. A basin that fails while the other is fetched still fails the
+    # pass, because that basin is not asked for again until a newer day lands, and so does the job's own failure,
+    # which no read is to blame for.
+    failed = 0
+    read_error = None
+    own = False
     try:
         out = sst_job(cfg, store, now, deadline=deadline)
-        errors = len(out.get("errors") or [])
+        errors = failed = len(out.get("errors") or [])
+    except ReadFailed as e:
+        out = {"written": False, "error": str(e)}
+        errors = 1
+        read_error = out["error"]
     except Exception as e:  # noqa: BLE001 - a missed day leaves the last grid standing
         out = {"written": False, "error": f"{type(e).__name__}: {e}"}
-        errors = 1
+        errors = failed = 1
+        own = True                              # the job's own failure leaves the streak as it is
+    alarms: list = []
+    if out.get("asked", True) and not own:
+        try:
+            health = arch.update_health(store, {"erddap": {"ok": read_error is None, "error": read_error}},
+                                        now, key=HEALTH_KEY)
+            out["failStreak"] = (health.get("erddap") or {}).get("fail_streak", 0)
+            if out["failStreak"] >= FAIL_STREAK_ALARM:
+                alarms = ["sst"]
+        except Exception as e:  # noqa: BLE001 - a streak that cannot be kept is the job's own failure
+            out["healthError"] = f"{type(e).__name__}: {e}"
+            failed = 1
     out.update({"kind": "sst", "seconds": round(time.time() - t0, 1)})
-    arch.LAST_STATUS = {"job": "sst", "errors": errors, "alarms": []}
+    arch.LAST_STATUS = {"job": "sst", "errors": errors, "alarms": alarms}
     print(json.dumps(out))
-    return errors
+    return failed

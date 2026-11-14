@@ -408,7 +408,9 @@ def series_pass(cfg: dict, store: Storage, fetch: Optional[Callable] = None) -> 
             errors.append("energy: no EIA key configured, so the energy series were not fetched")
         else:
             try:
-                for key, doc in en.energy_series(cfg, fetch).items():
+                # the lane gets ENERGY_SECONDS at most, so a slow EIA leaves the chain's later steps their time
+                lane = arch.Deadline(min(en.ENERGY_SECONDS, deadline.remaining() - 30))
+                for key, doc in en.energy_series(cfg, fetch, deadline=lane).items():
                     put(key, doc)
             except Exception as e:  # noqa: BLE001
                 errors.append(f"energy: {type(e).__name__}: {e}")

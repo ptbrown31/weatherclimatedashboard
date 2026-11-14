@@ -35,11 +35,21 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import time
 import urllib.parse
 import urllib.request
 from typing import Callable, Dict, List, Optional
 
 BASE = "https://api.eia.gov/v2/"
+# urllib's timeout bounds each wait on the socket, not the answer, so a server that keeps sending a little at a time
+# can hold one request for as long as it likes. On 14 November 2026 the daily chain's third try wrote every other
+# series in 13 s and then waited on this lane until Lambda stopped the function at its 900 s limit; the first two tries
+# ended the same way in the series step, and the steps after it (the traffic count and the report among them) did not
+# run. Each answer now has REQUEST_SECONDS to arrive whole, and the lane as a whole has ENERGY_SECONDS (a normal
+# pass's 33 requests take about 35 s).
+REQUEST_SECONDS = 60.0
+SOCKET_SECONDS = 20
+ENERGY_SECONDS = 240.0
 EPO = "electricity/electric-power-operational-data/data"
 RET = "electricity/retail-sales/data"
 
@@ -134,25 +144,44 @@ def api_key(cfg: dict) -> str:
             or ((cfg.get("eia") or {}).get("api_key") or "")).strip()
 
 
-def _get(route: str, params: dict, key: str, fetch: Optional[Callable]) -> dict:
+def _read_bounded(r, end: float) -> bytes:
+    """A response's whole body, read a piece at a time, or TimeoutError once
+    the wall clock passes `end`."""
+    parts: List[bytes] = []
+    while True:
+        if time.time() > end:
+            raise TimeoutError("the answer did not arrive in time")
+        b = r.read1(65536)
+        if not b:
+            return b"".join(parts)
+        parts.append(b)
+
+
+def _get(route: str, params: dict, key: str, fetch: Optional[Callable], deadline=None) -> dict:
+    """One EIA request. `deadline` (archive.Deadline) is the lane's; no
+    request starts within five seconds of it or runs past it."""
     p = dict(params)
     p["api_key"] = key
     url = BASE + route.lstrip("/") + "?" + urllib.parse.urlencode(p, doseq=True)
+    if deadline is not None and deadline.over(5):
+        raise TimeoutError("the lane's time ran out")
     if fetch:
         raw = fetch(url)
         return json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+    limit = REQUEST_SECONDS if deadline is None else min(REQUEST_SECONDS, deadline.remaining())
+    end = time.time() + limit
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=90) as r:
-        return json.load(r)
+    with urllib.request.urlopen(req, timeout=SOCKET_SECONDS) as r:
+        return json.loads(_read_bounded(r, end))
 
 
-def _rows(spec: dict, key: str, fetch: Optional[Callable], length: int = 5000) -> List[dict]:
+def _rows(spec: dict, key: str, fetch: Optional[Callable], length: int = 5000, deadline=None) -> List[dict]:
     freq = spec["freq"]
     start = {"monthly": START_MONTH, "annual": START_YEAR, "weekly": START_WEEK}[freq]
     p = dict(spec["params"])
     p.update({"frequency": freq, "data[0]": spec["col"], "start": start,
               "sort[0][column]": "period", "sort[0][direction]": "asc", "length": str(length)})
-    d = _get(spec["route"], p, key, fetch)
+    d = _get(spec["route"], p, key, fetch, deadline)
     return (d.get("response") or {}).get("data") or []
 
 
@@ -192,20 +221,31 @@ def _points(rows: List[dict], col: str) -> List[list]:
     return out
 
 
-def energy_series(cfg: dict, fetch: Optional[Callable] = None) -> Dict[str, dict]:
+def energy_series(cfg: dict, fetch: Optional[Callable] = None, deadline=None) -> Dict[str, dict]:
     """Every energy series this site can draw, keyed by series key.
 
     Returns an empty mapping when no key is configured; that is a state to
     report, not an error to raise, because the rest of the daily pass does not
-    depend on it.
+    depend on it. A request that fails or runs out of time ends the lane, and
+    the error names how far it got; nothing is returned, so every series
+    already published stays as it was.
     """
     key = api_key(cfg)
     if not key:
         return {}
     out: Dict[str, dict] = {}
+    total = len(SPECS) + (1 + len(SHARES) if SHARES else 0)
+    asked = [0]
+
+    def ask(spec: dict) -> List[dict]:
+        asked[0] += 1
+        try:
+            return _rows(spec, key, fetch, deadline=deadline)
+        except Exception as e:  # noqa: BLE001 - re-raised with the request's place in the pass
+            raise RuntimeError(f"request {asked[0]} of {total}, {type(e).__name__}: {e}") from None
 
     for pid, (skey, title, spec) in SPECS.items():
-        rows = _rows(spec, key, fetch)
+        rows = ask(spec)
         pts = _points(rows, spec["col"])
         if not pts:
             continue
@@ -221,13 +261,13 @@ def energy_series(cfg: dict, fetch: Optional[Callable] = None) -> Dict[str, dict
     # the shares need the same denominator, so all-fuels generation is fetched once
     if SHARES:
         tot = {q[0]: q[1] for q in _points(
-            _rows({"route": EPO, "col": "generation", "freq": "annual",
-                   "params": {"facets[location][]": "US", "facets[sectorid][]": "99",
-                              "facets[fueltypeid][]": "ALL"}}, key, fetch), "generation")}
+            ask({"route": EPO, "col": "generation", "freq": "annual",
+                 "params": {"facets[location][]": "US", "facets[sectorid][]": "99",
+                            "facets[fueltypeid][]": "ALL"}}), "generation")}
         for pid, (skey, title, fuel) in SHARES.items():
-            num = _points(_rows({"route": EPO, "col": "generation", "freq": "annual",
-                                 "params": {"facets[location][]": "US", "facets[sectorid][]": "99",
-                                            "facets[fueltypeid][]": fuel}}, key, fetch), "generation")
+            num = _points(ask({"route": EPO, "col": "generation", "freq": "annual",
+                               "params": {"facets[location][]": "US", "facets[sectorid][]": "99",
+                                          "facets[fueltypeid][]": fuel}}), "generation")
             pts = [[x, round(v / tot[x] * 100, 3)] for x, v in num if tot.get(x)]
             if not pts:
                 continue
