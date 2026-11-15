@@ -218,7 +218,9 @@ parameters: `station`, `theme`, `market`.
                      the hurricane map, and WPC's surface analysis over satellite imagery every three hours, played under
                      the landing map, copied into the bucket every half hour),
                      ndfd.py (NDFD's daytime high and overnight low sampled at the landing map's 4-pixel cells, each new
-                     issuance archived; today's views from the issuance before midnight Eastern, on its own schedule),
+                     issuance archived; today's views from the issuance before midnight Eastern, on its own schedule;
+                     and NDFD's hourly temperature on the analysis frames' cells for the NDFD landing's hourly maps, each
+                     hour from the newest issuance published before it began, a failure counted in its own streak),
                      locator.py (a metro-scale USGS map per station, fetched once),
                      traffic.py (page views from the CDN access logs),
                      basemap.py, storage.py, config.py,
