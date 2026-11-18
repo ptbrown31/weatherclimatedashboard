@@ -2484,6 +2484,86 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                                                       "final 10:46 AM (NOMADS)",
                                                       "final at 1:00:00 PM, three hours after the hour, from NOAA Open Data’s copy, because NOMADS had not published the file by then."],
                         str(hw_)[:400])
+                # the first-published rule, which the samples, all from before 19
+                # November 2026, cannot show: an hour of 20 November not written yet,
+                # final on the first copy found, undecided and final where both copies
+                # round alike, with the lane's alarm, undecided and under review where
+                # they do not, missing with no value, and an undecided row in the model
+                fp_ = page.evaluate("""() => { const S = window.WXSettle, tz = 'America/New_York', t = Date.parse('2026-11-20T17:00:00Z'), M = 60000;
+                  const c = (src, v) => ({ src, value: v });
+                  const pend = { t, hcut: t + 90 * M, first: true };
+                  const prim = { t, hcut: t + 90 * M, hat: t + 47 * M, hourly: { state: 'final', basis: 'first', src: 'nodd', copyState: 'primary' } };
+                  const alike = { t, hcut: t + 90 * M, hat: t + 49 * M, hourly: { state: 'final', basis: 'first', src: 'nodd', copyState: 'undecided',
+                    why: 'undecided: the first copy found is not the first published', alarm: 'the NOMADS copy differs', candidates: [c('nodd', 46), c('nomads', 46)] } };
+                  const apart = { t, hcut: t + 90 * M, hat: t + 49 * M, hourly: { state: 'review', basis: 'first', src: null, copyState: 'undecided',
+                    why: 'undecided: both copies carry the Last-Modified 2026-11-20T17:49:00Z', candidates: [c('nodd', 46), c('nomads', 48)] } };
+                  const none = { t, hcut: t + 90 * M, hat: t + 47 * M, hourly: { state: 'review', basis: 'first', src: 'nodd', copyState: 'missing' } };
+                  const P = S._model({ rowShape: 3, tz, hours: [{ t: '2026-11-20T17:00:00Z', local: '12 PM', rtma: { temp: null, wind: 6.7, gust: 11.2,
+                    undecided: { temp: [{ x: '46.4', show: 46 }, { x: '47.9', show: 48 }] }, why: 'the copies differ' } }] }, null, 'rtma', tz);
+                  return [S._hourlyText(pend, t + 20 * M, tz), S._hourlyText(prim, t + 60 * M, tz), S._hourlyWord(prim, t + 60 * M, tz),
+                          S._hourlyText(alike, t + 60 * M, tz), S._hourlyWord(alike, t + 60 * M, tz), S._hourlyText(apart, t + 100 * M, tz),
+                          S._hourlyWord(apart, t + 100 * M, tz), S._hourlyText(none, t + 100 * M, tz), [P.hours[0].anl, !!P.hours[0].und]]; }""")
+                chk.add(f"{scheme} settlement display: by the first-published rule an hour is final on the first copy found, and an undecided one says so, final or under review",
+                        [sd_n2(x_) for x_ in fp_[:8]] == [
+                            "provisional. It becomes final when either server publishes the file, expected about 12:46 PM, on the copy published first. "
+                            "With no copy by its cut-off, 1:30:00 PM, 1 hour 30 minutes after the hour, it goes to review.",
+                            "final at 12:47:00 PM, when NOAA Open Data published the file, the first copy found. The value is NOAA Open Data’s copy.",
+                            "final 12:47 PM (Open Data)",
+                            "final at 12:49:00 PM, on NOAA Open Data’s copy, the first found. The two servers’ copies differ here, 46 °F on NOAA Open Data’s copy "
+                            "and 46 °F on NOMADS’s copy, and the copy found first was not the one published first, but both round to the same whole degree. "
+                            "The lane raised an alarm: the NOMADS copy differs.",
+                            "final 12:49 PM (Open Data, copies differ)",
+                            "no value: the two servers’ copies differ here, 46 °F on NOAA Open Data’s copy and 48 °F on NOMADS’s copy, and both carry the same "
+                            "publication time. Under review.",
+                            "under review, copies differ",
+                            "no value: NOAA Open Data’s copy, the one that counts, has no value here. Under review."]
+                        and fp_[8] == [True, True], str(fp_)[:600])
+                # an undecided hour in the table: both values, as the lane rounded
+                # them, and why in the cell's title, in place of one value
+                und_doc = json.loads(json.dumps(sd_v3r))
+                und_row = und_doc["hours"][5]["rtma"]
+                und_row.update(temp=None, why="the copies differ and the order they were published in cannot be decided: "
+                               "both copies carry the Last-Modified 2026-09-26T09:46:00Z",
+                               undecided={"temp": [{"x": "46.418", "show": 46}, {"x": "47.903", "show": 48}]})
+                sd_serve["doc"] = und_doc
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                und_c = page.evaluate("() => { const c = [...document.querySelectorAll('#anaHours tbody tr')][5].querySelectorAll('td')[2]; return [c.textContent, c.title, c.classList.contains('und')]; }")
+                chk.add(f"{scheme} settlement display: an undecided hour shows both values in the table, and why, never one value",
+                        [sd_n2(und_c[0]), sd_n2(und_c[1]), und_c[2]] == ["46 or 48", "the two servers’ copies differ here, and both carry the same publication time", True],
+                        str(und_c)[:300])
+                # a day an undecided hour leaves split (_decided_summary): a value
+                # rounding two ways, the high and the precipitation total here, has
+                # none and is under review on its copies, the precipitation total's
+                # review flag notwithstanding, and the low, rounding alike with no one
+                # exact figure, keeps its value and says so. The day's entry is served
+                # in days/<date>.json too, which the display reads first
+                spl_doc = json.loads(json.dumps(sd_v3))
+                for r_ in spl_doc["hours"]:
+                    run_ = (r_.get("rtma") or {}).get("run")
+                    if run_:
+                        run_.update(high=None, precip=None)
+                        if run_.get("low"):
+                            run_["low"] = dict(run_["low"], exact=None)
+                spl_sum = spl_doc["summary"]["rtma"]
+                spl_sum.update(high=None, split=["high", "precip"], inexact=["low"], low=dict(spl_sum["low"], exact=None),
+                               precip={"value": None, "exact": None, "hours": (spl_sum.get("precip") or {}).get("hours", 0),
+                                       "resolved": False, "resolvedAt": None, "review": True})
+                with open(os.path.join(ANA_SNAP, "days", ana_day + ".json")) as fh:
+                    spl_day = json.load(fh)
+                spl_day["locations"]["new-york-ny"] = {"rtma": spl_sum}
+
+                def spl_route(route):
+                    return route.fulfill(status=200, content_type="application/json", body=json.dumps(spl_day))
+                sd_serve["doc"] = spl_doc
+                page.route(f"**/analysis2/days/{ana_day}.json*", spl_route)
+                ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                spl_c = {v_: (av_, ae_) for v_, av_, ae_ in page.evaluate(sd_cards_js)}
+                page.unroute(f"**/analysis2/days/{ana_day}.json*", spl_route)
+                spl_why = "under review: the two servers’ copies of an hour differ and which was published first cannot be told"
+                chk.add(f"{scheme} settlement display: a value an undecided hour splits is under review on its copies, the precipitation total too, and one with no one exact figure says so",
+                        spl_c.get("high") == ("no value", spl_why) and spl_c.get("precip") == ("no value", spl_why)
+                        and spl_c.get("low", ("", ""))[1].endswith("copies of an hour differ and both round to it")
+                        and spl_c.get("low", ("", ""))[0] not in ("", "no value"), str(spl_c)[:400])
                 # an hour with no file by its hourly cut-off: provisional before
                 # the cut, under review from it, in the table, the hover and the CSV
                 sd_serve["doc"] = sd_v3r

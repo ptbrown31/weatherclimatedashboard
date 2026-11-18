@@ -57,10 +57,14 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     server's first copy is kept on its own, with when this lane first saw it,
     the server's Last-Modified time and a sha256 of each message; a download
     with a message that fails the check is a copy only when the same bytes
-    come again (owner's ruling 2026-11-04). A row takes NOMADS's copy when it
-    was published by the day's cut-off, whatever NOAA Open Data's holds, then
-    NOAA Open Data's, and per file: a place the copy that counts has no value
-    for has none that hour. The choice is final once both copies are in, and
+    come again (owner's ruling 2026-11-04). Until the 19 November 2026 days a
+    row takes NOMADS's copy when it was published by the day's cut-off,
+    whatever NOAA Open Data's holds, then NOAA Open Data's; from them it takes
+    the copy published first, by the servers' own Last-Modified times (the
+    first-published rule, choose_first), an hour whose copies differ in an
+    order that cannot be told being undecided and decided by the interval
+    test. Either way the choice is per file: a place the copy that counts has
+    no value for has none that hour. The choice is final once both copies are in, and
     otherwise at the first ten-minute pass after the day's cut-off, on the
     copies in hand (owner's ruling 2026-11-04). A copy read later, and a
     later replacement of a file, are recorded and never used, and a day shown
@@ -84,7 +88,10 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     is 1 hour 30 minutes after the hour (his ruling of 5 November; three
     hours until then). It is final once NOMADS's copy published by then is
     in, otherwise at the first ten-minute pass after that cut-off on NOAA
-    Open Data's copy published by then, and under review with neither.
+    Open Data's copy published by then, and under review with neither; on the
+    19 November 2026 days and after it is final at the first copy found, from
+    either server, and undecided where a copy found later was published first
+    and differs (hourly_choice).
 
 Reads   noaa-rtma-pds and NOMADS, every file from both, through
         pipeline/gov_weather.py; the .idx sidecar of each analysis file and a
@@ -139,6 +146,7 @@ import csv
 import gzip
 import hashlib
 import io
+import itertools
 import json
 import math
 import os
@@ -232,7 +240,8 @@ NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com"}
 # (owner's decision 2026-09-29; the RTMA analysis of 2026-09-23 19Z never
 # reached NOAA Open Data and NOMADS had it). Since the owner's ruling of
 # 2026-11-03 the lane reads every file from both servers, and NOMADS's copy
-# counts when the two differ, since an hour is final once NOMADS has it. The
+# counted when the two differed, since an hour was final once NOMADS had it,
+# until the first-published rule of the 19 November 2026 days (FIRST_FROM_DAY). The
 # lane stops asking NOMADS a day short of its fourteen. NOMADS_AFTER_MINUTES
 # and PCP_NOMADS_AFTER_MINUTES are when read_hour and read_precip, the readers
 # of the archive's earlier shape, turn to it
@@ -241,7 +250,7 @@ NOMADS_AFTER_MINUTES = 30
 NOMADS_KEEP_HOURS = 13 * 24
 # the two servers, in the order the CSV files name them, and the order a pass
 # reads them in, NOMADS first, since it usually has a file a couple of minutes
-# before NOAA Open Data and its copy is the one that counts
+# before NOAA Open Data, and so its copy is usually the one published first
 SERVERS = ("nodd", "nomads")
 READ_ORDER = ("nomads", "nodd")
 # NOMADS blocks a client that makes more than about 120 requests a minute. A
@@ -464,15 +473,23 @@ CONVENTIONS = {
                    "the copies read by then, and the day turns final once every hour's copy is fixed, so a final "
                    "day never changes (decided 4 November 2026). A file published after the cut-off is shown and "
                    "never counted, a copy read after its hour was fixed is recorded and never used, and an hour "
-                   "missing at the cut-off leaves the value on the hours available.",
+                   "missing at the cut-off leaves the value on the hours available. From the 19 November 2026 days, "
+                   "a copy read after its hour was fixed that its server published by the cut-off and that gives "
+                   "the place other values makes the hour undecided, with an alarm, rather than changing it "
+                   "silently.",
     "review": "A place-day with no hour published by its cut-off has no value and is marked for event review, "
               "as the draft terms provide.",
     "missing": "Every file is read from NOAA Open Data and from NCEP's NOMADS server, and a file on either counts "
                "as published, from the first time it was on either, its Last-Modified time there. A file missing "
-               "from one server counts from the other. Where the two copies differ, NOMADS's counts when it was "
-               "published by the cut-off, and otherwise NOAA Open Data's. A place the copy that counts has no "
-               "value for has no value that hour (decided 4 November 2026). A download whose message fails the "
-               "check counts only once a second download returns the same bytes.",
+               "from one server counts from the other. Where the two copies differ, from the 19 November 2026 days "
+               "the copy published first counts, by the two servers' own Last-Modified times (the terms agreed on "
+               "17 November 2026), and until then NOMADS's counted when it was published by the cut-off, and "
+               "otherwise NOAA Open Data's. Where the copies differ and which was published first cannot be told "
+               "(equal times, or a copy with no Last-Modified that when it was first seen cannot place), the hour "
+               "is undecided, and a day's value stands where every choice between its undecided hours' copies "
+               "rounds to it, and is under review otherwise, or past twelve undecided hours. A place the copy that "
+               "counts has no value for has no value that hour (decided 4 November 2026). A download whose "
+               "message fails the check counts only once a second download returns the same bytes.",
     "hourly": "Each row is the analysis at the top of the hour and the precipitation over the hour that starts "
               "then, which NOAA files under the hour it ends. Station report conventions (the last report in "
               "the hour, specials, the tenths group) have no analogue here.",
@@ -486,7 +503,11 @@ CONVENTIONS = {
                       "read after that pass is recorded and never used. An hour read before the lane kept each "
                       "server's copy is final at the cut-off on the copy read, or at NOMADS's publication time where "
                       "one by the cut-off is on record, and in review where NOAA Open Data published after the "
-                      "cut-off.",
+                      "cut-off. From the 19 November 2026 days an hour is final at the first copy found, "
+                      "from either server, published by its cut-off. Where the other copy, found later, was "
+                      "published first and differs, which raises an alarm, or which came first cannot be told, the "
+                      "hour is undecided, final on the first found's value where both round to the same whole "
+                      "degree, and under review otherwise.",
     "cell": "The settlement grid cell approved on 2026-09-29: the 2.5 km cell whose square contains the main "
             "city's City Hall (in Miami the nearest land cell to the city's administration building, whose own "
             "cell counts as water). The value is the analysis at the cell, never an average over the "
@@ -851,7 +872,14 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     the files the live lane holds, and longer only while a catch-up span or
     the backfill has yet to reach the day, so a day shown final never changes
     (owner's ruling). `prior`, `missing` and `pmissing` are accepted from
-    callers that still pass them and are no longer used."""
+    callers that still pass them and are no longer used.
+
+    By the first-published rule an hour whose copies differ at the place in an
+    order that cannot be decided carries both values (`cands`), and each
+    daily value it bears on is decided by the interval test (_decided_summary)."""
+    und = _undecided_fields(product_hours)
+    if und:
+        return _decided_summary(product_hours, tz, day_iso, now, pending, und)
     hours, cut_iso, read, anl_rows, pcp_rows = _counted(product_hours, tz, day_iso)
     at_cutoff = now >= day_cutoff(day_iso, tz) and not pending
     if not read:
@@ -912,6 +940,85 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     return out
 
 
+# each daily value and the hourly field it is made from
+DAILY_FIELD = {"high": "temp", "low": "temp", "gust": "gust", "wind": "wind", "precip": "precip"}
+
+
+def _undecided_fields(product_hours: dict) -> Dict[str, list]:
+    """The hours whose copies differ at the place in an order that cannot be
+    decided, by field, each in time order."""
+    out: Dict[str, list] = {}
+    for iso in sorted(product_hours):
+        for f in (product_hours[iso].get("cands") or {}):
+            out.setdefault(f, []).append(iso)
+    return out
+
+
+def _with(rec: dict, f: str, raw) -> dict:
+    """An hour with one field set to a candidate's stored value."""
+    out = dict(rec)
+    out.pop("cands", None)
+    if f == "precip":
+        out.update(precip=exact("precip", raw), mm=raw)
+    else:
+        out[f] = exact(f, raw)
+    return out
+
+
+def _decided_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pending: bool,
+                     und: Dict[str, list]) -> Optional[dict]:
+    """day_summary with undecided hours, by the interval test (the engine's
+    decide): each daily value over every combination of its undecided hours'
+    candidates, the other hours as they stand. A value every combination rounds
+    alike settles, with its exact figure and its hour only where every
+    combination gives the same one (`inexact` names one without); one that
+    rounds two ways, or has a combination that counts no hour, or more than
+    MAX_UNDECIDED undecided hours, has no value (`split` names it), which at
+    the cut-off is event review. The day's other values stand as they are."""
+    plain = {iso: {k: v for k, v in rec.items() if k != "cands"} for iso, rec in product_hours.items()}
+    out = day_summary(plain, tz, day_iso, now, pending=pending)
+    if out is None:
+        return None
+    out = dict(out)
+    split, inexact = [], []
+    for daily, f in DAILY_FIELD.items():
+        hrs = und.get(f)
+        if not hrs:
+            continue
+        got: Optional[list] = None
+        if len(hrs) <= MAX_UNDECIDED:
+            got = []
+            choices = [sorted(set(product_hours[iso]["cands"][f]), key=lambda x: (x is None, x or 0)) for iso in hrs]
+            for combo in itertools.product(*choices):
+                ph = dict(plain)
+                for iso, raw in zip(hrs, combo):
+                    ph[iso] = _with(plain[iso], f, raw)
+                d = (day_summary(ph, tz, day_iso, now, pending=pending) or {}).get(daily)
+                if not d or d.get("value") is None:
+                    got = None
+                    break
+                got.append(d)
+        if got and len({d["value"] for d in got}) == 1:
+            v = dict(got[0])
+            for k in ("exact", "at"):
+                if k in v and len({d.get(k) for d in got}) != 1:
+                    v[k] = None
+            if v.get("exact") is None:
+                inexact.append(daily)
+            out[daily] = v
+        else:
+            split.append(daily)
+            if daily == "precip":
+                at_cut = now >= day_cutoff(day_iso, tz) and not pending
+                out[daily] = {"value": None, "exact": None, "hours": (out.get("precip") or {}).get("hours", 0),
+                              "resolved": False, "resolvedAt": None, "review": at_cut}
+            else:
+                out[daily] = None
+    out["split"] = split
+    out["inexact"] = inexact
+    return out
+
+
 def running(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, through: dt.datetime) -> Optional[dict]:
     """The day's values so far, from day_summary itself over the hours up to
     and including `through`, so every running figure is resolved by the code that
@@ -941,7 +1048,9 @@ def running_texts(product_hours: dict, tz: str, day_iso: str) -> Dict[str, dict]
     high and low are exact to a thousandth and the peak gust to twelve places;
     the mean wind and the precipitation total are cut toward zero at ten, the
     total converted once from the summed millimetres as day_summary does. A
-    value is None while nothing counts for it, as in `run`."""
+    value is None while nothing counts for it, as in `run`, and from an
+    undecided hour on, where the hour's candidates leave it no one exact
+    figure (_decided_summary)."""
     _, _, read, anl_rows, pcp_rows = _counted(product_hours, tz, day_iso)
     anl = {_iso(h): rec for h, rec in anl_rows}
     pcp = {_iso(h): rec for h, rec in pcp_rows}
@@ -949,8 +1058,10 @@ def running_texts(product_hours: dict, tz: str, day_iso: str) -> Dict[str, dict]
     wind, winds = Fraction(0), 0
     mm, inch, all_mm, wet = Fraction(0), Fraction(0), True, 0
     out = {}
-    for h, _ in read:
+    undecided: set = set()
+    for h, rec_h in read:
         k = _iso(h)
+        undecided |= set(rec_h.get("cands") or {})
         a = anl.get(k)
         if a is not None:
             if a.get("temp") is not None:
@@ -977,6 +1088,9 @@ def running_texts(product_hours: dict, tz: str, day_iso: str) -> Dict[str, dict]
         out[k] = {"high": fixed_text(hi, TEXT_PLACES["temp"]), "low": fixed_text(lo, TEXT_PLACES["temp"]),
                   "gust": fixed_text(peak, TEXT_PLACES["gust"]),
                   "wind": cut_text(wind / winds) if winds else None, "precip": total}
+        for daily, f in DAILY_FIELD.items():
+            if f in undecided:
+                out[k][daily] = None
     return out
 
 
@@ -1672,6 +1786,228 @@ def choose(copies: dict, cut_iso: str) -> Optional[str]:
     return "nodd" if nod is not None else None
 
 
+# ------------------------------------------------------------------ the first-published rule (2026-11-19)
+# The terms agreed on 17 November 2026 count the first published version of
+# a file, with no revisions, and on 18 November Patrick chose that this lane
+# follow them, as the engine does from that day. A place-day from FIRST_FROM_DAY,
+# its values and the hourly contracts of its hours alike, settles by it, so no
+# local day mixes two rules, and every one before keeps the rule it settled
+# under (choose above). The functions follow the engine's own, name for
+# name where they can (lm_time, on, same_values, first_published, choose,
+# hourly_choice, at_place, decide), its cap on undecided hours included, so the
+# two lanes agree by construction rather than by coincidence.
+FIRST_FROM_DAY = "2026-11-19"
+MAX_UNDECIDED = 12                              # the engine's: undecided hours an interval test enumerates, 2 ** 12
+# How "first published" is read where the lane finds the two copies out of the
+# order they were published in. It is the engine's reading, which has yet to
+# be ruled on, kept in this one place so that a ruling changes a value and not
+# the code: an hourly contract is final at the first copy found, and where the
+# other copy, found later, was published first and differs, the hour is
+# undecided between them with an alarm, final on the first found's value where
+# both round alike and otherwise under review, never changed silently. With
+# LATE_FIRST a day's hour fixed on its copies in hand (settle_cuts) is read the
+# same way when a copy found after it was published first and differs.
+HOURLY_READING = "first found; an earlier-published copy found later is undecided, with an alarm"
+LATE_FIRST = True
+SERVER_NAME = {"nodd": "NOAA Open Data", "nomads": "NOMADS"}
+
+
+def first_rule_day(day_iso: str) -> bool:
+    """Whether a place-day settles by the first-published rule."""
+    return day_iso >= FIRST_FROM_DAY
+
+
+def lm_time(c: Optional[dict]) -> Tuple[Optional[str], Optional[str]]:
+    """A copy's Last-Modified as a UTC ISO time, or None and why. The lane
+    keeps a header it could read as an ISO time (gov_weather.last_modified)
+    and None otherwise, and this never raises on one it cannot read."""
+    p = (c or {}).get("published")
+    if not p:
+        return None, "no Last-Modified on record"
+    try:
+        t = _parse_iso(p)
+    except (TypeError, ValueError, AttributeError):
+        return None, f"its Last-Modified {p!r} cannot be read"
+    if t.tzinfo is None:
+        return None, f"its Last-Modified {p!r} names no zone"
+    # one form for every time compared as text: UTC, to the second, with a Z
+    return _iso(t), None
+
+
+def on_time(c: Optional[dict]) -> Optional[str]:
+    """When a copy's server had it: its Last-Modified, or when the lane first
+    saw it where that is earlier or there is no Last-Modified (the engine's
+    Copy.on). A file published by the cut-off counts though it was read later."""
+    if not c:
+        return None
+    p, _ = lm_time(c)
+    s = _canon(c.get("seen"))
+    if p is None:
+        return s
+    return min(p, s) if s else p
+
+
+def _canon(s: Optional[str]) -> Optional[str]:
+    """A time the lane wrote as text, in the one form times are compared in,
+    None where it cannot be read as a time with a zone."""
+    if not s:
+        return None
+    try:
+        t = _parse_iso(s)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    return _iso(t) if t.tzinfo is not None else None
+
+
+def first_on(copies: dict) -> Optional[str]:
+    """The first time a file was on either server, by on_time."""
+    ts = [o for o in (on_time(c) for c in copies.values()) if o]
+    return min(ts) if ts else None
+
+
+def same_values(a: Optional[dict], b: Optional[dict]) -> Optional[bool]:
+    """Whether two copies agree at every place, or None when it cannot be
+    known (one kept no values and their bytes differ). Copies with the same
+    bytes, message for message, agree."""
+    if a is None or b is None:
+        return None
+    va, vb = a.get("values"), b.get("values")
+    if va is not None and vb is not None:
+        return all(va.get(lid) == vb.get(lid) for lid in set(va) | set(vb))
+    ha, hb = a.get("sha256") or {}, b.get("sha256") or {}
+    shared = [f for f in ha if ha.get(f) and hb.get(f)]
+    if shared and all(ha[f] == hb[f] for f in shared):
+        return True
+    return False if shared else None
+
+
+def first_published_pair(a: dict, b: dict) -> Tuple[Optional[dict], Optional[str]]:
+    """Of two copies that differ, the one its server published first, by the
+    servers' own Last-Modified times, or None and why the order cannot be
+    decided (the engine's first_published). Equal times cannot order them. A
+    copy with no Last-Modified is placed at when the lane first saw it, an upper
+    bound on its publication: it was first only if it was seen before the other
+    was published, and two such bounds never order two copies."""
+    pa, wa = lm_time(a)
+    pb, wb = lm_time(b)
+    if pa is not None and pb is not None:
+        if pa == pb:
+            return None, f"both copies carry the Last-Modified {pa}"
+        return (a if pa < pb else b), None
+    if pa is None and pb is None:
+        return None, (f"neither copy can be placed ({SERVER_NAME[a['server']]}: {wa}; "
+                      f"{SERVER_NAME[b['server']]}: {wb})")
+    known, unplaced, at, why = (b, a, pb, wa) if pa is None else (a, b, pa, wb)
+    seen = _canon(unplaced.get("seen"))
+    if seen and seen < at:
+        return unplaced, None
+    return None, (f"the {SERVER_NAME[unplaced['server']]} copy ({why}) was first seen at {seen}, "
+                  f"not before the {SERVER_NAME[known['server']]} copy's Last-Modified {at}")
+
+
+def _held_by(copies: dict, at_iso: str) -> Tuple[list, list]:
+    """The copies their servers had by `at_iso`, as (on_time, server, copy)
+    in that order, Open Data's first on a tie, and the servers whose copy
+    came after it."""
+    have = [(on_time(c), s, c) for s, c in copies.items() if c is not None]
+    held = sorted((x for x in have if x[0] is not None and x[0] <= at_iso), key=lambda x: (x[0], x[1]))
+    later = sorted(s for o, s, _ in have if o is None or o > at_iso)
+    return held, later
+
+
+def choose_first(copies: dict, at_iso: str) -> dict:
+    """The copy that counts for one file by the first-published rule, on the
+    copies its servers had by `at_iso` (a cut-off, or now before it), in the
+    engine's choose shape: "src", the server whose copy is used, or None;
+    "why", why none is; "differ", whether the two copies differ at any place
+    (None unless both are held, or when it cannot be known); "later", the
+    servers whose copy came after `at_iso`; and "candidates", where the copies
+    differ and the order they were published in cannot be decided, both
+    servers, the first held first. Copies that agree take the first held."""
+    held, later = _held_by(copies, at_iso)
+    base = {"src": None, "why": None, "differ": None, "later": later, "candidates": None}
+    if not held:
+        return dict(base, why="on neither server by the cut-off")
+    if len(held) == 1:
+        return dict(base, src=held[0][1])
+    same = same_values(held[0][2], held[1][2])
+    if same is False:
+        pick, why = first_published_pair(held[0][2], held[1][2])
+        if pick is None:
+            return dict(base, differ=True, candidates=[held[0][1], held[1][1]],
+                        why=f"the copies differ and the order they were published in cannot be decided: {why}")
+        return dict(base, src=pick["server"], differ=True)
+    if same is None:
+        return dict(base, src=next((x for x in held if x[2].get("values") is not None), held[0])[1])
+    return dict(base, src=held[0][1], differ=False)
+
+
+def hourly_choice(copies: dict, at_iso: str) -> dict:
+    """The copy an hourly contract reads by the first-published rule, on the
+    copies its servers had by `at_iso` (its cut, or now before it), in
+    choose_first's shape with "final", when it became final, and "alarm" (the
+    engine's hourly_choice, HOURLY_READING). It is the first copy held, final
+    as soon as it is held, at its time on its server. A second copy that agrees
+    changes nothing. Where they differ, the one published first is used if the
+    lane also found it first; otherwise the hour is undecided between them, the
+    first found first, with an alarm where the one published first was found
+    second and without one where the order cannot be decided."""
+    held, later = _held_by(copies, at_iso)
+    base = {"src": None, "final": None, "why": None, "differ": None, "later": later, "candidates": None,
+            "alarm": None}
+    if not held:
+        return dict(base, why="on neither server by the cut")
+    first = held[0]
+    if len(held) == 1:
+        return dict(base, src=first[1], final=first[0])
+    same = same_values(held[0][2], held[1][2])
+    if same is True:
+        return dict(base, src=first[1], final=first[0], differ=False)
+    if same is None:
+        return dict(base, src=next((x for x in held if x[2].get("values") is not None), first)[1], final=first[0])
+    # every copy the lane keeps carries when it was first seen (read_copy)
+    found = sorted(held[:2], key=lambda x: (_canon(x[2].get("seen")) or x[0], x[0], x[1]))
+    pick, why = first_published_pair(held[0][2], held[1][2])
+    if pick is not None and pick["server"] == found[0][1]:
+        return dict(base, src=pick["server"], final=on_time(pick), differ=True)
+    alarm = None
+    if pick is not None:
+        def when(c: dict) -> str:
+            p, _ = lm_time(c)
+            return p if p else f"no Last-Modified, first seen {c.get('seen')}"
+        alarm = (f"the {SERVER_NAME[pick['server']]} copy, first seen at {pick.get('seen')}, after the "
+                 f"{SERVER_NAME[found[0][1]]} copy at {found[0][2].get('seen')}, was published first "
+                 f"({when(pick)}, against {when(found[0][2])}) and differs")
+        why = "the first copy found is not the first published"
+    return dict(base, final=found[0][0], why=f"undecided: {why}", differ=True, alarm=alarm,
+                candidates=[found[0][1], found[1][1]])
+
+
+def first_at_place(choice: dict, copies: dict, kind: str, lid: str) -> Tuple[Optional[str], object, Optional[dict]]:
+    """One place's reading of a first-published choice (the engine's
+    at_place): the server whose copy it takes, its value there (an analysis's
+    {temp, wind, gust}, a precipitation file's millimetres) and None; or, where
+    the file is undecided and its two copies differ at the place, None, the
+    values the two agree on (an analysis's, the others None) and the
+    candidates' values where they differ, {var: [first held's, other's]}.
+    Copies that agree at the place, in value or in having none, need no order
+    there, and the place takes the first held's."""
+    cands = choice.get("candidates")
+    if not cands:
+        src = choice.get("src")
+        return src, (_value_at(copies.get(src), kind, lid) if src else None), None
+    each = [_value_at(copies.get(s), kind, lid) for s in cands]
+    if kind == "pcp":
+        return (cands[0], each[0], None) if each[0] == each[1] else (None, None, {"precip": each})
+    vals, split = {}, {}
+    for var in ANALYSIS_VARS:
+        xs = [(e or {}).get(var) for e in each]
+        vals[var] = xs[0] if xs[0] == xs[1] else None
+        if xs[0] != xs[1]:
+            split[var] = xs
+    return (cands[0], vals, None) if not split else (None, vals, split)
+
+
 def hourly_cut(t: dt.datetime) -> dt.datetime:
     """The hourly contracts' cut-off for hour t's analysis, at every place."""
     return t + HOURLY_CUT_AFTER
@@ -1689,14 +2025,45 @@ def place_cuts(kind: str, t: dt.datetime, locs: list) -> Dict[str, str]:
     return out
 
 
-def _cut_entry(copies: dict, held: list, cut_iso: str, at: str) -> dict:
+def first_server_on(copies: dict) -> Optional[str]:
+    """The server a file was on first, by on_time, NOAA Open Data on a tie."""
+    have = [(o, i, s) for i, s in enumerate(SERVERS) for o in [on_time(copies.get(s))] if o]
+    return min(have)[2] if have else None
+
+
+def _cut_entry(copies: dict, held: list, cut_iso: str, at: str, first: bool = False) -> dict:
     """How a file settled for the days of one cut-off: when (`at`, the pass),
     on which copies (`with`, the servers whose first copies were in hand),
     the copy chosen (`src`), and the first time the file was on either of
-    those servers and which one (`published`, `pubSrc`)."""
+    those servers and which one (`published`, `pubSrc`). By the
+    first-published rule (`first`) the entry says so (`rule`), and where the
+    copies differ and the order they were published in cannot be decided it
+    names both (`candidates`) with why, and `src` is None. With no copy
+    published by the cut-off it shows the first one its server had, which
+    never counts, as the rule before shows NOMADS's."""
     sub = {s: copies.get(s) for s in held}
-    return {"at": at, "with": list(held), "src": choose(sub, cut_iso), "published": first_published(sub),
-            "pubSrc": first_server(sub)}
+    if not first:
+        return {"at": at, "with": list(held), "src": choose(sub, cut_iso), "published": first_published(sub),
+                "pubSrc": first_server(sub)}
+    ch = choose_first(sub, cut_iso)
+    src = ch["src"]
+    if src is None and not ch["candidates"] and held:
+        src = first_server_on(sub)
+    entry = {"at": at, "with": list(held), "src": src, "published": first_on(sub), "pubSrc": first_server_on(sub),
+             "rule": "first"}
+    if ch["candidates"]:
+        entry.update(candidates=ch["candidates"], why=ch["why"])
+    return entry
+
+
+def cut_days(kind: str, t: dt.datetime, locs: list) -> Dict[str, str]:
+    """The local day each cut-off of a file's rows closes, by cut-off. Places
+    that share a cut-off share a zone's offset at it, and so a day."""
+    out: Dict[str, str] = {}
+    for loc in locs:
+        day = row_day(kind, t, loc["tz"])
+        out.setdefault(_iso(day_cutoff(day, loc["tz"])), day)
+    return out
 
 
 def settled_doc(product: str, kind: str, t: dt.datetime, copies: dict, cutoffs: dict, picks: dict,
@@ -1744,10 +2111,14 @@ def settle_cuts(store: Storage, product: str, kind: str, t: dt.datetime, slots: 
     where no zone's cut-off was later still (never with the sixty-seven
     places) the record waited for it; at 1 hour 30 minutes it never comes
     after the day's own cut-off. The daily cut-offs settle as they did.
+    A cut-off of a day from FIRST_FROM_DAY settles at the same passes by the
+    first-published rule (_cut_entry); the hourly cut is kept as it was, since
+    an hourly contract by that rule reads its copies itself (_hourly_first).
     Returns True when a cut-off settled."""
     copies = copies_of(store, product, kind, t, cache)
     held = [s for s in SERVERS if copies.get(s) is not None]
     by_place = place_cuts(kind, t, locs)
+    days = cut_days(kind, t, locs)
     done = dict(slots.get("cutoffs") or {})
     migrated = slots.get("migrated")
     changed = False
@@ -1757,7 +2128,7 @@ def settle_cuts(store: Storage, product: str, kind: str, t: dt.datetime, slots: 
         if migrated and cut_iso <= migrated:
             done[cut_iso] = _cut_entry(copies, [], cut_iso, migrated)
         elif len(held) == len(SERVERS) or (freeze and _iso(now) >= cut_iso):
-            done[cut_iso] = _cut_entry(copies, held, cut_iso, _iso(now))
+            done[cut_iso] = _cut_entry(copies, held, cut_iso, _iso(now), first_rule_day(days[cut_iso]))
         else:
             continue
         changed = True
@@ -1793,8 +2164,74 @@ def _late(src: Optional[str], held: list, copies: dict) -> bool:
                 and nom.get("sha256") != nod.get("sha256"))
 
 
+def _late_first(src: Optional[str], held: list, copies: dict, cut_iso: str) -> bool:
+    """_late by the first-published rule: a copy read after the row settled,
+    from either server, or a copy in hand other than the one the row uses that
+    differs from it, published after the cut-off."""
+    if any(copies.get(s) is not None and s not in held for s in SERVERS):
+        return True
+    c = copies.get(src) if src else None
+    return bool(c is not None and any(
+        s != src and copies.get(s) is not None and (on_time(copies[s]) or "") > cut_iso
+        and copies[s].get("sha256") != c.get("sha256") for s in held))
+
+
+def _view_first(store: Storage, product: str, kind: str, t: dt.datetime, lid: str, cut_iso: str,
+                now: dt.datetime, entry: Optional[dict], copies: dict, cache: dict) -> dict:
+    """file_view by the first-published rule. Before the row settles the
+    choice is made on the copies its servers had by now (choose_first), and
+    then on the copies it settled with. Where the file is undecided and its
+    copies differ at the place, `value` holds only what they agree on and
+    `cands` the rest, {var: [first held's, other's]}, with `why`. A copy read
+    after the row settled is recorded and never used (`late`); with LATE_FIRST,
+    where it was published by the cut-off and the rule on every copy now held
+    gives the place other values, the hour is undecided between the two, with
+    an `alarm`, rather than changed silently."""
+    if entry is not None:
+        held = list(entry.get("with") or [])
+        sub = {s: copies.get(s) for s in held if copies.get(s) is not None}
+        ch = {"src": entry.get("src"), "candidates": entry.get("candidates"), "why": entry.get("why")}
+        pub, pub_src, settled = entry.get("published"), entry.get("pubSrc"), entry.get("at")
+    else:
+        held = [s for s in SERVERS if copies.get(s) is not None]
+        sub = {s: copies[s] for s in held}
+        ch = choose_first(sub, min(_iso(now), cut_iso))
+        if ch["src"] is None and not ch["candidates"] and held:
+            ch["src"] = first_server_on(sub)
+        pub, pub_src, settled = first_on(sub), first_server_on(sub), None
+    src, value, cands = first_at_place(ch, sub, kind, lid)
+    why = ch.get("why") if cands else None
+    alarm = None
+    timely = [s for s in SERVERS if copies.get(s) is not None and s not in held
+              and (on_time(copies[s]) or "") <= cut_iso]
+    if entry is not None and LATE_FIRST and timely and not cands:
+        full = {s: copies[s] for s in SERVERS if copies.get(s) is not None}
+        _, value2, cands2 = first_at_place(choose_first(full, cut_iso), full, kind, lid)
+        # what the hour was fixed on, which is nothing where no copy it held was published by the cut-off
+        fixed = value if (pub or "~") <= cut_iso else (None if kind == "pcp" else dict.fromkeys(ANALYSIS_VARS))
+        if cands2 or value2 != fixed:
+            if cands2:
+                value, cands = value2, cands2
+            elif kind == "pcp":
+                value, cands = None, {"precip": [fixed, value2]}
+            else:
+                cands = {v: [(fixed or {}).get(v), (value2 or {}).get(v)] for v in ANALYSIS_VARS
+                         if (fixed or {}).get(v) != (value2 or {}).get(v)}
+                value = {v: (None if v in cands else (fixed or {}).get(v)) for v in ANALYSIS_VARS}
+            src, pub, pub_src = None, first_on(full), first_server_on(full)
+            c = copies[timely[0]]
+            alarm = (f"the {SERVER_NAME[timely[0]]} copy, first seen at {c.get('seen')}, after the hour was fixed "
+                     f"at {settled}, was on its server at {on_time(c)}, by the cut-off, and gives the place "
+                     f"other values")
+            why = "undecided: a copy found after the hour was fixed was published by the cut-off and differs"
+    return {"value": value, "src": src, "pub": pub, "pubSrc": pub_src, "settled": settled,
+            "late": _late_first(src or (ch.get("candidates") or [None])[0], held, copies, cut_iso),
+            "copies": copies, "later": {s: get_later(store, product, kind, s, t, cache) for s in SERVERS},
+            "cands": cands or None, "why": why, "alarm": alarm, "rule": "first"}
+
+
 def file_view(store: Storage, product: str, kind: str, t: dt.datetime, lid: str, cut_iso: str, now: dt.datetime,
-              slots: Optional[dict], cache: dict) -> Optional[dict]:
+              slots: Optional[dict], cache: dict, first: bool = False) -> Optional[dict]:
     """What one file gives one row, which is the value the row uses (an
     analysis's temperature, wind and gust, or a precipitation file's
     millimetres), whose copy it is (`src`), when the file was first on either
@@ -1803,7 +2240,9 @@ def file_view(store: Storage, product: str, kind: str, t: dt.datetime, lid: str,
     too late to count (`late`, a record only), and, for the raw CSV, both
     servers' copies and their later replacements. A settled row reads only
     the copies it settled on. A file in the archive's earlier shape gives its
-    one copy. None when nothing of the file was read."""
+    one copy. None when nothing of the file was read. A row of a day settling
+    by the first-published rule (`first`, or an entry that says so) is read by
+    _view_first."""
     rec = get_anl(store, product, t, cache) if kind == "anl" else get_precip(store, product, t, cache)
     if rec is not None and "settled" not in rec:
         # read before 2026-11-03 from one server, with no copies beside it
@@ -1815,7 +2254,9 @@ def file_view(store: Storage, product: str, kind: str, t: dt.datetime, lid: str,
     entry = ((rec if rec is not None else slots) or {}).get("cutoffs", {}).get(cut_iso)
     if entry is None and rec is not None:
         # a cut-off the record does not name (a zone added since): the copies it was written with
-        entry = _cut_entry(copies, sorted(rec.get("servers") or {}), cut_iso, rec.get("settled"))
+        entry = _cut_entry(copies, sorted(rec.get("servers") or {}), cut_iso, rec.get("settled"), first)
+    if (entry is not None and entry.get("rule") == "first") or (entry is None and first):
+        return _view_first(store, product, kind, t, lid, cut_iso, now, entry, copies, cache)
     if entry is not None:
         src, held = entry.get("src"), entry.get("with") or []
         if rec is not None and (rec.get("picks") or {}).get(lid, src) == src:
@@ -1890,7 +2331,7 @@ def file_doc(product: str, kind: str, t: dt.datetime, view: Optional[dict], coun
 
 
 def hourly_file(store: Storage, product: str, t: dt.datetime, slots: Optional[dict], cache: dict,
-                now: dt.datetime, times: dict) -> dict:
+                now: dt.datetime, times: dict, first: bool = False) -> dict:
     """The hourly temperature contract of hour t's analysis file, which every
     place shares (Patrick's ruling of 4 November): its cut (`cut`), its state
     (final, provisional or review), when it became final or went to review
@@ -1917,7 +2358,14 @@ def hourly_file(store: Storage, product: str, t: dt.datetime, slots: Optional[di
     two servers' copies the same in every file it compared), and under review
     at the cut where NOAA Open Data's Last-Modified is after it. The table is
     shown times only, so it never moves a day's figures; here it can make an
-    hour's state."""
+    hour's state.
+
+    An hour of a place-day from FIRST_FROM_DAY (`first`) is read by the
+    first-published rule (_hourly_first), so a file whose hour falls on 18
+    November at one place and 19 November at another is read by each day's
+    rule; each place's contract stands alone."""
+    if first:
+        return _hourly_first(store, product, t, cache, now)
     hc = _iso(hourly_cut(t))
     out = {"cut": hc, "state": "provisional", "at": None, "basis": None, "src": None, "late": False,
            "values": {}, "known": False}
@@ -1960,13 +2408,83 @@ def hourly_file(store: Storage, product: str, t: dt.datetime, slots: Optional[di
     return out
 
 
+def _hourly_first(store: Storage, product: str, t: dt.datetime, cache: dict, now: dt.datetime) -> dict:
+    """hourly_file by the first-published rule: hour t's analysis's choice
+    for its hourly contract on the copies its servers had by now or its cut,
+    whichever is earlier (hourly_choice), with each copy's values, which
+    hourly_row reads place by place. `basis` is "first" and `rule` says so;
+    `late` is a copy published after the cut, recorded and never used; and the
+    file is `known` once a copy is in or its cut has passed."""
+    hc = _iso(hourly_cut(t))
+    copies = {s: c for s, c in copies_of(store, product, "anl", t, cache).items() if c is not None}
+    ch = hourly_choice(copies, min(_iso(now), hc))
+    return {"cut": hc, "rule": "first", "basis": "first", "state": None, "at": None, "src": ch["src"],
+            "late": bool(ch["later"]), "values": {}, "known": bool(copies) or _iso(now) >= hc,
+            "past": _iso(now) >= hc, "choice": ch, "copies": {s: c.get("values") or {} for s, c in copies.items()}}
+
+
+def _hourly_row_first(hv: dict, lid: str) -> dict:
+    """One place's hourly contract by the first-published rule (the engine's
+    place_hours): `state` is the contract's, final, review or provisional
+    (still to come), and `copyState` the hour's, by the contract's own names:
+    primary, final at the first copy found;
+    undecided, where the copies differ at the place and either the one found
+    first was not the one published first, which carries an `alarm`, or the
+    order cannot be decided, final on the first found's value where the two
+    round alike and otherwise under review, both shown (`candidates`); missing,
+    under review, where the copy that counts gives the place no value or none
+    came by the cut; and pending before then. An undecided hour that is final
+    says so in copyState and why, never only in its value."""
+    ch, copies = hv["choice"], hv["copies"]
+
+    def temp(s: Optional[str]):
+        return ((copies.get(s) or {}).get(lid) or {}).get("temp") if s else None
+    out = {"cut": hv["cut"], "state": "provisional", "at": None, "basis": "first", "src": None, "rule": "first",
+           "copyState": "pending"}
+    cands = ch.get("candidates")
+    here = None
+    if cands:
+        xs = [temp(s) for s in cands]
+        if xs[0] == xs[1]:
+            v, src = xs[0], cands[0]
+        else:
+            v, src, here = None, None, xs
+    else:
+        src = ch.get("src")
+        v = temp(src)
+    if here is not None:
+        rounded = {None if x is None else half_up(exact("temp", x), 1) for x in here}
+        if len(rounded) == 1 and None not in rounded:
+            v, src = here[0], cands[0]
+            out.update(state="final", copyState="undecided", at=ch["final"], src=src)
+        else:
+            out.update(state="review", copyState="undecided", at=ch["final"])
+        out["candidates"] = [{"src": s, "value": None if x is None else half_up(exact("temp", x), 1),
+                              "x": x_text("temp", x)} for s, x in zip(cands, here)]
+        out["why"] = ch.get("why")
+    elif v is not None:
+        out.update(state="final", copyState="primary", at=ch["final"], src=src)
+    elif ch.get("final") is not None or hv.get("past"):
+        out.update(state="review", copyState="missing", at=ch.get("final") or hv["cut"], src=src)
+        out["why"] = ch.get("why") if ch.get("final") is None else "the copy that counts has no value at the place"
+    if ch.get("alarm"):
+        out["alarm"] = ch["alarm"]
+    out["value"] = half_up(exact("temp", v), 1) if v is not None else None
+    out["x"] = x_text("temp", v)
+    out["late"] = hv["late"]
+    return out
+
+
 def hourly_row(hv: dict, lid: str) -> dict:
     """One place's hourly contract from its file's (hourly_file): the value,
     whole degrees Fahrenheit rounded once, half up, away from zero, and its
     exact string, from the place's temperature in the copy the contract reads.
     A copy that counts with no temperature at the place leaves the place no
     value, which is a review at the cut, the choice being per file (owner's
-    ruling 2026-11-04)."""
+    ruling 2026-11-04). An hour by the first-published rule is read by
+    _hourly_row_first."""
+    if hv.get("rule") == "first":
+        return _hourly_row_first(hv, lid)
     k = ((hv.get("values") or {}).get(lid) or {}).get("temp")
     out = {key: hv[key] for key in ("cut", "state", "at", "basis", "src")}
     if out["state"] == "final" and k is None:
@@ -2151,11 +2669,12 @@ def _has_copy(view: Optional[dict]) -> bool:
 
 
 def _hourly(memo: dict, store: Storage, product: str, t: dt.datetime, slots: Optional[dict], cache: dict,
-            now: dt.datetime, times: dict) -> dict:
-    """hourly_file once per file in a build, since every place shares it."""
-    key = (product, _iso(t))
+            now: dt.datetime, times: dict, first: bool = False) -> dict:
+    """hourly_file once per file and rule in a build, since every place of
+    the day shares it."""
+    key = (product, _iso(t), first)
     if key not in memo:
-        memo[key] = hourly_file(store, product, t, slots, cache, now, times)
+        memo[key] = hourly_file(store, product, t, slots, cache, now, times, first)
     return memo[key]
 
 
@@ -2183,6 +2702,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
     if span:
         for product in PRODUCTS:
             prime_copies(store, product, min(span), max(span) + dt.timedelta(hours=1), cache)
+    first = first_rule_day(day_iso)
     for loc in locs:
         lid, tz = loc["id"], loc["tz"]
         hours = local_day_hours(day_iso, tz)
@@ -2211,14 +2731,16 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 # precipitation, a separate file (RTMA 2026-09-23 19Z).
                 end = h + dt.timedelta(hours=1)
                 sa, sp = (opened.get(_iso(h)) or {}).get("anl"), (opened.get(_iso(end)) or {}).get("pcp")
-                fa = file_view(store, product, "anl", h, lid, cut_iso, now, sa, cache) if h <= latest else None
-                fp = file_view(store, product, "pcp", end, lid, cut_iso, now, sp, cache) if end <= latest else None
+                fa = file_view(store, product, "anl", h, lid, cut_iso, now, sa, cache, first) if h <= latest else None
+                fp = file_view(store, product, "pcp", end, lid, cut_iso, now, sp, cache, first) if end <= latest else None
                 pending = (pending or _pending(fa, sa, state, product, h, now, cut_iso)
                            or _pending(fp, sp, state, product, end, now, cut_iso))
                 va = (fa or {}).get("value")
                 vp = (fp or {}).get("value")
+                # an undecided file's candidates where its copies differ at the place (_view_first)
+                cands = dict((fa or {}).get("cands") or {}, **((fp or {}).get("cands") or {}))
                 row[product] = None
-                if va is None and vp is None:
+                if va is None and vp is None and not cands:
                     # a copy with no value the row uses, read too late, say: the
                     # raw CSV still records it
                     if raw is not None and product == SETTLE and (_has_copy(fa) or _has_copy(fp)):
@@ -2230,7 +2752,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     # or one too late for the day and in time for the hourly
                     # contract) still carries it and its files, and nothing else
                     if wanted and h <= latest:
-                        hv = _hourly(hourly, store, product, h, sa, cache, now, times)
+                        hv = _hourly(hourly, store, product, h, sa, cache, now, times, first)
                         if hv["known"]:
                             row[product] = {"hourly": hourly_row(hv, lid),
                                             "anlFile": file_doc(product, "anl", h, fa, False, cut_iso, times),
@@ -2249,6 +2771,9 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 # its one server's time)
                 rec["pub"] = fa["pub"] if va is not None else None
                 rec["pcpPub"] = fp["pub"] if fp is not None else None
+                if cands:
+                    # the stored values each copy gives the place, which day_summary's interval test decides between
+                    rec["cands"] = cands
                 product_hours[_iso(h)] = rec
                 views[_iso(h)] = (fa, fp, va, vp, sa)
                 # the hourly values in the contract's units, cut to a
@@ -2280,6 +2805,18 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     row[product]["lateCopy"] = True
                 if (fp or {}).get("late"):
                     row[product]["pcpLateCopy"] = True
+                # by the first-published rule, an hour whose copies differ at the place in an order that
+                # cannot be decided shows both values and why, and one a copy found after it was fixed
+                # made undecided carries the alarm, so that it never reads as a plain value (_view_first)
+                if cands:
+                    # each copy's value converted (`x`) and as the contract shows it (`show`), rounded here,
+                    # since the page rounds nothing
+                    row[product]["undecided"] = {f: [{"x": x_text(f, x), "show": half_up(exact(f, x), HOUR_UNIT[f])}
+                                                     for x in xs] for f, xs in cands.items()}
+                    row[product]["why"] = (fa or {}).get("why") or (fp or {}).get("why")
+                alarm = (fa or {}).get("alarm") or (fp or {}).get("alarm")
+                if alarm:
+                    row[product]["alarm"] = alarm
                 if raw is not None and product == SETTLE:
                     raw.append([day_iso, lid, hour_label(h, tz), _iso(h),
                                 (va or {}).get("temp"), (va or {}).get("wind"), (va or {}).get("gust"),
@@ -2322,7 +2859,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     cell["pcpFile"] = (file_doc(product, "pcp", end, fp,
                                                 vp is not None and _in_time(rec["pcpPub"], cut_iso), cut_iso, times)
                                        if end <= latest else None)
-                    cell["hourly"] = hourly_row(_hourly(hourly, store, product, h, sa, cache, now, times), lid)
+                    cell["hourly"] = hourly_row(_hourly(hourly, store, product, h, sa, cache, now, times, first), lid)
             valued |= set(product_hours)
         if not entry:
             continue

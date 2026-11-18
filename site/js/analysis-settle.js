@@ -41,6 +41,20 @@ window.WXSettle = (() => {
      ever shown as a file's publication time. */
   const LAG = { anl: { nomads: 46 * MIN, nodd: 49 * MIN, by: 52 * MIN }, pcp: { nomads: 16 * MIN, nodd: 17 * MIN, by: 18 * MIN } };
   LAG.anl.due = LAG.anl.nomads; LAG.pcp.due = LAG.pcp.nomads;
+  /* The first-published rule (the terms agreed on 17 November 2026, which
+     Patrick chose on 18 November that this lane follow): where the two servers'
+     copies of a file differ, the copy published first counts, by the
+     servers' own Last-Modified times, for a place-day from 19 November, its
+     values and the hourly contracts of its hours alike, so no day mixes two
+     rules. The days before keep the rule they settled under, NOMADS's copy
+     where they differ.
+     An hour whose copies differ in an order that cannot be told is undecided
+     and carries both values, which the lane decides between or sends to
+     review; the page shows that it is undecided, never only its value. */
+  const FIRST_DAY = '2026-11-19';
+  const reason = why => (/not the first published/.test(why || '') ? 'the copy found first was not the one published first'
+    : /found after the hour was fixed/.test(why || '') ? 'a copy found after the hour was fixed had been published first'
+      : /both copies carry/.test(why || '') ? 'both carry the same publication time' : 'which was published first cannot be told');
   // the draft terms' cut-off, 12:45 AM local on the day after (clocks never
   // change between midnight and then in the lane's zones), and how far past
   // the last cut-off a final day's replay runs
@@ -162,8 +176,14 @@ window.WXSettle = (() => {
     const hours = rows.map((r, i) => {
       const t = Date.parse(r.t), v = r[product] || null;
       const o = { i, t, iso: r.t, end: t + HOUR, local: r.local, repeat: /\*$/.test(String(r.local || '')), v };
-      o.anl = !!(v && (v.temp != null || v.wind != null || v.gust != null));
-      o.pcp = !!(v && v.precip != null);
+      // an hour whose copies differ in an order that cannot be told is in, with both values (`und`)
+      // the rule the place-day settles by, which an hour the lane has not written yet reads
+      o.first = String((doc && doc.day) || '') >= FIRST_DAY;
+      o.und = (v && v.undecided) || null;
+      o.why = (v && v.why) || null;
+      o.alarm = (v && v.alarm) || null;
+      o.anl = !!(v && (v.temp != null || v.wind != null || v.gust != null || (o.und && (o.und.temp || o.und.wind || o.und.gust))));
+      o.pcp = !!(v && (v.precip != null || (o.und && o.und.precip)));
       o.anlLate = !!(v && v.late);
       o.pcpLate = !!(v && v.pcpLate);
       o.anlFile = (v && v.anlFile) || null;
@@ -240,7 +260,7 @@ window.WXSettle = (() => {
     return 'provisional';
   }
   // the hourly cut-off, 1 hour 30 minutes after the hour in every zone
-  // (owner's ruling of 2026-11-05; three hours from his ruling of 2026-11-04
+  // (owner's ruling of 2026-11-05; three hours from the ruling of 2026-11-04
   // until then), as the lane writes it, or for an hour it has not written
   // yet, from the hour's own time
   const HOURLY_CUT = 90 * MIN;
@@ -260,9 +280,39 @@ window.WXSettle = (() => {
   // from 2026-11-05 saying when an hour not final yet will be); `q` is the
   // apostrophe, typographic on the page and plain in a CSV file. An hour the
   // lane has not written yet reads as one to come
+  /* The same by the first-published rule (basis "first"): final at the first
+     copy found, from either server, at its time on its server; undecided where
+     the two copies differ here and either the copy found first was not the one
+     published first, which carries the lane's alarm, or which came first
+     cannot be told, final on the first found's value where both round to the
+     same whole degree and under review where they do not; and under review
+     with no value here or no copy by the cut-off. */
+  function firstText(o, T, tz, st, ap) {
+    const hr = o.hourly || {}, src = SRC[hr.src] || 'the first server';
+    const cut = clockS(tz, hourlyCut(o)) + ', ' + afterWords(hourlyCut(o) - o.t) + ' after the hour';
+    const two = (hr.candidates || []).map(c => (c.value == null ? 'no value' : c.value + ' °F') + ' on ' + (SRC[c.src] || c.src) + ap + 's copy').join(' and ');
+    const alarm = hr.alarm ? ' The lane raised an alarm: ' + hr.alarm + '.' : '';
+    if (st === 'final') {
+      if (hr.copyState === 'undecided') {
+        return 'final at ' + (o.hat != null ? clockS(tz, o.hat) : 'a time not on record') + ', on ' + src + ap + 's copy, the first found. The two servers'
+          + ap + ' copies differ here, ' + two + ', and ' + reason(hr.why) + ', but both round to the same whole degree.' + alarm;
+      }
+      return 'final at ' + (o.hat != null ? clockS(tz, o.hat) : 'a time not on record') + ', when ' + src + ' published the file, the first copy found. The value is '
+        + src + ap + 's copy.';
+    }
+    if (st === 'review') {
+      if (hr.copyState === 'undecided') return 'no value: the two servers' + ap + ' copies differ here, ' + two + ', and ' + reason(hr.why) + '. Under review.' + alarm;
+      if (hr.src) return 'no value: ' + src + ap + 's copy, the one that counts, has no value here. Under review.';
+      return 'no value: neither server had published the file by ' + cut + '. Under review.';
+    }
+    const e = nomadsDue(o, T);
+    return (T >= o.t ? 'provisional. ' : '') + 'It becomes final when either server publishes the file' + (e != null ? ', expected about ' + clock(tz, e) : '')
+      + ', on the copy published first. With no copy by its cut-off, ' + cut + ', it goes to review.';
+  }
   function hourlyText(o, T, tz, q) {
     const st = o.hourly ? hourlyAt(o, T) : 'provisional';
     const hr = o.hourly || {}, ap = q || '’';
+    if (hr.basis === 'first' || (!o.hourly && o.first)) return firstText(o, T, tz, st, ap);
     const three = (o.hcut != null ? clockS(tz, o.hcut) : 'a time not on record') + ', ' + afterWords(hourlyCut(o) - o.t) + ' after the hour';
     if (st === 'final') {
       if (hr.basis === 'nomads') {
@@ -301,8 +351,12 @@ window.WXSettle = (() => {
   // NOMADS's publication with NOAA Open Data's value, which the hover says
   function hourlyWord(o, T, tz) {
     const st = o.hourly ? hourlyAt(o, T) : 'provisional';
+    if (st === 'final' && o.hourly.basis === 'first') {
+      return 'final ' + clock(tz, o.hat != null ? o.hat : o.hcut) + ' (' + (o.hourly.src === 'nomads' ? 'NOMADS' : 'Open Data')
+        + (o.hourly.copyState === 'undecided' ? ', copies differ' : '') + ')';
+    }
     if (st === 'final') return 'final ' + clock(tz, o.hat != null ? o.hat : o.hcut) + (o.hourly.basis === 'nomads' ? ' (NOMADS)' : ' (Open Data)');
-    if (st === 'review') return 'under review';
+    if (st === 'review') return o.hourly && o.hourly.copyState === 'undecided' ? 'under review, copies differ' : 'under review';
     const e = nomadsDue(o, T);
     const fin = (e != null ? 'final expected ' + clock(tz, e) + ', ' : '') + 'cut-off ' + clock(tz, hourlyCut(o));
     return T >= o.t ? 'provisional, ' + fin : fin;
@@ -576,9 +630,15 @@ window.WXSettle = (() => {
           val = e[c.k] || null;
           n = c.k === 'precip' ? (val && val.hours) : e.hours;
         }
+        // by the first-published rule, a value an undecided hour leaves rounding two ways has none
+        // (`split`), and one that rounds alike has no one exact figure (`inexact`)
+        const split = !!(e && Array.isArray(e.split) && e.split.includes(c.k));
+        const inexact = !!(e && Array.isArray(e.inexact) && e.inexact.includes(c.k));
         let why = null;
         if (ctx.unread) why = 'the day file could not be read';
-        else if (review && (S.atCut || !P.running)) why = c.k === 'precip' ? 'no ' + NAME + ' precipitation published by the 12:45 AM cut-off' : 'no ' + NAME + ' hour published by the 12:45 AM cut-off';
+        else if (split && (!val || val.value == null)) {  // read before review, since a split precipitation total carries its review flag too
+          why = ((S.atCut || !P.running) ? 'under review: ' : '') + 'the two servers’ copies of an hour differ and which was published first cannot be told';
+        } else if (review && (S.atCut || !P.running)) why = c.k === 'precip' ? 'no ' + NAME + ' precipitation published by the 12:45 AM cut-off' : 'no ' + NAME + ' hour published by the 12:45 AM cut-off';
         else if (!val || val.value == null) why = P.running && P.hours.some(o => o.anl || o.pcp) ? 'no hour in yet' : 'no ' + NAME + ' hours read yet';
         if (why) {
           card.appendChild(h('span', { class: 'av dim', text: 'no value' }));
@@ -587,7 +647,7 @@ window.WXSettle = (() => {
           card.appendChild(h('span', { class: 'av', text: fx(val.value, c.dec) + c.unit }));
           const d = c.kind === 'at' ? (val.at ? 'at ' + hourZ(tz, Date.parse(val.at)) : '')
             : (c.kind === 'mean' ? 'mean of ' : 'total of ') + n + (n === 1 ? ' hour' : ' hours');
-          card.appendChild(h('span', { class: 'ae', text: d + so }));
+          card.appendChild(h('span', { class: 'ae', text: d + so + (inexact ? (d ? ', ' : '') + 'copies of an hour differ and both round to it' : '') }));
         }
         card.onclick = () => { if (opts.onVar) opts.onVar(c.k); };
         cards.appendChild(card);
@@ -1034,8 +1094,11 @@ window.WXSettle = (() => {
       // the converted value as the lane wrote it, or on an older file the row's
       // own value, cut, which is all that file carries
       const conv = kk => (o.x && o.x[kk] != null ? u(o.x[kk], UNIT[kk][2]) : v[kk] != null ? u(fx(v[kk], DEC[kk][1]), UNIT[kk][2]) + ' <span class="tm">cut</span>' : '');
+      // an hour whose copies differ here in an order that cannot be told shows both, converted, and why
+      const undRows = kk => (o.und && o.und[kk] ? [kv('Copies differ', esc(o.und[kk].map(c => (c.x == null ? 'no value' : c.x + ' ' + UNIT[kk][2])).join(' or ')
+        + ', and ' + reason(o.why)), 'num')].concat(o.alarm ? [kv('Alarm', esc(o.alarm))] : []) : []);
       const valueRows = (kk, name) => [kv(name ? name + ' as stored' : 'As stored', o.raw && o.raw[kk] != null ? u(o.raw[kk], UNIT[kk][0]) : '', 'num'),
-        kv('Converted', conv(kk), 'num'), kv('Rounded', rounded(kk) + (pc ? ' <span class="tm">for display only</span>' : ''))];
+        kv('Converted', conv(kk), 'num'), kv('Rounded', rounded(kk) + (pc ? ' <span class="tm">for display only</span>' : ''))].concat(undRows(kk));
       const soFar = (name, r, x, unit, dec) => kv(name, r && r.value != null ? esc(fx(r.value, dec)) + ' ' + unit + muted(x != null ? x : (ex ? null : r.exact)) : '');
       let body = '';
       if (!inn && !lt) {
@@ -1172,6 +1235,11 @@ window.WXSettle = (() => {
       const ex = !run;
       const cell = (o, k, isIn, isLate, cls) => {
         if (!(isIn || isLate)) return '<td class="num' + (cls || '') + '">·</td>';
+        // an hour whose copies differ here in an order that cannot be told: both values, as the lane rounded them
+        if (o.und && o.und[k] && P.running) {
+          return '<td class="num und' + (cls || '') + '" title="' + esc('the two servers’ copies differ here, and ' + reason(o.why)) + '">'
+            + esc(o.und[k].map(c => (c.show == null ? '·' : fx(c.show, DEC[k][0]))).join(' or ')) + '</td>';
+        }
         return '<td class="num' + (cls || '') + (isLate ? ' dim late' : '') + '"' + (isLate ? ' title="published after the cut-off, not counted"' : '') + '>'
           + fx(ex ? o.v[k] : shown(o, k), DEC[k][ex ? 1 : 0]) + '</td>';
       };
@@ -1225,15 +1293,27 @@ window.WXSettle = (() => {
           + 'The precipitation total, summed from NOAA’s own numbers before rounding and rounded once, is the column the contract resolves on, and the hourly amounts, rounded for display, can add up to a slightly different figure.'
         : 'This file carries each hour as stored, temperature, wind and gust to a thousandth and precipitation to a ten-thousandth of an inch, cut rather than rounded, and no running total.')
         + (anyLate ? ' A dimmed value was published after the cut-off and is not counted.' : '');
+      // the rule the day settled by, its values and its hourly contracts alike
+      const firstD = String((P.doc && P.doc.day) || '') >= FIRST_DAY;
+      const copyRule = firstD
+        ? 'The two copies are normally identical. Where they differ, the copy published first counts, from either server, by the times the servers report. '
+          + 'Where which came first cannot be told, the hour shows both values, and the day keeps a value only where both give it. '
+          + 'This is the rule from 19 November 2026. Until then the NOMADS copy counted if it was published in time.'
+        : 'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time. From 19 November 2026 the copy published first counts, from either server.';
+      const hourlyNotes = firstD
+        ? ['The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as either server publishes the file, on the first copy found, if that is by the hour’s cut-off, ' + aw + ' after the hour.',
+           'Where the other copy, found later, was published first and differs, the hour is undecided, and the lane raises an alarm. It stays final if both copies round to the same whole degree, and otherwise goes to review. With no copy by the cut-off, the hour has no value and goes to review.',
+           'For an hour not final yet, the table gives the time the first copy usually comes and the hour’s cut-off.']
+        : ['The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file, if that is by the hour’s cut-off, ' + aw + ' after the hour.',
+           'If NOMADS has not published the file by then, NOAA Open Data’s copy becomes final at the cut-off. With neither copy, the hour has no value and goes to review.',
+           'For an hour not final yet, the table gives the time NOMADS usually publishes its file and the hour’s cut-off.',
+           'NOMADS’s publication times are on record only from 10:00 UTC on 3 November, so earlier hours are final at their cut-off on NOAA Open Data’s copy, or under review where that copy came later.'];
       const pts = (run ? ['Point at an hour on a chart, or tap it, for the value as stored, converted before rounding and rounded.'] : []).concat([
         'Each row is the ' + NAME + ' analysis at the top of the hour in ' + tz + ' and the precipitation over the hour that starts then, which NOAA files under the hour it ends.',
         'NOAA publishes every file on two servers, NOAA Open Data (on Amazon’s cloud) and NOMADS (the National Centers for Environmental Prediction’s own server), and this page reads both.',
-        'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time.',
-        'The last two columns give the time each server published the hour’s analysis, as the server reports it. Until a server has published the file, its column gives the time it usually does, and “not on record” means no time was kept for that server.',
-        'The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file, if that is by the hour’s cut-off, ' + aw + ' after the hour.',
-        'If NOMADS has not published the file by then, NOAA Open Data’s copy becomes final at the cut-off. With neither copy, the hour has no value and goes to review.',
-        'For an hour not final yet, the table gives the time NOMADS usually publishes its file and the hour’s cut-off.',
-        'NOMADS’s publication times are on record only from 10:00 UTC on 3 November, so earlier hours are final at their cut-off on NOAA Open Data’s copy, or under review where that copy came later.']);
+        copyRule,
+        'The last two columns give the time each server published the hour’s analysis, as the server reports it. Until a server has published the file, its column gives the time it usually does, and “not on record” means no time was kept for that server.'],
+        hourlyNotes);
       // written again only when the words change, so points a reader opened stay open through a replay
       const key = lead + '\n' + pts.join('\n');
       if (key !== footKey) {

@@ -748,7 +748,8 @@ window.WXAnalysis = (() => {
     const s0 = src[PRODUCT] || {};
     host.appendChild(h('p', { text: 'Sources. RTMA is read from NOAA Open Data (' + (s0.bucket || 'noaa-rtma-pds') + '), '
       + lag(s0.lagMinutes) + ' after each hour' + latest(s0) + '; its precipitation is NOAA’s radar-only estimate. '
-      + 'Every file is read from NCEP’s NOMADS server as well, and where the two copies differ the NOMADS copy counts if it was published by the cut-off.' }));
+      + 'Every file is read from NCEP’s NOMADS server as well. Where the two copies differ, from 19 November 2026 the copy published first counts, from either server, '
+      + 'by the times the servers report, and until then the NOMADS copy counted if it was published by the cut-off.' }));
     host.appendChild(h('p', { text: 'The map shows each place’s value for the open day, the one its own 2.5 km grid square resolves on.' }));
     host.appendChild(h('p', { text: 'Station report conventions have no analogue here. There is no last report in the hour, no special report and no tenths group; '
       + 'each hour is the analysis at the top of the hour, and precipitation is the accumulation over the hour that starts then.' }));

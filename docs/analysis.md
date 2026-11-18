@@ -25,7 +25,8 @@ was in or not published), which had replaced half an hour after the product usua
 **the job checks every two minutes around the expected arrivals** (section 5), and reads each
 hour's precipitation file as soon as NOAA publishes it rather than with the next analysis. The
 same ruling has the job **read every file from NOMADS as well as NOAA Open Data** and keep each
-server's first copy, NOMADS's counting when the two differ (section 1). A file's publication time
+server's first copy, NOMADS's counting when the two differ (section 1; from the 19 November 2026 days
+the copy published first, below). A file's publication time
 is since then the first time it was on either server. 2026-11-04 (owner's ruling): **the choice of
 copy for every hour of a day is final at the first ten-minute pass after the day's cut-off**, on
 the copies read by then, or earlier once both servers' copies are in; a copy read later is
@@ -87,12 +88,35 @@ read. Where a message's hash equals the other server's, its values are that copy
 hashes differ, both copies are decoded at the places, and the raw CSV keeps the hash comparison
 apart from the value comparison. A later read of the same server's file with other bytes or
 another Last-Modified time is a replacement, recorded beside the first copy and never used
-(section 5). Each place's row takes one copy, by the day's cut-off:
+(section 5). Until the 19 November 2026 days each place's row takes one copy, by the day's cut-off:
 
 - NOMADS's copy, when it was published by the cut-off, whatever NOAA Open Data's holds;
 - otherwise NOAA Open Data's, when it was;
 - otherwise neither counts, and the row shows NOMADS's copy, or NOAA Open Data's when NOMADS has
   none, as published late.
+
+**The first-published rule (Patrick's choice of 2026-11-18, the terms agreed on 2026-11-17).** From
+the 19 November 2026 days (`FIRST_FROM_DAY`) a row takes the copy its server published first, by the
+two servers' own Last-Modified times, among the copies published by the cut-off (`choose_first`, the
+engine's `choose`, name for name). A copy is on its server from its Last-Modified, or
+from when the lane first saw it where that is earlier or there is no Last-Modified (`on_time`), so a
+copy without one is placed at an upper bound: it was first only if it was seen before the other was
+published. Copies that agree at every place take the first held. Where they differ and the order
+cannot be decided (equal Last-Modified times, or a copy that cannot be placed), the file is
+undecided. A place where its two copies agree takes their value, and elsewhere the row holds both
+(`cands`) and shows why. Each daily value an undecided hour bears on is decided by the interval
+test (`_decided_summary`, the engine's `decide`). It stands where every combination of the undecided
+hours' copies rounds to the same value, its exact figure and hour kept only where every combination
+gives the same (`inexact` names one without), and otherwise it has none and is under review at the
+cut-off (`split`), as it is past twelve undecided hours (`MAX_UNDECIDED`, the engine's own cap). The
+settling passes are unchanged (section 5): a row is fixed once both copies are in, or at the first
+ten-minute pass after its cut-off on the copies in hand, and a copy read later is recorded and
+flagged and never used. A copy read after its hour was fixed that its server published by the
+cut-off, and by which the rule on every copy now held gives the place other values, makes the hour
+undecided between the two, with an alarm (`LATE_FIRST`), rather than changing it silently; that
+reading of "first published" for a copy the lane found out of order is the engine's, which has
+yet to be ruled on, and lives in one place (`HOURLY_READING`, `LATE_FIRST`). The days before keep
+the rule they settled under, and each settled cut-off records the rule it took (`rule`).
 
 The choice is per file (owner's ruling 2026-11-04). If the copy that counts has no value at a
 place, from a bitmap that leaves the place out or a message refused, that place has no value for
@@ -146,8 +170,8 @@ NOAA Open Data copy came between 1 hour 30 minutes and three hours after the hou
 analysis file serves the hourly contracts of its
 hour at every place, and the file settles for the hourly cut apart from the days' cut-offs
 (`settle_cuts`, under `hourly` beside `cutoffs`) by the same rules: at the pass at which both
-servers' copies are in, or at the first ten-minute pass after the cut, on the copies in hand. The
-contract is:
+servers' copies are in, or at the first ten-minute pass after the cut, on the copies in hand. Before
+the 19 November 2026 days the contract is:
 
 - final once NOMADS's copy is in, if it was published by the cut and read before the cut settled,
   at that copy's Last-Modified (basis `nomads`);
@@ -156,6 +180,19 @@ contract is:
   its cut-off;
 - under review at the cut, with no value, when the cut settled with no copy published by then;
 - provisional until then, on the copy in hand.
+
+On a place-day from then (`FIRST_FROM_DAY`) it reads the first-published rule, as the day's values do,
+so one file's contract is read by the old rule where its hour falls on 18 November and by the new
+where it falls on the 19th, each place's contract standing alone, and no local day mixes two rules
+(`hourly_choice` and `_hourly_row_first`, the engine's `hourly_choice` and `place_hours`). It is final
+at the first copy found, from either server, published by the cut, at that copy's time on its server
+(basis `first`, `copyState` primary). Where the other copy is held and agrees nothing changes. Where
+they differ the copy published first is used if the lane also found it first; otherwise the hour is
+undecided between them (`copyState` undecided, both shown as `candidates`), with an `alarm` where the
+copy published first was found second, final on the first found's value where both round to the
+same whole degree and under review where they do not. A copy that gives the place no value, or no
+copy by the cut, is `missing`, under review; before then an hour is `pending`. An undecided hour that
+is final says so in `copyState`, never only in its value.
 
 A copy read after the hourly cut settled, whatever its Last-Modified, is recorded and flagged
 (`late`) and never used. Since the two cut-offs differ, an hour can count for its day and not for its
@@ -605,7 +642,8 @@ precip_mm, precip_file_utc, analysis_source, precip_source, analysis_published, 
 (the files' Last-Modified times, empty for a file read before 2026-10-14), the precipitation being the hour that
 starts at `valid_utc` and filed under `precip_file_utc`, nothing converted or rounded. Those
 columns keep their order and their meaning from 2026-11-03. `temp_k`, `wind_ms`, `gust_ms` and
-`precip_mm` are the values the row settles on, NOMADS's copy when the two differ and it counts;
+`precip_mm` are the values the row settles on, NOMADS's copy when the two differ and it counts
+(from the 19 November 2026 days the copy published first, and empty where the hour is undecided);
 `analysis_source` and `precip_source` name that copy's server; and `analysis_published` and
 `precip_published` are the first time the file was on either server, of the copies the row
 settled on once it has. After them come each server's copy of each file, in this order
@@ -1112,7 +1150,13 @@ day an hour the lane has not written yet reads the same until its cut-off. The c
 hover and the temperature CSV give the sentence. The note under the table explains the two
 servers: NOAA publishes every file on NOAA Open Data and on NOMADS, the page reads both, the copies
 are normally identical, the NOMADS copy counts where they differ if it was published in time, and
-NOMADS's publication times are on record only from 10:00 UTC on 3 November.
+NOMADS's publication times are on record only from 10:00 UTC on 3 November. On a day from 19
+November 2026 the note says instead that the copy published first counts, from either server, that
+an hour whose copies differ in an order that cannot be told shows both values and keeps a day's
+value only where both give it, and that the rule before counted NOMADS's; the hourly notes follow the
+rule of the day. Basis `first` reads "final at {at}, when {server} published the file, the first copy
+found. The value is {server}'s copy.", an undecided one names both values and why, with the lane's
+alarm where there is one, and the table's word adds "copies differ" (`firstText`, `hourlyWord`).
 
 - Basis `nomads` reads "final at {at}, when NOMADS published the file. The value is NOMADS's copy.",
   `at` being NOMADS's Last-Modified time, or "The value is NOAA Open Data's copy." when that is the
