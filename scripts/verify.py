@@ -1428,16 +1428,20 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 chk.add(f"{scheme} analysis: the map's labels take this scheme's colours, with ink that differs from each fill",
                         ana_col["n"] >= 60 and ana_col["ok"] and ana_col["steps"] >= 3
                         and ana_col["r4"].lower() == ("#f4ecc1" if scheme == "light" else "#76693a"), str(ana_col))
-                # RTMA is the one analysis the page reads (owner's decision
-                # 2026-09-30): no product choice, no URMA anywhere in the page
-                # or its description, and an address from before that still
-                # opens, on RTMA, without the parameter
+                # RTMA is the one analysis the page shows (owner's decision
+                # 2026-09-30), and from 20 November 2026 URMA's temperature stands
+                # in for an hour RTMA misses. So there is no product choice, URMA is
+                # named only in the dated sentences saying so and never in the page's
+                # description, and an address from before that still opens, on RTMA,
+                # without the parameter
                 page.click('#anaVar button[data-var="high"]')
                 ana_until(page, "() => document.querySelector('#anaLegend').textContent.startsWith('High')")
                 a2 = page.evaluate("""() => ({ product: document.querySelectorAll('button[data-product]').length,
                   text: document.body.innerText + ' ' + [...document.querySelectorAll('meta')].map(m => m.content || '').join(' ') })""")
-                chk.add(f"{scheme} analysis: one analysis, no product choice and no URMA on the page",
-                        a2["product"] == 0 and "urma" not in a2["text"].lower(), str(a2["product"]))
+                a2_rest = " ".join(p_ for p_ in re.split(r"(?<=[.!?])\s+", a2["text"]) if "20 November 2026" not in p_)
+                chk.add(f"{scheme} analysis: one analysis, no product choice, and URMA named only where the wait from 20 November 2026 is",
+                        a2["product"] == 0 and "urma" not in a2_rest.lower() and "From 20 November 2026 URMA" in a2["text"],
+                        str([a2["product"], [p_[:90] for p_ in re.split(r"(?<=[.!?])\s+", a2["text"]) if "urma" in p_.lower()][:4]]))
                 ana_goto(page, f"?var=high&product=urma&day={ana_day}")
                 a3 = page.evaluate("() => [document.querySelector('#anaNewest').textContent, location.search, document.querySelectorAll('#anaDots text.pvt').length]")
                 chk.add(f"{scheme} analysis: an address with product=urma opens on RTMA and drops the parameter",
@@ -1541,8 +1545,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         and not re.search(r"\d{4}-\d\d-\d\d", ana_bp[0][2]) and ana_bp[1][0] == ana_ld(ana_days[ana_i0 - 1]),
                         str(ana_bp)[:300])
                 ana_goto(page, f"?var=high&day={ana_day}&loc=new-york-ny", ANA_DAY)
-                chk.add(f"{scheme} analysis: the three charts draw, and the place never says URMA",
-                        pn["charts"] == ["anaTemp", "anaWind", "anaPcp"] and pn["series"] >= 1 and "urma" not in pn["text"].lower(), str(pn["charts"]))
+                # a day of the samples, before the wait (from 20 November 2026), names URMA only in the dated sentences on it
+                pn_rest = " ".join(p_ for p_ in re.split(r"(?<=[.!?])\s+", pn["text"]) if "20 November 2026" not in p_)
+                chk.add(f"{scheme} analysis: the three charts draw, and the place names URMA only where the wait from 20 November 2026 is",
+                        pn["charts"] == ["anaTemp", "anaWind", "anaPcp"] and pn["series"] >= 1 and "urma" not in pn_rest.lower(),
+                        str([pn["charts"], [p_[:90] for p_ in re.split(r"(?<=[.!?])\s+", pn["text"]) if "urma" in p_.lower()][:4]]))
                 chk.add(f"{scheme} analysis: the place shows no price and keeps the exchange's language",
                         pn["links"] == 0 and "¢" not in pn["text"] and not re.search(r"\b(ask|sell|offer|bid)\b", pn["text"], re.I)
                         and "No contract settles on it" in pn["text"], str(pn["links"]))
@@ -2564,6 +2571,90 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         spl_c.get("high") == ("no value", spl_why) and spl_c.get("precip") == ("no value", spl_why)
                         and spl_c.get("low", ("", ""))[1].endswith("copies of an hour differ and both round to it")
                         and spl_c.get("low", ("", ""))[0] not in ("", "no value"), str(spl_c)[:400])
+                # the wait (from 20 November 2026): New York's noon hour with no RTMA temperature by the cut-off, its
+                # high and low waiting, on the status line, the cards, the table and the hourly contract, and the same
+                # hour once URMA's value is in, settled at the wait's end, fixed ten minutes past it
+                def wait_day(urma_in):
+                    d = json.loads(json.dumps(sd_v3))
+                    d["day"] = "2026-11-20"
+                    n_, r_ = 12, None
+                    r_ = d["hours"][n_]["rtma"]
+                    t_ = sd_at(d["hours"][n_]["t"])
+                    hcut_ = t_ + dt.timedelta(minutes=90)
+                    cut_ = sd_at(d["hours"][-1]["t"]) + dt.timedelta(minutes=105)
+                    until_d, until_h = cut_ + dt.timedelta(hours=24), hcut_ + dt.timedelta(hours=24)
+                    st_ = "urma" if urma_in else "waiting"
+                    for k_ in ("wind", "gust"):
+                        r_[k_] = None
+                        for part in ("show", "x", "raw"):
+                            if isinstance(r_.get(part), dict):
+                                r_[part][k_] = None
+                    if not urma_in:
+                        r_["temp"] = None
+                        for part in ("show", "x", "raw"):
+                            if isinstance(r_.get(part), dict):
+                                r_[part]["temp"] = None
+                    for k_ in ("src", "pub", "pubSrc", "settled", "late", "lateCopy"):
+                        r_.pop(k_, None)
+                    r_["anlFile"] = dict(r_.get("anlFile") or {}, nodd=None, nomads=None, src=None, counts=False, afterCut=False)
+                    at_ = (t_ + dt.timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    w_d = {"until": until_d.strftime("%Y-%m-%dT%H:%M:%SZ"), "state": st_, "product": "urma" if urma_in else None}
+                    w_h = {"until": until_h.strftime("%Y-%m-%dT%H:%M:%SZ"), "state": st_, "product": "urma" if urma_in else None}
+                    if urma_in:
+                        w_d.update(src="nodd", at=at_)
+                        w_h.update(src="nodd", at=at_)
+                    r_["wait"] = w_d
+                    r_["hourly"] = {"cut": hcut_.strftime("%Y-%m-%dT%H:%M:%SZ"), "basis": "first", "rule": "first", "late": False,
+                                    "state": "final" if urma_in else "provisional", "at": at_ if urma_in else None,
+                                    "src": "nodd" if urma_in else None, "copyState": st_, "wait": w_h,
+                                    "value": (r_.get("show") or {}).get("temp") if urma_in else None,
+                                    "x": (r_.get("x") or {}).get("temp") if urma_in else None}
+                    if not urma_in:
+                        r_["hourly"]["why"] = "no RTMA value by the cut-off: waiting until " + w_h["until"] + " for RTMA, then URMA"
+                    s_ = d["summary"]["rtma"]
+                    if not urma_in:
+                        s_.update(final=False, finalAt=None, review=False, waiting=["high", "low"], waitUntil=w_d["until"])
+                    with open(os.path.join(ANA_SNAP, "days", ana_day + ".json")) as fh:
+                        dd_ = json.load(fh)
+                    dd_["locations"]["new-york-ny"] = {"rtma": s_}
+                    return d, dd_, n_
+
+                WAIT_JS = """(n) => { const trs = [...document.querySelectorAll('#anaHours tbody tr')], tr = trs[n];
+                  const pill = (document.querySelector('#anaStatus .anapill') || {}).textContent || '',
+                        stxt = (document.querySelector('#anaStatus .anastxt') || {}).textContent || '';
+                  if (!tr) return { rows: trs.length, pill, stxt, cell: ['', '', ''], word: '', acct: '' };
+                  const td = tr.querySelectorAll('td'), hs = tr.querySelector('td.hst');
+                  return { rows: trs.length, pill, stxt, cell: [td[2].textContent, td[2].className, td[2].title || ''],
+                           word: hs ? hs.textContent : '', acct: hs ? hs.title : '' }; }"""
+                wait_got = {}
+                for urma_in in (False, True):
+                    wd_doc, wd_days, wd_n = wait_day(urma_in)
+
+                    def wd_route_for(body):
+                        def wd_route(route):
+                            return route.fulfill(status=200, content_type="application/json", body=body)
+                        return wd_route
+                    wd_route = wd_route_for(json.dumps(wd_days))
+                    sd_serve["doc"] = wd_doc
+                    page.route(f"**/analysis2/days/{ana_day}.json*", wd_route)
+                    ana_goto(page, f"?day={ana_day}&loc=new-york-ny", ANA_DAY)
+                    wait_got[urma_in] = (page.evaluate(WAIT_JS, wd_n), {v_: (av_, ae_) for v_, av_, ae_ in page.evaluate(sd_cards_js)})
+                    page.unroute(f"**/analysis2/days/{ana_day}.json*", wd_route)
+                (wg, wc), (ug, uc) = wait_got[False], wait_got[True]
+                chk.add(f"{scheme} settlement display: a day whose temperature waits says so, its high and low waiting and its wind, gust and precipitation final",
+                        wg["pill"] == "Waiting" and "then take URMA" in wg["stxt"] and "an hour waits until" in wc.get("high", ("", ""))[1]
+                        and "an hour waits until" in wc.get("low", ("", ""))[1] and " so far" not in wc.get("wind", ("", ""))[1]
+                        and "waits" not in wc.get("precip", ("", ""))[1], str([wg["pill"], wg["stxt"][:120], wc])[:500])
+                chk.add(f"{scheme} settlement display: an hour waiting for RTMA, then URMA, shows that in the table and in its hourly contract",
+                        wg["cell"][0] == "·" and "wait" in wg["cell"][1].split() and wg["cell"][2].startswith("waiting until ")
+                        and sd_n2(wg["word"]).startswith("waiting until ") and "The hour waits until " in sd_n2(wg["acct"])
+                        and "then takes URMA" in sd_n2(wg["acct"]), str([wg, errs[-3:]])[:700])
+                chk.add(f"{scheme} settlement display: an hour that took URMA's value is final at the wait's end, fixed, and says whose value it is",
+                        ug["pill"] == "Final" and sd_n2(ug["word"]).startswith("final ") and sd_n2(ug["word"]).endswith("(URMA)")
+                        and "on URMA\u2019s analysis from NOAA Open Data" in sd_n2(ug["acct"])
+                        and ug["cell"][2].startswith("URMA\u2019s value, from NOAA Open Data") and "wait" in ug["cell"][1].split(),
+                        str([ug, errs[-3:]])[:700])
+                sd_serve["doc"] = sd_v3
                 # an hour with no file by its hourly cut-off: provisional before
                 # the cut, under review from it, in the table, the hover and the CSV
                 sd_serve["doc"] = sd_v3r

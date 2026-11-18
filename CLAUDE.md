@@ -17,7 +17,7 @@ this one has to stay up and stay fresh on its own.
 
 - **US government data only** for weather content: api.weather.gov, aviationweather.gov, NOAA Open
   Data on AWS (the NBM bulletins; RTMA on NOAA Open Data feeds the unlisted analysis-resolution
-  page; the HRRR's surface files feed the city page's HRRR line, `pipeline/hrrr.py`; NDFD's CONUS daytime high and
+  page, and from the 20 November 2026 days URMA's 2 m temperature does for an hour RTMA misses; the HRRR's surface files feed the city page's HRRR line, `pipeline/hrrr.py`; NDFD's CONUS daytime high and
   overnight low shade the landing map, `pipeline/ndfd.py`), NOMADS, NHC (its GIS archive of every advisory feeds the
   hurricane page's replay, `pipeline/advisories.py`), NCEI, NOAA GML, NOAA/NESDIS STAR, and the
   NWS Weather Prediction Center's analysis/satellite composite under the landing map (`pipeline/floater.py`). No
@@ -225,7 +225,8 @@ parameters: `station`, `theme`, `market`.
                      traffic.py (page views from the CDN access logs),
                      basemap.py, storage.py, config.py,
                      analysis.py (the gridded-analysis resolution lane: RTMA resolving at the
-                     sixty-seven settlement locations, on its own schedule; unlisted page, no contract settles on it),
+                     sixty-seven settlement locations, on its own schedule, with URMA's temperature for an hour RTMA
+                     misses from 2026-11-20; unlisted page, no contract settles on it),
                      grib2.py (a GRIB2 reader in the standard library, used by analysis.py and hrrr.py),
                      hrrr.py (the HRRR at each station's grid point, run by run, on its own schedule),
                      advisories.py (every full NHC advisory of each storm, from NHC's GIS archive, behind the

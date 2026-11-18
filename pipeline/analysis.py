@@ -18,8 +18,11 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     2026-09-29 (config/analysis_locations.json).
 
     RTMA resolves every variable, precipitation included (owner's decision
-    2026-09-29), and is the only analysis the lane reads: URMA, which does not
-    resolve, was dropped from the lane and the page on 2026-09-30.
+    2026-09-29). URMA, which does not resolve, was dropped from the lane and
+    the page on 2026-09-30, and since the 20 November 2026 days it is read
+    again for one thing only: the temperature of an hour RTMA gives no value
+    by its cut-off and not within a day after it (Patrick's ruling of 17
+    November 2026, "Wait a day, then URMA"; WAIT_FROM).
 
     The day is the local civil date at the place through its IANA zone. Every
     top-of-hour analysis whose local civil time falls on that date counts. That is
@@ -233,8 +236,10 @@ STATEMENT = "A proposed settlement framework. No contract settles on it."
 # 2026-09-27), and is what the health check and the turn to NOMADS expect, not
 # a promise NOAA makes; when the live walk looks is WINDOWS's. The lane is
 # written over PRODUCTS so another analysis could be added; since 2026-09-30
-# RTMA is the only one (the owner dropped URMA, which does not resolve).
-NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com"}
+# RTMA is the only one (the owner dropped URMA, which does not resolve). URMA's
+# servers are kept for the wait alone (WAIT_FROM), which reads only its 2 m
+# temperature, for an hour RTMA misses.
+NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com", "urma": "https://noaa-urma-pds.s3.amazonaws.com"}
 # NCEP's own server keeps the last fourteen days of the analysis under the
 # same directory and file names, and a file there counts as published
 # (owner's decision 2026-09-29; the RTMA analysis of 2026-09-23 19Z never
@@ -245,7 +250,8 @@ NODD_DEFAULT = {"rtma": "https://noaa-rtma-pds.s3.amazonaws.com"}
 # lane stops asking NOMADS a day short of its fourteen. NOMADS_AFTER_MINUTES
 # and PCP_NOMADS_AFTER_MINUTES are when read_hour and read_precip, the readers
 # of the archive's earlier shape, turn to it
-NOMADS_DEFAULT = {"rtma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod"}
+NOMADS_DEFAULT = {"rtma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/rtma/prod",
+                  "urma": "https://nomads.ncep.noaa.gov/pub/data/nccf/com/urma/prod"}
 NOMADS_AFTER_MINUTES = 30
 NOMADS_KEEP_HOURS = 13 * 24
 # the two servers, in the order the CSV files name them, and the order a pass
@@ -476,9 +482,17 @@ CONVENTIONS = {
                    "missing at the cut-off leaves the value on the hours available. From the 19 November 2026 days, "
                    "a copy read after its hour was fixed that its server published by the cut-off and that gives "
                    "the place other values makes the hour undecided, with an alarm, rather than changing it "
-                   "silently.",
+                   "silently. From the 20 November 2026 days, an hour whose temperature has no value at the "
+                   "cut-off waits a day for it (decided 17 November 2026). RTMA's first copy published within "
+                   "that day counts, and otherwise URMA's first copy published by the wait's end, at the same grid "
+                   "cell, or else the hour has no value. The wait's end is fixed fifteen minutes past it. The day's "
+                   "high and low wait with the hour and are neither final nor in review until then, and its wind, "
+                   "gust and precipitation do not wait. A copy found more than fifteen minutes after its server had "
+                   "it, during the wait, cannot be known to be the first published, so the hour is undecided with "
+                   "an alarm.",
     "review": "A place-day with no hour published by its cut-off has no value and is marked for event review, "
-              "as the draft terms provide.",
+              "as the draft terms provide. From the 20 November 2026 days its temperature first waits a day "
+              "for RTMA and then URMA, and the day goes to review only if no hour has a value at the wait's end.",
     "missing": "Every file is read from NOAA Open Data and from NCEP's NOMADS server, and a file on either counts "
                "as published, from the first time it was on either, its Last-Modified time there. A file missing "
                "from one server counts from the other. Where the two copies differ, from the 19 November 2026 days "
@@ -507,7 +521,11 @@ CONVENTIONS = {
                       "from either server, published by its cut-off. Where the other copy, found later, was "
                       "published first and differs, which raises an alarm, or which came first cannot be told, the "
                       "hour is undecided, final on the first found's value where both round to the same whole "
-                      "degree, and under review otherwise.",
+                      "degree, and under review otherwise. From the 20 November 2026 days an hour with no value "
+                      "at its cut-off waits a day after it. RTMA's first copy published within that day is final "
+                      "at the first copy found, and otherwise URMA's first copy published by the wait's end is, "
+                      "the wait's end fixed fifteen minutes past it. With neither, the hour has no value and is "
+                      "under review from the wait's end.",
     "cell": "The settlement grid cell approved on 2026-09-29: the 2.5 km cell whose square contains the main "
             "city's City Hall (in Miami the nearest land cell to the city's administration building, whose own "
             "cell counts as water). The value is the analysis at the cell, never an average over the "
@@ -803,6 +821,15 @@ def review_entry(day_iso: str, tz: str) -> dict:
                        "review": True}}
 
 
+def waiting_entry(day_iso: str, tz: str) -> dict:
+    """The product-day of a place with no hour in hand at its cut-off whose
+    temperature waits (WAIT_FROM): no value yet, neither final nor in review,
+    its high and low waiting until the wait's end, and its precipitation,
+    which does not wait, in event review."""
+    return dict(review_entry(day_iso, tz), review=False, waiting=["high", "low"],
+                waitUntil=_iso(day_cutoff(day_iso, tz) + WAIT))
+
+
 def day_cutoff(day_iso: str, tz: str) -> dt.datetime:
     """A place-day's cut-off: 12:45 AM local time on the day after (owner's
     ruling 2026-10-14, the draft terms). Clocks do not change between midnight
@@ -832,14 +859,18 @@ def _counted(product_hours: dict, tz: str, day_iso: str) -> Tuple[list, str, lis
         rec = product_hours.get(_iso(h))
         if rec is not None:
             read.append((h, rec))
-    anl_rows = [(h, rec) for h, rec in read if rec.get("anl", True) and _in_time(rec.get("pub"), cut_iso)]
+    # an hour the wait gave a temperature, or left undecided, counts though its
+    # copy came after the cut-off (wait_or_urma), for the temperature alone
+    anl_rows = [(h, rec) for h, rec in read
+                if rec.get("anl", True) and (rec.get("w3") or _in_time(rec.get("pub"), cut_iso))]
     pcp_rows = [(h, rec) for h, rec in read
                 if rec.get("precip") is not None and _in_time(rec.get("pcpPub"), cut_iso)]
     return hours, cut_iso, read, anl_rows, pcp_rows
 
 
 def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, prior: Optional[dict] = None,
-                missing: Optional[set] = None, pmissing: Optional[set] = None, pending: bool = False) -> Optional[dict]:
+                missing: Optional[set] = None, pmissing: Optional[set] = None, pending: bool = False,
+                waits: Optional[list] = None) -> Optional[dict]:
     """One product-day at a place, from its exact hourly values.
 
     product_hours maps the hour's UTC ISO string to {temp, wind, gust, precip}
@@ -879,7 +910,7 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     daily value it bears on is decided by the interval test (_decided_summary)."""
     und = _undecided_fields(product_hours)
     if und:
-        return _decided_summary(product_hours, tz, day_iso, now, pending, und)
+        return _decided_summary(product_hours, tz, day_iso, now, pending, und, waits)
     hours, cut_iso, read, anl_rows, pcp_rows = _counted(product_hours, tz, day_iso)
     at_cutoff = now >= day_cutoff(day_iso, tz) and not pending
     if not read:
@@ -922,6 +953,13 @@ def day_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pr
     out["review"] = at_cutoff and n == 0
     # the closed state ended with the cut-off rule: every day is final or in review at its cut-off
     out["closed"] = False
+    # a day an hour of whose temperature waits (WAIT_FROM, wait_or_urma) is
+    # neither final nor in review until the wait's end is fixed (`waits`, the
+    # hours waiting): its high and low run on the hours in hand meanwhile,
+    # and its wind, gust and precipitation, which do not wait, stand as they are
+    if waits and at_cutoff:
+        out.update(final=False, finalAt=None, review=False, waiting=["high", "low"],
+                   waitUntil=_iso(day_cutoff(day_iso, tz) + WAIT))
     if precip:
         # one conversion of the summed millimetres (see the docstring), so the
         # total is exact wherever the millimetres put it on a half hundredth
@@ -966,7 +1004,7 @@ def _with(rec: dict, f: str, raw) -> dict:
 
 
 def _decided_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetime, pending: bool,
-                     und: Dict[str, list]) -> Optional[dict]:
+                     und: Dict[str, list], waits: Optional[list] = None) -> Optional[dict]:
     """day_summary with undecided hours, by the interval test (the engine's
     decide): each daily value over every combination of its undecided hours'
     candidates, the other hours as they stand. A value every combination rounds
@@ -976,7 +1014,7 @@ def _decided_summary(product_hours: dict, tz: str, day_iso: str, now: dt.datetim
     MAX_UNDECIDED undecided hours, has no value (`split` names it), which at
     the cut-off is event review. The day's other values stand as they are."""
     plain = {iso: {k: v for k, v in rec.items() if k != "cands"} for iso, rec in product_hours.items()}
-    out = day_summary(plain, tz, day_iso, now, pending=pending)
+    out = day_summary(plain, tz, day_iso, now, pending=pending, waits=waits)
     if out is None:
         return None
     out = dict(out)
@@ -1638,6 +1676,103 @@ def read_copy(product: str, kind: str, server: str, t: dt.datetime, locs: list, 
     return CopyResult("ok", doc=doc, frames=frames or None, windows=windows or None)
 
 
+def urma_url(t: dt.datetime, nomads: bool = False) -> str:
+    """Where a server keeps URMA's analysis of hour t, its file named as RTMA's."""
+    t = t.astimezone(dt.timezone.utc)
+    return f"{_base(URMA, nomads)}/{URMA_FILE['dir']}.{t:%Y%m%d}/{URMA_FILE['anl'].format(hh=f'{t:%H}')}"
+
+
+def _urma_message(server: str, url: str, budget: Optional[NomadsBudget], meta: dict) -> Optional[bytes]:
+    """The 2 m temperature message of one server's URMA file, or None when the
+    file is not there. NOAA Open Data keeps an .idx sidecar, which names its
+    range. NOMADS keeps none, so its file is walked message by message, each
+    message's first octets giving its length and its field (grib2.head), and
+    only the one wanted is downloaded whole. Raises on anything else."""
+    if server == "nodd":
+        idx = _call(server, budget, gw.fetch_bytes, url + ".idx", tries=FETCH_TRIES, timeout=FETCH_TIMEOUT)
+        if idx is None:
+            return None
+        hit = [e for e in grib2.parse_idx(idx.decode("ascii", "replace"))
+               if e.get("var") == "TMP" and e.get("level") == "2 m above ground"]
+        if not hit:
+            raise ValueError("no TMP message in the sidecar")
+        e = hit[0]
+        end = e["end"] if e.get("end") is not None else e["start"] + MAX_MESSAGE_BYTES
+        msg = _call(server, budget, gw.fetch_range, url, e["start"], end, tries=FETCH_TRIES, timeout=FETCH_TIMEOUT,
+                    meta=meta)
+        if msg is None:
+            raise ValueError("TMP message missing")
+        return msg
+    offset = 0
+    for _ in range(URMA_WALK_MAX):
+        prefix = _call(server, budget, gw.fetch_range, url, offset, offset + URMA_HEAD_BYTES - 1, tries=FETCH_TRIES,
+                       timeout=FETCH_TIMEOUT, meta=meta)
+        if prefix is None:
+            if offset == 0:
+                return None
+            raise ValueError(f"the file ends at {offset} before its 2 m temperature")
+        h = grib2.head(prefix)
+        if (h["discipline"], h["category"], h["number"], h["level_type"], h["level_value"]) == (0, 0, 0, 103, 2.0):
+            msg = _call(server, budget, gw.fetch_range, url, offset, offset + h["total"] - 1, tries=FETCH_TRIES,
+                        timeout=FETCH_TIMEOUT, meta=meta)
+            if msg is None:
+                raise ValueError("TMP message missing")
+            return msg
+        offset += h["total"]
+    raise ValueError(f"no 2 m temperature in the first {URMA_WALK_MAX} messages")
+
+
+def read_urma(server: str, t: dt.datetime, locs: list, now: dt.datetime, other: Optional[dict] = None,
+              budget: Optional[NomadsBudget] = None, prior_bad: Optional[dict] = None) -> CopyResult:
+    """One server's copy of URMA's analysis of hour t, its 2 m temperature only,
+    for the wait (WAIT_FROM). It is read and kept as read_copy keeps RTMA's: the
+    message hashed and checked for its grid, which is RTMA's, its parameter and
+    its valid time; its values at the places' own cells, in kelvin, or the other
+    server's where the bytes are the same; a message failing the check `suspect`
+    until a later download fails with the same bytes; `seen` and the server's
+    Last-Modified (`published`) recorded. Nothing raises out of here."""
+    url = urma_url(t, nomads=server == "nomads")
+    meta: dict = {}
+    ks = [loc["cell"]["wexp"][2] for loc in locs]
+    values: Dict[str, dict] = {loc["id"]: {"temp": None} for loc in locs}
+    decoded: List[str] = []
+    try:
+        msg = _urma_message(server, url, budget, meta)
+        if msg is None:
+            return CopyResult("absent")
+        sha = hashlib.sha256(msg).hexdigest()
+        why = check_message(msg, "temp", _grid("wexp"), t)
+        if why is None and other is not None and (other.get("sha256") or {}).get("temp") == sha:
+            for lid in values:
+                values[lid]["temp"] = _value_at(other, "anl", lid, "temp")
+        elif why is None:
+            try:
+                cells, _, _ = _sample(msg, "temp", "wexp", ks, None)
+            except Exception as ex:  # noqa: BLE001 - a message that will not decode fails the check
+                why = f"undecodable ({type(ex).__name__}: {ex})"
+            else:
+                if locs and all(v is None for v in cells):
+                    why = "no value at any place"
+                else:
+                    decoded.append("temp")
+                    for loc, v in zip(locs, cells):
+                        values[loc["id"]]["temp"] = None if v is None else round(float(v), RAW_DIGITS["temp"])
+        del msg
+    except Skipped:
+        return CopyResult("skipped")
+    except Exception as e:  # noqa: BLE001
+        return CopyResult("error", error=f"{type(e).__name__}: {e}")
+    bad = {"temp": {"sha256": sha, "why": f"TMP: {why}"}} if why is not None else {}
+    if bad and (prior_bad or {}).get("temp", {}).get("sha256") != sha:
+        return CopyResult("suspect", bad=bad, error=bad["temp"]["why"])
+    doc = {"schema": SCHEMA, "product": URMA, "kind": URMA, "server": server, "valid": _iso(t), "seen": _iso(now),
+           "published": meta.get("lastModified"), "sha256": {"temp": sha}, "decoded": decoded, "written": _iso(now),
+           "values": values}
+    if bad:
+        doc["refused"] = {"temp": bad["temp"]["why"]}
+    return CopyResult("ok", doc=doc)
+
+
 def _value_at(c: Optional[dict], kind: str, lid: str, var: Optional[str] = None):
     """A copy's value at a place, an analysis's temperature, wind and gust (or
     the one `var`) or a precipitation file's millimetres."""
@@ -1683,7 +1818,7 @@ def prime_copies(store: Storage, product: str, t0: dt.datetime, t1: dt.datetime,
     keys = set(store.list(prefix, start_after=prefix + _stamp(t0 - dt.timedelta(hours=1))))
     t = t0
     while t <= t1:
-        for kind in KINDS:
+        for kind in KINDS + (URMA,):
             for server in SERVERS:
                 for ck, key in ((("copy", product, kind, server, _iso(t)), copy_key(product, kind, server, t)),
                                 (("later", product, kind, server, _iso(t)), later_key(product, kind, server, t))):
@@ -1810,6 +1945,51 @@ MAX_UNDECIDED = 12                              # the engine's: undecided hours 
 HOURLY_READING = "first found; an earlier-published copy found later is undecided, with an alarm"
 LATE_FIRST = True
 SERVER_NAME = {"nodd": "NOAA Open Data", "nomads": "NOMADS"}
+
+# ------------------------------------------------------------------ a day's wait, then URMA (2026-11-20)
+# Patrick's ruling of 17 November 2026, "Wait a day, then URMA", which the
+# engine settles by from its Contract Date of 20 November 2026 (its W3 and the
+# wait's end, on its freeze), and which Patrick chose on 18 November that this
+# lane follow after the engine. For a place-day from WAIT_FROM, an hour whose
+# temperature has no value at a cut-off, the day's or an hourly contract's,
+# waits WAIT for RTMA (wait_or_urma). Its first copy published after the
+# cut-off and by the wait's end counts as an hourly contract's does, final at
+# the first found and never moved, and one found more than FIX_AFTER after
+# its server had it comes from inside a gap in this lane's record, so it
+# cannot be known to be the first published and the hour is undecided with an
+# alarm. With no RTMA value by then the hour takes URMA's first copy
+# published by the wait's end, at the same grid cell and by the same rule, and
+# otherwise has no value. The wait's end is fixed as a cut-off is, FIX_AFTER
+# past it. Wind, gust and precipitation do not wait. The freeze that the
+# engine adds from the same day (FREEZE_FROM) is how this lane has settled a
+# file since 3 November: fixed once both copies are in or at the first
+# ten-minute pass after its cut-off, which the engine's FIX_AFTER models, with
+# a copy found later never moving the hour (LATE_FIRST). So it needs no code
+# here. The functions follow the engine's, name for name where they can.
+FREEZE_FROM = "2026-11-20"
+WAIT_FROM = FREEZE_FROM
+# the wait's end is fixed this long past it, and a copy found more than this after its server had it reads as
+# a gap in the lane's record. It is this lane's longest ordinary finding delay with a margin, a ten-minute
+# pass that an invocation can start a minute or so late, where the engine's reader asks every minute and keeps
+# ten (its review of 18 November). Only when a value is shown changes with it, never which value
+FIX_AFTER = dt.timedelta(minutes=15)
+WAIT = dt.timedelta(hours=24)
+URMA = "urma"                    # the kind of URMA's copies, its 2 m temperature only
+URMA_FILE = {"dir": "urma2p5", "anl": "urma2p5.t{hh}z.2dvaranl_ndfd.grb2_wexp"}
+# an hour the wait may need is asked for on every pass, RTMA from both servers
+# and URMA from its hourly cut (URMA_FROM), until LATE_END after the hour,
+# which is past the latest wait's end of any place-day it falls on (a 25-hour
+# day's first hour, 49 hours 45 minutes) and its FIX_AFTER. A copy is found
+# within FIX_AFTER of its publication only if the lane asks that often
+URMA_FROM = HOURLY_CUT_AFTER
+LATE_END = dt.timedelta(hours=51)
+URMA_HEAD_BYTES = 512             # a message's sections 0 to 4, walked on NOMADS, which keeps no .idx
+URMA_WALK_MAX = 20                # messages walked before a file's 2 m temperature is given up on
+
+
+def wait_rule_day(day_iso: str) -> bool:
+    """Whether a place-day's temperature waits a day, then takes URMA."""
+    return day_iso >= WAIT_FROM
 
 
 def first_rule_day(day_iso: str) -> bool:
@@ -2006,6 +2186,83 @@ def first_at_place(choice: dict, copies: dict, kind: str, lid: str) -> Tuple[Opt
         if xs[0] != xs[1]:
             split[var] = xs
     return (cands[0], vals, None) if not split else (None, vals, split)
+
+
+def wait_or_urma(copies: dict, urma: dict, cut_iso: str, now: dt.datetime, lid: str) -> dict:
+    """A temperature hour with no value at a cut-off (`cut_iso`, a day's or an
+    hourly contract's) of a place-day from WAIT_FROM, at one place: the engine's
+    wait_or_urma (Patrick's ruling of 17 November 2026, "Wait a day, then
+    URMA"), on both servers' first copies of RTMA (`copies`) and of URMA
+    (`urma`). It gives {state, product, v, why, src, cands, candSrc, alarm,
+    final, until}.
+    - RTMA's copies published after the cut-off and by the wait's end count as
+      an hourly contract's do (hourly_choice): final at the first copy found,
+      from either server, and never moved. A copy found later that was
+      published first and differs makes the hour undecided, with an alarm.
+    - A copy this lane first found more than FIX_AFTER after its server had it
+      comes from inside a gap in the lane's own record, so it cannot be known
+      to be the first published: the hour is undecided between no value and
+      that copy's, with an alarm.
+    - With no RTMA value by then the hour is `waiting` until the wait's end,
+      which is fixed as a cut-off is, FIX_AFTER past it, on the copies
+      published by the end. Then it takes URMA's first copy published by the
+      end, at the same grid cell, chosen and checked the same way (`urma`), or
+      else is `missing`. A copy published after the end, of either, is never
+      used, so a row shown final at the wait's end never moves."""
+    cut = _parse_iso(cut_iso)
+    end = cut + WAIT
+    fix = end + FIX_AFTER
+    end_iso = _iso(end)
+    base = {"state": None, "product": None, "v": None, "why": None, "src": None, "cands": None, "candSrc": None,
+            "alarm": None, "final": None, "until": end_iso}
+    held = {s: c for s, c in (copies or {}).items() if c is not None}
+    late = {s: c for s, c in held.items() if cut_iso < (on_time(c) or "") <= end_iso}
+    urma_held = {s: c for s, c in (urma or {}).items() if c is not None}
+    for product, src, at in (("rtma", late, min(_iso(now), end_iso)), (URMA, urma_held, end_iso)):
+        if product == URMA and now < end:
+            return dict(base, state="waiting",
+                        why=f"no RTMA value by the cut-off: waiting until {end_iso} for RTMA, then URMA")
+        if product == URMA and now < fix:
+            return dict(base, state="waiting",
+                        why=f"the wait ended at {end_iso}: fixed at {_iso(fix)} on the copies published by its end")
+        ch = hourly_choice(src, at)
+        pick, vals, split = first_at_place(ch, src, "anl", lid)
+        if split and "temp" in split:
+            return dict(base, state="undecided", product=product, why=ch["why"], cands=list(split["temp"]),
+                        candSrc=list(ch["candidates"]), alarm=ch["alarm"], final=ch["final"])
+        if pick is None and ch.get("candidates"):
+            pick = ch["candidates"][0]          # copies that differ elsewhere and agree here on the temperature
+        v = (vals or {}).get("temp") if pick else None
+        if v is None:
+            continue
+        c = src[pick]
+        on, seen = on_time(c), _canon(c.get("seen"))
+        if on and seen and _parse_iso(seen) - _parse_iso(on) > FIX_AFTER:
+            alarm = (f"the {SERVER_NAME[pick]} copy of {product.upper()} was first found at {seen}, more than "
+                     f"{int(FIX_AFTER.total_seconds() // 60)} minutes after its server had it at {on}: from inside a "
+                     "gap in this lane's record, it cannot be known to be the first published")
+            return dict(base, state="undecided", product=product, cands=[None, v], candSrc=[None, pick], alarm=alarm,
+                        why="undecided: the copy was found from inside a gap in our record")
+        return dict(base, state="primary" if product == "rtma" else URMA, product=product, v=v, src=pick,
+                    final=ch["final"])
+    after = sorted(s for s, c in urma_held.items() if (on_time(c) or "") > end_iso)
+    return dict(base, state="missing",
+                why="no RTMA value within a day of the cut-off, and no URMA value" if not after else
+                f"no RTMA value within a day of the cut-off, and URMA's copy was published after the wait's end "
+                f"({', '.join(after)})")
+
+
+def _wait_doc(w: dict) -> dict:
+    """What a row and an hourly contract carry of the wait (`wait`): its end
+    (`until`), the hour's state by it, and the analysis and server of the copy
+    it took, where it took one."""
+    out = {"until": w["until"], "state": w["state"], "product": w["product"]}
+    if w.get("src"):
+        out["src"] = w["src"]
+    if w.get("final"):
+        # when the copy it took was on its server, as hourly_choice gives it
+        out["at"] = w["final"]
+    return out
 
 
 def hourly_cut(t: dt.datetime) -> dt.datetime:
@@ -2331,7 +2588,7 @@ def file_doc(product: str, kind: str, t: dt.datetime, view: Optional[dict], coun
 
 
 def hourly_file(store: Storage, product: str, t: dt.datetime, slots: Optional[dict], cache: dict,
-                now: dt.datetime, times: dict, first: bool = False) -> dict:
+                now: dt.datetime, times: dict, first: bool = False, wait: bool = False) -> dict:
     """The hourly temperature contract of hour t's analysis file, which every
     place shares (Patrick's ruling of 4 November): its cut (`cut`), its state
     (final, provisional or review), when it became final or went to review
@@ -2365,7 +2622,7 @@ def hourly_file(store: Storage, product: str, t: dt.datetime, slots: Optional[di
     November at one place and 19 November at another is read by each day's
     rule; each place's contract stands alone."""
     if first:
-        return _hourly_first(store, product, t, cache, now)
+        return _hourly_first(store, product, t, cache, now, wait)
     hc = _iso(hourly_cut(t))
     out = {"cut": hc, "state": "provisional", "at": None, "basis": None, "src": None, "late": False,
            "values": {}, "known": False}
@@ -2408,19 +2665,26 @@ def hourly_file(store: Storage, product: str, t: dt.datetime, slots: Optional[di
     return out
 
 
-def _hourly_first(store: Storage, product: str, t: dt.datetime, cache: dict, now: dt.datetime) -> dict:
+def _hourly_first(store: Storage, product: str, t: dt.datetime, cache: dict, now: dt.datetime,
+                  wait: bool = False) -> dict:
     """hourly_file by the first-published rule: hour t's analysis's choice
     for its hourly contract on the copies its servers had by now or its cut,
     whichever is earlier (hourly_choice), with each copy's values, which
     hourly_row reads place by place. `basis` is "first" and `rule` says so;
     `late` is a copy published after the cut, recorded and never used; and the
-    file is `known` once a copy is in or its cut has passed."""
+    file is `known` once a copy is in or its cut has passed. An hour of a
+    place-day from WAIT_FROM (`wait`) carries both analyses' copies for the
+    wait (wait_or_urma), which _hourly_row_first reads place by place."""
     hc = _iso(hourly_cut(t))
     copies = {s: c for s, c in copies_of(store, product, "anl", t, cache).items() if c is not None}
     ch = hourly_choice(copies, min(_iso(now), hc))
-    return {"cut": hc, "rule": "first", "basis": "first", "state": None, "at": None, "src": ch["src"],
-            "late": bool(ch["later"]), "values": {}, "known": bool(copies) or _iso(now) >= hc,
-            "past": _iso(now) >= hc, "choice": ch, "copies": {s: c.get("values") or {} for s, c in copies.items()}}
+    out = {"cut": hc, "rule": "first", "basis": "first", "state": None, "at": None, "src": ch["src"],
+           "late": bool(ch["later"]), "values": {}, "known": bool(copies) or _iso(now) >= hc,
+           "past": _iso(now) >= hc, "choice": ch, "copies": {s: c.get("values") or {} for s, c in copies.items()}}
+    if wait:
+        out.update(wait=True, now=now, rtmaCopies=copies,
+                   urmaCopies={s: c for s, c in copies_of(store, product, URMA, t, cache).items() if c is not None})
+    return out
 
 
 def _hourly_row_first(hv: dict, lid: str) -> dict:
@@ -2434,7 +2698,11 @@ def _hourly_row_first(hv: dict, lid: str) -> dict:
     round alike and otherwise under review, both shown (`candidates`); missing,
     under review, where the copy that counts gives the place no value or none
     came by the cut; and pending before then. An undecided hour that is final
-    says so in copyState and why, never only in its value."""
+    says so in copyState and why, never only in its value. From WAIT_FROM an
+    hour with no value at its cut waits (wait_or_urma, `wait`): `waiting`,
+    provisional, until the wait's end is fixed; then final on RTMA's copy
+    published during the wait (primary) or on URMA's (`urma`), undecided, or
+    missing and under review from the wait's end."""
     ch, copies = hv["choice"], hv["copies"]
 
     def temp(s: Optional[str]):
@@ -2467,11 +2735,37 @@ def _hourly_row_first(hv: dict, lid: str) -> dict:
     elif ch.get("final") is not None or hv.get("past"):
         out.update(state="review", copyState="missing", at=ch.get("final") or hv["cut"], src=src)
         out["why"] = ch.get("why") if ch.get("final") is None else "the copy that counts has no value at the place"
-    if ch.get("alarm"):
-        out["alarm"] = ch["alarm"]
+    w = None
+    if hv.get("wait") and hv.get("past") and v is None and here is None and not ch.get("alarm"):
+        w = wait_or_urma(hv["rtmaCopies"], hv["urmaCopies"], hv["cut"], hv["now"], lid)
+        out["wait"] = _wait_doc(w)
+        out.pop("why", None)
+        if w["state"] == "waiting":
+            out.update(state="provisional", copyState="waiting", at=None, src=None, why=w["why"])
+        elif w["state"] in ("primary", URMA):
+            v = w["v"]
+            out.update(state="final", copyState=w["state"], at=w["final"], src=w["src"])
+        elif w["state"] == "undecided":
+            xs = w["cands"]
+            rounded = {None if x is None else half_up(exact("temp", x), 1) for x in xs}
+            if len(rounded) == 1 and None not in rounded:
+                v = xs[0]
+                out.update(state="final", copyState="undecided", at=w["final"], src=w["candSrc"][0])
+            else:
+                out.update(state="review", copyState="undecided", at=w["final"], src=None)
+            out["candidates"] = [{"src": s, "value": None if x is None else half_up(exact("temp", x), 1),
+                                  "x": x_text("temp", x)} for s, x in zip(w["candSrc"], xs)]
+            out["why"] = w["why"]
+        else:
+            out.update(state="review", copyState="missing", at=_iso(_parse_iso(hv["cut"]) + WAIT), src=None,
+                       why=w["why"])
+    alarm = ch.get("alarm") or (w or {}).get("alarm")
+    if alarm:
+        out["alarm"] = alarm
     out["value"] = half_up(exact("temp", v), 1) if v is not None else None
     out["x"] = x_text("temp", v)
-    out["late"] = hv["late"]
+    # a copy published after the cut that the wait took is no late copy
+    out["late"] = hv["late"] and not (w is not None and w["product"] == "rtma")
     return out
 
 
@@ -2669,12 +2963,12 @@ def _has_copy(view: Optional[dict]) -> bool:
 
 
 def _hourly(memo: dict, store: Storage, product: str, t: dt.datetime, slots: Optional[dict], cache: dict,
-            now: dt.datetime, times: dict, first: bool = False) -> dict:
+            now: dt.datetime, times: dict, first: bool = False, wait: bool = False) -> dict:
     """hourly_file once per file and rule in a build, since every place of
     the day shares it."""
-    key = (product, _iso(t), first)
+    key = (product, _iso(t), first, wait)
     if key not in memo:
-        memo[key] = hourly_file(store, product, t, slots, cache, now, times, first)
+        memo[key] = hourly_file(store, product, t, slots, cache, now, times, first, wait)
     return memo[key]
 
 
@@ -2703,6 +2997,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
         for product in PRODUCTS:
             prime_copies(store, product, min(span), max(span) + dt.timedelta(hours=1), cache)
     first = first_rule_day(day_iso)
+    wait_day = wait_rule_day(day_iso)
     for loc in locs:
         lid, tz = loc["id"], loc["tz"]
         hours = local_day_hours(day_iso, tz)
@@ -2716,6 +3011,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
             product_hours = {}
             views: dict = {}
             pending = False
+            waits: list = []                # the hours whose temperature waits (wait_or_urma)
             opened = (((state or {}).get("products") or {}).get(product) or {}).get("open") or {}
             # no file for an hour that has not begun (an analysis) or ended (an
             # accumulation) is looked for. This was expected_latest, which hid
@@ -2739,8 +3035,29 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 vp = (fp or {}).get("value")
                 # an undecided file's candidates where its copies differ at the place (_view_first)
                 cands = dict((fa or {}).get("cands") or {}, **((fp or {}).get("cands") or {}))
+                # a day's wait (WAIT_FROM): an hour whose temperature has no value at the
+                # cut-off waits a day for RTMA, then takes URMA's (wait_or_urma); `va` stays
+                # what the analysis file gives, and `vw` adds the temperature the wait took
+                # what the file gives the day by its cut-off: a copy published after it is shown and never counts
+                in_time_a = va is not None and _in_time((fa or {}).get("pub"), cut_iso)
+                w = None
+                if (wait_day and product == SETTLE and h <= latest and _iso(now) >= cut_iso
+                        and ((va or {}).get("temp") if in_time_a else None) is None and "temp" not in cands
+                        and not (fa or {}).get("alarm")):
+                    w = wait_or_urma(copies_of(store, product, "anl", h, cache),
+                                     copies_of(store, product, URMA, h, cache), cut_iso, now, lid)
+                    if w["state"] == "undecided":
+                        cands["temp"] = w["cands"]
+                    elif w["state"] == "waiting":
+                        waits.append(_iso(h))
+                wt = w["v"] if w is not None and w["state"] in ("primary", URMA) else None
+                w3 = w is not None and w["state"] in ("primary", URMA, "undecided")
+                # an hour the wait settles counts for its temperature alone: a copy in hand published after the
+                # cut-off gives the day no wind or gust, since they do not wait
+                base_a = va if in_time_a else (dict.fromkeys(ANALYSIS_VARS) if va is not None else None)
+                vw = dict(base_a or dict.fromkeys(ANALYSIS_VARS), temp=wt) if w3 else va
                 row[product] = None
-                if va is None and vp is None and not cands:
+                if vw is None and vp is None and not cands:
                     # a copy with no value the row uses, read too late, say: the
                     # raw CSV still records it
                     if raw is not None and product == SETTLE and (_has_copy(fa) or _has_copy(fp)):
@@ -2752,18 +3069,22 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     # or one too late for the day and in time for the hourly
                     # contract) still carries it and its files, and nothing else
                     if wanted and h <= latest:
-                        hv = _hourly(hourly, store, product, h, sa, cache, now, times, first)
+                        hv = _hourly(hourly, store, product, h, sa, cache, now, times, first, wait_day)
                         if hv["known"]:
                             row[product] = {"hourly": hourly_row(hv, lid),
                                             "anlFile": file_doc(product, "anl", h, fa, False, cut_iso, times),
                                             "pcpFile": (file_doc(product, "pcp", end, fp, False, cut_iso, times)
                                                         if end <= latest else None)}
+                            if w is not None:
+                                row[product]["wait"] = _wait_doc(w)
                     continue
-                rec = {var: exact(var, (va or {}).get(var)) for var in ANALYSIS_VARS}
+                rec = {var: exact(var, (vw or {}).get(var)) for var in ANALYSIS_VARS}
                 rec["precip"] = exact("precip", vp)
                 # the stored millimetres, which the day's total is summed from
                 rec["mm"] = vp
-                rec["anl"] = va is not None
+                rec["anl"] = vw is not None or w3
+                if w3:
+                    rec["w3"] = w["state"]
                 # the file was read and had no value at the place: read, not pending
                 rec["pcpRead"] = fp is not None
                 # when each file was first on either server, which the day's
@@ -2775,12 +3096,12 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     # the stored values each copy gives the place, which day_summary's interval test decides between
                     rec["cands"] = cands
                 product_hours[_iso(h)] = rec
-                views[_iso(h)] = (fa, fp, va, vp, sa)
+                views[_iso(h)] = (fa, fp, vw, vp, sa)
                 # the hourly values in the contract's units, cut to a
                 # thousandth (precipitation a ten-thousandth of an inch)
                 row[product] = {var: cut(rec[var], HOUR_SHOW[var]) for var in HOURLY_VARS}
                 # a file published after the day's cut-off is shown and never counted
-                if va is not None and not _in_time(rec["pub"], cut_iso):
+                if va is not None and not w3 and not _in_time(rec["pub"], cut_iso):
                     row[product]["late"] = True
                 if vp is not None and not _in_time(rec["pcpPub"], cut_iso):
                     row[product]["pcpLate"] = True
@@ -2801,7 +3122,7 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                 # been published after the cut-off, is a record only and
                 # changes no value, count or state (owner's rulings 2026-11-03
                 # and 2026-11-04)
-                if (fa or {}).get("late"):
+                if (fa or {}).get("late") and not (w is not None and w["product"] == "rtma"):
                     row[product]["lateCopy"] = True
                 if (fp or {}).get("late"):
                     row[product]["pcpLateCopy"] = True
@@ -2813,10 +3134,12 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     # since the page rounds nothing
                     row[product]["undecided"] = {f: [{"x": x_text(f, x), "show": half_up(exact(f, x), HOUR_UNIT[f])}
                                                      for x in xs] for f, xs in cands.items()}
-                    row[product]["why"] = (fa or {}).get("why") or (fp or {}).get("why")
-                alarm = (fa or {}).get("alarm") or (fp or {}).get("alarm")
+                    row[product]["why"] = (fa or {}).get("why") or (fp or {}).get("why") or (w or {}).get("why")
+                alarm = (fa or {}).get("alarm") or (fp or {}).get("alarm") or (w or {}).get("alarm")
                 if alarm:
                     row[product]["alarm"] = alarm
+                if w is not None:
+                    row[product]["wait"] = _wait_doc(w)
                 if raw is not None and product == SETTLE:
                     raw.append([day_iso, lid, hour_label(h, tz), _iso(h),
                                 (va or {}).get("temp"), (va or {}).get("wind"), (va or {}).get("gust"),
@@ -2825,7 +3148,10 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                                + raw_copy_columns(fa, fp, lid))
                 if asof is None or h > asof:
                     asof = h
-            s = day_summary(product_hours, tz, day_iso, now, pending=pending)
+            s = day_summary(product_hours, tz, day_iso, now, pending=pending, waits=waits)
+            if s is None and waits and not pending:
+                # no hour in hand at all and the temperature waiting (a day-long outage)
+                s = waiting_entry(day_iso, tz)
             if s is not None:
                 entry[product] = s
             if product == SETTLE:
@@ -2859,7 +3185,8 @@ def build_day(store: Storage, day_iso: str, locs: list, cache: dict, now: dt.dat
                     cell["pcpFile"] = (file_doc(product, "pcp", end, fp,
                                                 vp is not None and _in_time(rec["pcpPub"], cut_iso), cut_iso, times)
                                        if end <= latest else None)
-                    cell["hourly"] = hourly_row(_hourly(hourly, store, product, h, sa, cache, now, times, first), lid)
+                    cell["hourly"] = hourly_row(_hourly(hourly, store, product, h, sa, cache, now, times, first, wait_day),
+                                             lid)
             valued |= set(product_hours)
         if not entry:
             continue
@@ -3342,16 +3669,20 @@ def _cutoffs(kind: str, t: dt.datetime, locs: list) -> List[dt.datetime]:
 
 
 def _ask(server: str, slot: Optional[dict], t: dt.datetime, now: dt.datetime, force: bool,
-         cuts: Sequence[dt.datetime] = ()) -> bool:
+         cuts: Sequence[dt.datetime] = (), every: bool = False) -> bool:
     """Whether to look on a server for a file it has not given. It is every
     pass for RETRY_EVERY_PASS_HOURS after the hour, then once an hour, at the
     first pass after each cut-off in `cuts`, so the ten-minute pass that
     settles the days of that cut-off looks once more first, and at the next
     pass after a download that failed the check, while the lane reaches the
-    hour there."""
+    hour there. An hour the wait may need (`every`, wait_hour) is asked for
+    every pass until LATE_END after it, so a copy published during the wait is
+    found within FIX_AFTER of its publication."""
     if now > t + _reach(server):
         return False
     tried = (slot or {}).get("tried")
+    if every and now <= t + LATE_END:
+        return True
     if force or not tried or (slot or {}).get("bad") or now - t <= dt.timedelta(hours=RETRY_EVERY_PASS_HOURS):
         return True
     if any(tried < _iso(c) <= _iso(now) for c in cuts):
@@ -3392,7 +3723,9 @@ def settle_file(store: Storage, product: str, kind: str, t: dt.datetime, entry: 
         rec = _record(store, product, kind, t, cache)
     if rec is not None and (all(get_copy(store, product, kind, s, t, cache) is not None for s in SERVERS)
                             or now >= t + dt.timedelta(hours=RECHECK_AFTER_HOURS)):
-        entry.pop(kind, None)
+        # an hour the wait may need stays open, asked for every pass, until LATE_END
+        if not (kind == "anl" and now <= t + LATE_END and wait_hour(store, product, t, locs, cache)):
+            entry.pop(kind, None)
     return touched
 
 
@@ -3436,12 +3769,13 @@ def work_file(store: Storage, product: str, kind: str, t: dt.datetime, entry: di
     settled_any = rec is not None or bool(slots.get("cutoffs"))
     frame_cutoff = _floor_hour(now) - dt.timedelta(days=BACKFILL_FRAME_DAYS)
     cuts = _cutoffs(kind, t, locs)
+    every = kind == "anl" and wait_hour(store, product, t, locs, cache)
     for server in READ_ORDER:
         if get_copy(store, product, kind, server, t, cache) is not None:
             slots.pop(server, None)
             continue
         if (server in blocked or (kind, server) in blocked
-                or not _ask(server, slots.get(server), t, now, force, cuts)):
+                or not _ask(server, slots.get(server), t, now, force, cuts, every)):
             continue
         if deadline is not None and deadline.over(RESERVE_SECONDS):
             break
@@ -3496,6 +3830,73 @@ def work_file(store: Storage, product: str, kind: str, t: dt.datetime, entry: di
     return touched
 
 
+def wait_hour(store: Storage, product: str, t: dt.datetime, locs: list, cache: dict) -> bool:
+    """Whether the wait may need hour t's analysis (WAIT_FROM): the hour falls on
+    a place-day from WAIT_FROM at one place at least, and no copy in hand, from
+    either server, gives each such place a temperature. Only then is the hour
+    asked for every pass and URMA read for it."""
+    if product != SETTLE:
+        return False
+    places = [loc for loc in locs if wait_rule_day(row_day("anl", t, loc["tz"]))]
+    if not places:
+        return False
+    for c in copies_of(store, product, "anl", t, cache).values():
+        if c is not None and all(_value_at(c, "anl", loc["id"], "temp") is not None for loc in places):
+            return False
+    return True
+
+
+def urma_lane(store: Storage, state: dict, locs: list, cache: dict, now: dt.datetime, deadline: arch.Deadline,
+              status: dict, budget: NomadsBudget) -> set:
+    """URMA's copies of the hours the wait may need (wait_hour), every pass from
+    URMA_FROM after the hour until LATE_END, from each server that has not given
+    its first copy, NOMADS first, kept once (write_copy) and never replaced, as
+    RTMA's are. A server that refuses one is asked for no more this pass. The
+    hour's slots keep the last download that failed the check (`bad`), under
+    the open hour's `urma`. Returns the (location, day) pairs whose files
+    changed."""
+    touched: set = set()
+    blocked: set = set()
+    opened = state["products"][SETTLE].setdefault("open", {})
+    for iso in sorted(opened, reverse=True):
+        t, entry = _parse_iso(iso), opened[iso]
+        if "anl" not in entry or not (t + URMA_FROM <= now <= t + LATE_END):
+            continue
+        if not wait_hour(store, SETTLE, t, locs, cache):
+            continue
+        slots = entry.setdefault(URMA, {})
+        for server in READ_ORDER:
+            if get_copy(store, SETTLE, URMA, server, t, cache) is not None:
+                slots.pop(server, None)
+                continue
+            if server in blocked:
+                continue
+            if deadline is not None and deadline.over(RESERVE_SECONDS):
+                return touched
+            other = get_copy(store, SETTLE, URMA, "nodd" if server == "nomads" else "nomads", t, cache)
+            res = read_urma(server, t, locs, now, other=other, budget=budget,
+                            prior_bad=(slots.get(server) or {}).get("bad"))
+            if res.status == "skipped":
+                blocked.add(server)
+                continue
+            if res.status == "absent":
+                status["absent"].append(f"{SETTLE} {iso} {URMA} {server}")
+                continue
+            if res.status in ("error", "suspect"):
+                _fail(status, f"{SETTLE} {iso} {URMA} {server}: {res.error}")
+                if res.status == "suspect":
+                    slots.setdefault(server, {})["bad"] = res.bad
+                blocked.add(server)
+                continue
+            write_copy(store, SETTLE, URMA, server, t, res.doc, cache)
+            slots.pop(server, None)
+            status["copies"].append(f"{SETTLE} {iso} {URMA} {server}")
+            touched |= touched_by(t, locs)
+        if not slots:
+            entry.pop(URMA, None)
+    return touched
+
+
 def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: dict, cache: dict,
               grid_index: dict, now: dt.datetime, deadline: arch.Deadline, status: dict, budget: NomadsBudget,
               light: bool = False) -> set:
@@ -3522,10 +3923,11 @@ def live_lane(store: Storage, product: str, state: dict, locs: list, lattice: di
     for iso in sorted(opened, reverse=True):
         t, entry = _parse_iso(iso), opened[iso]
         for kind in KINDS:
-            if kind in entry and (not light or _newly_due(product, kind, t, now)):
+            if kind in entry and (not light or _newly_due(product, kind, t, now)
+                                  or (kind == "anl" and now <= t + LATE_END and wait_hour(store, product, t, locs, cache))):
                 touched |= work_file(store, product, kind, t, entry, locs, lattice, cache, grid_index, now,
                                      status, budget, blocked, state, deadline=deadline, freeze=not light)
-        if not entry:
+        if not entry or set(entry) <= {URMA}:
             del opened[iso]
     status["waiting"] += [f"{product} {iso} {' '.join(k for k in KINDS if k in opened[iso])}" for iso in sorted(opened)]
     return touched
@@ -3985,6 +4387,11 @@ def _run(store: Storage, now: dt.datetime, window: bool, budget: Optional[float]
                                      nomads, light=window)
             except Exception as e:  # noqa: BLE001
                 _fail(status, f"{product} live lane: {type(e).__name__}: {e}")
+        # 1b. URMA's copies of the hours the wait may need, on every pass
+        try:
+            touched |= urma_lane(store, state, locs, cache, now, deadline, status, nomads)
+        except Exception as e:  # noqa: BLE001
+            _fail(status, f"{SETTLE} urma lane: {type(e).__name__}: {e}")
         if not window:
             try:
                 touched |= days_past_cutoff(store, locs, now)

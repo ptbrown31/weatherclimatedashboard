@@ -118,6 +118,31 @@ reading of "first published" for a copy the lane found out of order is the engin
 yet to be ruled on, and lives in one place (`HOURLY_READING`, `LATE_FIRST`). The days before keep
 the rule they settled under, and each settled cut-off records the rule it took (`rule`).
 
+**A day's wait, then URMA (Patrick's ruling of 2026-11-17, "Wait a day, then URMA", chosen for this lane on
+2026-11-18).** From the 20 November 2026 days (`WAIT_FROM`, the engine's own), an hour whose temperature has
+no value at a cut-off, the day's or an hourly contract's, waits a day (`WAIT`) for it (`wait_or_urma`, the
+engine's, name for name). RTMA's first copy published after the cut-off and by the wait's end counts as an
+hourly contract's does, final at the first copy found and never moved. A copy the lane first found more than
+fifteen minutes (`FIX_AFTER`) after its server had it comes from inside a gap in the lane's own record, so it
+cannot be known to be the first published, and the hour is undecided between no value and that copy's, with
+an alarm. With no RTMA value by the wait's end, the hour takes URMA's first copy published by the end, at the
+same 2.5 km cell and by the same rule, and otherwise has no value. The end is fixed fifteen minutes past it, on
+the copies published by it, and a copy published after it, of either analysis, is never used, so no row is
+shown final twice. A day's high and low wait with the hour, neither final nor in review (`waiting`,
+`waitUntil`), and its wind, gust and precipitation do not wait. URMA is read for this alone, its 2 m
+temperature (`read_urma`), from NOAA Open Data's `noaa-urma-pds` by the .idx sidecar and from NOMADS, which
+keeps none, by walking the file message by message (`grib2.head`). It is asked for every pass from an hour's
+hourly cut until 51 hours after the hour (`URMA_FROM`, `LATE_END`) while no RTMA copy gives every place of a
+waiting day its temperature (`wait_hour`), and such an hour's RTMA file is asked for every pass over the same
+span. Fifteen minutes is this lane's longest ordinary finding delay with a margin, a ten-minute pass that an
+invocation can start a minute or so late, where the engine's reader asks every minute and keeps ten minutes
+(its review of 2026-11-18). Only when a value is shown differs between the two, never which value. The engine adds a freeze from the
+same day, a file fixed once both copies are in or ten minutes past its cut-off and a later copy never moving
+the hour. This lane has settled a file that way since 2026-11-03 (section 5, `LATE_FIRST`), so the freeze
+changes nothing here. Rows and hourly contracts the wait touched carry `wait` (`until`, `state`, `product`,
+`src`, `at`), the hourly contract's `copyState` gains `waiting` and `urma`, and its `state` keeps its three
+values, a waiting hour being provisional.
+
 The choice is per file (owner's ruling 2026-11-04). If the copy that counts has no value at a
 place, from a bitmap that leaves the place out or a message refused, that place has no value for
 the hour, whatever the other copy holds. A file's publication time, which the cut-off is judged
@@ -1377,7 +1402,8 @@ no analogue here.
   the centre; the day buttons name the days they open in short words and the statement names the day
   in full; the status strip and the newest analysis name the reader's zone and follow it from Denver
   to Honolulu, as the accuracy page's strip does; the method notes give their dates in words; the page
-  offers no product choice, never says URMA (an old `product=urma` address opens on RTMA) and shows
+  offers no product choice, names URMA only where the wait took URMA's value for an hour (from
+  2026-11-20; an old `product=urma` address opens on RTMA) and shows
   no price; a short day reads provisional with its count, a place under review says so on every card,
   an unreadable file is reported as unreadable, and the 503 degradation shows "No data". For the
   settlement display, on the samples' final New York day: the five cards carry the summary's values;

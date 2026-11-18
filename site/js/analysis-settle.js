@@ -52,9 +52,21 @@ window.WXSettle = (() => {
      and carries both values, which the lane decides between or sends to
      review; the page shows that it is undecided, never only its value. */
   const FIRST_DAY = '2026-11-19';
+  /* A day's wait, then URMA (the ruling of 17 November 2026, which Patrick
+     chose on 18 November that this lane follow): for a place-day from
+     20 November 2026, an hour whose temperature has no value at a cut-off,
+     the day's or an hourly contract's, waits a day for RTMA, then takes
+     URMA's value published by the wait's end, at the same grid square, or
+     else has none. The wait's end is fixed fifteen minutes past it, and only
+     then does URMA's value count. The wind, gust and precipitation do not
+     wait. */
+  const WAIT_DAY = '2026-11-20';
+  const WAIT_FIX = 15 * MIN;
   const reason = why => (/not the first published/.test(why || '') ? 'the copy found first was not the one published first'
     : /found after the hour was fixed/.test(why || '') ? 'a copy found after the hour was fixed had been published first'
-      : /both copies carry/.test(why || '') ? 'both carry the same publication time' : 'which was published first cannot be told');
+      : /both copies carry/.test(why || '') ? 'both carry the same publication time'
+        : /gap in our record/.test(why || '') ? 'the copy was found more than fifteen minutes after its server had it, from inside a gap in this lane’s record, so it cannot be known to be the first published'
+          : 'which was published first cannot be told');
   // the draft terms' cut-off, 12:45 AM local on the day after (clocks never
   // change between midnight and then in the lane's zones), and how far past
   // the last cut-off a final day's replay runs
@@ -182,6 +194,8 @@ window.WXSettle = (() => {
       o.und = (v && v.undecided) || null;
       o.why = (v && v.why) || null;
       o.alarm = (v && v.alarm) || null;
+      // the wait (from WAIT_DAY): the hour's state by it, its end, and the copy it took
+      o.wait = (v && v.wait) || null;
       o.anl = !!(v && (v.temp != null || v.wind != null || v.gust != null || (o.und && (o.und.temp || o.und.wind || o.und.gust))));
       o.pcp = !!(v && (v.precip != null || (o.und && o.und.precip)));
       o.anlLate = !!(v && v.late);
@@ -191,6 +205,12 @@ window.WXSettle = (() => {
       const a = arrival(v && v.pub, v && (v.pubSrc || v.src), o.anlFile);
       const p = arrival(v && v.pcpPub, v && (v.pcpPubSrc || v.pcpSrc), o.pcpFile);
       o.anlAt = a.at; o.anlBy = a.src;
+      // an hour whose temperature the wait took counts from when it did: RTMA’s copy published during
+      // the wait from its own time, and URMA’s from the wait’s end, fixed fifteen minutes past it
+      if (o.wait && o.anl && o.anlAt == null) {
+        o.anlAt = o.wait.state === 'primary' && when(o.wait.at) != null ? when(o.wait.at) : Date.parse(o.wait.until) + WAIT_FIX;
+        o.anlBy = o.wait.src || o.anlBy;
+      }
       o.pcpAt = p.at; o.pcpBy = p.src;
       o.show = running && v ? v.show || null : null;
       o.run = running && v ? v.run || null : null;
@@ -216,10 +236,16 @@ window.WXSettle = (() => {
        14 October counted late; then a quarter hour more, as the prototype
        does. */
     const lastCut = Math.max(-Infinity, ...hours.map(o => (o.hcut == null ? -Infinity : o.hcut)));
-    const replayEnd = Math.max(cutoff, lastCut, timed ? Math.max(a, p) : -Infinity) + AFTER;
+    // and past the end of any wait the day's hours had (from WAIT_DAY), fixed fifteen minutes past it, so a
+    // day the wait settled shows how it settled
+    const lastWait = Math.max(-Infinity, ...hours.map(o => Math.max(o.wait ? Date.parse(o.wait.until) + WAIT_FIX : -Infinity,
+      o.hourly && o.hourly.wait ? Date.parse(o.hourly.wait.until) + WAIT_FIX : -Infinity)));
+    const replayEnd = Math.max(cutoff, lastCut, lastWait, timed ? Math.max(a, p) : -Infinity) + AFTER;
     return { doc, tz: (doc && doc.tz) || tz || 'UTC', running, timed, hours, start, end, cutoff, replayEnd, e,
              final: !!(e && e.final), review: !!(e && e.review), pReview: !!(e && e.precip && e.precip.review),
-             closed: !!(e && e.closed) };
+             closed: !!(e && e.closed),
+             // a day whose high and low wait for an hour (from WAIT_DAY), and until when
+             waiting: !!(e && Array.isArray(e.waiting) && e.waiting.length), waitUntil: e && e.waitUntil ? Date.parse(e.waitUntil) : null };
   }
 
   // the span the slider covers: a live day runs to the clock, a day past its
@@ -252,11 +278,16 @@ window.WXSettle = (() => {
   function hourlyAt(o, T) {
     const hr = o && o.hourly;
     if (!hr) return null;
+    const fixW = hr.wait ? Date.parse(hr.wait.until) + WAIT_FIX : null;
     if (hr.state === 'final') {
-      const at = o.hat != null ? o.hat : o.hcut;
+      let at = o.hat != null ? o.hat : o.hcut;
+      if (hr.wait && hr.wait.state === 'urma') at = Math.max(at != null ? at : -Infinity, fixW);
       return at != null && T >= at ? 'final' : 'provisional';
     }
-    if (hr.state === 'review') return o.hcut != null && T >= o.hcut ? 'review' : 'provisional';
+    if (hr.state === 'review') {
+      const from = hr.wait && hr.wait.state === 'missing' ? fixW : o.hcut;
+      return from != null && T >= from ? 'review' : 'provisional';
+    }
     return 'provisional';
   }
   // the hourly cut-off, 1 hour 30 minutes after the hour in every zone
@@ -290,8 +321,30 @@ window.WXSettle = (() => {
   function firstText(o, T, tz, st, ap) {
     const hr = o.hourly || {}, src = SRC[hr.src] || 'the first server';
     const cut = clockS(tz, hourlyCut(o)) + ', ' + afterWords(hourlyCut(o) - o.t) + ' after the hour';
-    const two = (hr.candidates || []).map(c => (c.value == null ? 'no value' : c.value + ' °F') + ' on ' + (SRC[c.src] || c.src) + ap + 's copy').join(' and ');
+    const two = (hr.candidates || []).map(c => (c.value == null ? 'no value' : c.value + ' °F') + (c.src ? ' on ' + (SRC[c.src] || c.src) + ap + 's copy' : '')).join(' and ');
     const alarm = hr.alarm ? ' The lane raised an alarm: ' + hr.alarm + '.' : '';
+    if (hr.wait) {
+      const until = Date.parse(hr.wait.until), endW = clockS(tz, until) + ' ' + weekday(tz, until);
+      const gap = /gap in our record/.test(hr.why || '');
+      if (st === 'final' && hr.wait.state === 'urma') {
+        return 'final at ' + clockS(tz, until + WAIT_FIX) + ', on URMA' + ap + 's analysis from ' + src + ', since neither server had published the file by its cut-off, '
+          + cut + ', or within a day after it. URMA is NOAA' + ap + 's analysis of the same hour, run again later with more observations, and counts where published by the wait' + ap + 's end, ' + endW + '.';
+      }
+      if (st === 'final' && hr.wait.state === 'primary') {
+        return 'final at ' + (o.hat != null ? clockS(tz, o.hat) : 'a time not on record') + ', when ' + src + ' published the file, after its cut-off, ' + cut
+          + ', and within the day the hour waits for it. The value is ' + src + ap + 's copy.';
+      }
+      if (st === 'review' && hr.copyState === 'missing') {
+        return 'no value: neither server published the file by its cut-off, ' + cut + ', or within a day after it, and URMA gave no value by the wait' + ap + 's end, '
+          + endW + (/after the wait/.test(hr.why || '') ? '. URMA' + ap + 's copy came after the wait' + ap + 's end and does not count' : '') + '. Under review.';
+      }
+      if (st === 'review' && gap) return 'no value: the hour is undecided between ' + two + ', since ' + reason(hr.why) + '. Under review.' + alarm;
+      if (st !== 'final' && st !== 'review') {
+        return (T >= o.t ? 'provisional. ' : '') + 'Neither server had published the file by its cut-off, ' + cut + '. The hour waits until ' + endW + ' for RTMA, '
+          + 'and then takes URMA' + ap + 's value, if published by then, or has none'
+          + (/the wait ended/.test(hr.why || '') ? '. The wait has ended, and the hour is fixed at ' + clockS(tz, until + WAIT_FIX) + ' on the copies published by its end' : '') + '.';
+      }
+    }
     if (st === 'final') {
       if (hr.copyState === 'undecided') {
         return 'final at ' + (o.hat != null ? clockS(tz, o.hat) : 'a time not on record') + ', on ' + src + ap + 's copy, the first found. The two servers'
@@ -351,6 +404,10 @@ window.WXSettle = (() => {
   // NOMADS's publication with NOAA Open Data's value, which the hover says
   function hourlyWord(o, T, tz) {
     const st = o.hourly ? hourlyAt(o, T) : 'provisional';
+    const wt = o.hourly && o.hourly.wait;
+    if (wt && st === 'final' && wt.state === 'urma') return 'final ' + clock(tz, Date.parse(wt.until) + WAIT_FIX) + ' (URMA)';
+    if (wt && st === 'review' && /gap in our record/.test(o.hourly.why || '')) return 'under review, a gap in the record';
+    if (wt && st === 'provisional') return 'waiting until ' + clock(tz, Date.parse(wt.until)) + ' ' + weekday(tz, Date.parse(wt.until));
     if (st === 'final' && o.hourly.basis === 'first') {
       return 'final ' + clock(tz, o.hat != null ? o.hat : o.hcut) + ' (' + (o.hourly.src === 'nomads' ? 'NOMADS' : 'Open Data')
         + (o.hourly.copyState === 'undecided' ? ', copies differ' : '') + ')';
@@ -559,7 +616,11 @@ window.WXSettle = (() => {
       let cls, word, text;
       if (ctx.unread) { cls = 'prov'; word = 'No data'; text = 'The day file could not be read.'; }
       else if (P.review && (S.atCut || !P.running)) { cls = 'review'; word = 'Under review'; text = 'No ' + NAME + ' hour was published by the 12:45 AM cut-off, so the day is under review.'; }
-      else if (P.closed) { cls = 'closed'; word = 'Closed'; text = 'Closed on ' + n + ' of ' + of + ' hours, under the rule before 14 October.'; }
+      else if (P.waiting && (S.atCut || !P.running)) {
+        cls = 'prov'; word = 'Waiting';
+        text = 'An hour of this day had no ' + NAME + ' temperature by ' + cutAt + '. The high and low wait until ' + clock(tz, P.waitUntil) + ' on '
+          + dayName(tz, P.waitUntil) + ' for ' + NAME + ', then take URMA’s value. The wind, gust and precipitation do not wait.';
+      } else if (P.closed) { cls = 'closed'; word = 'Closed'; text = 'Closed on ' + n + ' of ' + of + ' hours, under the rule before 14 October.'; }
       else if (P.running ? S.final : P.final) { cls = 'final'; word = 'Final'; text = 'Resolved at ' + cutAt + ', on ' + n + ' of ' + of + ' hours.'; }
       else if (P.running && S.atCut) { cls = 'prov'; word = 'Provisional'; text = n + ' of ' + of + ' hours were in by ' + cutAt + '. The day turns final when the site next writes it.'; }
       else if (!n) { cls = 'prov'; word = 'Provisional'; text = 'No hour of this day is in yet. The day becomes final at ' + cutAt + '.'; }
@@ -611,7 +672,11 @@ window.WXSettle = (() => {
     // ---- the five values; a card is a button that sets the map's variable
     function renderCards(S) {
       const tz = P.tz, e = P.e || {};
-      const so = (P.running ? S.final : P.final) ? '' : ' so far';
+      const fin = P.running ? S.final : P.final;
+      // the high and low of a day whose temperature waits (`waiting`), and the values that do not wait, final at the cut-off
+      const waitK = k => P.waiting && (S.atCut || !P.running) && (e.waiting || []).includes(k);
+      const soOf = k => (fin || (P.waiting && (S.atCut || !P.running) && !waitK(k)) ? '' : ' so far');
+      const waitNote = 'an hour waits until ' + (P.waitUntil != null ? clock(tz, P.waitUntil) + ' ' + weekday(tz, P.waitUntil) : 'the end of its wait') + ' for ' + NAME + ', then URMA';
       // a redraw keeps the keyboard on the card it was on
       const had = cards.contains(document.activeElement) ? document.activeElement.dataset.var : null;
       cards.textContent = '';
@@ -638,7 +703,8 @@ window.WXSettle = (() => {
         if (ctx.unread) why = 'the day file could not be read';
         else if (split && (!val || val.value == null)) {  // read before review, since a split precipitation total carries its review flag too
           why = ((S.atCut || !P.running) ? 'under review: ' : '') + 'the two servers’ copies of an hour differ and which was published first cannot be told';
-        } else if (review && (S.atCut || !P.running)) why = c.k === 'precip' ? 'no ' + NAME + ' precipitation published by the 12:45 AM cut-off' : 'no ' + NAME + ' hour published by the 12:45 AM cut-off';
+        } else if (waitK(c.k) && (!val || val.value == null)) why = 'waiting, ' + waitNote;
+        else if (review && (S.atCut || !P.running)) why = c.k === 'precip' ? 'no ' + NAME + ' precipitation published by the 12:45 AM cut-off' : 'no ' + NAME + ' hour published by the 12:45 AM cut-off';
         else if (!val || val.value == null) why = P.running && P.hours.some(o => o.anl || o.pcp) ? 'no hour in yet' : 'no ' + NAME + ' hours read yet';
         if (why) {
           card.appendChild(h('span', { class: 'av dim', text: 'no value' }));
@@ -647,7 +713,8 @@ window.WXSettle = (() => {
           card.appendChild(h('span', { class: 'av', text: fx(val.value, c.dec) + c.unit }));
           const d = c.kind === 'at' ? (val.at ? 'at ' + hourZ(tz, Date.parse(val.at)) : '')
             : (c.kind === 'mean' ? 'mean of ' : 'total of ') + n + (n === 1 ? ' hour' : ' hours');
-          card.appendChild(h('span', { class: 'ae', text: d + so + (inexact ? (d ? ', ' : '') + 'copies of an hour differ and both round to it' : '') }));
+          card.appendChild(h('span', { class: 'ae', text: d + soOf(c.k) + (waitK(c.k) ? (d ? ', ' : '') + waitNote : '')
+            + (inexact ? (d ? ', ' : '') + 'copies of an hour differ and both round to it' : '') }));
         }
         card.onclick = () => { if (opts.onVar) opts.onVar(c.k); };
         cards.appendChild(card);
@@ -1233,14 +1300,24 @@ window.WXSettle = (() => {
       const pk = run ? S.runA && S.runA.gust : (P.e || {}).gust;
       const oh = hi && hourAt(hi.at), ol = lo && hourAt(lo.at), op = pk && hourAt(pk.at);
       const ex = !run;
+      // the temperature of an hour by the wait (from WAIT_DAY): waiting, or taken from RTMA during the wait or from URMA
+      const waitOf = (o, k) => (k === 'temp' && o.wait ? o.wait : null);
       const cell = (o, k, isIn, isLate, cls) => {
+        const wt = waitOf(o, k);
+        if (!(isIn || isLate) && wt && wt.state === 'waiting') {
+          return '<td class="num wait' + (cls || '') + '" title="' + esc('waiting until ' + clock(tz, Date.parse(wt.until)) + ' ' + weekday(tz, Date.parse(wt.until))
+            + ' for ' + NAME + ', then URMA') + '">·</td>';
+        }
         if (!(isIn || isLate)) return '<td class="num' + (cls || '') + '">·</td>';
         // an hour whose copies differ here in an order that cannot be told: both values, as the lane rounded them
         if (o.und && o.und[k] && P.running) {
           return '<td class="num und' + (cls || '') + '" title="' + esc('the two servers’ copies differ here, and ' + reason(o.why)) + '">'
             + esc(o.und[k].map(c => (c.show == null ? '·' : fx(c.show, DEC[k][0]))).join(' or ')) + '</td>';
         }
-        return '<td class="num' + (cls || '') + (isLate ? ' dim late' : '') + '"' + (isLate ? ' title="published after the cut-off, not counted"' : '') + '>'
+        const wtitle = wt && wt.state === 'urma' ? 'URMA’s value, from ' + (SRC[wt.src] || wt.src) + ', since ' + NAME + ' gave none by the cut-off or within a day after it'
+          : wt && wt.state === 'primary' ? 'published by ' + (SRC[wt.src] || wt.src) + ' after the cut-off, within the day the hour waits for it' : null;
+        return '<td class="num' + (cls || '') + (isLate ? ' dim late' : '') + (wtitle ? ' wait' : '') + '"'
+          + (isLate ? ' title="published after the cut-off, not counted"' : wtitle ? ' title="' + esc(wtitle) + '"' : '') + '>'
           + fx(ex ? o.v[k] : shown(o, k), DEC[k][ex ? 1 : 0]) + '</td>';
       };
       // a live day's file can still gain a server's time; a past day's cannot
@@ -1295,14 +1372,21 @@ window.WXSettle = (() => {
         + (anyLate ? ' A dimmed value was published after the cut-off and is not counted.' : '');
       // the rule the day settled by, its values and its hourly contracts alike
       const firstD = String((P.doc && P.doc.day) || '') >= FIRST_DAY;
+      const waitD = String((P.doc && P.doc.day) || '') >= WAIT_DAY;
+      const waitRule = 'From 20 November 2026, an hour whose temperature has no value at a cut-off, the day’s or the hourly contract’s, waits a day for it. '
+        + NAME + '’s first copy published within that day counts, and otherwise URMA’s value published by the wait’s end, at the same grid square, or else the hour has none. '
+        + 'URMA is NOAA’s analysis of the same hour, run again later with more observations. The wind, gust and precipitation do not wait.';
       const copyRule = firstD
         ? 'The two copies are normally identical. Where they differ, the copy published first counts, from either server, by the times the servers report. '
           + 'Where which came first cannot be told, the hour shows both values, and the day keeps a value only where both give it. '
           + 'This is the rule from 19 November 2026. Until then the NOMADS copy counted if it was published in time.'
-        : 'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time. From 19 November 2026 the copy published first counts, from either server.';
+          + (waitD ? '' : ' From 20 November 2026 an hour whose temperature has no value at the cut-off waits a day for it, then takes URMA’s.')
+        : 'The two copies are normally identical. Where they differ, the NOMADS copy counts if it was published in time. From 19 November 2026 the copy published first counts, from either server, '
+          + 'and from 20 November 2026 an hour whose temperature has no value at the cut-off waits a day for it, then takes URMA’s.';
       const hourlyNotes = firstD
         ? ['The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as either server publishes the file, on the first copy found, if that is by the hour’s cut-off, ' + aw + ' after the hour.',
-           'Where the other copy, found later, was published first and differs, the hour is undecided, and the lane raises an alarm. It stays final if both copies round to the same whole degree, and otherwise goes to review. With no copy by the cut-off, the hour has no value and goes to review.',
+           'Where the other copy, found later, was published first and differs, the hour is undecided, and the lane raises an alarm. It stays final if both copies round to the same whole degree, and otherwise goes to review. '
+             + (waitD ? 'With no copy by the cut-off, the hour waits a day for one and then takes URMA’s value, and with neither it goes to review.' : 'With no copy by the cut-off, the hour has no value and goes to review.'),
            'For an hour not final yet, the table gives the time the first copy usually comes and the hour’s cut-off.']
         : ['The hourly contract resolves on each hour’s temperature by itself. Its value is final as soon as NOMADS publishes the file, if that is by the hour’s cut-off, ' + aw + ' after the hour.',
            'If NOMADS has not published the file by then, NOAA Open Data’s copy becomes final at the cut-off. With neither copy, the hour has no value and goes to review.',
@@ -1312,7 +1396,8 @@ window.WXSettle = (() => {
         'Each row is the ' + NAME + ' analysis at the top of the hour in ' + tz + ' and the precipitation over the hour that starts then, which NOAA files under the hour it ends.',
         'NOAA publishes every file on two servers, NOAA Open Data (on Amazon’s cloud) and NOMADS (the National Centers for Environmental Prediction’s own server), and this page reads both.',
         copyRule,
-        'The last two columns give the time each server published the hour’s analysis, as the server reports it. Until a server has published the file, its column gives the time it usually does, and “not on record” means no time was kept for that server.'],
+        'The last two columns give the time each server published the hour’s analysis, as the server reports it. Until a server has published the file, its column gives the time it usually does, and “not on record” means no time was kept for that server.']
+        .concat(waitD ? [waitRule] : []),
         hourlyNotes);
       // written again only when the words change, so points a reader opened stay open through a replay
       const key = lead + '\n' + pts.join('\n');

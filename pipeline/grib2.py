@@ -106,6 +106,35 @@ def _section(msg: bytes, secs: dict, n: int) -> bytes:
     return msg[p:p + ln]
 
 
+def head(prefix: bytes) -> dict:
+    """A message's identity from its first octets, for a file with no .idx
+    sidecar (URMA on NOMADS): walking the file message by message, each
+    prefix gives the message's total length, so the next one starts there,
+    and its section 4 says which field it carries. Keys: total, discipline,
+    category, number, template, level_type, level_value, as product_def
+    names them. Raises ValueError where the prefix is not the start of a
+    GRIB2 message or ends before the octets of section 4 read here."""
+    if len(prefix) < 16 or prefix[:4] != b"GRIB":
+        raise ValueError("not a GRIB message")
+    if prefix[7] != 2:
+        raise ValueError(f"GRIB edition {prefix[7]}, not 2")
+    total = _u(prefix[8:16])
+    p = 16
+    while p + 5 <= len(prefix) and p < total - 4:
+        ln = _u(prefix[p:p + 4])
+        sec = prefix[p + 4]
+        if ln < 5 or sec < 1 or sec > 7:
+            raise ValueError(f"bad section header at offset {p}")
+        if sec == 4:
+            if p + 28 > len(prefix):
+                raise ValueError("the prefix ends inside section 4")
+            b = prefix[p:p + 28]
+            return {"total": total, "discipline": prefix[6], "category": b[9], "number": b[10],
+                    "template": _u(b[7:9]), "level_type": b[22], "level_value": _s(b[24:28]) / 10.0 ** _s(b[23:24])}
+        p += ln
+    raise ValueError("the prefix ends before section 4")
+
+
 # ---------------------------------------------------------------------------
 # 2. THE HEADERS: SECTIONS 1, 3, 4, 5, 6
 # ---------------------------------------------------------------------------
