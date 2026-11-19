@@ -1437,11 +1437,24 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 page.click('#anaVar button[data-var="high"]')
                 ana_until(page, "() => document.querySelector('#anaLegend').textContent.startsWith('High')")
                 a2 = page.evaluate("""() => ({ product: document.querySelectorAll('button[data-product]').length,
+                  meta: [...document.querySelectorAll('meta')].map(m => m.content || '').join(' '),
                   text: document.body.innerText + ' ' + [...document.querySelectorAll('meta')].map(m => m.content || '').join(' ') })""")
-                a2_rest = " ".join(p_ for p_ in re.split(r"(?<=[.!?])\s+", a2["text"]) if "20 November 2026" not in p_)
-                chk.add(f"{scheme} analysis: one analysis, no product choice, and URMA named only where the wait from 20 November 2026 is",
-                        a2["product"] == 0 and "urma" not in a2_rest.lower() and "From 20 November 2026 URMA" in a2["text"],
-                        str([a2["product"], [p_[:90] for p_ in re.split(r"(?<=[.!?])\s+", a2["text"]) if "urma" in p_.lower()][:4]]))
+                # every sentence that names URMA, pinned by its full text: the dated Sources sentence on the page,
+                # and on a day before the wait the dated note on the rule, so a mention anywhere else fails
+                URMA_SOURCES = ("From 20 November 2026 URMA, NOAA\u2019s analysis of the same hour run again later with more observations, "
+                                "is read as well, from NOAA Open Data (noaa-urma-pds) and NOMADS, for the temperature of an hour with no "
+                                "value by its cut-off or within a day after it.")
+                URMA_OLD_RULE = ("From 19 November 2026 the copy published first counts, from either server, and from 20 November 2026 an "
+                                 "hour whose temperature has no value at the cut-off waits a day for it, then takes URMA\u2019s.")
+                urma_said = lambda t_: sorted({p_.strip() for p_ in re.split(r"(?<=[.!?])(?:\s+|(?=[A-Z\u201c]))", t_)
+                                               if "urma" in p_.lower()})
+                a2_urma = urma_said(a2["text"])
+                chk.add(f"{scheme} analysis: one analysis, no product choice, and URMA named only in its pinned, dated sentences",
+                        a2["product"] == 0 and a2_urma == sorted({URMA_SOURCES} | ({URMA_OLD_RULE} & set(a2_urma))),
+                        str([a2["product"], [p_[:120] for p_ in a2_urma]]))
+                # the page's description and other meta never name URMA at all, the pinned sentences included
+                chk.add(f"{scheme} analysis: the page's meta never names URMA",
+                        bool(a2["meta"]) and "urma" not in a2["meta"].lower(), a2["meta"][:200])
                 ana_goto(page, f"?var=high&product=urma&day={ana_day}")
                 a3 = page.evaluate("() => [document.querySelector('#anaNewest').textContent, location.search, document.querySelectorAll('#anaDots text.pvt').length]")
                 chk.add(f"{scheme} analysis: an address with product=urma opens on RTMA and drops the parameter",
@@ -1546,10 +1559,11 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                         str(ana_bp)[:300])
                 ana_goto(page, f"?var=high&day={ana_day}&loc=new-york-ny", ANA_DAY)
                 # a day of the samples, before the wait (from 20 November 2026), names URMA only in the dated sentences on it
-                pn_rest = " ".join(p_ for p_ in re.split(r"(?<=[.!?])\s+", pn["text"]) if "20 November 2026" not in p_)
-                chk.add(f"{scheme} analysis: the three charts draw, and the place names URMA only where the wait from 20 November 2026 is",
-                        pn["charts"] == ["anaTemp", "anaWind", "anaPcp"] and pn["series"] >= 1 and "urma" not in pn_rest.lower(),
-                        str([pn["charts"], [p_[:90] for p_ in re.split(r"(?<=[.!?])\s+", pn["text"]) if "urma" in p_.lower()][:4]]))
+                pn_urma = urma_said(pn["text"])
+                chk.add(f"{scheme} analysis: the three charts draw, and the place names URMA only in its pinned, dated sentences",
+                        pn["charts"] == ["anaTemp", "anaWind", "anaPcp"] and pn["series"] >= 1
+                        and pn_urma == sorted({URMA_OLD_RULE} | ({URMA_SOURCES} & set(pn_urma))) and len(pn_urma) >= 1,
+                        str([pn["charts"], [p_[:120] for p_ in pn_urma]]))
                 chk.add(f"{scheme} analysis: the place shows no price and keeps the exchange's language",
                         pn["links"] == 0 and "¢" not in pn["text"] and not re.search(r"\b(ask|sell|offer|bid)\b", pn["text"], re.I)
                         and "No contract settles on it" in pn["text"], str(pn["links"]))
