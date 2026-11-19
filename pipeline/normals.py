@@ -13,6 +13,11 @@ Normals are the 2006-2020 daily normals (NCEI's current 15-year set), one
 row per day of the year: normal high, normal low, and their standard
 deviations. They refresh weekly; they change once a decade.
 
+The step has two minutes of the daily chain (BUDGET_SECONDS). After them it
+starts no station, no request runs on, and a station it did not reach waits
+for the next morning, which costs nothing for a figure that changes once a
+decade.
+
 Writes snapshots/normals/{STATION}.json = {"station", "ghcn", "name",
 "asof", "days": {"MM-DD": {"tmax", "tmin", "tmaxSd", "tminSd"}}}.
 """
@@ -24,6 +29,7 @@ import time
 import urllib.parse
 from typing import Optional
 
+from . import archive as arch
 from . import gov_weather as gw
 from . import basemap
 from .storage import Storage
@@ -34,6 +40,11 @@ DATA = "https://www.ncei.noaa.gov/access/services/data/v1"
 NORMALS_DATASET = "normals-daily-2006-2020"
 REFRESH_DAYS = 7
 BOX = 0.2                       # degrees around the airport for the station search
+# The step's share of the daily chain, which Lambda stops whole at 900 s. A weekly batch of 15 stations takes 8 to 33 s
+# at NCEI's usual 1.3 to 3.7 s a station (19 Oct to 14 Nov 2026), and on 18 November a slow NCEI took it to 729 s
+# and the chain past its limit (owner's decision 2026-11-19).
+BUDGET_SECONDS = 120
+NEED_SECONDS = 10               # no station is started with less than this left of the budget
 
 
 def _dist_km(lat1, lon1, lat2, lon2) -> float:
@@ -42,11 +53,12 @@ def _dist_km(lat1, lon1, lat2, lon2) -> float:
     return 12742 * math.asin(math.sqrt(a))
 
 
-def resolve_ghcn(city: dict, today: dt.date) -> Optional[dict]:
-    """The nearest first-order (USW) GHCN-Daily station with recent data."""
+def resolve_ghcn(city: dict, today: dt.date, end: Optional[float] = None) -> Optional[dict]:
+    """The nearest first-order (USW) GHCN-Daily station with recent data.
+    `end` bounds the search's whole call (gov_weather._fetch)."""
     q = urllib.parse.urlencode({"dataset": "daily-summaries", "limit": 25,
                                 "bbox": f"{city['lat'] + BOX},{city['lon'] - BOX},{city['lat'] - BOX},{city['lon'] + BOX}"})
-    j = gw._get(f"{SEARCH}?{q}") or {}
+    j = gw._get(f"{SEARCH}?{q}", end=end) or {}
     best = None
     for r in j.get("results", []):
         for s in r.get("stations", []):
@@ -69,10 +81,11 @@ def resolve_ghcn(city: dict, today: dt.date) -> Optional[dict]:
     return best
 
 
-def fetch_normals(ghcn: str, year: int) -> dict:
+def fetch_normals(ghcn: str, year: int, end: Optional[float] = None) -> dict:
+    """One station's daily normals. `end` bounds the whole call (gov_weather._fetch)."""
     q = urllib.parse.urlencode({"dataset": NORMALS_DATASET, "stations": ghcn, "startDate": f"{year}-01-01",
                                 "endDate": f"{year}-12-31", "format": "json", "units": "standard"})
-    rows = gw._get(f"{DATA}?{q}") or []
+    rows = gw._get(f"{DATA}?{q}", end=end) or []
     out = {}
     for r in rows:
         d = r.get("DATE")
@@ -95,17 +108,23 @@ def normals_pass(cfg: dict, store: Storage) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     today = now.date()
     t0 = time.time()
+    left = arch.remaining_budget(cfg)
+    deadline = arch.Deadline(BUDGET_SECONDS if left is None else min(BUDGET_SECONDS, left))
     raw = store.get(GHCN_KEY)
     ghcn = json.loads(raw) if raw else {}
     changed = False
     written = skipped = errors = 0
+    deferred = []
     for c in basemap.load_roster():
         if c["unit"] != "F":
             continue
         sid = c["station"]
         try:
             if sid not in ghcn:
-                m = resolve_ghcn(c, today)
+                if deadline.over(NEED_SECONDS):
+                    deferred.append(sid)
+                    continue
+                m = resolve_ghcn(c, today, end=deadline.end)
                 if not m:
                     print(json.dumps({"kind": "normals", "station": sid, "warning": "no first-order GHCN station found nearby"}))
                     continue
@@ -119,7 +138,11 @@ def normals_pass(cfg: dict, store: Storage) -> int:
                 if asof and (now - dt.datetime.fromisoformat(asof.replace("Z", "+00:00"))).days < REFRESH_DAYS:
                     skipped += 1
                     continue
-            days = fetch_normals(ghcn[sid]["ghcn"], today.year)
+            # a station due but past the budget waits for tomorrow's pass, untouched
+            if deadline.over(NEED_SECONDS):
+                deferred.append(sid)
+                continue
+            days = fetch_normals(ghcn[sid]["ghcn"], today.year, end=deadline.end)
             if len(days) < 300:
                 raise RuntimeError(f"only {len(days)} normal days returned")
             snap = {"station": sid, "ghcn": ghcn[sid]["ghcn"], "name": ghcn[sid]["name"], "distanceKm": ghcn[sid]["distanceKm"],
@@ -133,6 +156,9 @@ def normals_pass(cfg: dict, store: Storage) -> int:
             print(json.dumps({"kind": "normals", "station": sid, "error": f"{type(e).__name__}: {e}"}))
     if changed:
         store.put(GHCN_KEY, json.dumps(ghcn, indent=1).encode(), "application/json")
-    print(json.dumps({"kind": "normals", "written": written, "skipped": skipped, "errors": errors,
-                      "resolved": len(ghcn), "seconds": round(time.time() - t0, 1)}))
+    line = {"kind": "normals", "written": written, "skipped": skipped, "errors": errors, "deferred": len(deferred),
+            "resolved": len(ghcn), "seconds": round(time.time() - t0, 1)}
+    if deferred:
+        line["deferredStations"] = deferred
+    print(json.dumps(line))
     return 1 if errors and not written and not skipped else 0

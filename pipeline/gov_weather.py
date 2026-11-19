@@ -73,32 +73,64 @@ TEMP_SOURCE = "remarks"   # "remarks" (tenths) or "body" (whole degrees)
 INCLUDE_SPECI = True      # count SPECI reports toward the daily maximum
 
 
-def _fetch(url: str, tries: int = 3, timeout: int = 30, accept: str = "*/*") -> bytes:
+def _fetch(url: str, tries: int = 3, timeout: int = 30, accept: str = "*/*", end: Optional[float] = None) -> bytes:
     """GET with the required header and a polite back-off. NWS says a
-    rate-limit error clears within about five seconds, so the waits grow."""
+    rate-limit error clears within about five seconds, so the waits grow.
+
+    `end`, a wall-clock time, bounds the whole call when it is given: no try
+    starts after it, no back-off waits past it, and an answer still arriving
+    at it is a TimeoutError. A socket timeout bounds each wait for bytes, not
+    the answer, so a server trickling its answer would otherwise hold the call
+    open (NCEI on 18 November 2026, 729 s for fifteen stations' normals).
+    Without `end` the call is as it always was."""
     for attempt in range(tries):
+        if end is not None and time.time() >= end:
+            raise TimeoutError("the call's time ran out")
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return r.read()
+            wait = timeout if end is None else max(1.0, min(timeout, end - time.time()))
+            with urllib.request.urlopen(req, timeout=wait) as r:
+                return r.read() if end is None else _read_until(r, end)
         except urllib.error.HTTPError as e:
             # A client error other than 429 will not change on retry.
             if 400 <= e.code < 500 and e.code != 429:
                 raise
             if attempt == tries - 1:
                 raise
-            time.sleep(2.5 * (attempt + 1))
+            _back_off(attempt, end)
         except Exception:
             if attempt == tries - 1:
                 raise
-            time.sleep(2.5 * (attempt + 1))
+            _back_off(attempt, end)
     raise RuntimeError("unreachable")
 
 
-def _get(url: str, tries: int = 3) -> Any:
+def _back_off(attempt: int, end: Optional[float]) -> None:
+    """The wait before the next try, which never runs past `end`."""
+    pause = 2.5 * (attempt + 1)
+    if end is not None:
+        pause = min(pause, max(0.0, end - time.time()))
+    time.sleep(pause)
+
+
+def _read_until(r, end: float) -> bytes:
+    """A response's whole body, read a piece at a time, or TimeoutError once
+    the wall clock passes `end`."""
+    parts = []
+    while True:
+        if time.time() > end:
+            raise TimeoutError("the answer did not arrive in time")
+        b = r.read1(65536)
+        if not b:
+            return b"".join(parts)
+        parts.append(b)
+
+
+def _get(url: str, tries: int = 3, end: Optional[float] = None) -> Any:
     """JSON GET. An empty body (aviationweather.gov answers 204 with no body
-    for a valid request that matches nothing) returns None, not an error."""
-    body = _fetch(url, tries, accept="application/geo+json,application/json")
+    for a valid request that matches nothing) returns None, not an error.
+    `end` bounds the whole call, as in _fetch."""
+    body = _fetch(url, tries, accept="application/geo+json,application/json", end=end)
     if not body.strip():
         return None
     return json.loads(body)
