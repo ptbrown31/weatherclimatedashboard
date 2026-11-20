@@ -51,9 +51,13 @@ Conventions, all from docs/analysis.md section 1 and fixed there:
     as if it rounds the other way. A value equal to
     the strike resolves Yes, at or above it for the high, gust, mean wind and
     precipitation and at or below it for the low (owner's decision
-    2026-09-28). The exchange's current daily temperature and wind contracts
-    keep the strict test, so on the boundary this framework and the board
-    part company by design.
+    2026-09-28). From 20 November 2026, by contract date, the high and each
+    hour's temperature resolve Yes strictly above the strike and the low Yes
+    strictly below it, so a value equal to the strike resolves No for those
+    three, as on the exchange's current daily contracts (Patrick's ruling of
+    2026-11-19, STRICT_FROM_DAY). The peak gust, the mean wind and
+    precipitation keep the rule of 28 September, so on the boundary they and
+    the exchange's strict wind contracts part company by design.
 
     Every file is read from NOAA Open Data and from NCEP's NOMADS server,
     whose copy counts as published too (owner's ruling 2026-11-03). Each
@@ -456,9 +460,9 @@ CONVENTIONS = {
            "hours that count. An hour whose analysis file never landed still adds its precipitation, which NOAA publishes "
            "as a separate file.",
     "high": "The highest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
-            "Yes when the value is at or above the strike.",
+            "Yes when the value is strictly above the strike (at or above it before 20 November 2026).",
     "low": "The lowest hourly temperature of the day, whole degrees Fahrenheit rounded half up; "
-           "Yes when the value is at or below the strike.",
+           "Yes when the value is strictly below the strike (at or below it before 20 November 2026).",
     "gust": "The highest hourly gust of the day, whole miles per hour rounded half up; "
             "Yes when the value is at or above the strike.",
     "wind": "The mean of the day's hourly sustained winds, whole miles per hour rounded half up; "
@@ -470,7 +474,9 @@ CONVENTIONS = {
                 "that aggregate cut, not rounded, to a thousandth (precipitation to a ten-thousandth of an inch), "
                 "so it never looks as if it rounds the other way.",
     "strike": "A value equal to the strike resolves Yes, at or above it for the high, gust, mean wind and "
-              "precipitation and at or below it for the low (decided 28 September 2026). The exchange's "
+              "precipitation and at or below it for the low (decided 28 September 2026). From 20 November "
+              "2026 a value equal to the strike resolves No for the high, each hour's temperature and the "
+              "low (decided 19 November 2026). The exchange's "
               "current daily temperature and wind contracts resolve a value equal to the strike No.",
     "provisional": "RTMA resolves, precipitation included (decided 29 September 2026). A place-day is final at "
                    "its cut-off, 12:45 AM local time on the day after (decided 14 October 2026), on the files "
@@ -508,7 +514,9 @@ CONVENTIONS = {
               "then, which NOAA files under the hour it ends. Station report conventions (the last report in "
               "the hour, specials, the tenths group) have no analogue here.",
     "hourlyContract": "Each hour's temperature is also the hourly temperature contract's value, whole degrees "
-                      "Fahrenheit rounded once, half up, away from zero (decided 4 November 2026). Its cut-off is "
+                      "Fahrenheit rounded once, half up, away from zero (decided 4 November 2026). From the "
+                      "20 November 2026 days it resolves Yes strictly above its strike, and on the days before "
+                      "at or above it (decided 19 November 2026). Its cut-off is "
                       "1 hour 30 minutes after the hour in every zone (decided 5 November 2026; three hours until "
                       "then), and the daily 12:45 AM cut-off does not apply to it. It is final once NOMADS's copy of "
                       "the analysis is in, if published by that cut-off; "
@@ -1132,16 +1140,25 @@ def running_texts(product_hours: dict, tz: str, day_iso: str) -> Dict[str, dict]
     return out
 
 
-def resolves(var: str, value, strike) -> Optional[bool]:
-    """Whether a hypothetical contract on a daily variable resolves Yes at a
-    strike: the low resolves on a value at or below the strike, everything
-    else on a value at or above it, so the boundary case is Yes whichever way
-    the contract runs (owner's decision 2026-09-28; it was strict before, as
-    the exchange's current contracts still are). The rule the page draws its
-    ladders with; kept here so a test can pin it and a reader can find it in
-    one place. None while the day has no value."""
-    if value is None:
+def resolves(var: str, value, strike, day: str) -> Optional[bool]:
+    """Whether a hypothetical contract resolves Yes at a strike, by its
+    contract day. On a day before STRICT_FROM_DAY a value equal to the strike
+    resolves Yes whichever way the contract runs, the low on a value at or
+    below the strike and everything else on a value at or above it (owner's
+    decision 2026-09-28; it was strict before, as the exchange's current
+    contracts still are). From that day the high and each hour's temperature
+    ("temp", the hourly contract's value) resolve Yes strictly above the
+    strike and the low strictly below it, so a value equal to the strike
+    resolves No (Patrick's ruling of 2026-11-19), and the peak gust, the mean
+    wind and precipitation keep the rule of 28 September. The settlement
+    display shows values and draws no ladder, so nothing served calls this.
+    It is kept so a test can pin the rule and a reader can find it in one
+    place. None while the day has no value, and None for a contract day that
+    is not a date, which is given no rule rather than a default."""
+    if value is None or not is_contract_day(day):
         return None
+    if var in STRICT_VARS and strict_rule_day(day):
+        return value < strike if var == "low" else value > strike
     return value <= strike if var == "low" else value >= strike
 
 
@@ -1986,10 +2003,39 @@ LATE_END = dt.timedelta(hours=51)
 URMA_HEAD_BYTES = 512             # a message's sections 0 to 4, walked on NOMADS, which keeps no .idx
 URMA_WALK_MAX = 20                # messages walked before a file's 2 m temperature is given up on
 
+# ------------------------------------------------------------------ strict temperature strikes (2026-11-20)
+# Patrick's ruling of 19 November 2026. From the contracts dated 20 November
+# 2026 the NDFD temperature strikes are strict after rounding, the high and
+# each hour's temperature Yes strictly above the strike and the low Yes
+# strictly below it, so a value equal to the strike resolves No. A contract
+# day before it keeps the rule of 28 September 2026, a value equal to the
+# strike resolving Yes, and the peak gust, the mean wind and precipitation
+# keep that rule, as Patrick ruled the same day. A daily contract's day is its
+# place-day, and an hourly contract's is the place-day its hour falls in, the
+# day of the place file that carries it. resolves() is the rule's one use in
+# code, and the conventions state it in words.
+STRICT_FROM_DAY = "2026-11-20"
+STRICT_VARS = ("high", "low", "temp")    # "temp" is each hour's temperature, the hourly contract's value
+
 
 def wait_rule_day(day_iso: str) -> bool:
     """Whether a place-day's temperature waits a day, then takes URMA."""
     return day_iso >= WAIT_FROM
+
+
+def strict_rule_day(day_iso: str) -> bool:
+    """Whether a contract day's temperature strikes are strict."""
+    return day_iso >= STRICT_FROM_DAY
+
+
+def is_contract_day(day) -> bool:
+    """Whether `day` is a contract day as this lane writes one, YYYY-MM-DD."""
+    if not isinstance(day, str) or len(day) != 10:
+        return False
+    try:
+        return dt.date.fromisoformat(day).isoformat() == day
+    except ValueError:
+        return False
 
 
 def first_rule_day(day_iso: str) -> bool:

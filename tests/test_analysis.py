@@ -533,9 +533,9 @@ class Rules(unittest.TestCase):
         self.assertEqual(analysis.half_up(-20.49, 1), -20)
         s = analysis.day_summary(hours_of([-20.5, -3.0], day="2026-01-10"), "America/New_York", "2026-01-10", NOW)
         self.assertEqual((s["low"]["value"], s["low"]["exact"]), (-21, -20.5))
-        self.assertEqual(analysis.resolves("low", -21, -22), False)
-        self.assertEqual(analysis.resolves("low", -21, -21), True)     # at the strike is Yes
-        self.assertEqual(analysis.resolves("low", -21, -20), True)
+        self.assertEqual(analysis.resolves("low", -21, -22, "2026-01-10"), False)
+        self.assertEqual(analysis.resolves("low", -21, -21, "2026-01-10"), True)     # at the strike is Yes before 2026-11-20
+        self.assertEqual(analysis.resolves("low", -21, -20, "2026-01-10"), True)
 
     def test_units_are_exact(self):
         self.assertAlmostEqual(analysis.k_to_f(273.15), 32.0)
@@ -545,15 +545,63 @@ class Rules(unittest.TestCase):
 
     def test_at_least_on_a_ladder(self):
         # owner's decision 2026-09-28: a value equal to the strike resolves Yes
-        # whichever way the contract runs
+        # whichever way the contract runs, on a contract day before 2026-11-20
+        d = "2026-11-19"
         # high 71: Yes at the value and below it, No above it
-        self.assertEqual([analysis.resolves("high", 71, k) for k in (69, 70, 71, 72)], [True, True, True, False])
+        self.assertEqual([analysis.resolves("high", 71, k, d) for k in (69, 70, 71, 72)], [True, True, True, False])
         # low 58: No below the value, Yes at it and above it
-        self.assertEqual([analysis.resolves("low", 58, k) for k in (57, 58, 59, 60)], [False, True, True, True])
-        self.assertEqual([analysis.resolves("precip", 0.49, k) for k in (0.25, 0.49, 0.5)], [True, True, False])
-        self.assertEqual([analysis.resolves("gust", 40, k) for k in (40, 41)], [True, False])
-        self.assertEqual([analysis.resolves("wind", 12, k) for k in (12, 13)], [True, False])
-        self.assertIsNone(analysis.resolves("gust", None, 30))
+        self.assertEqual([analysis.resolves("low", 58, k, d) for k in (57, 58, 59, 60)], [False, True, True, True])
+        self.assertEqual([analysis.resolves("precip", 0.49, k, d) for k in (0.25, 0.49, 0.5)], [True, True, False])
+        self.assertEqual([analysis.resolves("gust", 40, k, d) for k in (40, 41)], [True, False])
+        self.assertEqual([analysis.resolves("wind", 12, k, d) for k in (12, 13)], [True, False])
+        self.assertIsNone(analysis.resolves("gust", None, 30, d))
+
+    def test_strict_temperature_strikes_from_20_november(self):
+        # Patrick's ruling of 2026-11-19. From the contracts dated 2026-11-20 the
+        # high and each hour's temperature resolve Yes strictly above the strike
+        # and the low strictly below it, so a value equal to the strike resolves
+        # No. A day before keeps Yes at the strike, and the gust, the mean wind and
+        # precipitation keep it on every day
+        self.assertEqual(analysis.STRICT_FROM_DAY, "2026-11-20")
+        self.assertEqual((analysis.strict_rule_day("2026-11-19"), analysis.strict_rule_day("2026-11-20")), (False, True))
+        for day, high, low, temp in (("2026-11-19", [True, True, True, False], [False, True, True, True], [True, True, False]),
+                                     ("2026-11-20", [True, True, False, False], [False, False, True, True], [True, False, False]),
+                                     ("2027-01-05", [True, True, False, False], [False, False, True, True], [True, False, False])):
+            self.assertEqual([analysis.resolves("high", 71, k, day) for k in (69, 70, 71, 72)], high, day)
+            self.assertEqual([analysis.resolves("low", 58, k, day) for k in (57, 58, 59, 60)], low, day)
+            self.assertEqual([analysis.resolves("temp", 64, k, day) for k in (63, 64, 65)], temp, day)
+            self.assertEqual([analysis.resolves("gust", 40, k, day) for k in (40, 41)], [True, False], day)
+            self.assertEqual([analysis.resolves("wind", 12, k, day) for k in (12, 13)], [True, False], day)
+            self.assertEqual([analysis.resolves("precip", 0.49, k, day) for k in (0.49, 0.5)], [True, False], day)
+        # a negative low at its strike on a strict day is No, and a degree under it Yes
+        self.assertEqual((analysis.resolves("low", -21, -21, "2026-11-20"), analysis.resolves("low", -22, -21, "2026-11-20")),
+                         (False, True))
+        # a contract day that is not a date is given no rule, never a default
+        for bad in (None, "", "20 November", "2026-11-2", "2026-13-01", "2026-11-20T00:00", 20261120):
+            self.assertIsNone(analysis.resolves("high", 71, 71, bad), bad)
+            self.assertIsNone(analysis.resolves("gust", 40, 40, bad), bad)
+        self.assertIsNone(analysis.resolves("high", None, 71, "2026-11-20"))
+
+    def test_the_strict_rule_is_stated_in_the_conventions_with_its_date(self):
+        # nothing states the rule without its date. The high's and the low's own
+        # entries, the strike entry and the hourly contract's all name 20 November
+        # 2026, and the three families the ruling leaves alone keep their words
+        import re
+        C = analysis.CONVENTIONS
+        self.assertIn("Yes when the value is strictly above the strike (at or above it before 20 November 2026).", C["high"])
+        self.assertIn("Yes when the value is strictly below the strike (at or below it before 20 November 2026).", C["low"])
+        self.assertIn("(decided 28 September 2026)", C["strike"])
+        self.assertIn("From 20 November 2026 a value equal to the strike resolves No for the high, each hour's temperature "
+                      "and the low (decided 19 November 2026).", C["strike"])
+        self.assertIn("From the 20 November 2026 days it resolves Yes strictly above its strike, and on the days before "
+                      "at or above it (decided 19 November 2026).", C["hourlyContract"])
+        for k in ("gust", "wind", "precip"):
+            self.assertTrue(C[k].endswith("Yes when the value is at or above the strike."), k)
+        # the method notes' rules in scripts/verify.py, dates in words and no one named
+        for k in ("high", "low", "strike", "hourlyContract"):
+            self.assertNotIn("owner", C[k], k)
+            self.assertNotIn("Patrick", C[k], k)
+            self.assertIsNone(re.search(r"\b20\d\d-\d\d-\d\d\)", C[k]), k)
 
     def test_daily_values_from_the_hours(self):
         temps = [60.0 + i * 0.4 for i in range(24)]         # rises through the day, peak at hour 23

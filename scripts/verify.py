@@ -1455,6 +1455,16 @@ def run(no_build: bool, only: str = "", schemes=("light", "dark")) -> int:
                 # the page's description and other meta never name URMA at all, the pinned sentences included
                 chk.add(f"{scheme} analysis: the page's meta never names URMA",
                         bool(a2["meta"]) and "urma" not in a2["meta"].lower(), a2["meta"][:200])
+                # the lede keeps its rounding and its rule, and gives the strict rule from 20 November 2026 by contract date,
+                # in the same words as the NDFD settlement page's lede, which its own verify pins the same way
+                st_ = page.evaluate("() => (document.querySelector('#anaStatement') || {}).innerText || ''")
+                chk.add(f"{scheme} analysis: the lede keeps its rounding and its rule, and gives the strict rule from 20 November 2026, by contract "
+                        "date, for a high, each hour's temperature and a low",
+                        "Values are rounded once, half up, away from zero, and a value equal to the strike resolves Yes." in st_
+                        and ("From 20 November 2026, by contract date, a high and each hour’s temperature resolve Yes strictly above the strike "
+                             "and a low Yes strictly below the strike, so a value equal to the strike resolves No for the high, each hour’s "
+                             "temperature and the low, as on the exchange’s current daily contracts.") in st_
+                        and "still resolve strictly" not in st_, st_[:400])
                 ana_goto(page, f"?var=high&product=urma&day={ana_day}")
                 a3 = page.evaluate("() => [document.querySelector('#anaNewest').textContent, location.search, document.querySelectorAll('#anaDots text.pvt').length]")
                 chk.add(f"{scheme} analysis: an address with product=urma opens on RTMA and drops the parameter",

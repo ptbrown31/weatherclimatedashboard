@@ -143,6 +143,16 @@ changes nothing here. Rows and hourly contracts the wait touched carry `wait` (`
 `src`, `at`), the hourly contract's `copyState` gains `waiting` and `urma`, and its `state` keeps its three
 values, a waiting hour being provisional.
 
+**Strict temperature strikes (Patrick's ruling of 2026-11-19).** From the contracts dated 20 November
+2026 (`STRICT_FROM_DAY`) the high and each hour's temperature resolve Yes strictly above the strike and
+the low Yes strictly below it, so a value equal to the strike resolves No for those three, as on the
+exchange's current daily contracts. A contract day before keeps the rule of 2026-09-28, a value equal
+to the strike resolving Yes, and the peak gust, the mean wind and precipitation keep that rule, as
+Patrick ruled the same day. A daily contract's day is its place-day, and an hourly contract's is the
+place-day its hour falls in. Nothing served computes a Yes or a No, so the rule lives in `resolves()`,
+which the tests pin on both sides of the date, and in the index's conventions (`high`, `low`,
+`strike`, `hourlyContract`).
+
 The choice is per file (owner's ruling 2026-11-04). If the copy that counts has no value at a
 place, from a bitmap that leaves the place out or a message refused, that place has no value for
 the hour, whatever the other copy holds. A file's publication time, which the cut-off is judged
@@ -183,6 +193,8 @@ two copies.
 
 **The hourly contract (Patrick's ruling of 4 November).** Each hour's temperature is also the value
 of an hourly temperature contract on that hour, whole °F rounded once, half up, away from zero.
+From the 20 November 2026 days it resolves Yes strictly above its strike, and on the days before at
+or above it (Patrick's ruling of 2026-11-19, above).
 Its cut-off is 1 hour 30 minutes after the hour (`HOURLY_CUT_AFTER`, Patrick's ruling of 5
 November, the draft terms' Resolution Time; three hours from his ruling of 4 November until then),
 the same in every zone, and the day's 12:45 AM cut-off does not apply to it. He shortened it on the
@@ -305,8 +317,8 @@ spans two UTC day directories. Arizona keeps standard time and has 24 hours ever
 
 | variable | rule | shown as | resolves Yes when |
 |---|---|---|---|
-| high | max of the hourly temperatures | whole °F, half up | value ≥ strike |
-| low | min of the hourly temperatures | whole °F, half up | value ≤ strike |
+| high | max of the hourly temperatures | whole °F, half up | value > strike (≥ before 2026-11-20) |
+| low | min of the hourly temperatures | whole °F, half up | value < strike (≤ before 2026-11-20) |
 | gust | max of the hourly gusts | whole mph, half up | value ≥ strike |
 | wind | mean of the hourly sustained winds | whole mph, half up | value ≥ strike |
 | precip | sum of the hourly accumulations | inches to 0.01, half up | value ≥ strike |
@@ -332,12 +344,18 @@ ten-thousandth of an inch), never rounded, so a mean wind of 16.4996 shows as 16
 since the file holds hundredths of a kelvin. A value equal
 to the strike resolves Yes, at or above it for the high, gust, mean wind and precipitation and
 at or below it for the low, so the boundary case is Yes whichever way the contract runs
-(owner's decision 2026-09-28; until then the page resolved it No). The Yes and No are drawn from the published values rather than
-stored, so the rule holds on every day the page shows, the backfill included. The exchange's
+(owner's decision 2026-09-28; until then the page resolved it No). No Yes or No is stored. The
+page drew them from the published values until display version 3 removed its hypothetical ladder
+(section 6), and it draws none now, so the rule is stated in the conventions and pinned in
+`resolves()`. The exchange's
 current daily temperature and MG wind contracts keep the strict test (greater than, less than,
 equal resolving No) and are unchanged, so on the boundary this framework deliberately parts
 from the board. Mean wind and precipitation have no live contract and take the same shape by
-the owner's decision.
+the owner's decision. From 20 November 2026, by contract date, the high and each hour's
+temperature resolve Yes strictly above the strike and the low Yes strictly below it, so a value
+equal to the strike resolves No for those three, and on the boundary the temperatures no longer
+part from the board (Patrick's ruling of 2026-11-19, `STRICT_FROM_DAY`, section 1). The peak
+gust, the mean wind and precipitation keep the rule of 2026-09-28.
 
 **Hourly values.** Each row of a day is the analysis at the top of that hour and the
 precipitation over the hour that starts then. The archive keeps the files' own numbers
@@ -1274,7 +1292,8 @@ no analogue here.
   trip, refusal of a message on another grid.
 - `tests/test_analysis.py`: with a recording `LocalStorage` and a monkeypatched fetch and
   decoder, a product-hour is written to the archive, its precipitation key and the frames
-  with the grid index; day rules (half-up rounding away from zero, the at-least strike test,
+  with the grid index; day rules (half-up rounding away from zero, the strike test on both sides of
+  `STRICT_FROM_DAY`,
   partial days, the local day spanning two UTC directories, the 23- and 25-hour daylight-time days,
   Arizona unchanged); `index.json` written last; a missing object is an absence; a raising
   fetch or decode is the hour's failure, the pass still writes the state, the grid index and

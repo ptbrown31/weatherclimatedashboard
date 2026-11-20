@@ -7,7 +7,10 @@
    instead of a station's reports, precipitation included (owner's decision
    2026-09-29). Resolved in whole units rounded once, half up, away from zero,
    with a value equal to the strike resolving Yes (owner's decision
-   2026-09-28; the exchange's current daily contracts resolve strictly). No
+   2026-09-28). From 20 November 2026, by contract date, a high and each
+   hour's temperature resolve Yes strictly above the strike and a low Yes
+   strictly below it, so a value equal to the strike resolves No for those
+   three, as on the exchange's current daily contracts. No
    contract settles on it, the page says so on every view, and it is not in
    the navigation.
 
