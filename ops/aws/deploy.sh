@@ -109,6 +109,16 @@ phase_vendor() {
 
 phase_code() {
   need aws "brew install awscli"
+  # the zone guards, before any aws call and before anything is packaged. From the NDFD site's publish of
+  # 20 November 2026 a place page refuses a place whose record in the analysis index has no zone the browser knows,
+  # and a pass writes its index whatever its lanes did, so a zone broken in the shipped places, or dropped on its way
+  # to the index, would reach the public pages. Both tests must run and pass, or nothing is packaged or uploaded
+  say "zone guards: every shipped place's zone, and the index carrying it (tests/test_analysis.py)"
+  local zout
+  zout="$(cd "$ROOT" && python3 -B -m unittest discover -s tests -p test_analysis.py \
+    -k test_every_place_ships_a_canonical_zone -k test_a_product_hour_writes_the_archive_the_frames_and_the_grid_index 2>&1)" \
+    || die "a zone guard failed, so nothing was packaged or uploaded. $(printf '%s\n' "$zout" | grep -E '^(FAIL|ERROR):' | head -3 | tr '\n' ' ')"
+  printf '%s\n' "$zout" | grep -q '^Ran 2 tests' || die "the zone guards did not both run, so nothing was packaged or uploaded"
   local fn; fn="$(output FunctionName)"
   [ -n "$fn" ] || die "stack has no FunctionName output; run the stack phase first"
   say "packaging the pipeline"

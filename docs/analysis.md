@@ -526,6 +526,16 @@ index and the CSV files. The stack's cache policy is unchanged.
 `days` lists the newest 60 day files; the day and place files themselves are kept
 indefinitely (the archive can rebuild any of them).
 
+Each location's `tz` decides whether the NDFD pages draw the place at all. From the NDFD site's publish of
+20 November 2026 a place page refuses a place whose record has no zone the browser knows, in words of its own, and
+the landing gives it a hollow dot. The places are the shipped `config/analysis_locations.json`, so a zone changes
+only by a deploy. The code phase of `ops/aws/deploy.sh` runs `test_every_place_ships_a_canonical_zone`, which needs
+each shipped place's zone in its canonical Area/Location form, and the run test, which needs the written index to
+carry each zone as shipped. It runs both before any aws call and uploads nothing unless both run and pass. A pass
+writes the index whatever its lanes did, so a zone that reached the package anyway would reach the index. The pages
+would then refuse that place in their own words while every lane step fails and the pass reports the outage.
+Whether a browser's own zone database accepts the names is the NDFD fork's verify.
+
 **`snapshots/analysis2/days/YYYY-MM-DD.json`** — one entry per location for that local date.
 
 ```
