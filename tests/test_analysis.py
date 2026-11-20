@@ -582,6 +582,24 @@ class Rules(unittest.TestCase):
             self.assertIsNone(analysis.resolves("gust", 40, 40, bad), bad)
         self.assertIsNone(analysis.resolves("high", None, 71, "2026-11-20"))
 
+    def test_every_place_ships_a_canonical_zone(self):
+        # From the NDFD site's publish of 20 November 2026 a place page refuses a place whose record in the
+        # index has no zone the browser knows, and the landing gives it a hollow dot, so a place without one
+        # goes dark on the public site. This test covers the shipped names, each a canonical IANA name,
+        # Area/Location, that Python's zoneinfo resolves to itself, and the run test above covers the index
+        # carrying them as shipped. Whether a browser's own zone database (ICU) accepts them is the NDFD
+        # fork's verify, which drives a real browser on planted zones. Neither covers the other, so neither
+        # is redundant
+        import re
+        from zoneinfo import ZoneInfo
+        self.assertEqual(len(ALL_LOCS), 67)
+        self.assertEqual(len({l["id"] for l in ALL_LOCS}), 67)
+        for l in ALL_LOCS:
+            z = l.get("tz")
+            self.assertIsInstance(z, str, l["id"])
+            self.assertRegex(z, r"^[A-Z][A-Za-z_]+(/[A-Z][A-Za-z_]+)+$", l["id"])
+            self.assertEqual(str(ZoneInfo(z)), z, l["id"])
+
     def test_the_strict_rule_is_stated_in_the_conventions_with_its_date(self):
         # nothing states the rule without its date. The high's and the low's own
         # entries, the strike entry and the hourly contract's all name 20 November
@@ -1135,6 +1153,8 @@ class Job(unittest.TestCase):
         self.assertEqual(idx["asof"], iso(t_r))
         self.assertEqual(idx["statement"], analysis.STATEMENT)
         self.assertEqual(len(idx["locations"]), 3)
+        # each place's zone reaches the index as the shipped record gives it, which the NDFD pages read
+        self.assertEqual([(l["id"], l["tz"]) for l in idx["locations"]], [(l["id"], l["tz"]) for l in LOCS])
         self.assertEqual(self.st.puts[-1][0], analysis.INDEX_KEY)
         for key, ctype, cache in self.st.puts:
             if key.startswith("snapshots/"):

@@ -660,6 +660,15 @@ none. Every time is ISO UTC with Z, and a missing figure is `null`.
   and a review, `null` while provisional; `basis`, `nomads`, `cutoff` or `norecord`, `null` while
   provisional; `src`, the copy it reads, `null` in review; `value`, whole °F, and `x`, its exact
   string; and `late`, a copy read after its cut settled.
+  From the 19 November 2026 days (`FIRST_FROM_DAY`, section 1) it also carries `rule`, which is `first`, and
+  its `basis` is `first`. Its `copyState` names the hour's copy. It is `primary` when final at the first copy
+  found, and `undecided` where the copies differ at the place and which came first cannot be settled, both
+  shown as `candidates`, with an `alarm` where the copy found first was not the one published first. It is
+  `missing`, in review, where the copy that counts gives the place no value or none came by the cut, and
+  `pending` before the cut. From the 20 November 2026 days (`WAIT_FROM`) an hour with no value at its cut
+  waits. It carries `wait` (`until`, `state`, `product`, `src`, `at`), with `copyState` `waiting` while
+  provisional, then `primary` or `urma` once the wait settles it, or `undecided` or `missing` as above.
+  `rule` names the copy rule only, so the wait is read from `wait` and `copyState`, never from `rule`.
 
 A row with no value for the day whose hourly contract has a state (a file on neither server by
 the hourly cut, or, under the three hours, one too late for the day and in time for the hourly
